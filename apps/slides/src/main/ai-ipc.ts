@@ -23,6 +23,7 @@ import {
   isAiOverloadedError,
   defaultAiSettings,
   activeProvider,
+  providerRequiresApiKey,
   maxOutputTokensOf,
   resolveAiSettings,
   setAiUserAgent,
@@ -151,7 +152,7 @@ export function registerAiIpc(): void {
     const send = (chunk: AiStreamChunk) => {
       if (!event.sender.isDestroyed()) event.sender.send('ai:stream-chunk', chunk)
     }
-    if (!config || (provider !== 'codex' && !config.apiKey)) {
+    if (!config || (providerRequiresApiKey(provider) && !config.apiKey)) {
       send({
         requestId,
         type: 'error',

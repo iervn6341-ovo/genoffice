@@ -328,6 +328,19 @@ export function cloudToolsEnabled(settings: Pick<AiSettings, 'gskToolsEnabled'>)
 }
 
 /**
+ * Whether a request through this provider must carry an API key. Codex
+ * authenticates through its own CLI login, and a custom OpenAI-compatible
+ * endpoint (Ollama, LM Studio, vLLM, an intranet gateway) may accept anonymous
+ * requests, so neither can be rejected up front for a missing key. This is the
+ * single source of truth shared by `activeProvider` and every IPC handler that
+ * gates a model call, so the two can never disagree about a key-less custom setup.
+ */
+export function providerRequiresApiKey(provider: AiProviderId): boolean {
+  const meta = AI_PROVIDERS.find((m) => m.id === provider)
+  return !meta?.needsCliPath && !meta?.needsBaseUrl
+}
+
+/**
  * The stored provider selection is honored only when its config is usable
  * (api-key providers need a key and a model id; custom also needs a base URL).
  * Codex can auto-discover its executable. Anything else — including unknown

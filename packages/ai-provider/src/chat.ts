@@ -4,6 +4,7 @@ import { chatOpenAiCompatible } from './protocols/openai-compatible'
 import { chatCodexAppServer } from './codex-app-server'
 import { getProviderAdapter, type ResolvedEndpoint } from './registry'
 import type { AiChatResponse, AiProviderConfig, AiProviderId } from './types'
+import { AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS } from './local'
 import { AI_CHAT_RESPONSE_TIMEOUT_MS, createStreamWatchdog } from './watchdog'
 
 /** route a one-shot (non-streaming, non-tool-calling) chat call by provider id */
@@ -14,20 +15,20 @@ export async function chatForProvider(
   user: string,
   signal?: AbortSignal,
 ): Promise<AiChatResponse> {
+  // resolved up front so a local server can be given the long local watchdog budget
+  let endpoint: ResolvedEndpoint
+  try {
+    endpoint = getProviderAdapter(provider).resolveEndpoint(config)
+  } catch (e) {
+    // config errors (unknown provider, missing base URL) report as a failed reply, not a rejection
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
   // non-streaming: the server generates the full answer before the headers arrive,
   // so the connect phase gets the long budget; the body read then gets the idle budget
-  const wd = createStreamWatchdog(signal, AI_CHAT_RESPONSE_TIMEOUT_MS)
+  const wd = endpoint.patientTimeouts
+    ? createStreamWatchdog(signal, AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS)
+    : createStreamWatchdog(signal, AI_CHAT_RESPONSE_TIMEOUT_MS)
   return wd.guard(() => {
-    let endpoint: ResolvedEndpoint
-    try {
-      endpoint = getProviderAdapter(provider).resolveEndpoint(config)
-    } catch (e) {
-      // config errors (unknown provider, missing base URL) report as a failed reply, not a rejection
-      return Promise.resolve({
-        ok: false as const,
-        error: e instanceof Error ? e.message : String(e),
-      })
-    }
     switch (endpoint.protocol) {
       case 'codex-app-server':
         return chatCodexAppServer(config, system, user, wd.signal)

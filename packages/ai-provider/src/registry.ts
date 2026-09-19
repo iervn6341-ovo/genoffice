@@ -1,5 +1,6 @@
 import { ANTHROPIC_BASE_URL } from './protocols/anthropic'
 import { GEMINI_BASE_URL } from './protocols/gemini'
+import { isLocalEndpoint } from './local'
 import { AI_PROVIDERS, GENSPARK_LLM_BASE_URLS } from './providers'
 import type { AiProviderConfig, AiProviderId, AiProviderMeta } from './types'
 
@@ -22,6 +23,8 @@ export interface ResolvedEndpoint {
   useMaxCompletionTokens?: boolean
   /** vendor-specific request fields merged into the chat-completions body */
   bodyExtras?: Record<string, unknown>
+  /** the server runs on this machine / LAN: use the long local watchdog budget instead of the cloud one */
+  patientTimeouts?: boolean
 }
 
 export interface ProviderAdapter {
@@ -272,6 +275,7 @@ export const AI_PROVIDER_ADAPTERS: Record<AiProviderId, ProviderAdapter> = {
         protocol: 'openai-compatible',
         baseUrl: config.baseUrl,
         ...(modelHasFixedSampling(config.model) ? { omitTemperature: true } : {}),
+        ...(isLocalEndpoint(config.baseUrl) ? { patientTimeouts: true } : {}),
       }
     },
   },

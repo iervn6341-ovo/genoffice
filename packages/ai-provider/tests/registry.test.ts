@@ -223,7 +223,11 @@ describe('provider registry', () => {
   it('uses the configured base URL for custom and rejects a missing one', () => {
     expect(
       AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('m', 'http://localhost:1234/v1')),
-    ).toEqual({ protocol: 'openai-compatible', baseUrl: 'http://localhost:1234/v1' })
+    ).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://localhost:1234/v1',
+      patientTimeouts: true,
+    })
     expect(() => AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('m'))).toThrow(
       'A custom provider requires a Base URL',
     )
@@ -285,10 +289,12 @@ describe('fixed-sampling models on indirect routes', () => {
       omitTemperature: true,
     })
     expect(
-      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('gpt-5.6-terra', 'https://mirror/v1')),
+      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(
+        config('gpt-5.6-terra', 'https://mirror.example.com/v1'),
+      ),
     ).toEqual({
       protocol: 'openai-compatible',
-      baseUrl: 'https://mirror/v1',
+      baseUrl: 'https://mirror.example.com/v1',
       omitTemperature: true,
     })
   })
@@ -378,10 +384,12 @@ describe('modelHasFixedSampling case handling', () => {
 
   it('omits temperature for upper-case fixed-sampling ids on mirror routes', () => {
     expect(
-      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('GPT-5.6-terra', 'https://mirror/v1')),
+      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(
+        config('GPT-5.6-terra', 'https://mirror.example.com/v1'),
+      ),
     ).toEqual({
       protocol: 'openai-compatible',
-      baseUrl: 'https://mirror/v1',
+      baseUrl: 'https://mirror.example.com/v1',
       omitTemperature: true,
     })
     expect(AI_PROVIDER_ADAPTERS.openrouter.resolveEndpoint(config('MOONSHOTAI/KIMI-K3'))).toEqual({
@@ -415,10 +423,12 @@ describe('modelHasFixedSampling case handling', () => {
       omitTemperature: true,
     })
     expect(
-      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('KIMI-K3', 'https://mirror/v1')),
+      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(
+        config('KIMI-K3', 'https://mirror.example.com/v1'),
+      ),
     ).toEqual({
       protocol: 'openai-compatible',
-      baseUrl: 'https://mirror/v1',
+      baseUrl: 'https://mirror.example.com/v1',
       omitTemperature: true,
     })
   })

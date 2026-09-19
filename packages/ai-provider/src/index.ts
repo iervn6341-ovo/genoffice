@@ -31,8 +31,20 @@ export {
   cloudToolsEnabled,
   defaultAiSettings,
   maxOutputTokensOf,
+  providerRequiresApiKey,
   resolveAiSettings,
 } from './providers'
+export {
+  AI_LOCAL_CONNECT_TIMEOUT_MS,
+  AI_LOCAL_IDLE_TIMEOUT_MS,
+  LOCAL_ENDPOINT_PRESETS,
+  isLocalEndpoint,
+  parseModelList,
+  presetForBaseUrl,
+} from './local'
+export type { LocalEndpointPreset } from './local'
+export { listOpenAiCompatibleModels } from './list-models'
+export type { ListModelsResult } from './list-models'
 export {
   AI_MEDIA_PROVIDERS,
   GEMINI_MEDIA_BASE_URL,

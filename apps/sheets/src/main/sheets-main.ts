@@ -65,6 +65,7 @@ import {
   chatForProvider,
   defaultAiSettings,
   activeProvider,
+  providerRequiresApiKey,
   maxOutputTokensOf,
   resolveAiSettings,
   setAiUserAgent,
@@ -3284,7 +3285,7 @@ export function registerSheetsAiIpc(): void {
     if (provider === 'genspark' && config && !config.apiKey) {
       config = { ...config, apiKey: gskApiKey() }
     }
-    if (!config || (provider !== 'codex' && !config.apiKey)) {
+    if (!config || (providerRequiresApiKey(provider) && !config.apiKey)) {
       return {
         ok: false,
         error: provider === 'genspark' ? tm('errGskNotLoggedIn') : tm('errNoApiKey', { provider }),
@@ -3320,7 +3321,7 @@ export function registerSheetsAiIpc(): void {
     const send = (chunk: AiStreamChunk) => {
       if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiStreamChunk, chunk)
     }
-    if (!config || (provider !== 'codex' && !config.apiKey)) {
+    if (!config || (providerRequiresApiKey(provider) && !config.apiKey)) {
       send({
         requestId,
         type: 'error',
