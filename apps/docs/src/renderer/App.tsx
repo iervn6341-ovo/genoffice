@@ -819,6 +819,17 @@ export function App() {
   const [imageDragOver, setImageDragOver] = useState(false)
   const [findFocusInput, setFindFocusInput] = useState(0)
   const [findFocusReplace, setFindFocusReplace] = useState(0)
+  // ribbon Home > Editing: same effect as ⌘F / Ctrl+H
+  const openFind = useCallback(() => {
+    if (!doc) return
+    setShowFind(true)
+    setFindFocusInput((n) => n + 1)
+  }, [doc])
+  const openReplace = useCallback(() => {
+    if (!doc) return
+    setShowFind(true)
+    setFindFocusReplace((n) => n + 1)
+  }, [doc])
   const [showShortcuts, setShowShortcuts] = useState(false)
   const ribbonActionsRef = useRef<{
     stepFontSize?: (dir: 1 | -1) => void
@@ -5728,6 +5739,8 @@ export function App() {
         editor={editor}
         formatState={formatState}
         hasDoc={!!doc}
+        onFind={openFind}
+        onReplace={openReplace}
         blocks={doc?.parsed.blocks ?? EMPTY_BLOCKS}
         styles={ribbonStyles}
         docDefaults={doc?.parsed.docDefaults}

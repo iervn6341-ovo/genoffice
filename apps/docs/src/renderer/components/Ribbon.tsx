@@ -38,8 +38,10 @@ import {
   Dropdown,
   RibbonCollapseButton,
   isSymbolFontFamily,
+  labelFromTip,
   useDismissablePopover,
   useRibbonCollapse,
+  useRibbonLabelFit,
 } from '@genoffice/ui'
 import { HIGHLIGHT_CSS } from '../editor/extensions'
 import { applyCase, type CaseMode } from '../editor/case-transform'
@@ -111,6 +113,8 @@ import {
   IconCopy,
   IconCut,
   IconFormatPainter,
+  IconReplace,
+  IconSearch,
   IconGrowFont,
   IconHighlight,
   IconIndentDec,
@@ -158,6 +162,9 @@ interface RibbonProps {
   /** shallow-stable snapshot of every editor-state read shown in the ribbon (memo invalidation key) */
   formatState: RibbonFormatState
   hasDoc: boolean
+  /** Home > Editing: open the find / replace panel */
+  onFind?: () => void
+  onReplace?: () => void
   blocks: Block[]
   /** Fallback when a new list can't reuse a numId (adopt a document definition / create one) */
   allocateNumId?: (kind: 'bullet' | 'ordered') => string | null
@@ -624,6 +631,8 @@ function RibbonInner({
   editor,
   formatState: fs,
   hasDoc,
+  onFind,
+  onReplace,
   blocks,
   allocateNumId,
   createListDef,
@@ -740,6 +749,9 @@ function RibbonInner({
   const lastRegularTab = useRef<(typeof TABS)[number]>('home')
   const wasInTable = useRef(false)
   const wasInImage = useRef(false)
+  // shows text beside the icons when the window is wide enough (ribbon-fit)
+  const ribbonBodyRef = useRef<HTMLDivElement | null>(null)
+  useRibbonLabelFit(ribbonBodyRef)
   /** Picture Format → remove background / crop dialogs */
   const [pictureDialog, setPictureDialog] = useState<'cutout' | 'crop' | null>(null)
   const [listDialog, setListDialog] = useState(false)
@@ -2034,7 +2046,7 @@ function RibbonInner({
         {trailingActions}
       </div>
 
-      <div className="ribbon-body" data-ribbon-body="">
+      <div className="ribbon-body" data-ribbon-body="" ref={ribbonBodyRef}>
         {tab === 'shapeFormat' && inShape ? (
           <div className="table-ribbon-body">
             <div className="ribbon-group">
@@ -2981,6 +2993,9 @@ function RibbonInner({
                     onClick={() => void clipboard('cut')}
                   >
                     <IconCut />
+                    <span className="rb-lbl" data-tier="1">
+                      {labelFromTip(t('ribbonCutTip'))}
+                    </span>
                   </button>
                   <button
                     className="rb-small"
@@ -2990,6 +3005,9 @@ function RibbonInner({
                     onClick={() => void clipboard('copy')}
                   >
                     <IconCopy />
+                    <span className="rb-lbl" data-tier="1">
+                      {labelFromTip(t('ribbonCopyTip'))}
+                    </span>
                   </button>
                   <button
                     className={`rb-small ${painter ? 'active' : ''}`}
@@ -2999,6 +3017,9 @@ function RibbonInner({
                     onClick={togglePainter}
                   >
                     <IconFormatPainter />
+                    <span className="rb-lbl" data-tier="1">
+                      {labelFromTip(t('ribbonPainterTip'))}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -3755,6 +3776,41 @@ function RibbonInner({
                 )}
               </div>
               <div className="ribbon-group-label">{t('ribbonGroupStyles')}</div>
+            </div>
+
+            <div className="ribbon-sep" />
+
+            {/* ---- Editing (Word's Find / Replace group, labelled when there is room) ---- */}
+            <div className="ribbon-group">
+              <div className="ribbon-group-items">
+                <div className="rb-col">
+                  <button
+                    className="rb-small"
+                    disabled={!hasDoc || !onFind}
+                    data-tip={t('appFindPlaceholder')}
+                    aria-label={t('appFindPlaceholder')}
+                    onClick={() => onFind?.()}
+                  >
+                    <IconSearch />
+                    <span className="rb-lbl" data-tier="2">
+                      {t('appFindPlaceholder')}
+                    </span>
+                  </button>
+                  <button
+                    className="rb-small"
+                    disabled={!canEdit || !onReplace}
+                    data-tip={t('appReplace')}
+                    aria-label={t('appReplace')}
+                    onClick={() => onReplace?.()}
+                  >
+                    <IconReplace />
+                    <span className="rb-lbl" data-tier="2">
+                      {t('appReplace')}
+                    </span>
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group-label">{t('appReplace')}</div>
             </div>
           </>
         ) : tab === 'draw' ? (

@@ -1,0 +1,14 @@
+/*
+ * Adaptive ribbon labels (see ribbon-fit.ts): a label is hidden until the ribbon body's
+ * data-labels level reaches its tier, so a wide window shows text beside the icons.
+ */
+.rb-lbl {
+  display: none;
+  white-space: nowrap;
+}
+
+.ribbon-body[data-labels='1'] .rb-lbl[data-tier='1'],
+.ribbon-body[data-labels='2'] .rb-lbl:is([data-tier='1'], [data-tier='2']),
+.ribbon-body[data-labels='3'] .rb-lbl {
+  display: inline;
+}

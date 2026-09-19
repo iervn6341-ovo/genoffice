@@ -874,6 +874,15 @@ button {
   min-width: 24px;
   padding: 0 4px;
 }
+/* labels showing (ribbon-fit): icon and text left-aligned like Office's Cut / Copy / Format Painter */
+.ribbon-body:is([data-labels='1'], [data-labels='2'], [data-labels='3']) .rb-clip-col .rb-icon {
+  justify-content: flex-start;
+  gap: 5px;
+  padding: 0 8px 0 6px;
+}
+.rb-clip-col .rb-icon .rb-lbl {
+  font-size: 12px;
+}
 
 /* PowerPoint-style combined slides group: big new-slide button + stacked
    small labeled rows (layout / add section). The column stretches to the big

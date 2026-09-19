@@ -1,7 +1,7 @@
 /** Home tab of the slides ribbon. Extracted from Ribbon.tsx. */
 import { useState } from 'react'
 import { platformShortcuts } from '@genoffice/i18n'
-import { ColorPicker, isSymbolFontFamily } from '@genoffice/ui'
+import { ColorPicker, isSymbolFontFamily, labelFromTip } from '@genoffice/ui'
 import { saveEditSelection } from '../TextEditOverlay'
 import { armColorInput } from '../color-input'
 import { displayFontFamily } from '../konva-adapter'
@@ -289,6 +289,9 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
             aria-label={t('ribbonCutTip')}
           >
             <IconCut size={14} />
+            <span className="rb-lbl" data-tier="1">
+              {labelFromTip(t('ribbonCutTip'))}
+            </span>
           </button>
           <button
             className="rb-icon"
@@ -298,6 +301,9 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
             aria-label={t('ribbonCopyTip')}
           >
             <IconCopy size={14} />
+            <span className="rb-lbl" data-tier="1">
+              {labelFromTip(t('ribbonCopyTip'))}
+            </span>
           </button>
           <button
             className={`rb-icon${brushMode ? ' on' : ''}`}
@@ -331,6 +337,9 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
             }}
           >
             <IconFormatPainter size={14} />
+            <span className="rb-lbl" data-tier="1">
+              {labelFromTip(t('ribbonBrushTipDefault'))}
+            </span>
           </button>
         </div>
       </Group>

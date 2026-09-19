@@ -21,6 +21,7 @@ import {
   THEME_COLORS,
   THEME_COLOR_SHADES,
   STANDARD_COLORS,
+  useRibbonLabelFit,
 } from '@genoffice/ui'
 import { getRecentColors, pushRecentColor } from '../recent-colors'
 import { ICON_COLORS } from '../insert-presets'
@@ -1381,6 +1382,8 @@ export function Ribbon({
   // an estimate, corrected by measurement as soon as the group first folds).
   const collapse = useRibbonCollapse('ai-slides-ribbon-collapsed')
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  // shows text beside the icons when the window is wide enough (ribbon-fit)
+  useRibbonLabelFit(bodyRef)
   const inlineWidthsRef = useRef(new Map<string, number>())
   const collapsedWidthsRef = useRef(new Map<string, number>())
   useLayoutEffect(() => {

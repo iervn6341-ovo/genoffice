@@ -2052,6 +2052,11 @@ th.cell-rev-del {
   min-width: 259px;
 }
 
+/* Labels (ribbon-fit) must not squeeze the gallery below four cards + the expander */
+.ribbon-body:not([data-labels='0']) .ribbon-group-styles {
+  min-width: 335px;
+}
+
 .style-gallery-wrap {
   gap: 4px;
   min-width: 0;

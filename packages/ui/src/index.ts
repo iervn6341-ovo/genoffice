@@ -95,3 +95,10 @@ export {
   type AutoSaveDefault,
   type AutoSaveDefaultApi,
 } from './auto-save-pref'
+export {
+  RIBBON_LABEL_MAX_LEVEL,
+  fitRibbonLabels,
+  labelFromTip,
+  useRibbonLabelFit,
+  type RibbonFitTarget,
+} from './ribbon-fit'
