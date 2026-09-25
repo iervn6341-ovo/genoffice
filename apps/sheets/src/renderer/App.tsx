@@ -318,6 +318,7 @@ import { installMultiRowAutofit } from './autofit-multi-row'
 import { registerExcelJumpNav } from './excel-jump-nav'
 import { registerExcelShortcuts } from './excel-shortcuts'
 import { installCopyMaterialize } from './copy-materialize'
+import { CELL_SHIFT_COMMAND_IDS } from './cell-shift'
 import { applyUniverLocale, insertRowsBelowLocale, numberAsTextAlertLocale } from './univer-locales'
 import { installRuleDetail } from './univer-rule-detail'
 import { installActiveCellDataValidationChrome } from './data-validation-dropdown'
@@ -2526,7 +2527,8 @@ export function App(): React.JSX.Element {
           FILTER_COMMAND_PATTERN.test(event.id) ||
           event.id === OPEN_FILTER_PANEL_OPERATION ||
           event.id === MOVE_RANGE_COMMAND ||
-          event.id === MOVE_ROWS_COMMAND
+          event.id === MOVE_ROWS_COMMAND ||
+          CELL_SHIFT_COMMAND_IDS.has(event.id)
         ) {
           const subUnitId =
             (event.params as { subUnitId?: string } | undefined)?.subUnitId ??
@@ -2568,7 +2570,9 @@ export function App(): React.JSX.Element {
             return
           }
           if (
-            (event.id === MOVE_RANGE_COMMAND || event.id === MOVE_ROWS_COMMAND) &&
+            (event.id === MOVE_RANGE_COMMAND ||
+              event.id === MOVE_ROWS_COMMAND ||
+              CELL_SHIFT_COMMAND_IDS.has(event.id)) &&
             state.file.sheets.find((candidate) => candidate.id === subUnitId)?.pivotRanges.length
           ) {
             event.cancel = true
@@ -4464,6 +4468,21 @@ export function App(): React.JSX.Element {
         onRefreshPivot={() => handleRefreshPivotImpl(pivotContext())}
         onIsSelectionInPivot={() => isSelectionInPivotImpl(pivotContext())}
         onGetActiveCell={() => activeCellLabelImpl(dataToolsContext())}
+        onGetSelectionShape={() => {
+          const worksheet = univerRef.current?.univerAPI.getActiveWorkbook()?.getActiveSheet()
+          const active = univerRef.current?.univerAPI.getActiveWorkbook()?.getActiveRange()
+          if (!worksheet || !active) return null
+          return {
+            range: {
+              startRow: active.getRow(),
+              endRow: active.getRow() + active.getHeight() - 1,
+              startColumn: active.getColumn(),
+              endColumn: active.getColumn() + active.getWidth() - 1,
+            },
+            rowCount: worksheet.getMaxRows(),
+            columnCount: worksheet.getMaxColumns(),
+          }
+        }}
         onGetAnchorValue={anchorCellValue}
         activeCellA1={activeCellA1}
         onGoToReference={(ref) => goToReferenceImpl(dataToolsContext(), ref)}

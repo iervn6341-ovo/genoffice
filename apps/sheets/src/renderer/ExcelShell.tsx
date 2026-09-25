@@ -33,6 +33,14 @@ import {
 import { ColorDropdown } from './ColorDropdown'
 import { FormatCellsDialog } from './FormatCellsDialog'
 import { AllowEditRangesDialog } from './AllowEditRangesDialog'
+import {
+  defaultCellShift,
+  directCellShift,
+  type CellShiftMode,
+  type CellShiftOption,
+  type CellShiftRange,
+} from './cell-shift'
+import { InsertCellsDialog } from './InsertCellsDialog'
 import { GoToDialog } from './GoToDialog'
 import { COLOR_SCHEMES, FONT_SCHEMES, THEME_PRESETS } from './themes'
 import { useI18n, type StringKey } from './i18n/locale'
@@ -268,6 +276,12 @@ interface ExcelShellProps {
   readonly onRefreshPivot: () => string | null
   readonly onIsSelectionInPivot: () => boolean
   readonly onGetActiveCell: () => string
+  /// the selection and sheet size, for the Insert/Delete Cells dialog default
+  readonly onGetSelectionShape: () => {
+    readonly range: CellShiftRange
+    readonly rowCount: number
+    readonly columnCount: number
+  } | null
   /// Value of the selection's top-left cell, read when Format Cells opens
   /// (number-format preview).
   readonly onGetAnchorValue: () => number | string | null
@@ -344,6 +358,7 @@ export function ExcelShell({
   onRefreshPivot,
   onIsSelectionInPivot,
   onGetActiveCell,
+  onGetSelectionShape,
   onGetAnchorValue,
   activeCellA1,
   onGoToReference,
@@ -412,6 +427,12 @@ export function ExcelShell({
   const [showGoalSeek, setShowGoalSeek] = useState(false)
   const [showConsolidateDialog, setShowConsolidateDialog] = useState(false)
   const [showGoTo, setShowGoTo] = useState(false)
+  const [cellShiftDialog, setCellShiftDialog] = useState<{
+    mode: CellShiftMode
+    initial: CellShiftOption
+  } | null>(null)
+  const onGetSelectionShapeRef = useRef(onGetSelectionShape)
+  onGetSelectionShapeRef.current = onGetSelectionShape
   const [showHeaderFooter, setShowHeaderFooter] = useState(false)
   const [showAllowEditRanges, setShowAllowEditRanges] = useState(false)
   /// Non-null while the Chart Design → Add Chart Element text prompt is open.
@@ -437,6 +458,28 @@ export function ExcelShell({
       if ((event.metaKey || event.ctrlKey) && event.key === 'g') {
         event.preventDefault()
         setShowGoTo(true)
+      }
+      // Excel's Insert Cells (⌃⇧= / ⌘⇧+) and Delete Cells (⌃- / ⌘-): matched
+      // by key position (Shift+= types "+"). Whole rows/columns skip the dialog.
+      const insertCells =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.code === 'Equal'
+      const deleteCells =
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.code === 'Minus'
+      if ((insertCells || deleteCells) && canEditSheet(event)) {
+        const shape = onGetSelectionShapeRef.current()
+        if (shape) {
+          event.preventDefault()
+          const mode: CellShiftMode = insertCells ? 'insert' : 'delete'
+          const direct = directCellShift(shape.range, shape.rowCount, shape.columnCount)
+          if (direct) onCommand(`cells-shift:${mode}:${direct}`)
+          else setCellShiftDialog({ mode, initial: defaultCellShift(mode, shape.range) })
+        }
       }
       // Excel's Show Formulas shortcut (⌘` / Ctrl+`).
       if ((event.metaKey || event.ctrlKey) && event.key === '`') {
@@ -899,6 +942,14 @@ export function ExcelShell({
           targetLabel={onGetActiveCell()}
           onCreate={onCreateConsolidate}
           onClose={() => setShowConsolidateDialog(false)}
+        />
+      )}
+      {cellShiftDialog && (
+        <InsertCellsDialog
+          mode={cellShiftDialog.mode}
+          initial={cellShiftDialog.initial}
+          onApply={(option) => onCommand(`cells-shift:${cellShiftDialog.mode}:${option}`)}
+          onClose={() => setCellShiftDialog(null)}
         />
       )}
       {showGoTo && (
