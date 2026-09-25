@@ -117,7 +117,7 @@ Lifecycle. Priority order is top to bottom.
     bold. Non-bold text is never reachable.
   - Format Painter from Normal text onto a heading fails the same way.
 - **Word behavior**
-  - The Bold button reflects the *effective* bold, including bold inherited
+  - The Bold button reflects the _effective_ bold, including bold inherited
     from the style.
   - Toggling it off writes `<w:b w:val="0"/>` as a direct run property.
 - **Likely layers**
@@ -230,19 +230,19 @@ Also check "Delete Cells" (⌘-) parity.
 
 ## 3. Test plan after handoff (run locally on the Mac)
 
-Per `references/completion-gate.md`. The cloud fills the *Cloud* column; the
+Per `references/completion-gate.md`. The cloud fills the _Cloud_ column; the
 local session fills the rest.
 
-| Task | Cloud: unit/type/lint/build | Local e2e | Office comparison | Lifecycle (undo → redo → save → reopen → continue editing) |
-|---|---|---|---|---|
-| C1 | required | new spec | Word: Heading 1 bold toggle | required |
-| C2 | required | — | Excel opens the file; validation accepts 2026 dates | save/reopen |
-| C3 | required | — | Excel opens without repair; Quick Look shows values | save/reopen |
-| C4 | required | new spec | Excel Insert Cells dialog | required |
-| C5 | required | docs find spec | Word Find | N/A |
-| C6 | required | new spec | Word section break | required |
-| C7 | required | new spec | Word layout undo | required |
-| C8 | required | pdf-edit spec | Acrobat/Preview (optional) | required |
+| Task | Cloud: unit/type/lint/build | Local e2e      | Office comparison                                   | Lifecycle (undo → redo → save → reopen → continue editing) |
+| ---- | --------------------------- | -------------- | --------------------------------------------------- | ---------------------------------------------------------- |
+| C1   | required                    | new spec       | Word: Heading 1 bold toggle                         | required                                                   |
+| C2   | required                    | —              | Excel opens the file; validation accepts 2026 dates | save/reopen                                                |
+| C3   | required                    | —              | Excel opens without repair; Quick Look shows values | save/reopen                                                |
+| C4   | required                    | new spec       | Excel Insert Cells dialog                           | required                                                   |
+| C5   | required                    | docs find spec | Word Find                                           | N/A                                                        |
+| C6   | required                    | new spec       | Word section break                                  | required                                                   |
+| C7   | required                    | new spec       | Word layout undo                                    | required                                                   |
+| C8   | required                    | pdf-edit spec  | Acrobat/Preview (optional)                          | required                                                   |
 
 After merging back locally:
 
@@ -267,3 +267,27 @@ After merging back locally:
 
 `PASS` / `FAIL` / `NOT TESTED` / `BLOCKED` / `N/A`. Never mark anything
 PASS without executing it.
+
+## 5. Cloud results (2026-09-25)
+
+One commit per task on `qa/local-fixes`. Each commit message carries its
+own test report. Cloud verification covered unit tests, typecheck, lint and
+`npm run build:all` (PASS). No UI, keyboard, focus or rendering behavior was
+marked PASS.
+
+| Task | Commit    | Cloud: unit/type/lint/build | New local e2e spec                       | Notes / limitations                                                                                                                                      |
+| ---- | --------- | --------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1   | `469a58e` | PASS                        | `e2e/docs-style-bold-toggle.spec.ts`     | Effective B/I (ribbon, ⌘B/⌘I, Font dialog, Format Painter); explicit `w:b w:val="0"`                                                                     |
+| C2   | `bf63958` | PASS                        | —                                        | Only panel date strings shift by 1462; in-app Univer check of 1904 serials unchanged                                                                     |
+| C3   | `e36e22a` | PASS                        | —                                        | Save waits ≤3 s for the engine; bulk fill-down formulas not covered                                                                                      |
+| C4   | `e885e26` | PASS                        | `e2e/sheets-insert-cells-dialog.spec.ts` | Range shifts gated like move-range (need full load)                                                                                                      |
+| C5   | `cf6225a` | PASS                        | (docs find spec)                         | ß/SS, ς/σ, İ/i, NFC; offsets mapped back                                                                                                                 |
+| C6   | `103fdcb` | PASS                        | `e2e/docs-section-break-undo.spec.ts`    | Minimal fix plus design note `docs/qa/c6-section-model.md`; new section lays out after the next save                                                     |
+| C7   | `59d5407` | PASS                        | `e2e/docs-layout-undo.spec.ts`           | Margins, orientation, size, first page, odd/even and page numbers are on the undo stack; header/footer content, page color and AI page setup are not yet |
+| C8   | `fe699bf` | PASS                        | (pdf-edit spec)                          | Crop and page size use file-level undo (`restorePageOp`), not a snapshot bucket; watermark text layer is WinAnsi only                                    |
+
+Environment-only failures, which reproduce without these changes:
+
+- sheets: `promote-file-atomically` (3), because the tests run as root;
+- sheets: `pivot-roundtrip.e2e` (1), because LibreOffice is not installed;
+- pdf: `text-insert-fallback` (1), because fallback fonts are installed.
