@@ -2289,10 +2289,20 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
  * the parsed anchors use). Without it a new picture saved with its wrap mode's default
  * alignment and jumped back to the margin on reopen.
  */
-function imagePosOffset(node: PmNode): { x: number; y: number } | undefined {
+function imagePosOffset(
+  node: PmNode,
+): { x: number; y: number; relativeTo?: 'page' | 'margin' } | undefined {
   const x = node.attrs?.imageOffsetXEmu
   const y = node.attrs?.imageOffsetYEmu
-  return x != null && y != null ? { x: Number(x), y: Number(y) } : undefined
+  if (x == null || y == null) return undefined
+  // a page/margin-anchored float (insert_image float.anchor, imageRelV) keeps its
+  // frame; without it the offsets were rewritten as column/paragraph-relative
+  const rel = node.attrs?.imageRelV
+  return {
+    x: Number(x),
+    y: Number(y),
+    ...(rel === 'page' || rel === 'margin' ? { relativeTo: rel } : {}),
+  }
 }
 
 function imageFromProtectedAttrs(node: PmNode): NewImage | null {
