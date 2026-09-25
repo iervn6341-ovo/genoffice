@@ -32,6 +32,7 @@ const api: PdfApi = {
   setPageSize: (request) => ipcRenderer.invoke(PDF_CHANNELS.setPageSize, request),
   splitPages: (request) => ipcRenderer.invoke(PDF_CHANNELS.splitPages, request),
   cropPages: (request) => ipcRenderer.invoke(PDF_CHANNELS.cropPages, request),
+  restorePageOp: (request) => ipcRenderer.invoke(PDF_CHANNELS.restorePageOp, request),
   exportImages: (request) => ipcRenderer.invoke(PDF_CHANNELS.exportImages, request),
   convertOffice: (format) => ipcRenderer.invoke(PDF_CHANNELS.convertOffice, format),
   createDocument: (request) => ipcRenderer.invoke(PDF_CHANNELS.createDocument, request),

@@ -713,6 +713,48 @@ describe('applySaveRequest', () => {
     expect((await PDFDocument.load(saved)).getPageCount()).toBe(1)
   })
 
+  it('watermark stamps carry an invisible, searchable text layer (C8)', async () => {
+    const bytes = await makePdf([[612, 792]])
+    const saved = await apply(
+      bytes,
+      request({
+        stamps: [
+          {
+            pageIndex: 0,
+            image: TINY_PNG,
+            rect: [0, 0, 612, 792],
+            opacity: 0.2,
+            text: { value: 'CONFIDENTIAL', size: 612 * 0.12, angle: 45 },
+          },
+        ],
+      }),
+    )
+    const runs = await pageRuns(saved)
+    expect(runs.map((r) => r.str).join('')).toContain('CONFIDENTIAL')
+    // rotated with the bitmap (45° counter-clockwise) and centred on the page
+    const t = runs.find((r) => r.str.includes('CONFIDENTIAL'))!.t
+    expect(t[0]).toBeCloseTo(t[3], 3)
+    expect(t[1]).toBeGreaterThan(0)
+  })
+
+  it('non-WinAnsi watermark text stays image-only without failing the save', async () => {
+    const bytes = await makePdf([[612, 792]])
+    const saved = await apply(
+      bytes,
+      request({
+        stamps: [
+          {
+            pageIndex: 0,
+            image: TINY_PNG,
+            rect: [0, 0, 612, 792],
+            text: { value: '机密文件', size: 60, angle: 45 },
+          },
+        ],
+      }),
+    )
+    expect((await pageRuns(saved)).map((r) => r.str).join('')).toBe('')
+  })
+
   it('applies metadata and splits keywords on mixed separators', async () => {
     const bytes = await makePdf([[100, 100]])
     const saved = await apply(

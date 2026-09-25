@@ -186,7 +186,7 @@ import {
 import type { LocalTextEdit, LocalTextInsert, TextDraft } from './text-edit-preview'
 import { planEditOps, reduceBucket } from './edit-ops'
 import type { Bucket, Op, OpContext, PlanResult } from './edit-ops'
-import { rectsNear } from './edit-state'
+import { isPageOpUndo, rectsNear, type PageOpUndo, type UndoEntry } from './edit-state'
 import type {
   StampConfig,
   SavedMarkupAnnot,
@@ -808,8 +808,8 @@ export default function App() {
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([])
   const [searchCur, setSearchCur] = useState(0)
   const [printing, setPrinting] = useState(false)
-  const [undoStack, setUndoStack] = useState<EditSnapshot[]>([])
-  const [redoStack, setRedoStack] = useState<EditSnapshot[]>([])
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
+  const [redoStack, setRedoStack] = useState<UndoEntry[]>([])
   const [pwInput, setPwInput] = useState('')
   const [pwWrong, setPwWrong] = useState(false)
   const [extractDlg, setExtractDlg] = useState(false)
@@ -1867,9 +1867,30 @@ export default function App() {
     setSelected(null)
   }
 
+  /** Undo/redo of a crop / page-size rewrite: swap the file back and reload. The
+      reload clears both stacks; the step then lands on the opposite one. */
+  const restorePageOp = async (entry: PageOpUndo, direction: 'undo' | 'redo') => {
+    const result = await window.pdfApi.restorePageOp({
+      path: filePath,
+      token: entry.token,
+      direction,
+    })
+    if (!result.ok) {
+      opFailed(result.error)
+      return
+    }
+    await loadDoc(filePath, doc)
+    if (direction === 'undo') setRedoStack([entry])
+    else setUndoStack([entry])
+  }
+
   const undo = () => {
     const top = undoStack[undoStack.length - 1]
     if (!top) return
+    if (isPageOpUndo(top)) {
+      void restorePageOp(top, 'undo')
+      return
+    }
     // Taken before applySnapshot rewrites the refs; the updater may run after it
     const cur = snapshot()
     setRedoStack((r) => [...r, cur])
@@ -1881,6 +1902,10 @@ export default function App() {
   const redo = () => {
     const top = redoStack[redoStack.length - 1]
     if (!top) return
+    if (isPageOpUndo(top)) {
+      void restorePageOp(top, 'redo')
+      return
+    }
     const cur = snapshot()
     setUndoStack((u) => [...u, cur])
     setRedoStack((r) => r.slice(0, -1))
@@ -4933,8 +4958,25 @@ export default function App() {
     )
   const replacePagesOnDisk = (visIdxs: number[]) =>
     rewriteInPlace(() => window.pdfApi.replacePages({ path: filePath, pages: visIdxs }))
+  /** An in-place rewrite that can be undone: after the reload (which clears the
+      stacks) the step becomes the only undo entry */
+  const rewriteUndoable = async (
+    run: () => Promise<{ ok: true; undoToken?: string } | { ok: false; error: string }>,
+  ): Promise<FileOpResult> => {
+    let token: string | undefined
+    const result = await rewriteInPlace(async () => {
+      const r = await run()
+      if (r.ok) token = r.undoToken
+      return r
+    })
+    if (result.ok && !('canceled' in result) && token) {
+      setUndoStack([{ kind: 'pageOp', token }])
+      setRedoStack([])
+    }
+    return result
+  }
   const resizePages = (width: number, height: number) =>
-    rewriteInPlace(() => window.pdfApi.setPageSize({ path: filePath, width, height }))
+    rewriteUndoable(() => window.pdfApi.setPageSize({ path: filePath, width, height }))
   const splitPagesToFile = (perPage: 2 | 4 | 9) =>
     runFileOp(() =>
       window.pdfApi.splitPages({
@@ -4944,7 +4986,7 @@ export default function App() {
       }),
     )
   const cropPagesOnDisk = (visIdxs: number[], rect: CropRect) =>
-    rewriteInPlace(() => window.pdfApi.cropPages({ path: filePath, pages: visIdxs, rect }))
+    rewriteUndoable(() => window.pdfApi.cropPages({ path: filePath, pages: visIdxs, rect }))
 
   const extractPage = (origIdx: number) => extractPagesToFile([visList.indexOf(origIdx)])
 

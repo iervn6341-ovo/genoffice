@@ -15,9 +15,17 @@ import {
   concatTransformationMatrix,
   degrees,
   drawObject,
+  StandardFonts,
+  TextRenderingMode,
+  beginText,
+  endText,
   popGraphicsState,
   pushGraphicsState,
   rgb,
+  setFontAndSize,
+  setTextMatrix,
+  setTextRenderingMode,
+  showText,
 } from 'pdf-lib'
 import type { PDFOperator, PDFPage } from 'pdf-lib'
 import { VISUAL_SIGNATURE_CONTENT_PREFIX } from '../shared/ipc'
@@ -982,6 +990,57 @@ export interface AppliedSaveRequest {
 }
 
 /** Apply markups + form values + page ops, returning new bytes. Original objects are not reordered (pdf-lib keeps untouched objects). */
+/**
+ * Watermarks are bitmaps (CJK-safe without embedding fonts), which left their
+ * text invisible to Find, copy and screen readers. Lay the same string over the
+ * bitmap as invisible text (render mode 3), rotated and sized like the image,
+ * centered on the stamp rect. Helvetica covers WinAnsi only; other text stays
+ * image-only (embedding a CJK face for an invisible layer is out of scope).
+ */
+async function drawInvisibleStampText(
+  pdfDoc: PDFDocument,
+  page: PDFPage,
+  rect: [number, number, number, number],
+  text: { value: string; size: number; angle: number },
+): Promise<void> {
+  const value = text.value.trim()
+  if (!value) return
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  let encoded
+  try {
+    encoded = font.encodeText(value)
+  } catch {
+    return
+  }
+  const [x1, y1, x2, y2] = rect
+  // same shrink rule as the bitmap: fit 80 % of the diagonal
+  const unitWidth = font.widthOfTextAtSize(value, 1)
+  const maxW = Math.hypot(x2 - x1, y2 - y1) * 0.8
+  const size = Math.max(1, Math.min(text.size, unitWidth > 0 ? maxW / unitWidth : text.size))
+  const width = unitWidth * size
+  const rad = (text.angle * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  // baseline start: back from the center by half the width along the text
+  // direction, down by ~1/3 em across it (the bitmap centers on the middle)
+  const cx = (x1 + x2) / 2
+  const cy = (y1 + y2) / 2
+  const down = size * 0.35
+  const x = cx - (width / 2) * cos + down * sin
+  const y = cy - (width / 2) * sin - down * cos
+  const fontKey = page.node.newFontDictionary(font.name, font.ref)
+  page.pushOperators(
+    pushGraphicsState(),
+    beginText(),
+    setFontAndSize(fontKey, size),
+    setTextRenderingMode(TextRenderingMode.Invisible),
+    setTextMatrix(cos, sin, -sin, cos, x, y),
+    showText(encoded),
+    endText(),
+    popGraphicsState(),
+  )
+}
+
 export async function applySaveRequest(
   bytes: Uint8Array,
   request: SavePdfRequest,
@@ -1068,6 +1127,7 @@ export async function applySaveRequest(
       height: y2 - y1,
       opacity: s.opacity ?? 1,
     })
+    if (s.text) await drawInvisibleStampText(pdfDoc, page, s.rect, s.text)
   }
   if (request.metadata) applyMetadata(pdfDoc, request.metadata)
   // Page thumbnails and producer piece-info can retain a pre-redaction rendering of

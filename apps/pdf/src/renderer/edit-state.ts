@@ -68,6 +68,18 @@ export interface EditSnapshot {
   metadata: MetadataInput | null
 }
 
+/** An in-place page rewrite (Crop, Page Size) on the undo stack: the file itself
+    changed, so undo/redo ask the main process to swap the bytes back (restorePageOp) */
+export interface PageOpUndo {
+  kind: 'pageOp'
+  token: string
+}
+
+export type UndoEntry = EditSnapshot | PageOpUndo
+
+export const isPageOpUndo = (entry: UndoEntry | undefined): entry is PageOpUndo =>
+  !!entry && 'kind' in entry && entry.kind === 'pageOp'
+
 /** What a running save wrote, captured when the save starts. The post-save reload
     subtracts exactly this instead of wiping all edit state, so anything the user did
     while the write was in flight stays pending on the reloaded document. */

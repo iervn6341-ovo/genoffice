@@ -47,6 +47,8 @@ import type {
   PagePreviewRequest,
   ReplacePagesRequest,
   ReplacePagesResult,
+  RestorePageOpRequest,
+  RestorePageOpResult,
   SetPageSizeRequest,
   SetPageSizeResult,
   SplitPagesRequest,
@@ -64,6 +66,10 @@ import type {
 } from '../shared/ipc'
 import type { SavedSignature } from '../shared/ipc'
 import { writePdfAtomically } from './atomic-write'
+import { PageOpHistory } from './page-op-history'
+
+/** bytes around in-place crop / page-size rewrites, for undo */
+const pageOpHistory = new PageOpHistory()
 import {
   cropPagesBytes,
   extractPagesBytes,
@@ -1363,8 +1369,36 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: invalid page size' }
       }
       try {
-        const bytes = await setPageSizeBytes(new Uint8Array(await readFile(path)), width, height)
+        const before = new Uint8Array(await readFile(path))
+        const bytes = await setPageSizeBytes(before, width, height)
         await writePdfAtomically(path, bytes)
+        const undoToken = pageOpHistory.record(path, before, bytes)
+        return undoToken ? { ok: true, undoToken } : { ok: true }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    PDF_CHANNELS.restorePageOp,
+    async (e, request: RestorePageOpRequest): Promise<RestorePageOpResult> => {
+      const { path, token, direction } = request ?? {}
+      if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
+        return { ok: false, error: 'pdf: path not granted to this view' }
+      }
+      if (typeof token !== 'string' || (direction !== 'undo' && direction !== 'redo')) {
+        return { ok: false, error: 'pdf: invalid page operation' }
+      }
+      try {
+        const resolved = pageOpHistory.resolve(
+          path,
+          token,
+          direction,
+          new Uint8Array(await readFile(path)),
+        )
+        if (!resolved.ok) return resolved
+        await writePdfAtomically(path, resolved.bytes)
         return { ok: true }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -1411,9 +1445,11 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: path not granted to this view' }
       }
       try {
-        const bytes = await cropPagesBytes(new Uint8Array(await readFile(path)), pages, rect)
+        const before = new Uint8Array(await readFile(path))
+        const bytes = await cropPagesBytes(before, pages, rect)
         await writePdfAtomically(path, bytes)
-        return { ok: true }
+        const undoToken = pageOpHistory.record(path, before, bytes)
+        return undoToken ? { ok: true, undoToken } : { ok: true }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
