@@ -283,6 +283,23 @@ const RIBBON_TABS = [
 ] as const
 type RibbonTab = (typeof RIBBON_TABS)[number]['id'] | 'fillForm'
 
+/** The text-index line under a text-layer rect (PDF points): the exact run size source */
+function indexLineFor(
+  pageBlocks: ReadonlyMap<number, TextBlock[]>,
+  origIdx: number,
+  rect: readonly number[],
+): TextBlock['lines'][number] | undefined {
+  return pageBlocks
+    .get(origIdx)
+    ?.flatMap((b) => b.lines)
+    .find(
+      (l) =>
+        Math.min(l.rect[2], rect[2]!) - Math.max(l.rect[0], rect[0]!) > 0 &&
+        Math.min(l.rect[3], rect[3]!) - Math.max(l.rect[1], rect[1]!) >
+          0.5 * Math.min(l.rect[3] - l.rect[1], rect[3]! - rect[1]!),
+    )
+}
+
 export default function App() {
   const { lang, t } = useI18n()
   const collapse = useRibbonCollapse('genoffice-pdf-ribbon-collapsed')
@@ -2012,6 +2029,20 @@ export default function App() {
     }
   }, [editTextMode, readOnly, doc, visibleRows, rows, pageBlocks, getSearchIndex])
 
+  // A line editor opened before the page's text index was built took its size from the
+  // text-layer box (≈12.2 for 12pt); swap in the exact run size once the index lands,
+  // unless the user already picked a size
+  useEffect(() => {
+    if (!textDraft?.fontSizeProvisional) return
+    const line = indexLineFor(pageBlocks, textDraft.origIdx, textDraft.rect)
+    if (!line) return
+    setTextDraft((d) =>
+      d && d.fontSizeProvisional && d.origIdx === textDraft.origIdx
+        ? { ...d, fontSize: line.fontSize, fontSizeProvisional: undefined }
+        : d,
+    )
+  }, [pageBlocks, textDraft])
+
   /** Saved markup/note annotations are keyed to the loaded doc; drop them on save-reload */
   useEffect(() => {
     setSavedMarkups(new Map())
@@ -2831,22 +2862,21 @@ export default function App() {
     // Exact run size from the page's text index (the text matrix's vertical axis) — the
     // size box must read 12 for a 12pt run. The text-layer span box only approximates it
     // (12.2), so it stays the fallback for lines the index does not cover.
-    const indexLine = pageBlocks
-      .get(origIdx)
-      ?.flatMap((b) => b.lines)
-      .find(
-        (l) =>
-          Math.min(l.rect[2], rect[2]) - Math.max(l.rect[0], rect[0]) > 0 &&
-          Math.min(l.rect[3], rect[3]) - Math.max(l.rect[1], rect[1]) >
-            0.5 * Math.min(l.rect[3] - l.rect[1], rect[3] - rect[1]),
-      )
+    const indexLine = indexLineFor(pageBlocks, origIdx, rect)
     const fontSize =
       indexLine?.fontSize ??
       (unionH > 0 ? Math.abs(by - ay) * (lineGroup.fontHeight / unionH) : Math.abs(by - ay))
     setSelected(null)
     draftSelectedRef.current = false
     draftPreselectRef.current = preselect ?? null
-    setTextDraft({ origIdx, rect, oldText, fontSize, value: oldText })
+    setTextDraft({
+      origIdx,
+      rect,
+      oldText,
+      fontSize,
+      value: oldText,
+      ...(indexLine ? {} : { fontSizeProvisional: true as const }),
+    })
     seedDraftFont(origIdx, rect)
     // The span rect is a font-metric layout box; the run's glyph ink can poke out of it.
     // Fetch the engine's real ink bounds so the editor/preview cover hides the old run fully.

@@ -447,6 +447,9 @@ export interface TextDraft {
   rect: [number, number, number, number]
   oldText: string
   fontSize: number
+  /** fontSize came from the text-layer span box (≈12.2 for a 12pt run) because the
+      page's text index was not built yet; replaced by the exact size when it lands */
+  fontSizeProvisional?: true
   value: string
   /** Style overrides; undefined = keep the run's original size/color */
   size?: number
