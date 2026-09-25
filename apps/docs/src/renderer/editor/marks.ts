@@ -7,6 +7,7 @@ import { cssCsFontFamily, cssRunFontFamily } from '../line-metrics'
 import { isEastAsianFontName } from '../font-list'
 import { t } from '../i18n/locale'
 import { dkBackground } from './dark-page'
+import { toggleEffectiveFlag } from './effective-format'
 import { runBorderDecls } from './run-border'
 import { fillInk } from './shading-ink'
 import { textColorDecls } from './text-color'
@@ -53,7 +54,7 @@ export const BoldMark = Mark.create({
     return ['strong', 0]
   },
   addKeyboardShortcuts() {
-    return { 'Mod-b': () => this.editor.commands.toggleMark('bold') }
+    return { 'Mod-b': () => toggleEffectiveFlag(this.editor, 'bold') }
   },
 })
 
@@ -66,7 +67,7 @@ export const ItalicMark = Mark.create({
     return ['em', 0]
   },
   addKeyboardShortcuts() {
-    return { 'Mod-i': () => this.editor.commands.toggleMark('italic') }
+    return { 'Mod-i': () => toggleEffectiveFlag(this.editor, 'italic') }
   },
 })
 

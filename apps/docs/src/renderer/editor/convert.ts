@@ -2978,6 +2978,7 @@ function symRuns(run: Run): Run[] {
 
 function runFromMarks(text: string, marks: PmMark[]): Run {
   const run: Run = { text }
+  const offs = { bold: false, italic: false }
   for (const mark of marks) {
     if (mark.type === 'bold') run.bold = true
     else if (mark.type === 'italic') run.italic = true
@@ -3068,6 +3069,10 @@ function runFromMarks(text: string, marks: PmMark[]): Run {
         run.themeRFonts = JSON.parse(String(mark.attrs.themeRFonts)) as Run['themeRFonts']
       }
       if (mark.attrs?.themeColor) run.themeColor = String(mark.attrs.themeColor)
+      // an explicit off-switch (w:b/w:i val=0) survives as a model false so the
+      // serializer can write it for runs that never had raw rPr
+      if (mark.attrs?.boldOff === true) offs.bold = true
+      if (mark.attrs?.italicOff === true) offs.italic = true
     } else if (mark.type === 'rprChange') {
       run.rPrChange = {
         author: String(mark.attrs?.author ?? ''),
@@ -3077,6 +3082,8 @@ function runFromMarks(text: string, marks: PmMark[]): Run {
       }
     }
   }
+  if (offs.bold && !run.bold) run.bold = false
+  if (offs.italic && !run.italic) run.italic = false
   return run
 }
 
@@ -3113,8 +3120,8 @@ function runStyleKey(run: Run): string {
   return JSON.stringify([
     run.rawRPr ?? null,
     run.styleId ?? null,
-    !!run.bold,
-    !!run.italic,
+    run.bold ?? null,
+    run.italic ?? null,
     !!run.underline,
     !!run.strike,
     run.color ?? null,
@@ -3166,8 +3173,8 @@ function normalizedRuns(runs: Run[]): unknown[] {
           r.text,
           r.rawRPr ?? null,
           r.styleId ?? null,
-          !!r.bold,
-          !!r.italic,
+          r.bold ?? null,
+          r.italic ?? null,
           !!r.underline,
           !!r.strike,
           r.color ?? null,

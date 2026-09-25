@@ -2631,6 +2631,14 @@ const rawAttr = (xml: string | undefined, attr: string): string | undefined =>
   xml ? new RegExp(` ${attr}="([^"]*)"`).exec(xml)?.[1] : undefined
 
 /** String version of boolProp: element present means true unless w:val negates it */
+/** A tri-state toggle (true / explicit false / unset) against its raw element. An unset
+ *  model value accepts a raw explicit off (legacy Runs that never carried the off-switch);
+ *  an explicit model false requires the raw element to be present and off. */
+function rawToggleEqual(xml: string | undefined, value: boolean | undefined): boolean {
+  if (value === false) return !!xml && !rawBool(xml)
+  return rawBool(xml) === !!value
+}
+
 function rawBool(xml: string | undefined): boolean {
   if (!xml) return false
   const val = rawAttr(xml, 'w:val')
@@ -2725,9 +2733,14 @@ function modelRPrChildren(run: Run, insideLink: boolean): PPrChild[] {
   // on Arabic or Hebrew changes nothing on screen, which is what Word writes too
   if (run.bold) {
     out.push({ name: 'w:b', xml: '<w:b/>' }, { name: 'w:bCs', xml: '<w:bCs/>' })
+  } else if (run.bold === false) {
+    // explicit off: switches off bold inherited from the paragraph/character style
+    out.push({ name: 'w:b', xml: '<w:b w:val="0"/>' }, { name: 'w:bCs', xml: '<w:bCs w:val="0"/>' })
   }
   if (run.italic) {
     out.push({ name: 'w:i', xml: '<w:i/>' }, { name: 'w:iCs', xml: '<w:iCs/>' })
+  } else if (run.italic === false) {
+    out.push({ name: 'w:i', xml: '<w:i w:val="0"/>' }, { name: 'w:iCs', xml: '<w:iCs w:val="0"/>' })
   }
   if (run.strike) out.push({ name: 'w:strike', xml: '<w:strike/>' })
   if (run.color)
@@ -2812,9 +2825,9 @@ export function mergeRPrModel(rawRPr: string, run: Run, insideLink: boolean): st
         )
       }
       case 'bold':
-        return rawBool(rawOf(cs ? 'w:bCs' : 'w:b')) === !!run.bold
+        return rawToggleEqual(rawOf(cs ? 'w:bCs' : 'w:b'), run.bold)
       case 'italic':
-        return rawBool(rawOf(cs ? 'w:iCs' : 'w:i')) === !!run.italic
+        return rawToggleEqual(rawOf(cs ? 'w:iCs' : 'w:i'), run.italic)
       case 'strike':
         return rawBool(rawOf('w:strike')) === !!run.strike
       case 'color': {

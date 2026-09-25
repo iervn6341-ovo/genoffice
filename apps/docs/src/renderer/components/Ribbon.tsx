@@ -37,6 +37,7 @@ import type {
 } from '@genoffice/docx-engine'
 import { bulletPresetLevels, numberPresetLevels } from '../numbering-actions'
 import { FORMAT_MARKS } from '../editor/caret-marks'
+import { effectiveFlag, toggleEffectiveFlag } from '../editor/effective-format'
 import {
   ColorPicker,
   Dropdown,
@@ -1644,6 +1645,13 @@ function RibbonInner({
           (t === 'bold' ? docDefaults?.bold : t === 'italic' ? docDefaults?.italic : undefined)
         if (styleFlag && !picked.some((m) => m.type.name === t)) marks.push({ type: t, attrs: {} })
       }
+      // a source that is NOT bold/italic must switch off what a styled target
+      // inherits (Normal → Heading 1): Word stamps w:b w:val="0"
+      for (const t of ['bold', 'italic'] as const) {
+        if (!effectiveFlag(t, picked, $from.parent, { styles, docDefaults })) {
+          ts[t === 'bold' ? 'boldOff' : 'italicOff'] = true
+        }
+      }
       ts.sizeHalfPoints ??=
         charStyle?.sizeHalfPoints ??
         paraStyle?.sizeHalfPoints ??
@@ -1900,7 +1908,13 @@ function RibbonInner({
       disabled={!canEdit}
       data-tip={title}
       aria-label={title}
-      onClick={() => chain().toggleMark(name).run()}
+      onClick={() => {
+        if (name !== 'bold' && name !== 'italic') chain().toggleMark(name).run()
+        else if (canEdit) {
+          ed.commands.focus()
+          toggleEffectiveFlag(ed, name)
+        }
+      }}
     >
       {label}
     </button>

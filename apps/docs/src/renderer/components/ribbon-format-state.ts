@@ -5,6 +5,7 @@ import { isInTable, mergeCells, selectedRect, splitCell } from '@tiptap/pm/table
 import type { DocDefaults, Run, StyleInfo, TextboxDisplay } from '@genoffice/docx-engine'
 import { getActiveSubEditor } from '../editor/active-editor'
 import { effectiveSizeHalfPoints } from '../editor/text-style-resolve'
+import { isFlagActive } from '../editor/effective-format'
 import { textHasCjk } from '../line-metrics'
 import { cachedByDoc } from '../doc-cache'
 
@@ -288,8 +289,9 @@ export function computeFormatState(
     cellHeightCm,
     cellWidthCm,
     cellVAlign,
-    bold: ed.isActive('bold'),
-    italic: ed.isActive('italic'),
+    // effective values: bold/italic inherited from the style lights the button (Word)
+    bold: isFlagActive(ed.state, 'bold', sub ? {} : { styles, docDefaults }),
+    italic: isFlagActive(ed.state, 'italic', sub ? {} : { styles, docDefaults }),
     underline: ed.isActive('underline'),
     strike: ed.isActive('strike'),
     vertAlign: str(textAttrs.vertAlign),
