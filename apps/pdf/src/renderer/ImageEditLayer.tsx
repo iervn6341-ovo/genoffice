@@ -72,9 +72,10 @@ export function ImageEditLayer({
   onSelectEdit: (id: string, x: number, y: number) => void
   onSelectExisting: (ref: PageImageRef, x: number, y: number) => void
   /** Committed move/resize of a pending op's rect; omit to disable (read-only) */
-  onRect?: (id: string, rect: Rect) => void
+  /** A moved/resized image; (x, y) = client point of the release, for re-selecting it */
+  onRect?: (id: string, rect: Rect, x: number, y: number) => void
   /** Drag/resize of an untouched existing image (App turns it into a transform op) */
-  onExistingRect?: (ref: PageImageRef, rect: Rect) => void
+  onExistingRect?: (ref: PageImageRef, rect: Rect, x: number, y: number) => void
   /** Prefetched pixels of an untouched existing image; shown live while it is dragged/resized */
   existingPng?: (ref: PageImageRef) => string | undefined
   /** Fired when a drag starts on an untouched existing image (App prefetches its pixels) */
@@ -97,9 +98,9 @@ export function ImageEditLayer({
 
   const css = (r: Rect): Box => pdfRectToCss(geom, r, scale)
 
-  const commitRect = (target: DragTarget, rect: Rect) => {
-    if (target.kind === 'edit') onRect?.(target.id, rect)
-    else onExistingRect?.(target.ref, rect)
+  const commitRect = (target: DragTarget, rect: Rect, x: number, y: number) => {
+    if (target.kind === 'edit') onRect?.(target.id, rect, x, y)
+    else onExistingRect?.(target.ref, rect, x, y)
   }
 
   const select = (target: DragTarget, x: number, y: number) => {
@@ -137,7 +138,12 @@ export function ImageEditLayer({
     const [bx, by] = viewToPdf(geom, (d.to[0] - d.from[0]) / scale, (d.to[1] - d.from[1]) / scale)
     const dx = bx - ax
     const dy = by - ay
-    commitRect(d.target, [d.rect[0] + dx, d.rect[1] + dy, d.rect[2] + dx, d.rect[3] + dy])
+    commitRect(
+      d.target,
+      [d.rect[0] + dx, d.rect[1] + dy, d.rect[2] + dx, d.rect[3] + dy],
+      e.clientX,
+      e.clientY,
+    )
   }
 
   const dragStyle = (target: DragTarget, rect: Rect): CSSProperties => {
@@ -212,7 +218,7 @@ export function ImageEditLayer({
     })
   }
 
-  const handleUp = () => {
+  const handleUp = (e: ReactPointerEvent<HTMLElement>) => {
     const r = resize
     setResize(null)
     if (!r) return
@@ -224,7 +230,12 @@ export function ImageEditLayer({
       (r.box.left + r.box.width) / scale,
       (r.box.top + r.box.height) / scale,
     )
-    commitRect(r.target, [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)])
+    commitRect(
+      r.target,
+      [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)],
+      e.clientX,
+      e.clientY,
+    )
   }
 
   // Selected target for the corner handles (must live on this page)

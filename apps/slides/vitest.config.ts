@@ -13,6 +13,14 @@ export default defineConfig({
         here,
         '../../packages/pptx-engine/src/table-grid.ts',
       ),
+      '@genoffice/pptx-engine/font-size-step': resolve(
+        here,
+        '../../packages/pptx-engine/src/font-size-step.ts',
+      ),
+      '@genoffice/pptx-engine/text-case': resolve(
+        here,
+        '../../packages/pptx-engine/src/text-case.ts',
+      ),
       '@genoffice/pptx-engine/identity': resolve(
         here,
         '../../packages/pptx-engine/src/identity.ts',
@@ -52,6 +60,9 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'jsdom',
+    // Node 25+ defines its own localStorage (undefined without --localstorage-file), which
+    // shadows jsdom's and breaks every storage test; turn Node's off
+    execArgv: ['--no-experimental-webstorage'],
     testTimeout: 20000,
   },
 })

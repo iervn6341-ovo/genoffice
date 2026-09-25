@@ -100,6 +100,14 @@ import {
   startShapeDraw,
   type VisualActionContext,
 } from './visual-actions'
+import type { FWorksheet } from '@univerjs/sheets/facade'
+import { ILayoutService } from '@univerjs/preset-sheets-core'
+import {
+  cellShiftAction,
+  parseCellShiftCommand,
+  type CellShiftMode,
+  type CellShiftOption,
+} from './cell-shift'
 import type { ChartDialogKind, ChartEditData, ShapeEditChanges } from './WorkbookVisuals'
 
 /** The App refs/state the ribbon dispatcher needs; built fresh per call. */
@@ -310,6 +318,16 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
   }
   // Read-only-safe commands work on imported workbooks too.
   const worksheet = runtime.univerAPI.getActiveWorkbook()?.getActiveSheet()
+  const cellShift = parseCellShiftCommand(command)
+  if (cellShift) {
+    runCellShift(ctx, runtime, worksheet, cellShift.mode, cellShift.option)
+    return
+  }
+  if (command === 'focus-grid') {
+    // a dialog closed: hand keyboard focus back to the grid so ⌘Z / arrows reach it
+    runtime.univer.__getInjector().get(ILayoutService).focus()
+    return
+  }
   switch (command) {
     case 'find':
       void runtime.univerAPI.executeCommand('ui.operation.open-find-dialog')
@@ -1473,6 +1491,28 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
       }
       case 'autofn': {
         if (!worksheet) return
+        // Excel's usual AutoSum: the empty cell under (or right of) a run of numbers is
+        // selected alone — the run above, else to the left, becomes the argument
+        if (range.getHeight() === 1 && range.getWidth() === 1) {
+          const row = range.getRow()
+          const column = range.getColumn()
+          const isNumber = (r: number, c: number) =>
+            r >= 0 && c >= 0 && typeof worksheet.getRange(r, c).getValue() === 'number'
+          let top = row
+          while (isNumber(top - 1, column)) top -= 1
+          let left = column
+          if (top === row) while (isNumber(row, left - 1)) left -= 1
+          if (top === row && left === column) {
+            ctx.setMessage(t('appAutofnSelectCells', { fn: argument }))
+            return
+          }
+          const from = `${columnLabel(top === row ? left : column)}${top + 1}`
+          const to =
+            top === row ? `${columnLabel(column - 1)}${row + 1}` : `${columnLabel(column)}${row}`
+          // into the selected cell itself — the "below the selection" notice would be wrong
+          worksheet.getRange(row, column).setFormula(`=${argument}(${from}:${to})`)
+          return
+        }
         if (range.getHeight() < 2) {
           ctx.setMessage(t('appAutofnSelectCells', { fn: argument }))
           return
@@ -1833,5 +1873,55 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     ctx.setMessage(t('appAppliedToSelection'))
   } catch (error: unknown) {
     ctx.setMessage(error instanceof Error ? error.message : t('appCommandFailed'))
+  }
+}
+
+/// Insert Cells / Delete Cells dialog choice. Range shifts go through Univer's
+/// own commands (one undo step; gated like move-range in App); whole rows and
+/// columns take the same path as Insert/Delete Sheet Rows.
+function runCellShift(
+  ctx: RibbonCommandContext,
+  runtime: UniverRuntime,
+  worksheet: FWorksheet | undefined,
+  mode: CellShiftMode,
+  option: CellShiftOption,
+): void {
+  const active = runtime.univerAPI.getActiveWorkbook()?.getActiveRange()
+  if (!worksheet || !active) {
+    ctx.setMessage(t('appSelectCellFirst'))
+    return
+  }
+  const range = {
+    startRow: active.getRow(),
+    endRow: active.getRow() + active.getHeight() - 1,
+    startColumn: active.getColumn(),
+    endColumn: active.getColumn() + active.getWidth() - 1,
+  }
+  const action = cellShiftAction(mode, option, range)
+  if (!action) return
+  if (action.kind === 'command') {
+    void runtime.univerAPI.executeCommand(action.id, { range })
+    return
+  }
+  const sheetId = worksheet.getSheetId()
+  if (ctx.lazyWorkbookRef.current) {
+    const op: WorkbookOperation =
+      action.kind === 'rows'
+        ? { op: action.op, sheetId, row: action.row, count: action.count }
+        : { op: action.op, sheetId, column: columnLabel(action.column), count: action.count }
+    void ctx.runOps([op], null)
+    return
+  }
+  try {
+    if (action.kind === 'rows') {
+      if (action.op === 'insert_rows') worksheet.insertRowsBefore(action.row - 1, action.count)
+      else worksheet.deleteRows(action.row - 1, action.count)
+    } else if (action.op === 'insert_cols') {
+      worksheet.insertColumnsBefore(action.column, action.count)
+    } else {
+      worksheet.deleteColumns(action.column, action.count)
+    }
+  } catch {
+    // A canceled structural command already surfaced its own message.
   }
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import { useI18n } from '../i18n/locale'
 import { searchPluginKey } from '../editor/extensions'
+import { findFoldedSpans } from '../editor/find-fold'
 
 interface Range {
   from: number
@@ -29,7 +30,6 @@ export function foldCase(s: string): string {
 export function findMatches(editor: Editor, query: string, opts: FindOptions): Range[] {
   const found: Range[] = []
   if (!query) return found
-  const needle = opts.matchCase ? query : foldCase(query)
   editor.state.doc.descendants((node, pos) => {
     if (!node.isTextblock) return true
     // flatten the block's inline content so matches spanning marks are found
@@ -44,18 +44,15 @@ export function findMatches(editor: Editor, query: string, opts: FindOptions): R
         text += '\u0000' // leaf placeholder (hard break) never matches
       }
     })
-    const haystack = opts.matchCase ? text : foldCase(text)
-    let i = 0
-    while ((i = haystack.indexOf(needle, i)) !== -1) {
-      const isWhole =
-        !opts.wholeWord || (!isWordChar(text[i - 1]) && !isWordChar(text[i + query.length]))
-      if (isWhole) {
-        found.push({ from: posAt[i], to: posAt[i + query.length - 1] + 1 })
-        i += query.length
-      } else {
-        i += 1
-      }
-    }
+    // Unicode folding (ß/SS, final sigma, İ, NFC) with offsets mapped back
+    // to the source text, so highlights cover exactly the matched characters
+    const spans = findFoldedSpans(
+      text,
+      query,
+      opts.matchCase,
+      (from, to) => !opts.wholeWord || (!isWordChar(text[from - 1]) && !isWordChar(text[to])),
+    )
+    for (const span of spans) found.push({ from: posAt[span.from], to: posAt[span.to - 1] + 1 })
     return false
   })
   return found

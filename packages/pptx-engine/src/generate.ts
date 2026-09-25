@@ -382,6 +382,14 @@ function patchRunProps(runXml: string, run: TextRun): string {
       run.fontSize != null && !run.fontSizeImplicit ? szAttr(run.fontSize) : undefined,
       /\ssz="[^"]*"/,
     )
+    // Character spacing (1/100 pt): only an explicit model value is written ("normal" is an
+    // explicit 0); a run the model has no spacing for keeps its original bytes
+    tag = setAttr(
+      tag,
+      'spc',
+      run.letterSpacing != null ? String(Math.round(run.letterSpacing * 100)) : undefined,
+      /\sspc="[^"]*"/,
+    )
     return tag
   }
 
@@ -406,6 +414,7 @@ function patchRunProps(runXml: string, run: TextRun): string {
     if (run.fontFamily && !run.latinFont && !run.eaFont && !run.fontImplicit) {
       runXml = patchRunFont(runXml, run.fontFamily)
     }
+    if (run.highlightEdited) runXml = patchRunHighlight(runXml, run.highlight)
     runXml = patchRunHlink(runXml, run)
   } else {
     // No rPr: inject a minimal rPr after <a:r> (no font slots injected when the font is untouched,
@@ -420,11 +429,56 @@ function patchRunProps(runXml: string, run: TextRun): string {
       run.fontFamily && !run.fontImplicit && !run.latinFont && !run.eaFont
         ? fontSlotsXml(escapeXmlAttr(run.fontFamily))
         : ''
-    const inner = color + font + hlinkXml(run) // schema order: fill before the font slots, hlinkClick after
+    const highlight = run.highlight
+      ? `<a:highlight><a:srgbClr val="${hex6(run.highlight)}"/></a:highlight>`
+      : ''
+    // schema order: fill, highlight, font slots, hlinkClick
+    const inner = color + highlight + font + hlinkXml(run)
     const rpr = inner ? `<a:rPr${attrs}>${inner}</a:rPr>` : `<a:rPr${attrs}/>`
     runXml = runXml.replace(/(<a:r(?:\s[^>]*)?>)/, `$1${rpr}`)
   }
   return runXml
+}
+
+/** rPr children that must follow <a:highlight> (CT_TextCharacterProperties sequence) */
+const AFTER_HIGHLIGHT = new Set([
+  'a:uLnTx',
+  'a:uLn',
+  'a:uFillTx',
+  'a:uFill',
+  'a:latin',
+  'a:ea',
+  'a:cs',
+  'a:sym',
+  'a:hlinkClick',
+  'a:hlinkMouseOver',
+  'a:rtl',
+  'a:extLst',
+])
+
+/** Replace, insert or remove the run's own <a:highlight> (only called for a run the user edited). */
+function patchRunHighlight(runXml: string, color: string | undefined): string {
+  const rPr = ownRPr(runXml)
+  if (!rPr) return runXml
+  const el = color ? `<a:highlight><a:srgbClr val="${hex6(color)}"/></a:highlight>` : ''
+  const kids = rPr.selfClosing ? [] : topLevelChildren(runXml, rPr.innerStart, rPr.innerEnd)
+  const existing = kids.find((c) => c.name === 'a:highlight')
+  if (existing) return runXml.slice(0, existing.start) + el + runXml.slice(existing.end)
+  if (!el) return runXml
+  if (rPr.selfClosing) {
+    // <a:rPr …/> → <a:rPr …>highlight</a:rPr>
+    const tag = runXml.slice(rPr.start, rPr.end)
+    return (
+      runXml.slice(0, rPr.start) +
+      tag.replace(/\/>$/, '>') +
+      el +
+      '</a:rPr>' +
+      runXml.slice(rPr.end)
+    )
+  }
+  const after = kids.find((c) => AFTER_HIGHLIGHT.has(c.name))
+  const at = after ? after.start : rPr.innerEnd
+  return runXml.slice(0, at) + el + runXml.slice(at)
 }
 
 /** <a:hlinkClick> for the model's rId (empty when none). */

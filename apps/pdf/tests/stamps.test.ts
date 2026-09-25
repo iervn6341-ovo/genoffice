@@ -93,11 +93,14 @@ describe('buildStamps watermark', () => {
   it('emits one full-page stamp per page with the configured opacity', () => {
     const stamps = buildStamps([page(0, 1), page(3, 2)], wm({ opacity: 0.3 }), null)
     expect(stamps).toHaveLength(2)
+    const cfg = wm({ opacity: 0.3 })
     expect(stamps[0]).toEqual({
       pageIndex: 0,
       image: 'FAKEBASE64',
       rect: [0, 0, 600, 800],
       opacity: 0.3,
+      // C8: the same text rides along for the invisible searchable layer
+      text: { value: cfg.text.trim(), size: 600 * cfg.sizeRatio, angle: cfg.angle },
     })
     expect(stamps[1]!.pageIndex).toBe(3)
   })

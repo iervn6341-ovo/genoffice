@@ -91,7 +91,7 @@ test.describe('docs paste options chip', () => {
           },
           { html: WEB_TWO_PARAS, text: WEB_TEXT },
         )
-        await editorPage.keyboard.press('Control+v')
+        await editorPage.keyboard.press('ControlOrMeta+v')
         await editorPage.waitForTimeout(400)
       }
 
@@ -138,7 +138,7 @@ test.describe('docs paste options chip', () => {
       await expect(chip).toBeHidden()
       // focus back in the document before driving the caret
       await editorPage.locator('.doc-page').click()
-      await editorPage.keyboard.press('Control+End')
+      await editorPage.keyboard.press('ControlOrMeta+End')
       await editorPage.keyboard.press('Enter')
       await paste()
       state = await runs()

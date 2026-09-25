@@ -63,6 +63,7 @@ export function lookup(name: string): OpDef {
 }
 
 export const BUCKETS: Bucket[] = [
+  'redactions',
   'markups',
   'annotDeletes',
   'noteEdits',

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { applyFlag, isFlagActive, styleContextOf } from '../editor/effective-format'
 import type { Editor } from '@tiptap/core'
 import type { Command } from '@tiptap/pm/state'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
@@ -549,11 +550,14 @@ export function FontDialog({ editor, onClose }: { editor: Editor; onClose: () =>
   // the dialog opens from a click, so activation is still live here
   useEffect(() => loadSystemFonts(), [loadSystemFonts])
   const textAttrs = editor.getAttributes('docTextStyle')
-  const initialStyle = editor.isActive('bold')
-    ? editor.isActive('italic')
+  const styleCtx = styleContextOf(editor)
+  const boldNow = isFlagActive(editor.state, 'bold', styleCtx)
+  const italicNow = isFlagActive(editor.state, 'italic', styleCtx)
+  const initialStyle = boldNow
+    ? italicNow
       ? 'boldItalic'
       : 'bold'
-    : editor.isActive('italic')
+    : italicNow
       ? 'italic'
       : 'regular'
 
@@ -595,8 +599,12 @@ export function FontDialog({ editor, onClose }: { editor: Editor; onClose: () =>
       })
     const wantBold = style === 'bold' || style === 'boldItalic'
     const wantItalic = style === 'italic' || style === 'boldItalic'
-    chain = wantBold ? chain.setMark('bold') : chain.unsetMark('bold')
-    chain = wantItalic ? chain.setMark('italic') : chain.unsetMark('italic')
+    // effective values: un-bolding Heading 1 text writes the explicit off-switch
+    chain = chain.command(({ tr }) => {
+      applyFlag(tr, 'bold', wantBold, styleCtx)
+      applyFlag(tr, 'italic', wantItalic, styleCtx)
+      return true
+    })
     chain = underline ? chain.setMark('underline') : chain.unsetMark('underline')
     chain = strike ? chain.setMark('strike') : chain.unsetMark('strike')
     chain.run()

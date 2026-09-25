@@ -151,6 +151,7 @@ export const id = {
   aiThemePlayful: 'Ceria',
   aiThemeDark: 'Gelap',
   aiSummarizeBtn: 'Ringkasan AI',
+  aiToolsGroup: 'Alat AI',
   aiSummarizePrompt: 'Ringkas isi utama dan poin-poin penting dokumen ini',
   aiAttachTitle: 'Lampirkan file lokal (atau seret ke panel)',
   aiRemoveAttachmentTitle: 'Hapus lampiran',

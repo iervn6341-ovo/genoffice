@@ -216,6 +216,16 @@ export interface SetElementFontOp {
   strike?: boolean
   /** Font color #RRGGBB */
   color?: string
+  /** Character spacing (pt; 0 = normal) */
+  letterSpacingPt?: number
+  /** Text highlight #RRGGBB; null = no colour */
+  highlight?: string | null
+  /** Change Case */
+  textCase?: 'sentence' | 'lower' | 'upper' | 'title' | 'toggle'
+  /** Increase (1) / Decrease (-1) Font Size, each run from its own size */
+  fontSizeStep?: 1 | -1
+  /** Superscript 30 / subscript -25 / normal 0 */
+  baseline?: number
   /** In-group editing: all sourceIds are direct children of that group */
   groupId?: string
 }
@@ -358,6 +368,8 @@ export interface AddElementOp {
   fillColor?: string
   /** Shape stroke (solid color + point width) */
   stroke?: { color: string; widthPt: number }
+  /** Vertical text anchor of the new shape (default top) */
+  bodyPr?: { anchor?: 't' | 'ctr' | 'b' }
 }
 
 export interface DeleteElementOp {
@@ -848,6 +860,36 @@ export interface EditConnectorEndpointsOp {
 export interface SetNotesOp {
   slideIndex: number
   text: string
+  /** Formatted notes from the notes pane (srcPara/srcRun trace NotesParagraphView); wins over text */
+  paragraphs?: EditParagraph[]
+}
+
+/** One run of the notes pane, formatting resolved for display */
+export interface NotesRunView {
+  text: string
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  strike: boolean
+  /** Superscript/subscript offset (%): >0 raised, <0 lowered */
+  baseline: number
+  fontSizePt: number
+  /** Resolved typeface (explicit or inherited) */
+  fontFamily?: string
+  /** The run names its own typeface (an inherited one is not written back) */
+  fontExplicit: boolean
+  /** #RRGGBB when the run sets its own colour; inherited theme text colour follows the UI theme */
+  color?: string
+  highlight?: string
+}
+
+/** One paragraph of the notes pane */
+export interface NotesParagraphView {
+  runs: NotesRunView[]
+  align?: 'left' | 'center' | 'right' | 'justify'
+  level: number
+  /** Bullet glyph to show before the text ('•', '1.' …); absent = none */
+  bullet?: string
 }
 
 /** Add a comment (the author is the system username fetched by the main process). */
@@ -1102,17 +1144,40 @@ export interface ShowSyncState {
   ended: boolean
   /** Presenter toggled black screen (B key/toolbar button) */
   black: boolean
+  /** Presenter toggled white screen (W key) */
+  white?: boolean
+  /** Slide Zoom: normalized point magnified 2× (PowerPoint's Zoom into the slide); absent = off */
+  zoom?: { x: number; y: number } | null
+  /** Presenter's pointer tool: the audience screen accepts the same pointer (e.g. laser) */
+  tool?: 'none' | 'laser' | 'pen' | 'highlighter' | 'eraser'
+  /** Current pen / highlighter colour for ink drawn on the audience screen */
+  inkColor?: string
+  /** Camera on: both screens show the live camera bubble on the slide */
+  camera?: boolean
 }
 
 /** Presenter ink/laser event; coordinates are 0..1 normalized relative to the slide area (laser x<0 = off) */
 export type ShowInkEvent =
+  /** x < 0 hides the laser dot */
   | { type: 'laser'; x: number; y: number }
-  | { type: 'stroke-start'; x: number; y: number; color: string }
-  | { type: 'stroke-move'; x: number; y: number }
+  | { type: 'stroke-start'; x: number; y: number; color: string; kind: 'pen' | 'highlighter' }
+  /** Points added to the current stroke since the last frame (normalized, alternating x,y) */
+  | { type: 'stroke-move'; points: number[] }
+  /** Eraser touch: strokes passing near the point are removed */
+  | { type: 'erase'; x: number; y: number }
   | { type: 'clear' }
 
 /** Navigation actions sent back from the audience window (click/keypress) */
-export type AudienceNavAction = 'next' | 'prev' | 'exit'
+export type AudienceNavAction =
+  | 'next'
+  | 'prev'
+  | 'exit'
+  | 'first'
+  | 'last'
+  | 'black'
+  | 'white'
+  /** `goto:12` — go to slide number 12 (typed digits, then Enter) */
+  | `goto:${number}`
 
 export type MenuCommand =
   | 'open'
@@ -1455,6 +1520,8 @@ export interface SlidesApi {
   moveSlide: (op: MoveSlideOp) => Promise<{ slides: RenderSlide[]; sections: SectionInfo[] } | null>
   /** Plain text of the current page's speaker notes ('' when there are none) */
   getNotes: (slideIndex: number) => Promise<string>
+  /** The current page's notes with formatting, for the notes pane ([] when there are none) */
+  getNotesRich: (slideIndex: number) => Promise<NotesParagraphView[]>
   /** Overwrite-write notes (into the pptx's notesSlide part); returns success */
   setNotes: (op: SetNotesOp) => Promise<boolean>
   /** All comments on a page (in add order) */
@@ -1652,7 +1719,14 @@ export interface SlidesApi {
   masterDeleteElement: (op: MasterDeleteElementOp) => Promise<RenderSlide | null>
   // ── Presenter-view multi-screen show ────────────────────────────────
   /** Enter presenter view: detects multiple displays and opens a fullscreen audience show window on the external screen (sharing this session's document) */
-  presenterStart: () => Promise<{ audience: boolean }>
+  /** Number of connected screens (presenter view needs two) */
+  displayCount: () => Promise<number>
+  /** Open the audience window; `monitor` = preferred display label (Slide Show → Monitor), else automatic */
+  presenterStart: (opts?: { monitor?: string | null }) => Promise<{ audience: boolean }>
+  /** Connected screens, for the Slide Show → Monitor choice */
+  displayList: () => Promise<Array<{ id: number; label: string; primary: boolean }>>
+  /** Audience window: ink drawn with the mouse on the audience screen, mirrored to the presenter */
+  audienceInk: (ev: ShowInkEvent) => void
   /** Broadcast show state to the audience window (fire-and-forget) */
   presenterSync: (state: ShowSyncState) => void
   /** Broadcast ink/laser events to the audience window */

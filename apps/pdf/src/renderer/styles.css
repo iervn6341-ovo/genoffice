@@ -2354,6 +2354,11 @@ button {
   color: var(--text);
 }
 
+/* Insert text: font face and B / I beside it */
+.pdf-insert-face .pdf-modal-dd {
+  flex: 1;
+}
+
 .pdf-field > span:first-child {
   flex-shrink: 0;
   min-width: 74px;

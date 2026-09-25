@@ -152,6 +152,11 @@ export function buildStamps(
           image,
           rect: [0, 0, p.pw, p.ph],
           opacity: watermark.opacity,
+          text: {
+            value: watermark.text.trim(),
+            size: p.pw * watermark.sizeRatio,
+            angle: watermark.angle,
+          },
         })
       }
     }
@@ -162,7 +167,11 @@ export function buildStamps(
     const margin = Math.min(p.ph * 0.035, 26)
 
     const header = renderBar(
-      [hf.headerLeft, hf.headerCenter, hf.headerRight].map((s) => fill(s, no, total)) as [string, string, string],
+      [hf.headerLeft, hf.headerCenter, hf.headerRight].map((s) => fill(s, no, total)) as [
+        string,
+        string,
+        string,
+      ],
       p.pw,
       hf.fontSize,
       hf.color,

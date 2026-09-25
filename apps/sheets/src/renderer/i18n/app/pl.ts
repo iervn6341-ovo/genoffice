@@ -777,6 +777,7 @@ export const pl = {
   appGroupChartActions: 'Akcje wykresu',
   appRemoveFromSheet: 'Usuń z arkusza',
   appGroupAiAssistant: 'Asystent AI',
+  appGroupAiTools: 'Narzędzia AI',
   appAiOpenPanelDetail: 'Pasek boczny czatu',
   appGroupAiStarters: 'Szybki start',
   appAiStarterDetail: 'Wyślij do panelu AI',

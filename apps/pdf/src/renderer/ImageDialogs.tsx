@@ -8,7 +8,7 @@
  * Crop: drag 8 handles (or drag inside the box to move); applying returns the cropped
  * pixels plus the kept-region fractions so App can shrink the page footprint to match.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from 'react'
 import { removeBackground, sampleBackgroundColors, type PixelImage, type RGB } from './cutout'
 import { DEFAULT_CUTOUT_TOLERANCE, type CropFractions } from './image-bake'
@@ -17,6 +17,28 @@ import type { StringKey, TFunc } from './i18n/locale'
 /** Longest side of the preview canvas (px) */
 const PREVIEW_MAX = 520
 const CROP_HANDLE_GUTTER = 6
+/** Top margin of the preview dialogs (tall: the shared 96px would push their buttons out) */
+const PREVIEW_DIALOG_TOP = 24
+/** Gap kept between a preview dialog and the bottom of its mask */
+const PREVIEW_DIALOG_GAP = 16
+
+/**
+ * Height a dialog's preview may take so the whole dialog stays inside its mask. The mask
+ * covers the viewer pane under the ribbon, not the window, so window.innerHeight overstates
+ * the room by the ribbon's height (at 1280×800 the crop dialog's Apply button and bottom
+ * handles ended up off-screen): subtract the dialog's top margin, a bottom gap and the
+ * dialog's other contents — title, hint, buttons.
+ */
+function previewRoomHeight(dialog: HTMLElement | null, preview: HTMLElement | null): number {
+  const mask = dialog?.parentElement
+  if (!dialog || !mask || !preview) return PREVIEW_MAX
+  const border = dialog.offsetHeight - dialog.clientHeight
+  const others = dialog.scrollHeight + border - preview.offsetHeight
+  return Math.max(
+    80,
+    Math.min(PREVIEW_MAX, mask.clientHeight - PREVIEW_DIALOG_TOP - PREVIEW_DIALOG_GAP - others),
+  )
+}
 
 const fitPreview = (
   naturalWidth: number,
@@ -84,7 +106,16 @@ export function CutoutDialog({
   const bgColorsRef = useRef<RGB[]>([])
   const rafRef = useRef<number | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
+  const previewBoxRef = useRef<HTMLDivElement>(null)
+  const [previewMaxH, setPreviewMaxH] = useState(PREVIEW_MAX)
   const previouslyFocused = useRef<HTMLElement | null>(null)
+
+  useLayoutEffect(() => {
+    const fit = () => setPreviewMaxH(previewRoomHeight(dialogRef.current, previewBoxRef.current))
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [])
 
   // Focus the first field on mount; return focus to the opener on unmount
   useEffect(() => {
@@ -207,11 +238,12 @@ export function CutoutDialog({
         role="dialog"
         aria-modal="true"
         aria-label={t('imageCutout')}
-        style={{ maxWidth: PREVIEW_MAX + 48 }}
+        style={{ maxWidth: PREVIEW_MAX + 48, marginTop: PREVIEW_DIALOG_TOP }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="pdf-modal-title">{t('imageCutout')}</div>
         <div
+          ref={previewBoxRef}
           style={{
             ...CHECKERBOARD,
             display: 'flex',
@@ -240,7 +272,7 @@ export function CutoutDialog({
               ref={canvasRef}
               style={{
                 maxWidth: '100%',
-                maxHeight: PREVIEW_MAX,
+                maxHeight: previewMaxH,
                 display: loaded ? 'block' : 'none',
               }}
             />
@@ -322,6 +354,7 @@ export function CropDialog({
     start: CropFractions
   } | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
+  const previewBoxRef = useRef<HTMLDivElement>(null)
   const previouslyFocused = useRef<HTMLElement | null>(null)
 
   // Focus the first field on mount; return focus to the opener on unmount
@@ -340,7 +373,9 @@ export function CropDialog({
     const img = imgRef.current
     if (!img) return
     const maxWidth = Math.max(80, Math.min(PREVIEW_MAX, window.innerWidth - 92))
-    const maxHeight = Math.max(80, Math.min(PREVIEW_MAX, window.innerHeight - 220))
+    // the checkerboard box pads the image by the handle gutter on each side
+    const maxHeight =
+      previewRoomHeight(dialogRef.current, previewBoxRef.current) - CROP_HANDLE_GUTTER * 2
     setView(fitPreview(img.naturalWidth, img.naturalHeight, maxWidth, maxHeight))
   }, [])
 
@@ -488,6 +523,7 @@ export function CropDialog({
         aria-label={t('imageCrop')}
         style={{
           width: PREVIEW_MAX + 48 + CROP_HANDLE_GUTTER * 2,
+          marginTop: PREVIEW_DIALOG_TOP,
           maxWidth: 'calc(100vw - 32px)',
           maxHeight: 'calc(100vh - 32px)',
           boxSizing: 'border-box',
@@ -497,6 +533,7 @@ export function CropDialog({
       >
         <div className="pdf-modal-title">{title ?? t('imageCrop')}</div>
         <div
+          ref={previewBoxRef}
           style={{
             ...CHECKERBOARD,
             display: 'flex',

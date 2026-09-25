@@ -8,7 +8,7 @@ import {
   aiPanelFontPx,
   clampAiCustomFontSize,
 } from '@genoffice/ui'
-import type { AiFontSize, AiPanelPrefs, AiPanelSide } from '@genoffice/ui'
+import type { AiFontSize, AiPanelPrefs, AiPanelSide, RibbonFold } from '@genoffice/ui'
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   MAX_MAX_OUTPUT_TOKENS,
@@ -1212,6 +1212,21 @@ export function SettingsModal({
                       { value: 'right', label: t('aiPanelSideRight') },
                     ]}
                     onPick={(side) => updateAiPrefs({ side: side as AiPanelSide })}
+                  />
+                </div>
+                <div className="set-field">
+                  <div className="set-field-text">
+                    <label className="set-field-label">{t('setRibbonFold')}</label>
+                  </div>
+                  <Dropdown
+                    className="set-dd"
+                    value={aiPrefs.ribbonFold}
+                    ariaLabel={t('setRibbonFold')}
+                    options={[
+                      { value: 'classic', label: t('ribbonFoldClassic') },
+                      { value: 'auto', label: t('ribbonFoldAuto') },
+                    ]}
+                    onPick={(ribbonFold) => updateAiPrefs({ ribbonFold: ribbonFold as RibbonFold })}
                   />
                 </div>
                 <div className="set-field">

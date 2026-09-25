@@ -87,19 +87,75 @@ async function nextFreePath(
   throw new NoteEditError('No free part name for the comments part.')
 }
 
-function buildCommentsXml(notes: readonly SheetNote[]): string {
+function decodeXml(value: string): string {
+  return value.replace(/&(#x[0-9a-fA-F]+|#\d+|lt|gt|amp|quot|apos);/g, (_, entity: string) => {
+    if (entity[0] === '#') {
+      const code = entity[1] === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10)
+      return String.fromCodePoint(code)
+    }
+    return { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" }[entity]!
+  })
+}
+
+/** A comment already in the file, with the plain text the importer derived from it */
+interface ExistingComment {
+  readonly ref: string
+  readonly author: string
+  readonly text: string
+  readonly xml: string
+}
+
+/// The same reading as the sidecar's read_comments: every <t> of the comment
+/// concatenated (rich runs and all), author by authorId, line breaks as \n.
+function parseExistingComments(commentsXml: string): ExistingComment[] {
+  const authorsBlock = /<authors\b[^>]*>([\s\S]*?)<\/authors>/.exec(commentsXml)?.[1] ?? ''
+  const authors = [
+    ...authorsBlock.matchAll(/<author\b[^>]*\/>|<author\b[^>]*>([\s\S]*?)<\/author>/g),
+  ].map((match) => decodeXml(match[1] ?? ''))
+  return [...commentsXml.matchAll(/<comment\b[^>]*>[\s\S]*?<\/comment>/g)].map((match) => {
+    const xml = match[0]
+    const authorId = Number(/\bauthorId="(\d+)"/.exec(xml)?.[1] ?? -1)
+    const text = [...xml.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+      .map((t) => decodeXml(t[1] ?? ''))
+      .join('')
+      .replace(/\r\n?/g, '\n')
+    return {
+      ref: (/\bref="([^"]*)"/.exec(xml)?.[1] ?? '').replace(/\$/g, '').toUpperCase(),
+      author: authors[authorId] ?? '',
+      text,
+      xml,
+    }
+  })
+}
+
+/**
+ * The full comment set. A note whose author and text are unchanged keeps its
+ * original <comment> (rich runs — the bold author line, colors — intact); the
+ * editor only carries plain text, so rebuilding it would flatten every note on
+ * the sheet whenever any one of them was edited.
+ */
+function buildCommentsXml(
+  notes: readonly SheetNote[],
+  existing: readonly ExistingComment[],
+): string {
   const authors: string[] = []
   const authorId = (author: string): number => {
-    const existing = authors.indexOf(author)
-    if (existing !== -1) return existing
+    const found = authors.indexOf(author)
+    if (found !== -1) return found
     authors.push(author)
     return authors.length - 1
   }
   const comments = notes
     .map((note) => {
       const ref = `${columnName(note.column)}${note.row + 1}`
+      const kept = existing.find(
+        (comment) =>
+          comment.ref === ref && comment.author === note.author && comment.text === note.text,
+      )
+      const id = authorId(note.author)
+      if (kept) return kept.xml.replace(/\bauthorId="\d+"/, `authorId="${id}"`)
       return (
-        `<comment ref="${ref}" authorId="${authorId(note.author)}">` +
+        `<comment ref="${ref}" authorId="${id}">` +
         `<text><t xml:space="preserve">${escapeXml(note.text)}</t></text></comment>`
       )
     })
@@ -122,11 +178,11 @@ const VML_HEADER =
   '<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/>' +
   '</v:shapetype>'
 
-function noteShape(note: SheetNote, index: number): string {
+function noteShape(note: SheetNote, index: number, shapeNumber: number): string {
   // Anchor: from one column right of the cell, spanning ~3 columns / 4 rows.
   const anchor = [note.column + 1, 15, note.row, 2, note.column + 4, 15, note.row + 4, 2].join(',')
   return (
-    `<v:shape id="_x0000_s${1025 + index}" type="#_x0000_t202"` +
+    `<v:shape id="_x0000_s${shapeNumber}" type="#_x0000_t202"` +
     ' style="position:absolute;margin-left:80pt;margin-top:2pt;width:108pt;height:60pt;' +
     `z-index:${index + 1};visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto">` +
     '<v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/>' +
@@ -138,6 +194,42 @@ function noteShape(note: SheetNote, index: number): string {
     `<x:Row>${note.row}</x:Row><x:Column>${note.column}</x:Column></x:ClientData>` +
     '</v:shape>'
   )
+}
+
+/// The note shapes of a VML drawing by cell ("row,column"), as Excel sized, placed and
+/// showed or hid them.
+function noteShapesByCell(vmlXml: string): Map<string, string> {
+  const shapes = new Map<string, string>()
+  for (const match of vmlXml.matchAll(/<v:shape\b[\s\S]*?<\/v:shape>/g)) {
+    const shape = match[0]
+    if (!shape.includes('ObjectType="Note"')) continue
+    const row = /<x:Row>\s*(\d+)\s*<\/x:Row>/.exec(shape)?.[1]
+    const column = /<x:Column>\s*(\d+)\s*<\/x:Column>/.exec(shape)?.[1]
+    if (row !== undefined && column !== undefined)
+      shapes.set(`${Number(row)},${Number(column)}`, shape)
+  }
+  return shapes
+}
+
+/// Note shapes for the new set: a cell that already had a note keeps its own shape
+/// (an edited note keeps its box, like Excel); new notes get generated ones whose
+/// ids avoid every shape id still in the drawing.
+function noteShapesFor(notes: readonly SheetNote[], existingVml: string | null): string {
+  const kept = existingVml === null ? new Map<string, string>() : noteShapesByCell(existingVml)
+  const shapes = notes.map((note) => kept.get(`${note.row},${note.column}`) ?? null)
+  const used = new Set<number>()
+  const idSource = (existingVml === null ? '' : stripNoteShapes(existingVml)) + shapes.join('')
+  for (const match of idSource.matchAll(/_x0000_s(\d+)/g)) used.add(Number(match[1]))
+  let next = 1025
+  return notes
+    .map((note, index) => {
+      const shape = shapes[index]
+      if (shape) return shape
+      while (used.has(next)) next += 1
+      used.add(next)
+      return noteShape(note, index, next)
+    })
+    .join('')
 }
 
 /// Drops every Note-typed shape, keeping other legacy objects verbatim.
@@ -260,16 +352,23 @@ export async function applySheetNotes(
     const target = `../${commentsPath.replace(/^xl\//, '')}`
     relsXml = appendRel(relsXml, rid, COMMENTS_REL_TYPE, target)
     relsChanged = true
-    pkg.add(commentsPath, buildCommentsXml(notes))
+    pkg.add(commentsPath, buildCommentsXml(notes, []))
   } else {
-    pkg.write(commentsPath, buildCommentsXml(notes))
+    const existing = (await pkg.has(commentsPath))
+      ? parseExistingComments(await pkg.readText(commentsPath))
+      : []
+    pkg.write(commentsPath, buildCommentsXml(notes, existing))
   }
   touchedEntries.add(commentsPath)
 
-  // VML part: keep foreign shapes, replace the note shapes.
-  const shapes = notes.map((note, index) => noteShape(note, index)).join('')
-  if (existingVmlPath !== null && (await pkg.has(existingVmlPath))) {
-    const vml = stripNoteShapes(await pkg.readText(existingVmlPath))
+  // VML part: keep foreign shapes and the boxes of cells that keep a note.
+  const existingVml =
+    existingVmlPath !== null && (await pkg.has(existingVmlPath))
+      ? await pkg.readText(existingVmlPath)
+      : null
+  const shapes = noteShapesFor(notes, existingVml)
+  if (existingVmlPath !== null && existingVml !== null) {
+    const vml = stripNoteShapes(existingVml)
     const end = vml.lastIndexOf('</xml>')
     if (end === -1) throw new NoteEditError(`${existingVmlPath} is not a VML drawing.`)
     pkg.write(existingVmlPath, vml.slice(0, end) + shapes + vml.slice(end))

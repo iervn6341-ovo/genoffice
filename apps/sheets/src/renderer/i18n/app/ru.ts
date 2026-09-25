@@ -768,6 +768,7 @@ export const ru = {
   appGroupChartActions: 'Действия с диаграммой',
   appRemoveFromSheet: 'Удалить с листа',
   appGroupAiAssistant: 'Помощник ИИ',
+  appGroupAiTools: 'Инструменты ИИ',
   appAiOpenPanelDetail: 'Чат в боковой панели',
   appGroupAiStarters: 'Быстрый старт',
   appAiStarterDetail: 'Отправить в панель ИИ',

@@ -57,6 +57,7 @@ export const it = {
   ribbonPin: 'Aggiungi la barra multifunzione',
   ribbonExpand: 'Espandi la barra multifunzione',
   ribbonGroupInsert: 'Inserisci',
+  ribbonGroupView: 'Visualizza',
   editText: 'Modifica testo',
   fontSize: 'Dimensione carattere',
   fontWeight: 'Peso',

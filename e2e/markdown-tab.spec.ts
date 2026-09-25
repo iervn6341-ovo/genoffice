@@ -65,6 +65,29 @@ test.describe('markdown editor', () => {
     }
   })
 
+  test('a double-click right of a list item never merges it with the next one', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'genoffice-md-'))
+    const mdPath = join(dir, 'list.md')
+    await writeFile(mdPath, '1. First\n2. Second\n3. Third\n')
+    const launched = await launchShell({
+      onboardingSeen: true,
+      videoDir: 'markdown-dblclick',
+      openFile: mdPath,
+    })
+    try {
+      const editorPage = await waitForPageWithUrl(launched.app, '://markdown/')
+      const editor = editorPage.locator('.doc-editor')
+      const item = editor.locator('li').nth(1)
+      await expect(item).toHaveText('Second')
+      const box = (await item.boundingBox())!
+      await editorPage.mouse.dblclick(box.x + box.width - 40, box.y + box.height / 2)
+      await editorPage.keyboard.type('X')
+      await expect(editor.locator('li')).toHaveText(['First', 'SecondX', 'Third'])
+    } finally {
+      await closeAndSaveVideo(launched, 'markdown-dblclick')
+    }
+  })
+
   test('opens a .md file from argv, edits and saves it back', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'genoffice-md-'))
     const mdPath = join(dir, 'note.md')

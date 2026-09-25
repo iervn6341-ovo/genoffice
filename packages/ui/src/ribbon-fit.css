@@ -1,0 +1,58 @@
+/*
+ * Adaptive ribbon labels (see ribbon-fit.ts): a label is hidden until the ribbon body's
+ * data-labels level reaches its tier, so a wide window shows text beside the icons.
+ */
+.rb-lbl {
+  display: none;
+  white-space: nowrap;
+}
+
+.ribbon-body[data-labels='1'] .rb-lbl[data-tier='1'],
+.ribbon-body[data-labels='2'] .rb-lbl:is([data-tier='1'], [data-tier='2']),
+.ribbon-body[data-labels='3'] .rb-lbl {
+  display: inline;
+}
+
+/*
+ * RibbonFoldGroup: unfolded, only the items show; folded (data-folded, set by the fit hook), only
+ * the dropdown button shows and the items become its panel. Two-class selectors so the button
+ * stays hidden whatever display an app's own button class sets.
+ */
+.rb-fold-group {
+  anchor-scope: --rb-fold;
+}
+.rb-fold-group > .rb-fold-btn {
+  display: none;
+  anchor-name: --rb-fold;
+}
+.rb-fold-group[data-folded] > .rb-fold-btn {
+  display: flex;
+}
+.rb-fold-group[data-folded] > .rb-fold-items {
+  display: none;
+}
+.rb-fold-group[data-folded].rb-fold-open > .rb-fold-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: min(720px, calc(100vw - 24px));
+  height: auto;
+  /* fixed + anchored: escapes the ribbon's scroll clip like every other ribbon flyout */
+  position: fixed;
+  position-anchor: --rb-fold;
+  top: calc(anchor(bottom) + 6px);
+  left: anchor(left);
+  position-try-fallbacks: flip-inline;
+  z-index: 60;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-menu);
+}
+
+/* A group pushed to the ribbon's right edge (the AI group sits where Microsoft 365 puts Copilot) */
+.ribbon-group.rb-group-end {
+  margin-left: auto;
+}

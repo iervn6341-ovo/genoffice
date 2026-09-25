@@ -21,9 +21,30 @@ import {
   formatClock,
   startRehearse,
   switchRehearsePage,
+  toggleShowScreen,
   type RehearseTiming,
+  type ShowScreen,
 } from '../slideshow-utils'
+import { useShowKeys } from '../use-show-keys'
 import { liftShowCurtain } from '../show-actions'
+import {
+  DEFAULT_HIGHLIGHTER_COLOR,
+  DEFAULT_PEN_COLOR,
+  InkBoard,
+  InkLayer,
+  useInkPointer,
+  type InkTool,
+} from './ShowInk'
+import { CameraBubble } from './ShowCamera'
+import {
+  closeShowPopovers,
+  ShowToolbar,
+  showOptionsMenu,
+  usePointerShortcuts,
+} from './ShowControls'
+
+/** The control bar and the arrow fade out after this long without mouse movement (PowerPoint) */
+const IDLE_HIDE_MS = 3000
 
 const ANIMATED = [
   'fade',
@@ -47,6 +68,7 @@ export function SlideShowView({
   customOrder,
   rehearseMode,
   onRehearseDone,
+  onUsePresenterView,
 }: {
   slides: RenderSlide[]
   images: Map<string, HTMLImageElement>
@@ -60,6 +82,8 @@ export function SlideShowView({
   rehearseMode?: boolean
   /** Rehearsal-end callback (called before onExit on exit); perPageSec is by original page index, unvisited pages are 0 */
   onRehearseDone?: (perPageSec: number[]) => void
+  /** "Use Presenter View" from the show's options menu: continue from lastIndex in presenter view */
+  onUsePresenterView?: (lastIndex: number) => void
 }) {
   const { t } = useI18n()
   // Playback sequence (original indexes): hidden pages skipped (except the start page); custom shows use the given order
@@ -355,37 +379,80 @@ export function SlideShowView({
     [order, pos, slide],
   )
 
-  // Keyboard navigation (capture beats the editor's generic shortcuts)
+  // ── Pointer Options, Zoom and the control bar (PowerPoint's bottom-left show controls) ──
+  const [tool, setToolState] = useState<InkTool>('none')
+  const [penColor, setPenColor] = useState<string>(DEFAULT_PEN_COLOR)
+  const [hlColor, setHlColor] = useState<string>(DEFAULT_HIGHLIGHTER_COLOR)
+  const inkColor = tool === 'highlighter' ? hlColor : penColor
+  const board = useMemo(() => new InkBoard(), [])
+  const [canErase, setCanErase] = useState(false)
+  useEffect(() => board.subscribe(() => setCanErase(board.strokes.length > 0)), [board])
+  const stageRef = useRef<HTMLDivElement>(null)
+  const ink = useInkPointer(board, tool, inkColor, stageRef)
+  const [zoomArmed, setZoomArmed] = useState(false)
+  const [zoom, setZoom] = useState<{ x: number; y: number } | null>(null)
+  const setTool = useCallback((v: InkTool) => {
+    setToolState(v)
+    setZoomArmed(false)
+    setZoom(null)
+  }, [])
+  const eraseAll = useCallback(() => board.clear(), [board])
+  usePointerShortcuts(setTool, eraseAll)
+  // ink and zoom belong to the slide they were made on
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        exitRef.current()
-      } else if (
-        e.key === 'ArrowRight' ||
-        e.key === 'ArrowDown' ||
-        e.key === ' ' ||
-        e.key === 'Enter' ||
-        e.key === 'PageDown'
-      ) {
-        e.preventDefault()
-        next()
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
-        e.preventDefault()
-        prev()
-      } else if (e.key === 'Home') {
-        e.preventDefault()
-        setEnded(false)
-        goTo(0, false)
-      } else if (e.key === 'End') {
-        e.preventDefault()
-        setEnded(false)
-        goTo(order.length - 1, false)
+    board.clear()
+    setZoom(null)
+    setZoomArmed(false)
+  }, [pos, board])
+  const popoverOpenRef = useRef(false)
+  const [camera, setCamera] = useState(false)
+  // The bar and the arrow show on mouse movement and fade after a few idle seconds
+  const [idle, setIdle] = useState(false)
+  const idleTimer = useRef(0)
+  const wake = useCallback(() => {
+    setIdle(false)
+    window.clearTimeout(idleTimer.current)
+    idleTimer.current = window.setTimeout(() => {
+      if (!popoverOpenRef.current) setIdle(true)
+    }, IDLE_HIDE_MS)
+  }, [])
+  useEffect(() => {
+    wake()
+    return () => window.clearTimeout(idleTimer.current)
+  }, [wake])
+
+  // Keyboard (PowerPoint's show shortcuts, shared with the presenter/audience windows): navigation
+  // also brings the slide back from a black/white screen
+  const [cover, setCover] = useState<ShowScreen>('none')
+  useShowKeys({
+    onCommand: (command) => {
+      if (command === 'exit') {
+        // Esc closes an open menu, then leaves Zoom, then ends the show
+        if (popoverOpenRef.current) return closeShowPopovers()
+        if (zoomArmed || zoom) {
+          setZoomArmed(false)
+          setZoom(null)
+          return
+        }
+        return exitRef.current()
       }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [next, prev, goTo, order.length])
+      if (command === 'black' || command === 'white')
+        return setCover((c) => toggleShowScreen(c, command))
+      setCover('none')
+      if (command === 'next') return next()
+      if (command === 'prev') return prev()
+      setEnded(false)
+      goTo(command === 'first' ? 0 : order.length - 1, false)
+    },
+    onGoto: (n) => {
+      // typed slide numbers are 1-based positions in the deck; hidden slides aren't playable
+      const p = order.indexOf(n - 1)
+      if (p < 0) return
+      setCover('none')
+      setEnded(false)
+      goTo(p, false)
+    },
+  })
 
   if (!slide) return null
   const fitW = Math.round(Math.min(size.w, (size.h * slide.widthPx) / slide.heightPx))
@@ -399,12 +466,60 @@ export function SlideShowView({
     ? rehearse.perPageMs.reduce((a, b) => a + b, 0) + sinceEntered
     : 0
 
+  const lastIndex = () => order[Math.min(pos, order.length - 1)] ?? startAt
+  const menuItems = showOptionsMenu(t, {
+    slides,
+    order,
+    pos,
+    ended,
+    lastViewed: lastViewedRef.current,
+    cover,
+    tool,
+    canErase,
+    presenter: false,
+    canSwap: false,
+    onNext: next,
+    onPrev: prev,
+    onGoto: (p) => {
+      setCover('none')
+      setEnded(false)
+      goTo(p, false)
+    },
+    onCover: (c) => setCover((cur) => toggleShowScreen(cur, c)),
+    ...(onUsePresenterView ? { onToggleView: () => onUsePresenterView(lastIndex()) } : {}),
+    onTool: setTool,
+    onEraseAll: eraseAll,
+    onEnd: () => exitRef.current(),
+  })
+
   return (
     <div
-      className="slideshow"
-      onClick={next}
+      className={`slideshow${idle && tool !== 'laser' ? ' ss-idle' : ''}${tool !== 'none' ? ` ss-tool-${tool}` : ''}${zoomArmed ? ' ss-zoom-armed' : ''}`}
+      onPointerMove={wake}
+      onClick={(e) => {
+        if (tool !== 'none') return
+        if (zoomArmed) {
+          const r = stageRef.current?.getBoundingClientRect()
+          if (r && r.width && r.height)
+            setZoom({
+              x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+              y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+            })
+          setZoomArmed(false)
+          return
+        }
+        if (zoom) {
+          setZoom(null)
+          return
+        }
+        next()
+      }}
       onContextMenu={(e) => {
         e.preventDefault()
+        if (zoom) {
+          setZoom(null)
+          return
+        }
         prev()
       }}
     >
@@ -430,24 +545,45 @@ export function SlideShowView({
               className={`ss-frame${anim.kind !== 'none' ? ` ss-anim-${anim.kind}` : ''}`}
             >
               <div
-                style={{ position: 'relative', width: fitW, margin: '0 auto' }}
+                ref={stageRef}
+                style={{ position: 'relative', width: fitW, margin: '0 auto', overflow: 'hidden' }}
                 onClick={(e) => {
+                  if (tool !== 'none' || zoomArmed || zoom) return
                   const target = linkAt(e)
                   if (!target) return // Bubbles to the root onClick → next page
                   e.stopPropagation()
                   followLink(target)
                 }}
                 onMouseMove={(e) => {
-                  e.currentTarget.style.cursor = linkAt(e) ? 'pointer' : ''
+                  e.currentTarget.style.cursor = tool === 'none' && linkAt(e) ? 'pointer' : ''
                 }}
+                {...ink}
               >
-                <AnimatedSlideStage
-                  slide={slide}
-                  images={images}
+                <div
+                  className="show-zoom"
+                  style={
+                    zoom
+                      ? {
+                          transform: 'scale(2)',
+                          transformOrigin: `${zoom.x * 100}% ${zoom.y * 100}%`,
+                        }
+                      : undefined
+                  }
+                >
+                  <AnimatedSlideStage
+                    slide={slide}
+                    images={images}
+                    width={fitW}
+                    states={player.states}
+                  />
+                  <ShowMediaLayer slide={slide} slideIndex={order[pos]!} width={fitW} />
+                </div>
+                <CameraBubble on={camera} width={fitW} onError={() => setCamera(false)} />
+                <InkLayer
+                  board={board}
                   width={fitW}
-                  states={player.states}
+                  height={Math.round((fitW * slide.heightPx) / slide.widthPx)}
                 />
-                <ShowMediaLayer slide={slide} slideIndex={order[pos]!} width={fitW} />
               </div>
             </div>
           )}
@@ -462,7 +598,49 @@ export function SlideShowView({
           <div className="ss-counter">
             {pos + 1} / {order.length}
           </div>
+          {cover !== 'none' && <div className={`ss-screen ss-screen-${cover}`} />}
         </>
+      )}
+      {covered && !rehearseMode && (
+        <div className={`ss-controls${idle ? '' : ' ss-controls-on'}`}>
+          <ShowToolbar
+            tool={tool}
+            inkColor={inkColor}
+            canErase={canErase}
+            zoomOn={zoomArmed || zoom !== null}
+            black={cover === 'black'}
+            cameraOn={camera}
+            onCamera={() => setCamera((v) => !v)}
+            menuItems={menuItems}
+            menuUp
+            showNav
+            onTool={setTool}
+            onColor={(hex) => {
+              if (tool === 'highlighter') setHlColor(hex)
+              else {
+                setPenColor(hex)
+                if (tool !== 'pen') setTool('pen')
+              }
+            }}
+            onEraseAll={eraseAll}
+            onZoom={() => {
+              if (zoomArmed || zoom) {
+                setZoomArmed(false)
+                setZoom(null)
+              } else {
+                setToolState('none')
+                setZoomArmed(true)
+              }
+            }}
+            onBlack={() => setCover((c) => toggleShowScreen(c, 'black'))}
+            onPrev={prev}
+            onNext={next}
+            onOpenChange={(open) => {
+              popoverOpenRef.current = open
+              if (!open) wake()
+            }}
+          />
+        </div>
       )}
     </div>
   )

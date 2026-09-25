@@ -490,6 +490,25 @@ function bulletRunStyle(
   return base
 }
 
+/** Height of a round bullet glyph's visual center above the baseline, in em (Arial-like "•") */
+const BULLET_CENTER_EM = 0.35
+
+/**
+ * A symbol bullet scaled by buSzPct/buSzPts sits on the shared baseline, so a larger glyph
+ * grows upward and its dot floats above the text's middle. Nudge the baseline so the dot
+ * keeps the center it has at text size (smaller ones drop back up). Numbers and picture
+ * bullets stay on the baseline.
+ */
+export function bulletCenterShift(
+  bulletSizePx: number,
+  textSizePx: number,
+  type: string | undefined,
+  image: string | undefined,
+): number {
+  if (type !== 'char' || image) return 0
+  return (bulletSizePx - textSizePx) * BULLET_CENTER_EM
+}
+
 const isBulletKind = (t: string | undefined): boolean =>
   t === 'char' || t === 'number' || t === 'blip'
 
@@ -1714,6 +1733,7 @@ function layoutAll(
       }))
       if (hasBullet && li === 0) {
         const st = bulletSt!
+        const textSizePx = runStyle(p.runs[0]!, scale, fontScale).fontSizePx
         // Mirrored: the glyph keeps its reserved advance but on the right of the body text
         // (right edge at availWidth - bulletX when the line is flush right); numbered
         // glyphs render with an RTL base so "1." displays as ".1" like PowerPoint
@@ -1724,7 +1744,8 @@ function layoutAll(
           text: bulletText,
           x: bx,
           ...(mirror ? { rtl: true } : {}),
-          baselineY: baseline,
+          baselineY:
+            baseline + bulletCenterShift(st.fontSizePx, textSizePx, bulletType, bulletImage),
           fontFamily: metrics.displayFamily?.(st, bulletText) ?? st.fontFamily,
           fontSizePx: st.fontSizePx,
           color: p.bullet?.color ?? p.runs[0]?.color ?? '#000000',

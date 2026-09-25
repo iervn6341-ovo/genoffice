@@ -1,4 +1,6 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { RunStyle } from '@genoffice/pptx-render'
 
@@ -25,6 +27,16 @@ const mac = process.platform === 'darwin'
 // With Office for Mac installed, its private DFonts (real Yu Gothic/Malgun/MingLiU…) win over
 // same-script substitution — the assertions accept either the real family or the substitute.
 const office = existsSync('/Applications/Microsoft PowerPoint.app/Contents/Resources/DFonts')
+// Office's cloud-font cache sits in its group container, which macOS may keep closed to other
+// processes ("Operation not permitted"): weight faces only resolve when it can be read
+const cloudFonts = (() => {
+  try {
+    readdirSync(join(homedir(), 'Library/Group Containers/UBF8T346G9.Office/FontCache'))
+    return true
+  } catch {
+    return false
+  }
+})()
 
 describe.runIf(mac)(
   'Japanese/Korean/Traditional-Chinese font substitution (macOS system fonts)',
@@ -91,12 +103,15 @@ describe.runIf(mac)(
       expect(m.displayFamily!(style('Georgia Light'))).toBe('Georgia')
     })
 
-    it.runIf(office)('a weight-suffix request picks the matching cloud face, not Regular', () => {
-      const w = (fam: string) =>
-        m.measure('contract', { fontFamily: fam, fontSizePx: 100, bold: false, italic: false })
-      // Office CloudFonts carry Montserrat in every weight as numeric files
-      expect(w('Montserrat SemiBold')).toBeGreaterThan(w('Montserrat') + 5)
-    })
+    it.runIf(office && cloudFonts)(
+      'a weight-suffix request picks the matching cloud face, not Regular',
+      () => {
+        const w = (fam: string) =>
+          m.measure('contract', { fontFamily: fam, fontSizePx: 100, bold: false, italic: false })
+        // Office CloudFonts carry Montserrat in every weight as numeric files
+        expect(w('Montserrat SemiBold')).toBeGreaterThan(w('Montserrat') + 5)
+      },
+    )
 
     it('non-CJK path is unaffected', () => {
       expect(m.displayFamily!(style('Arial'))).toBe('Arial')

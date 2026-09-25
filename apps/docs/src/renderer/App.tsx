@@ -1,4 +1,13 @@
 import { DOC_CSS_COMMITTED_EVENT } from './editor/cjk-punct-shrink'
+import {
+  applySectionLayouts,
+  LAYOUT_ATTR,
+  recordLayoutChange,
+  restoredLayout,
+  sectionLayouts,
+  withRestoreDirty,
+  type LayoutSnapshot,
+} from './editor/layout-history'
 import { justifyShrinkPluginKey } from './editor/justify-shrink'
 import {
   useCallback,
@@ -254,6 +263,7 @@ import {
   resolvedCommentsPluginKey,
   revisionDisplayState,
 } from './editor/extensions'
+import type { ListAutoFormatStorage } from './editor/list-autoformat'
 import { setDkColor } from './editor/dark-page'
 import { useUiThemeIsDark } from './ui-theme'
 import { type InkAnnotation, type InkTool } from './editor/ink'
@@ -305,6 +315,8 @@ import {
   allocateListNumId as allocateListNumIdImpl,
   continueNumbering as continueNumberingImpl,
   createCustomListDef as createCustomListDefImpl,
+  bulletPresetLevels,
+  numberPresetLevels,
   restartNumbering as restartNumberingImpl,
   type NumberingContext,
 } from './numbering-actions'
@@ -785,10 +797,44 @@ export function App() {
     setHfVariants((v) => ({ ...v, [key]: next }))
     setHfVariantsDirty((d) => (d.includes(key) ? d : [...d, key]))
   }
+  // ── page layout on the undo stack (C7): every layout edit commits a full
+  // snapshot through recordLayoutChange; undo/redo restore it (see effect below)
+  const layoutSnapshot = (): LayoutSnapshot => ({
+    section,
+    sectionDirty,
+    sections: sectionLayouts(sections),
+    sectionsDirty,
+    titlePg,
+    titlePgDirty,
+    evenOddHf,
+    evenOddHfDirty,
+    pgNumEdit,
+    pgNumDirtySections,
+  })
+  const applyLayoutSnapshot = (s: LayoutSnapshot) => {
+    setSection(s.section)
+    setSectionDirty(s.sectionDirty)
+    setSections((prev) => applySectionLayouts(prev, s.sections))
+    setSectionsDirty([...s.sectionsDirty])
+    setTitlePg(s.titlePg)
+    setTitlePgDirty(s.titlePgDirty)
+    setEvenOddHf(s.evenOddHf)
+    setEvenOddHfDirty(s.evenOddHfDirty)
+    setPgNumEdit(s.pgNumEdit ? { ...s.pgNumEdit } : null)
+    setPgNumDirtySections([...s.pgNumDirtySections])
+  }
+  const layoutRef = useRef({ snapshot: layoutSnapshot, apply: applyLayoutSnapshot })
+  layoutRef.current = { snapshot: layoutSnapshot, apply: applyLayoutSnapshot }
+  const commitLayout = (change: (before: LayoutSnapshot) => Partial<LayoutSnapshot>) => {
+    const before = layoutRef.current.snapshot()
+    const after: LayoutSnapshot = { ...before, ...change(before) }
+    layoutRef.current.apply(after)
+    if (editor) recordLayoutChange(editor, before, after)
+  }
+
   /** "Different first page" toggle, shared by the ribbon checkbox and the on-page chip */
   const toggleTitlePg = (on: boolean) => {
-    setTitlePg(on)
-    setTitlePgDirty(true)
+    commitLayout(() => ({ titlePg: on, titlePgDirty: true }))
     setHfView(on ? 'first' : 'default')
     setStatus(on ? t('appTitlePgOn') : t('appTitlePgOff'))
   }
@@ -819,6 +865,17 @@ export function App() {
   const [imageDragOver, setImageDragOver] = useState(false)
   const [findFocusInput, setFindFocusInput] = useState(0)
   const [findFocusReplace, setFindFocusReplace] = useState(0)
+  // ribbon Home > Editing: same effect as ⌘F / Ctrl+H
+  const openFind = useCallback(() => {
+    if (!doc) return
+    setShowFind(true)
+    setFindFocusInput((n) => n + 1)
+  }, [doc])
+  const openReplace = useCallback(() => {
+    if (!doc) return
+    setShowFind(true)
+    setFindFocusReplace((n) => n + 1)
+  }, [doc])
   const [showShortcuts, setShowShortcuts] = useState(false)
   const ribbonActionsRef = useRef<{
     stepFontSize?: (dir: 1 | -1) => void
@@ -1227,6 +1284,21 @@ export function App() {
       forceRender()
     },
   })
+
+  // undo/redo moved the layout snapshot: restore App layout state from it (C7)
+  useEffect(() => {
+    if (!editor) return
+    const onTransaction = ({ transaction }: { transaction: Transaction }) => {
+      const restored = restoredLayout(transaction, transaction.before.attrs[LAYOUT_ATTR])
+      if (restored) {
+        layoutRef.current.apply(withRestoreDirty(restored, layoutRef.current.snapshot()))
+      }
+    }
+    editor.on('transaction', onTransaction)
+    return () => {
+      editor.off('transaction', onTransaction)
+    }
+  }, [editor])
 
   // textbox sub-editors: re-render the ribbon on focus/selection changes and
   // mark the document dirty when their content changes
@@ -1954,17 +2026,6 @@ export function App() {
     [],
   )
 
-  // inserting a section break needs one save for the new section to take effect; the
-  // flag is consumed in the render after state commit, guaranteeing the save closure
-  // sees the latest sectionsDirty/trailingStartType
-  const pendingSectionSaveRef = useRef(false)
-  useEffect(() => {
-    if (pendingSectionSaveRef.current && doc?.filePath) {
-      pendingSectionSaveRef.current = false
-      void save(false, true)
-    }
-  })
-
   /**
    * Insert a section break: the new break paragraph takes a copy of the current
    * section's sectPr (content before the break keeps the original
@@ -2039,6 +2100,10 @@ export function App() {
             label: 'Section break paragraph',
             previewText: '',
             genXml,
+            // the chosen type belongs to the NEXT sectPr; the save derives it from
+            // this attr (insertedBreakTypes), so undo/redo of the insert stays
+            // consistent with the file. A pending (AI) section patches its own XML.
+            breakStartType: pendingXml || ai ? null : type,
           },
         })
         .run()
@@ -2051,6 +2116,8 @@ export function App() {
             i === targetSection ? { ...s, startType: type, sectPrXml: pendingXml } : s,
           ),
         )
+      } else if (!ai) {
+        // UI insert: nothing to hold in app state — the paragraph carries the type
       } else if (live.length === 0 || targetSection === live.length - 1) {
         setTrailingStartType(type)
       } else {
@@ -2059,20 +2126,10 @@ export function App() {
         )
         setSectionsDirty((d) => (d.includes(targetSection) ? d : [...d, targetSection]))
       }
-      const labels: Record<SectionInfo['startType'], string> = {
-        nextPage: t('appBreakNextPage'),
-        continuous: t('appBreakContinuous'),
-        evenPage: t('appBreakEvenPage'),
-        oddPage: t('appBreakOddPage'),
-        // parse-only start type (single-column: acts like next page); the UI never inserts it
-        nextColumn: t('appBreakNextPage'),
-      }
-      if (doc.filePath) {
-        pendingSectionSaveRef.current = true
-        setStatus(t('appSectionBreakInserted', { type: labels[type] }))
-      } else {
-        setStatus(t('appSectionBreakPending'))
-      }
+      // No immediate save: a silent write + reparse ignored AutoSave off and
+      // wiped the undo stack (C6). The break is an ordinary undoable edit and
+      // its new section is written — and laid out — by the next save.
+      setStatus(t('appSectionBreakPending'))
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveSectPrXml is rebuilt per render from the state listed here
     [
@@ -2117,6 +2174,31 @@ export function App() {
     (kind: 'bullet' | 'ordered') => allocateListNumIdImpl(numberingCtxRef.current, kind),
     [],
   )
+  // Word's list AutoFormat ("* ", "1. ", "a) " …): "*" joins the document's bullet list like
+  // the Bullets button; the others start a new list of that exact format at 1
+  useEffect(() => {
+    const store: ListAutoFormatStorage | undefined = editor?.storage.listAutoFormat
+    if (!editor || !store) return
+    store.resolve = (spec) => {
+      if (spec.kind === 'bullet' && spec.glyph === '•') {
+        let found: string | null = null
+        editor.state.doc.descendants((n) => {
+          if (!found && n.type.name === 'docListItem' && n.attrs.kind === 'bullet' && n.attrs.numId)
+            found = String(n.attrs.numId)
+          return !found
+        })
+        return found ?? allocateListNumId('bullet')
+      }
+      return createCustomListDef(
+        spec.kind === 'bullet'
+          ? bulletPresetLevels(spec.glyph)
+          : numberPresetLevels(spec.numFmt, spec.pattern),
+      )
+    }
+    return () => {
+      store.resolve = null
+    }
+  }, [editor, allocateListNumId, createCustomListDef])
   const restartNumbering = useCallback(() => restartNumberingImpl(numberingCtxRef.current), [])
   const continueNumbering = useCallback(() => continueNumberingImpl(numberingCtxRef.current), [])
 
@@ -2275,21 +2357,26 @@ export function App() {
     const start =
       pgNumModal.start.trim() === '' ? undefined : Math.max(0, parseInt(pgNumModal.start, 10) || 0)
     const idx = sections.length > 0 ? Math.min(activeSection, sections.length - 1) : -1
-    if (idx >= 0) {
-      setSections((prev) =>
-        prev.map((s, i) => (i === idx ? { ...s, pageNumberFmt: fmt, pageNumberStart: start } : s)),
-      )
-    }
-    if (idx < 0 || idx === sections.length - 1) {
-      setPgNumEdit({
-        ...(fmt !== undefined ? { fmt } : {}),
-        ...(start !== undefined ? { start } : {}),
-      })
-    } else {
-      setPgNumDirtySections((d) => (d.includes(idx) ? d : [...d, idx]))
-    }
+    commitLayout((before) => ({
+      sections: before.sections.map((s, i) =>
+        i === idx ? { ...s, pageNumberFmt: fmt, pageNumberStart: start } : s,
+      ),
+      ...(idx < 0 || idx === sections.length - 1
+        ? {
+            pgNumEdit: {
+              ...(fmt !== undefined ? { fmt } : {}),
+              ...(start !== undefined ? { start } : {}),
+            },
+          }
+        : {
+            pgNumDirtySections: before.pgNumDirtySections.includes(idx)
+              ? before.pgNumDirtySections
+              : [...before.pgNumDirtySections, idx],
+          }),
+    }))
     setPgNumModal(null)
     setStatus(t('appPgNumFormatSet'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- commitLayout reads the live layout through layoutRef
   }, [pgNumModal, sections, activeSection])
 
   const exportPdf = useCallback(
@@ -5455,14 +5542,20 @@ export function App() {
     onToggleAi: () => setShowAi((v) => !v),
     onSection: (next: SectionSettings) => {
       // layout applies to the cursor's section; the final section's sectPr goes through SaveOptions.section (also drives canvas geometry)
-      setSections((prev) =>
-        prev.map((s, i) => (i === activeSection ? { ...s, settings: next } : s)),
-      )
-      if (sections.length <= 1 || activeSection === sections.length - 1) {
-        setSection(next)
-        setSectionDirty(true)
-      } else {
-        setSectionsDirty((d) => (d.includes(activeSection) ? d : [...d, activeSection]))
+      const isFinal = sections.length <= 1 || activeSection === sections.length - 1
+      commitLayout((before) => ({
+        sections: before.sections.map((s, i) =>
+          i === activeSection ? { ...s, settings: next } : s,
+        ),
+        ...(isFinal
+          ? { section: next, sectionDirty: true }
+          : {
+              sectionsDirty: before.sectionsDirty.includes(activeSection)
+                ? before.sectionsDirty
+                : [...before.sectionsDirty, activeSection],
+            }),
+      }))
+      if (!isFinal) {
         setStatus(t('appSectionSettingsApplied', { n: activeSection + 1 }))
       }
     },
@@ -5520,8 +5613,7 @@ export function App() {
     },
     onTitlePg: toggleTitlePg,
     onEvenOddHf: (on: boolean) => {
-      setEvenOddHf(on)
-      setEvenOddHfDirty(true)
+      commitLayout(() => ({ evenOddHf: on, evenOddHfDirty: true }))
       setHfView(on ? 'even' : 'default')
       setStatus(on ? t('appEvenOddOn') : t('appEvenOddOff'))
     },
@@ -5728,6 +5820,8 @@ export function App() {
         editor={editor}
         formatState={formatState}
         hasDoc={!!doc}
+        onFind={openFind}
+        onReplace={openReplace}
         blocks={doc?.parsed.blocks ?? EMPTY_BLOCKS}
         styles={ribbonStyles}
         docDefaults={doc?.parsed.docDefaults}

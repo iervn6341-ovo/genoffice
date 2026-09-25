@@ -153,6 +153,7 @@ export const de = {
   aiThemePlayful: 'Verspielt',
   aiThemeDark: 'Dunkel',
   aiSummarizeBtn: 'KI-Zusammenfassung',
+  aiToolsGroup: 'KI-Tools',
   aiSummarizePrompt: 'Fasse den Hauptinhalt und die Kernpunkte dieses Dokuments zusammen',
   aiAttachTitle: 'Lokale Dateien anhängen (oder auf den Bereich ziehen)',
   aiRemoveAttachmentTitle: 'Anlage entfernen',

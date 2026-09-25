@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { IRange } from '@univerjs/core'
+import { IUndoRedoService, type IRange } from '@univerjs/core'
 import {
   FindModel,
   IFindReplaceService,
@@ -412,12 +412,30 @@ function facade(
       sheetId === 's1' ? { getRowFiltered: rowFiltered } : null,
   }
   const instanceService = { getUnit: () => (noFilterModel ? null : workbookModel) }
+  // Replace All batches its writes into one undo item: record when the batch is
+  // open so tests can prove every write lands inside it
+  const undoBatch = { open: 0, disposed: 0, writesInside: 0 }
+  const undoService = {
+    __tempBatchingUndoRedo: () => {
+      undoBatch.open += 1
+      return {
+        dispose: () => {
+          undoBatch.open -= 1
+          undoBatch.disposed += 1
+        },
+      }
+    },
+  }
   const runtime2 = {
     univerAPI: { getActiveWorkbook: () => workbook },
     univer: {
       __getInjector: () => ({
         get: (identifier: unknown) =>
-          identifier === IFindReplaceService ? service : instanceService,
+          identifier === IFindReplaceService
+            ? service
+            : identifier === IUndoRedoService
+              ? undoService
+              : instanceService,
       }),
     },
   }
@@ -433,6 +451,7 @@ function facade(
     registrations,
     rowFiltered,
     active,
+    undoBatch,
   }
 }
 
@@ -798,9 +817,14 @@ describe('installLazyFindBridge', () => {
     const models = await harnessLookup(harness)(query({ findString: '2' }))
     const model = models[0]!
     await settle(model)
+    harness.setValues.mockImplementation(() => {
+      if (harness.undoBatch.open > 0) harness.undoBatch.writesInside += 1
+    })
     await model.replaceAll('9')
     // 123 → "193" → numeric 193, so SUM keeps counting it (was text "193" before)
     expect(harness.setValues).toHaveBeenCalledWith([[{ v: 193 }]])
+    // the out-of-window write joined the Replace All undo batch, which then closed
+    expect(harness.undoBatch).toEqual({ open: 0, disposed: 1, writesInside: 1 })
     bridge.dispose()
   })
 

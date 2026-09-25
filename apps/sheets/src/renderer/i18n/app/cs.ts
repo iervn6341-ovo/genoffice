@@ -752,6 +752,7 @@ export const cs = {
   appGroupChartActions: 'Akce grafu',
   appRemoveFromSheet: 'Odebrat z listu',
   appGroupAiAssistant: 'Asistent AI',
+  appGroupAiTools: 'Nástroje AI',
   appAiOpenPanelDetail: 'Postranní panel chatu',
   appGroupAiStarters: 'Rychlý start',
   appAiStarterDetail: 'Odeslat do panelu AI',

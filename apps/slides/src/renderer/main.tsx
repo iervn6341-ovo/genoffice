@@ -10,13 +10,17 @@ import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/color-picker.css'
 import '@genoffice/ui/dropdown.css'
 import '@genoffice/ui/ribbon-collapse.css'
+import '@genoffice/ui/ribbon-fit.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/ai-panel-prefs.css'
 import '@genoffice/ui/ai-scope-quote.css'
 import './styles.css'
-import { applyAiPanelPrefs, installScreenTips } from '@genoffice/ui'
+// compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
+import '@genoffice/ui/ribbon-density.css'
+import { applyAiPanelPrefs, installMacLineBoundaryKeys, installScreenTips } from '@genoffice/ui'
 
 installScreenTips()
+installMacLineBoundaryKeys()
 
 // Canvas fillText never triggers @font-face downloads, so the bundled document fonts
 // (Carlito ↔ Calibri) must be loaded explicitly or Konva silently draws the fallback face.

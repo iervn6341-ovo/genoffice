@@ -25,6 +25,7 @@ export const PDF_CHANNELS = {
   mergePages: 'pdf:merge-pages',
   replacePages: 'pdf:replace-pages',
   setPageSize: 'pdf:set-page-size',
+  restorePageOp: 'pdf:restore-page-op',
   splitPages: 'pdf:split-pages',
   cropPages: 'pdf:crop-pages',
   exportImages: 'pdf:export-images',
@@ -209,6 +210,9 @@ export interface StampInput {
   /** PDF user space [x1,y1,x2,y2] */
   rect: [number, number, number, number]
   opacity?: number
+  /** Watermark text drawn as an invisible text layer over the bitmap so Find and
+      copy see it: nominal font size (pt) and counter-clockwise angle (deg) */
+  text?: { value: string; size: number; angle: number }
 }
 
 /** Document info; an empty string clears the field */
@@ -623,7 +627,17 @@ export interface SetPageSizeRequest {
   height: number
 }
 
-export type SetPageSizeResult = { ok: true } | { ok: false; error: string }
+/** undoToken: the rewrite can be undone through restorePageOp (absent when too large to keep) */
+export type SetPageSizeResult = { ok: true; undoToken?: string } | { ok: false; error: string }
+
+/** Undo / redo an in-place page rewrite (crop, page size) by its token */
+export interface RestorePageOpRequest {
+  path: string
+  token: string
+  direction: 'undo' | 'redo'
+}
+
+export type RestorePageOpResult = { ok: true } | { ok: false; error: string }
 
 /** Split every page into a grid of pages (inverse of merge pages), written to the
  * GenOffice save dir and opened in a new tab */
@@ -644,7 +658,7 @@ export interface CropPagesRequest {
   rect: { l: number; t: number; r: number; b: number }
 }
 
-export type CropPagesResult = { ok: true } | { ok: false; error: string }
+export type CropPagesResult = { ok: true; undoToken?: string } | { ok: false; error: string }
 
 /** Export pages as PNG: renderer rasterizes the bitmaps, main process shows a dialog and writes to disk */
 export interface ExportImagesRequest {
@@ -738,6 +752,7 @@ export interface PdfApi {
   setPageSize(request: SetPageSizeRequest): Promise<SetPageSizeResult>
   splitPages(request: SplitPagesRequest): Promise<SplitPagesResult>
   cropPages(request: CropPagesRequest): Promise<CropPagesResult>
+  restorePageOp(request: RestorePageOpRequest): Promise<RestorePageOpResult>
   exportImages(request: ExportImagesRequest): Promise<ExportImagesResult>
   /** Convert the current PDF to Word / Excel / PowerPoint via the shell's local conversion flows */
   convertOffice(format: PdfConvertFormat): Promise<void>

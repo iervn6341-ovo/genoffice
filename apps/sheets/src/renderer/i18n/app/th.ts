@@ -718,6 +718,7 @@ export const th = {
   appGroupChartActions: 'การดำเนินการกับแผนภูมิ',
   appRemoveFromSheet: 'เอาออกจากแผ่นงาน',
   appGroupAiAssistant: 'ผู้ช่วย AI',
+  appGroupAiTools: 'เครื่องมือ AI',
   appAiOpenPanelDetail: 'แถบด้านข้างสนทนา',
   appGroupAiStarters: 'เริ่มด่วน',
   appAiStarterDetail: 'ส่งไปยังแผง AI',

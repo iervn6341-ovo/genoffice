@@ -748,6 +748,7 @@ export const hi = {
   appGroupChartActions: 'चार्ट क्रियाएँ',
   appRemoveFromSheet: 'शीट से निकालें',
   appGroupAiAssistant: 'AI सहायक',
+  appGroupAiTools: 'AI टूल',
   appAiOpenPanelDetail: 'चैट साइडबार',
   appGroupAiStarters: 'त्वरित प्रारंभ',
   appAiStarterDetail: 'AI पैनल पर भेजें',

@@ -88,6 +88,7 @@ import {
   slideDurableId,
   getSlideComments,
   getSlideNotes,
+  getSlideNotesParagraphs,
   getSlideTransition,
   elementSpid,
   getSlideAnimations,
@@ -190,6 +191,7 @@ import type {
   SetAdvanceTimesOp,
   SetAnimationsOp,
   SetNotesOp,
+  NotesParagraphView,
   SetSlideHiddenOp,
   SetTransitionOp,
   AddSectionOp,
@@ -260,6 +262,7 @@ const lastSlidePaste = new Map<number, { afterIndex: number; undoLen: number }>(
 const CLOUD_PAGE_PREFIX = 'cloudpptx:'
 const issuedCloudPages = new Set<string>()
 import { registerPresenterIpc } from './presenter-show'
+import { notesParagraphViews } from './notes-view'
 import { registerAttachmentIpc } from './attachments-ipc'
 
 export {
@@ -1398,6 +1401,11 @@ export function registerSlidesIpc(): void {
       italic: op.italic,
       underline: op.underline,
       color: op.color,
+      letterSpacingPt: op.letterSpacingPt,
+      highlight: op.highlight,
+      textCase: op.textCase,
+      fontSizeStep: op.fontSizeStep,
+      baseline: op.baseline,
     }
     pushHistory(session)
     const r = journaledTxn(session, 'edit', {
@@ -2010,6 +2018,7 @@ export function registerSlidesIpc(): void {
           offset: { x: toEmu(op.xPx), y: toEmu(op.yPx), cx: toEmu(op.wPx), cy: toEmu(op.hPx) },
           ...(paragraphs ? { paragraphs } : {}),
           ...(op.fillColor ? { fill: op.fillColor } : {}),
+          ...(op.bodyPr ? { bodyPr: op.bodyPr } : {}),
           ...(op.stroke
             ? {
                 stroke: {
@@ -3964,11 +3973,22 @@ export function registerSlidesIpc(): void {
     return session && slide ? getSlideNotes(session.opened.archive, slide.path) : ''
   })
 
+  ipcMain.handle('slides:get-notes-rich', (e, slideIndex: number): NotesParagraphView[] => {
+    const session = sessions.get(e.sender.id)
+    const slide = session?.opened.deck.slides[slideIndex]
+    if (!session || !slide) return []
+    return notesParagraphViews(getSlideNotesParagraphs(session.opened.archive, slide.path))
+  })
+
   ipcMain.handle('slides:set-notes', (e, op: SetNotesOp) => {
     const session = sessions.get(e.sender.id)
     if (!session) return false
     const r = sessionTxn(session, {
-      ops: [{ op: 'setNotes', target: { slide: op.slideIndex }, text: op.text }],
+      ops: [
+        op.paragraphs
+          ? { op: 'setNotes', target: { slide: op.slideIndex }, paragraphs: op.paragraphs }
+          : { op: 'setNotes', target: { slide: op.slideIndex }, text: op.text },
+      ],
     })
     if (r) session.metaDirty = true
     return r !== null

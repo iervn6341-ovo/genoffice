@@ -186,7 +186,7 @@ import {
 import type { LocalTextEdit, LocalTextInsert, TextDraft } from './text-edit-preview'
 import { planEditOps, reduceBucket } from './edit-ops'
 import type { Bucket, Op, OpContext, PlanResult } from './edit-ops'
-import { rectsNear } from './edit-state'
+import { isPageOpUndo, rectsNear, type PageOpUndo, type UndoEntry } from './edit-state'
 import type {
   StampConfig,
   SavedMarkupAnnot,
@@ -282,6 +282,23 @@ const RIBBON_TABS = [
   { id: 'view', labelKey: 'ribbonTabView' },
 ] as const
 type RibbonTab = (typeof RIBBON_TABS)[number]['id'] | 'fillForm'
+
+/** The text-index line under a text-layer rect (PDF points): the exact run size source */
+function indexLineFor(
+  pageBlocks: ReadonlyMap<number, TextBlock[]>,
+  origIdx: number,
+  rect: readonly number[],
+): TextBlock['lines'][number] | undefined {
+  return pageBlocks
+    .get(origIdx)
+    ?.flatMap((b) => b.lines)
+    .find(
+      (l) =>
+        Math.min(l.rect[2], rect[2]!) - Math.max(l.rect[0], rect[0]!) > 0 &&
+        Math.min(l.rect[3], rect[3]!) - Math.max(l.rect[1], rect[1]!) >
+          0.5 * Math.min(l.rect[3] - l.rect[1], rect[3]! - rect[1]!),
+    )
+}
 
 export default function App() {
   const { lang, t } = useI18n()
@@ -387,6 +404,12 @@ export default function App() {
   drawingsRef.current = drawings
   const [drawTool, setDrawTool] = useState<DrawTool | null>(null)
   const [redactions, setRedactions] = useState<LocalRedaction[]>([])
+  const redactionsRef = useRef(redactions)
+  redactionsRef.current = redactions
+  const commitRedactions = (next: LocalRedaction[]) => {
+    redactionsRef.current = next
+    setRedactions(next)
+  }
   const redactionApplyConfirmedRef = useRef(false)
   const [redactionCopyInFlight, setRedactionCopyInFlight] = useState(false)
   const [textEdits, setTextEdits] = useState<LocalTextEdit[]>([])
@@ -633,6 +656,10 @@ export default function App() {
   const [textInsertEditId, setTextInsertEditId] = useState<string | null>(null)
   const [staticText, setStaticText] = useState('')
   const [staticTextSize, setStaticTextSize] = useState(14)
+  /** Insert text only: font face (EDIT_FONTS id; undefined = automatic) and style */
+  const [staticTextFont, setStaticTextFont] = useState<string | undefined>(undefined)
+  const [staticTextBold, setStaticTextBold] = useState(false)
+  const [staticTextItalic, setStaticTextItalic] = useState(false)
   const [staticTextColor, setStaticTextColor] = useState('#111111')
   const [staticTextColorOpen, setStaticTextColorOpen] = useState(false)
   const [staticTextAlign, setStaticTextAlign] = useState<'left' | 'center' | 'right'>('left')
@@ -798,8 +825,8 @@ export default function App() {
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([])
   const [searchCur, setSearchCur] = useState(0)
   const [printing, setPrinting] = useState(false)
-  const [undoStack, setUndoStack] = useState<EditSnapshot[]>([])
-  const [redoStack, setRedoStack] = useState<EditSnapshot[]>([])
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
+  const [redoStack, setRedoStack] = useState<UndoEntry[]>([])
   const [pwInput, setPwInput] = useState('')
   const [pwWrong, setPwWrong] = useState(false)
   const [extractDlg, setExtractDlg] = useState(false)
@@ -1046,7 +1073,7 @@ export default function App() {
         setAiSelection(null)
         setAskPop(null)
         setMarkups([])
-        setRedactions([])
+        commitRedactions([])
         redactionApplyConfirmedRef.current = false
         setAnnotDeletes([])
         setNoteEdits([])
@@ -1073,8 +1100,8 @@ export default function App() {
         // Redaction marks are deliberately omitted from ordinary saves. Keep them
         // through the reload, remapping their original page indices if this save
         // changed page order or removed pages while it was running.
-        setRedactions((prev) =>
-          prev.flatMap((mark) => {
+        commitRedactions(
+          redactionsRef.current.flatMap((mark) => {
             const ni = remap.get(mark.pageIndex)
             return ni === undefined
               ? []
@@ -1677,6 +1704,7 @@ export default function App() {
   // Ref-mirrored fields read the mirrors so a pushUndo later in an AI turn captures
   // the tools that ran before it, not the state this render closed over
   const snapshot = (): EditSnapshot => ({
+    redactions: redactionsRef.current,
     markups: markupsRef.current,
     annotDeletes: annotDeletesRef.current,
     noteEdits: noteEditsRef.current,
@@ -1825,6 +1853,7 @@ export default function App() {
     ])
 
   const applySnapshot = (s: EditSnapshot) => {
+    commitRedactions(s.redactions)
     markupsRef.current = s.markups
     formEditsRef.current = s.formEdits
     annotDeletesRef.current = s.annotDeletes
@@ -1855,9 +1884,30 @@ export default function App() {
     setSelected(null)
   }
 
+  /** Undo/redo of a crop / page-size rewrite: swap the file back and reload. The
+      reload clears both stacks; the step then lands on the opposite one. */
+  const restorePageOp = async (entry: PageOpUndo, direction: 'undo' | 'redo') => {
+    const result = await window.pdfApi.restorePageOp({
+      path: filePath,
+      token: entry.token,
+      direction,
+    })
+    if (!result.ok) {
+      opFailed(result.error)
+      return
+    }
+    await loadDoc(filePath, doc)
+    if (direction === 'undo') setRedoStack([entry])
+    else setUndoStack([entry])
+  }
+
   const undo = () => {
     const top = undoStack[undoStack.length - 1]
     if (!top) return
+    if (isPageOpUndo(top)) {
+      void restorePageOp(top, 'undo')
+      return
+    }
     // Taken before applySnapshot rewrites the refs; the updater may run after it
     const cur = snapshot()
     setRedoStack((r) => [...r, cur])
@@ -1869,6 +1919,10 @@ export default function App() {
   const redo = () => {
     const top = redoStack[redoStack.length - 1]
     if (!top) return
+    if (isPageOpUndo(top)) {
+      void restorePageOp(top, 'redo')
+      return
+    }
     const cur = snapshot()
     setUndoStack((u) => [...u, cur])
     setRedoStack((r) => r.slice(0, -1))
@@ -1974,6 +2028,20 @@ export default function App() {
       stale = true
     }
   }, [editTextMode, readOnly, doc, visibleRows, rows, pageBlocks, getSearchIndex])
+
+  // A line editor opened before the page's text index was built took its size from the
+  // text-layer box (≈12.2 for 12pt); swap in the exact run size once the index lands,
+  // unless the user already picked a size
+  useEffect(() => {
+    if (!textDraft?.fontSizeProvisional) return
+    const line = indexLineFor(pageBlocks, textDraft.origIdx, textDraft.rect)
+    if (!line) return
+    setTextDraft((d) =>
+      d && d.fontSizeProvisional && d.origIdx === textDraft.origIdx
+        ? { ...d, fontSize: line.fontSize, fontSizeProvisional: undefined }
+        : d,
+    )
+  }, [pageBlocks, textDraft])
 
   /** Saved markup/note annotations are keyed to the loaded doc; drop them on save-reload */
   useEffect(() => {
@@ -2791,12 +2859,24 @@ export default function App() {
       Math.max(ay, by),
     ]
     const unionH = sb.bottom - sb.top
+    // Exact run size from the page's text index (the text matrix's vertical axis) — the
+    // size box must read 12 for a 12pt run. The text-layer span box only approximates it
+    // (12.2), so it stays the fallback for lines the index does not cover.
+    const indexLine = indexLineFor(pageBlocks, origIdx, rect)
     const fontSize =
-      unionH > 0 ? Math.abs(by - ay) * (lineGroup.fontHeight / unionH) : Math.abs(by - ay)
+      indexLine?.fontSize ??
+      (unionH > 0 ? Math.abs(by - ay) * (lineGroup.fontHeight / unionH) : Math.abs(by - ay))
     setSelected(null)
     draftSelectedRef.current = false
     draftPreselectRef.current = preselect ?? null
-    setTextDraft({ origIdx, rect, oldText, fontSize, value: oldText })
+    setTextDraft({
+      origIdx,
+      rect,
+      oldText,
+      fontSize,
+      value: oldText,
+      ...(indexLine ? {} : { fontSizeProvisional: true as const }),
+    })
     seedDraftFont(origIdx, rect)
     // The span rect is a font-metric layout box; the run's glyph ink can poke out of it.
     // Fetch the engine's real ink bounds so the editor/preview cover hides the old run fully.
@@ -3086,16 +3166,17 @@ export default function App() {
     void window.pdfApi
       .validateTextEdits({ path: filePath, edits: [edit.input] })
       .then(([v]) => {
-        // Stale result: the edit may have been saved or deleted while validation ran
-        if (!v || !textEditsRef.current.some((e) => e.id === edit.id)) return
+        // Stale result: the edit may have been saved, deleted or re-edited while validation
+        // ran. A re-edit keeps the id but swaps in a new input — a verdict on the old input
+        // must neither drop the newer edit nor stamp it with the old bounds.
+        const isThis = (e: LocalTextEdit) => e.id === edit.id && e.input === edit.input
+        if (!v || !textEditsRef.current.some(isThis)) return
         if (v.reason) {
-          applyTextEdits((prev) => prev.filter((e) => e.id !== edit.id))
+          applyTextEdits((prev) => prev.filter((e) => !isThis(e)))
           showNotice(t(edit.input.translate ? 'textBlockMoveNoMatch' : 'textEditNoMatch'))
         } else if (v.bounds) {
           const bounds = v.bounds
-          applyTextEdits((prev) =>
-            prev.map((e) => (e.id === edit.id ? { ...e, cover: bounds } : e)),
-          )
+          applyTextEdits((prev) => prev.map((e) => (isThis(e) ? { ...e, cover: bounds } : e)))
         }
       })
       .catch(() => {
@@ -3583,7 +3664,7 @@ export default function App() {
     setSaveState('idle')
     if (applyingRedactions) {
       redactionApplyConfirmedRef.current = false
-      setRedactions([])
+      commitRedactions([])
     }
     return true
   }
@@ -3805,9 +3886,14 @@ export default function App() {
     text: string,
     fontSize: number,
     align: 'left' | 'center' | 'right',
+    face?: { font?: string; bold?: boolean; italic?: boolean },
   ): number[] => {
     if (align === 'left') return text.split('\n').map(() => 0)
-    const font = `${fontSize}px ${getComputedStyle(document.body).fontFamily}`
+    // measure with the face the insert draws in, or centered/right lines land off
+    const family =
+      (face?.font && EDIT_FONT_BY_ID.get(face.font)?.css) ||
+      getComputedStyle(document.body).fontFamily
+    const font = `${face?.italic ? 'italic ' : ''}${face?.bold ? 'bold ' : ''}${fontSize}px ${family}`
     return text
       .split('\n')
       .map((line) => measureTextWidth(line, font) * (align === 'center' ? -0.5 : -1))
@@ -3818,13 +3904,18 @@ export default function App() {
     fontSize: number,
     color: [number, number, number],
     align: 'left' | 'center' | 'right',
+    face: { font?: string; bold?: boolean; italic?: boolean } = {},
   ): Omit<TextInsertInput, 'pageIndex' | 'origin'> => ({
     text,
     fontSize,
     color,
     lineLeading: fontSize * 1.2,
-    lineXOffsets: textInsertOffsets(text, fontSize, align),
+    lineXOffsets: textInsertOffsets(text, fontSize, align, face),
     align,
+    // explicit undefined clears a face when re-editing an insert (patch semantics)
+    font: face.font,
+    bold: face.bold || undefined,
+    italic: face.italic || undefined,
   })
 
   const patchTextInsert = (id: string, patch: Partial<TextInsertInput>) =>
@@ -3845,7 +3936,9 @@ export default function App() {
       // proves nothing about save: gate on an embeddable face NOW, keeping the dialog
       // open, instead of failing at save time ("could not be saved" long after typing).
       // An IPC error must not block inserting — the save path re-checks anyway.
-      const drawable = await window.pdfApi.canDrawText(text).catch(() => true)
+      const drawable = await window.pdfApi
+        .canDrawText(text, staticTextFont, staticTextBold, staticTextItalic)
+        .catch(() => true)
       if (!drawable) {
         showNotice(t('textInsertNoFont'))
         return
@@ -3855,6 +3948,7 @@ export default function App() {
         staticTextSize,
         hexTo255(staticTextColor),
         staticTextAlign,
+        { font: staticTextFont, bold: staticTextBold, italic: staticTextItalic },
       )
       setStaticTextDialog(false)
       if (textInsertEditId) {
@@ -4013,9 +4107,18 @@ export default function App() {
   }
 
   /** Committed move/resize of a pending image op */
-  const updateImageEditRect = (id: string, rect: [number, number, number, number]) => {
+  /** Move/resize a pending image edit; (x, y) = release point: the image stays selected
+      afterwards (PowerPoint/Acrobat), so it can be resized or deleted straight away */
+  const updateImageEditRect = (
+    id: string,
+    rect: [number, number, number, number],
+    x?: number,
+    y?: number,
+  ) => {
     setSelected(null)
-    applyEditOps([{ op: 'setImageEditRect', id, rect }])
+    const plan = applyEditOps([{ op: 'setImageEditRect', id, rect }])
+    if (x !== undefined && y !== undefined && plan.failures.length === 0)
+      setSelected({ kind: 'imageEdit', id, ...popupPos(x, y) })
   }
 
   /** Prefetched pixels of untouched existing images (keyed pageIndex:rectKey); fetched on
@@ -4113,7 +4216,8 @@ export default function App() {
         staticFill: savedStaticFill ? { ...savedStaticFill, rect } : undefined,
       },
     ])
-    if (cached || plan.failures.length > 0) return
+    if (plan.failures.length > 0) return null
+    if (cached) return id
     void window.pdfApi
       .pageImagePng({ path: filePath, pageIndex: ref.pageIndex, rect: ref.rect })
       .then((png) => {
@@ -4122,6 +4226,7 @@ export default function App() {
       .catch(() => {
         /* ghost stays a dashed box */
       })
+    return id
   }
 
   /** The rect's footprint after an odd quarter turn about its center (w/h swap) */
@@ -4883,8 +4988,25 @@ export default function App() {
     )
   const replacePagesOnDisk = (visIdxs: number[]) =>
     rewriteInPlace(() => window.pdfApi.replacePages({ path: filePath, pages: visIdxs }))
+  /** An in-place rewrite that can be undone: after the reload (which clears the
+      stacks) the step becomes the only undo entry */
+  const rewriteUndoable = async (
+    run: () => Promise<{ ok: true; undoToken?: string } | { ok: false; error: string }>,
+  ): Promise<FileOpResult> => {
+    let token: string | undefined
+    const result = await rewriteInPlace(async () => {
+      const r = await run()
+      if (r.ok) token = r.undoToken
+      return r
+    })
+    if (result.ok && !('canceled' in result) && token) {
+      setUndoStack([{ kind: 'pageOp', token }])
+      setRedoStack([])
+    }
+    return result
+  }
   const resizePages = (width: number, height: number) =>
-    rewriteInPlace(() => window.pdfApi.setPageSize({ path: filePath, width, height }))
+    rewriteUndoable(() => window.pdfApi.setPageSize({ path: filePath, width, height }))
   const splitPagesToFile = (perPage: 2 | 4 | 9) =>
     runFileOp(() =>
       window.pdfApi.splitPages({
@@ -4894,7 +5016,7 @@ export default function App() {
       }),
     )
   const cropPagesOnDisk = (visIdxs: number[], rect: CropRect) =>
-    rewriteInPlace(() => window.pdfApi.cropPages({ path: filePath, pages: visIdxs, rect }))
+    rewriteUndoable(() => window.pdfApi.cropPages({ path: filePath, pages: visIdxs, rect }))
 
   const extractPage = (origIdx: number) => extractPagesToFile([visList.indexOf(origIdx)])
 
@@ -4915,15 +5037,20 @@ export default function App() {
     void extractPagesToFile(pages.map((n) => n - 1))
   }
 
-  const insertPdf = (afterOrigIdx: number) =>
-    flushThen(async () => {
-      const result = await window.pdfApi.insertPdf({ path: filePath, afterPageIndex: afterOrigIdx })
+  const insertPdf = (afterOrigIdx: number) => {
+    // The flush writes the on-screen order into the file, so the insert position is the
+    // page's visible position (taken now, before the flush resets the mapping) — the
+    // original index put imported pages elsewhere after a reorder or a delete
+    const afterVisIdx = visList.indexOf(afterOrigIdx)
+    return flushThen(async () => {
+      const result = await window.pdfApi.insertPdf({ path: filePath, afterPageIndex: afterVisIdx })
       if (!result.ok) {
         opFailed(result.error)
         return
       }
       if (!('canceled' in result)) await loadDoc(filePath, doc)
     })
+  }
 
   const insertBlankPage = (afterOrigIdx: number) => insertBlankPageAt(visList.indexOf(afterOrigIdx))
 
@@ -5919,6 +6046,9 @@ export default function App() {
         setTextInsertEditId(null)
         setStaticTextPurpose('insert')
         setStaticText('')
+        setStaticTextFont(undefined)
+        setStaticTextBold(false)
+        setStaticTextItalic(false)
         setStaticTextDialog(true)
       }}
     >
@@ -6290,7 +6420,10 @@ export default function App() {
                       <button
                         className="rb-big"
                         data-tip={t('redactClear')}
-                        onClick={() => setRedactions([])}
+                        onClick={() => {
+                          pushUndo()
+                          commitRedactions([])
+                        }}
                       >
                         {t('redactClear')}
                       </button>
@@ -7344,6 +7477,9 @@ export default function App() {
                                         setStaticTextSize(insert.input.fontSize)
                                         setStaticTextColor(rgb255ToHex(insert.input.color))
                                         setStaticTextAlign(insert.input.align ?? 'left')
+                                        setStaticTextFont(insert.input.font)
+                                        setStaticTextBold(!!insert.input.bold)
+                                        setStaticTextItalic(!!insert.input.italic)
                                         setStaticTextDialog(true)
                                       }}
                                     >
@@ -7884,7 +8020,16 @@ export default function App() {
                                     onExistingRect={
                                       readOnly
                                         ? undefined
-                                        : (ref, rect) => transformExisting(ref, rect)
+                                        : (ref, rect, x, y) => {
+                                            // the moved image stays selected, as the original was
+                                            const id = transformExisting(ref, rect)
+                                            if (id)
+                                              setSelected({
+                                                kind: 'imageEdit',
+                                                id,
+                                                ...popupPos(x, y),
+                                              })
+                                          }
                                     }
                                     existingPng={(ref) =>
                                       existingPngs.get(`${ref.pageIndex}:${imageRectKey(ref.rect)}`)
@@ -7995,12 +8140,13 @@ export default function App() {
                                 pageWidth={size.width}
                                 pageHeight={size.height}
                                 marks={redactions.filter((mark) => mark.pageIndex === origIdx)}
-                                onCommit={(rect) =>
-                                  setRedactions((prev) => [
-                                    ...prev,
+                                onCommit={(rect) => {
+                                  pushUndo()
+                                  commitRedactions([
+                                    ...redactionsRef.current,
                                     { id: newId(), pageIndex: origIdx, rect },
                                   ])
-                                }
+                                }}
                               />
                               {/* Ghost pin for the note being typed into the margin draft card */}
                               {noteDraft?.origIdx === origIdx &&
@@ -8526,9 +8672,58 @@ export default function App() {
                     className="pdf-modal-textarea"
                     value={staticText}
                     placeholder={t('formAddTextPlaceholder')}
+                    style={
+                      staticTextPurpose === 'insert'
+                        ? {
+                            fontFamily: staticTextFont
+                              ? EDIT_FONT_BY_ID.get(staticTextFont)?.css
+                              : undefined,
+                            fontWeight: staticTextBold ? 'bold' : undefined,
+                            fontStyle: staticTextItalic ? 'italic' : undefined,
+                          }
+                        : undefined
+                    }
                     autoFocus
                     onChange={(e) => setStaticText(e.target.value)}
                   />
+                  {staticTextPurpose === 'insert' && editFonts.length > 0 && (
+                    <div className="pdf-field pdf-insert-face">
+                      <span>{t('texteditFont')}</span>
+                      <Dropdown
+                        className="pdf-modal-dd"
+                        ariaLabel={t('texteditFont')}
+                        value={staticTextFont ?? ''}
+                        options={[
+                          { value: '', label: t('insertTextFontAuto') },
+                          ...editFonts.map((id) => ({
+                            value: id,
+                            label: EDIT_FONT_BY_ID.get(id)?.label ?? id,
+                          })),
+                        ]}
+                        onPick={(v) => setStaticTextFont(v || undefined)}
+                      />
+                      <button
+                        type="button"
+                        className={`pdf-textedit-toggle${staticTextBold ? ' active' : ''}`}
+                        aria-pressed={staticTextBold}
+                        data-tip={t('texteditBold')}
+                        aria-label={t('texteditBold')}
+                        onClick={() => setStaticTextBold((v) => !v)}
+                      >
+                        B
+                      </button>
+                      <button
+                        type="button"
+                        className={`pdf-textedit-toggle pdf-textedit-toggle-i${staticTextItalic ? ' active' : ''}`}
+                        aria-pressed={staticTextItalic}
+                        data-tip={t('texteditItalic')}
+                        aria-label={t('texteditItalic')}
+                        onClick={() => setStaticTextItalic((v) => !v)}
+                      >
+                        I
+                      </button>
+                    </div>
+                  )}
                   <label className="pdf-field">
                     <span>{t('formTextSize')}</span>
                     <input

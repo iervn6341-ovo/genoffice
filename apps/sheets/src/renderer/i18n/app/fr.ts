@@ -812,6 +812,7 @@ export const fr = {
   appGroupChartActions: 'Actions du graphique',
   appRemoveFromSheet: 'Supprimer de la feuille',
   appGroupAiAssistant: 'Assistant IA',
+  appGroupAiTools: 'Outils IA',
   appAiOpenPanelDetail: 'Volet de discussion',
   appGroupAiStarters: 'Démarrage rapide',
   appAiStarterDetail: 'Envoyer au volet IA',

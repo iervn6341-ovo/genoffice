@@ -13,6 +13,11 @@ const workspaceAlias = {
     here,
     '../../packages/pptx-engine/src/table-grid.ts',
   ),
+  '@genoffice/pptx-engine/font-size-step': resolve(
+    here,
+    '../../packages/pptx-engine/src/font-size-step.ts',
+  ),
+  '@genoffice/pptx-engine/text-case': resolve(here, '../../packages/pptx-engine/src/text-case.ts'),
   '@genoffice/pptx-engine/identity': resolve(here, '../../packages/pptx-engine/src/identity.ts'),
   '@genoffice/pptx-engine/named-action': resolve(
     here,

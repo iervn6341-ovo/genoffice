@@ -1602,7 +1602,13 @@ async function rebuildRun(
     let matrix = Array.from(m.HEAPF32.subarray(matPtr >> 2, (matPtr >> 2) + 6))
     let fontSize = edit.fontSize
     if (m._FPDFTextObj_GetFontSize(anchor.obj, sizePtr)) fontSize = m.HEAPF32[sizePtr >> 2]!
-    if (edit.newFontSize !== undefined && edit.newFontSize > 0) fontSize = edit.newFontSize
+    // A size the user picks (whole edit or a selection) is page-space pt — what the size box
+    // shows. The rebuilt object keeps the anchor's matrix, and producers often scale text
+    // through it (a Tf-16 run drawn at 0.743 is an 11.9pt run), so the Tf size is the picked
+    // size over the matrix's vertical scale; writing it unconverted drew 14pt as 10.4pt.
+    const userScale = edit.origin ? 1 : Math.hypot(matrix[2]!, matrix[3]!) || 1
+    if (edit.newFontSize !== undefined && edit.newFontSize > 0)
+      fontSize = edit.newFontSize / userScale
     if (edit.origin) {
       // Paragraph rebuild: the renderer measured wrap width, leading and x offsets
       // in PDF user space, so write in user space too — identity matrix at the
@@ -1706,7 +1712,8 @@ async function rebuildRun(
       return `${f.font ?? ''}|${f.bold ? 1 : 0}|${f.italic ? 1 : 0}`
     }
     const baseFaceKey = faceKeyOf(null)
-    const sizeOf = (s: RunStyle | null) => (s?.size !== undefined && s.size > 0 ? s.size : fontSize)
+    const sizeOf = (s: RunStyle | null) =>
+      s?.size !== undefined && s.size > 0 ? s.size / userScale : fontSize
 
     // One extra font per distinct non-base face among the styled chars, subset to
     // exactly the text that face draws (styled ranges are never kept, so the set is

@@ -109,6 +109,14 @@ export function applyEditParagraphs(oldParas: Paragraph[], edited: EditParagraph
           if (r.baseline === 0) delete merged.baseline
           else merged.baseline = r.baseline
         }
+        // Character spacing / highlight: the editor only sends them when the user changed them
+        // (spacing 0 = "normal", kept explicit so the save writes spc="0")
+        if (r.letterSpacing !== undefined) merged.letterSpacing = r.letterSpacing
+        if (r.highlight !== undefined) {
+          if (r.highlight) merged.highlight = r.highlight
+          else delete merged.highlight
+          merged.highlightEdited = true
+        }
         if (merged.strike === false) delete merged.strikeStyle
         if (merged.rawXml && r.text !== oldRun?.text) delete merged.rawXml
         // The editor always returns the resolved display color; treat it as an explicit color
@@ -251,6 +259,9 @@ export function collectParagraphFormatPatches(
       ...(p.startAt != null && p.bullet !== 'char' && p.bullet !== 'blip'
         ? { startAt: p.startAt }
         : {}),
+      ...(p.bulletHangEmu != null ? { bulletHangEmu: p.bulletHangEmu } : {}),
+      ...(p.bulletSizePct != null ? { bulletSizePct: p.bulletSizePct } : {}),
+      ...(p.bulletColor != null ? { bulletColor: p.bulletColor } : {}),
       ...(p.lineSpacingPct != null ? { lineSpacingPct: p.lineSpacingPct } : {}),
       ...(p.spaceBeforePt != null ? { spaceBeforePt: p.spaceBeforePt } : {}),
       ...(p.spaceAfterPt != null ? { spaceAfterPt: p.spaceAfterPt } : {}),

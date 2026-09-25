@@ -114,7 +114,11 @@ import {
   composeSkills,
   type AgentImage,
 } from '@genoffice/agent-core'
-import { imageGenerationAvailable, type AiSettings } from '@genoffice/ai-provider/browser'
+import {
+  imageGenerationAvailable,
+  providerRequiresApiKey,
+  type AiSettings,
+} from '@genoffice/ai-provider/browser'
 import { type WorkbookOperation } from '@genoffice/xlsx-gateway/domain/workbook-dsl'
 import {
   columnLabel,
@@ -314,6 +318,7 @@ import { installMultiRowAutofit } from './autofit-multi-row'
 import { registerExcelJumpNav } from './excel-jump-nav'
 import { registerExcelShortcuts } from './excel-shortcuts'
 import { installCopyMaterialize } from './copy-materialize'
+import { CELL_SHIFT_COMMAND_IDS } from './cell-shift'
 import { applyUniverLocale, insertRowsBelowLocale, numberAsTextAlertLocale } from './univer-locales'
 import { installRuleDetail } from './univer-rule-detail'
 import { installActiveCellDataValidationChrome } from './data-validation-dropdown'
@@ -1316,7 +1321,11 @@ export function App(): React.JSX.Element {
     // Genspark's key never lands in the settings file; the main process injects
     // it from the gsk login state. When logged out, requests return an error
     // guiding sign-in — not intercepted here.
-    return settings.provider === 'genspark' || !!config.apiKey
+    return (
+      settings.provider === 'genspark' ||
+      !providerRequiresApiKey(settings.provider) ||
+      !!config.apiKey
+    )
   }
 
   /** Image attachments read as base64 and sent multimodal with this user message
@@ -2518,7 +2527,8 @@ export function App(): React.JSX.Element {
           FILTER_COMMAND_PATTERN.test(event.id) ||
           event.id === OPEN_FILTER_PANEL_OPERATION ||
           event.id === MOVE_RANGE_COMMAND ||
-          event.id === MOVE_ROWS_COMMAND
+          event.id === MOVE_ROWS_COMMAND ||
+          CELL_SHIFT_COMMAND_IDS.has(event.id)
         ) {
           const subUnitId =
             (event.params as { subUnitId?: string } | undefined)?.subUnitId ??
@@ -2560,7 +2570,9 @@ export function App(): React.JSX.Element {
             return
           }
           if (
-            (event.id === MOVE_RANGE_COMMAND || event.id === MOVE_ROWS_COMMAND) &&
+            (event.id === MOVE_RANGE_COMMAND ||
+              event.id === MOVE_ROWS_COMMAND ||
+              CELL_SHIFT_COMMAND_IDS.has(event.id)) &&
             state.file.sheets.find((candidate) => candidate.id === subUnitId)?.pivotRanges.length
           ) {
             event.cancel = true
@@ -3680,7 +3692,15 @@ export function App(): React.JSX.Element {
       // A disposing workbook can race the read; keep the last echo.
       return
     }
-    const next = toSelectionFormat(selectionStyle(range), pattern, selectionLinkTarget(range))
+    const echo = toSelectionFormat(selectionStyle(range), pattern, selectionLinkTarget(range))
+    // A cell without its own font is in the workbook's Normal font — the face the grid
+    // draws and the file saves (Calibri 11 for a new workbook), not a fixed UI default
+    const normal = lazyWorkbookRef.current?.file.styles?.[0]
+    const next: SelectionFormat = {
+      ...echo,
+      fontFamily: echo.fontFamily ?? normal?.fontFamily ?? 'Calibri',
+      fontSize: echo.fontSize ?? normal?.fontSize ?? 11,
+    }
     setSelectionFormat((previous) => (selectionFormatEquals(previous, next) ? previous : next))
   }
 
@@ -4448,6 +4468,21 @@ export function App(): React.JSX.Element {
         onRefreshPivot={() => handleRefreshPivotImpl(pivotContext())}
         onIsSelectionInPivot={() => isSelectionInPivotImpl(pivotContext())}
         onGetActiveCell={() => activeCellLabelImpl(dataToolsContext())}
+        onGetSelectionShape={() => {
+          const worksheet = univerRef.current?.univerAPI.getActiveWorkbook()?.getActiveSheet()
+          const active = univerRef.current?.univerAPI.getActiveWorkbook()?.getActiveRange()
+          if (!worksheet || !active) return null
+          return {
+            range: {
+              startRow: active.getRow(),
+              endRow: active.getRow() + active.getHeight() - 1,
+              startColumn: active.getColumn(),
+              endColumn: active.getColumn() + active.getWidth() - 1,
+            },
+            rowCount: worksheet.getMaxRows(),
+            columnCount: worksheet.getMaxColumns(),
+          }
+        }}
         onGetAnchorValue={anchorCellValue}
         activeCellA1={activeCellA1}
         onGoToReference={(ref) => goToReferenceImpl(dataToolsContext(), ref)}

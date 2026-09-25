@@ -57,6 +57,7 @@ export const es = {
   ribbonPin: 'Anclar la cinta de opciones',
   ribbonExpand: 'Expandir la cinta de opciones',
   ribbonGroupInsert: 'Insertar',
+  ribbonGroupView: 'Vista',
   editText: 'Editar texto',
   fontSize: 'Tamaño de fuente',
   fontWeight: 'Grosor',

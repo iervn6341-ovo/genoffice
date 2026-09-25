@@ -150,6 +150,7 @@ export const ar = {
   aiThemePlayful: 'مرح',
   aiThemeDark: 'داكن',
   aiSummarizeBtn: 'تلخيص AI',
+  aiToolsGroup: 'أدوات الذكاء الاصطناعي',
   aiSummarizePrompt: 'لخّص المحتوى الرئيسي والنقاط الأساسية لهذا المستند',
   aiAttachTitle: 'إرفاق ملفات محلية (أو اسحبها إلى اللوحة)',
   aiRemoveAttachmentTitle: 'إزالة المرفق',

@@ -153,6 +153,7 @@ export const pt = {
   aiThemePlayful: 'Divertido',
   aiThemeDark: 'Escuro',
   aiSummarizeBtn: 'Resumo IA',
+  aiToolsGroup: 'Ferramentas de IA',
   aiSummarizePrompt: 'Resuma o conteúdo principal e os pontos-chave deste documento',
   aiAttachTitle: 'Anexar arquivos locais (ou arraste-os para o painel)',
   aiRemoveAttachmentTitle: 'Remover anexo',

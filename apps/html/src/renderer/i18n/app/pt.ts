@@ -56,6 +56,7 @@ export const pt = {
   ribbonPin: 'Fixar a Faixa de Opções',
   ribbonExpand: 'Expandir a Faixa de Opções',
   ribbonGroupInsert: 'Inserir',
+  ribbonGroupView: 'Exibir',
   editText: 'Editar texto',
   fontSize: 'Tamanho da fonte',
   fontWeight: 'Peso',

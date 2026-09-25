@@ -750,6 +750,7 @@ export const ms = {
   appGroupChartActions: 'Tindakan carta',
   appRemoveFromSheet: 'Alih keluar daripada helaian',
   appGroupAiAssistant: 'Pembantu AI',
+  appGroupAiTools: 'Alat AI',
   appAiOpenPanelDetail: 'Bar sisi sembang',
   appGroupAiStarters: 'Mula pantas',
   appAiStarterDetail: 'Hantar ke panel AI',

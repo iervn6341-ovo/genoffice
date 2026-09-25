@@ -168,8 +168,10 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null)
   /** a resize / reorder drag is in progress inside the frame: the floating chrome would only get in the way */
   const [dragging, setDragging] = useState(false)
-  /** freshly inserted text element: opens for typing once the reloaded frame reports ready */
-  const editAfterLoadRef = useRef<number | null>(null)
+  /** freshly inserted text element: opens for typing once a frame showing the insert (its
+      document version or later) reports ready — a ready from the frame still on screen while
+      the reload is debounced must not use it up */
+  const editAfterLoadRef = useRef<{ sid: number; version: number } | null>(null)
   const insertedSidRef = useRef<number | null>(null)
   const previewStyleRef = useRef<(styles: Record<string, string | null>) => void>(() => {})
   // a release over the host chrome (or a window switch) never reaches the frame's listeners
@@ -567,9 +569,11 @@ export default function App() {
             previewRef.current?.post({ type: 'gx:scrollTo', y: frameScrollRef.current })
           const sid = selectedSidRef.current
           if (sid !== null) previewRef.current?.post({ type: 'gx:select', sid })
-          if (editAfterLoadRef.current !== null && editAfterLoadRef.current === sid)
-            previewRef.current?.post({ type: 'gx:beginTextEdit', sid })
-          editAfterLoadRef.current = null
+          const pendingEdit = editAfterLoadRef.current
+          if (pendingEdit !== null && msg.version >= pendingEdit.version) {
+            if (pendingEdit.sid === sid) previewRef.current?.post({ type: 'gx:beginTextEdit', sid })
+            editAfterLoadRef.current = null
+          }
           postMarks()
           return
         }
@@ -819,8 +823,12 @@ export default function App() {
       return
     }
     insertedSidRef.current = null
-    if (runManual([op], 'inserted') && TEXT_INSERT_KINDS.has(kind))
-      editAfterLoadRef.current = insertedSidRef.current
+    if (
+      runManual([op], 'inserted') &&
+      TEXT_INSERT_KINDS.has(kind) &&
+      insertedSidRef.current !== null
+    )
+      editAfterLoadRef.current = { sid: insertedSidRef.current, version: versionRef.current }
   }
   /** crop / remove background edit the pixels: read the picture, open the dialog, write a new asset */
   const openPictureDialog = async (kind: 'crop' | 'cutout') => {

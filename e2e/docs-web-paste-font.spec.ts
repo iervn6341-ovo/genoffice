@@ -103,7 +103,7 @@ test.describe('docs web-HTML paste fonts', () => {
           },
           { html, text },
         )
-        await editorPage.keyboard.press('Control+v')
+        await editorPage.keyboard.press('ControlOrMeta+v')
         await editorPage.waitForTimeout(400)
       }
 
@@ -115,14 +115,14 @@ test.describe('docs web-HTML paste fonts', () => {
       expect(generic?.color).toBe('202122')
 
       // 2) whole-paragraph copy on an empty line: the block's concrete font
-      await editorPage.keyboard.press('Control+End')
+      await editorPage.keyboard.press('ControlOrMeta+End')
       await editorPage.keyboard.press('Enter')
       await paste(BLOCK_ROBOTO, 'web roboto block')
       state = await runs()
       expect(state.find((r) => r.text.includes('web roboto'))?.font).toBe('Roboto')
 
       // 3) internal clipboard HTML stays untouched (no caret-font fill)
-      await editorPage.keyboard.press('Control+End')
+      await editorPage.keyboard.press('ControlOrMeta+End')
       await editorPage.keyboard.press('Enter')
       await paste(INTERNAL_BARE, 'internal bare')
       state = await runs()

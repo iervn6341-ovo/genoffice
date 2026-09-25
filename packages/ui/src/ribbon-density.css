@@ -1,0 +1,59 @@
+/*
+ * Compact ribbon metrics (Microsoft 365 density), shared by every editor. Imported after each
+ * app's own styles.css so these base metrics win over the apps' equal-specificity rules; the
+ * apps' more specific layout rules (split buttons, stacked columns…) still apply on top.
+ * Spacing only — colours stay in the apps' tokens.
+ */
+
+/* Docs / Slides / Markdown / HTML ribbons */
+.ribbon-body {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.ribbon-body > .ribbon-group {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+.ribbon-body > .ribbon-sep,
+.ribbon-body > .rb-sep {
+  margin-left: 3px;
+  margin-right: 3px;
+}
+.ribbon-body .rb-big {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.ribbon-body .rb-icon {
+  min-width: 26px;
+  padding-left: 3px;
+  padding-right: 3px;
+}
+.ribbon-body .rb-small {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+/* Sheets ribbon (its own class names) */
+.ribbon[data-ribbon-body] {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.ribbon[data-ribbon-body] > .ribbon-group {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.ribbon[data-ribbon-body] .ribbon-tool {
+  min-width: 44px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.ribbon[data-ribbon-body] .ribbon-tool.large {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.ribbon[data-ribbon-body] .inline-tools {
+  gap: 2px;
+}
+.ribbon[data-ribbon-body] .inline-tools button {
+  min-width: 26px;
+}

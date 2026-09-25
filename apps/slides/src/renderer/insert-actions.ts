@@ -19,6 +19,15 @@ import {
 import { t } from './i18n/locale'
 import { isLineDrawKind, type DrawRect } from './draw-shape'
 
+/**
+ * Text a shape inserted from the ribbon starts with, like PowerPoint's: centred both ways and
+ * white (the theme's light colour on its accent fill). Text boxes and lines keep their own defaults.
+ */
+const NEW_SHAPE_TEXT = {
+  bodyPr: { anchor: 'ctr' as const },
+  paragraphs: [{ align: 'center' as const, runs: [{ text: '', color: '#FFFFFF' }] }],
+}
+
 /** Draw-mode commit: insert a gallery shape at the drawn box (PowerPoint click-or-drag sizing). */
 export async function insertShapeAt(
   ctx: ActionCtx,
@@ -36,7 +45,9 @@ export async function insertShapeAt(
     wPx: Math.round(rect.w),
     hPx: Math.round(rect.h),
     fitWidthPx: FIT_WIDTH,
-    ...(isLine ? { stroke: { color: '#000000', widthPt: 1 } } : { fillColor: '#C43E1C' }),
+    ...(isLine
+      ? { stroke: { color: '#000000', widthPt: 1 } }
+      : { fillColor: '#C43E1C', ...NEW_SHAPE_TEXT }),
   })
   if (!r) return
   let updated = r.slide
@@ -77,7 +88,7 @@ export async function insertElement(ctx: ActionCtx, kind: InsertKind): Promise<v
       ? { text: '' }
       : isLine
         ? { stroke: { color: '#000000', widthPt: 1 } }
-        : { fillColor: '#C43E1C' }),
+        : { fillColor: '#C43E1C', ...NEW_SHAPE_TEXT }),
   })
   if (r) {
     ctx.applySlide(current, r.slide)

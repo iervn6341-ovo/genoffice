@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { geomDispSize, pdfRectToCss } from './annotations'
@@ -151,10 +151,26 @@ export function ThumbPendingOverlay({
 }): ReactElement {
   const disp = geomDispSize(geom)
   const noop = () => {}
+  // Scale to the thumbnail box as laid out: the page image fills the box's width, which
+  // can differ from the sidebar's nominal raster width (`k`) — scaling by that drifted every
+  // pending mark down and right, e.g. an edited line drawn two lines low
+  const ref = useRef<HTMLDivElement>(null)
+  const [boxW, setBoxW] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const box = ref.current?.parentElement
+    if (!box) return
+    const measure = () => setBoxW(box.clientWidth || null)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [])
+  const scale = boxW ? boxW / disp.width : k
   return (
     <div
+      ref={ref}
       className="pdf-thumb-overlay"
-      style={{ width: disp.width, height: disp.height, transform: `scale(${k})` }}
+      style={{ width: disp.width, height: disp.height, transform: `scale(${scale})` }}
     >
       {imageEdits.length > 0 && (
         <ImageEditLayer

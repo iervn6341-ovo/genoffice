@@ -13,6 +13,8 @@ import {
   type Transaction,
 } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { ListAutoFormat } from './list-autoformat'
+import { DoubleClickLineEnd } from './double-click-line-end'
 import { appendsAtEnd, touchedTopLevelBlocks } from './touched-blocks'
 import { installProseMirrorPerf } from './prosemirror-perf'
 import type { EditorView } from '@tiptap/pm/view'
@@ -821,6 +823,10 @@ export const DocDocument = Node.create({
   name: 'doc',
   topNode: true,
   content: 'block+',
+  addAttributes() {
+    // page-layout snapshot on the undo stack (layout-history.ts); display state only
+    return { layout: { default: null } }
+  },
 })
 
 export const DocText = Node.create({
@@ -3399,6 +3405,9 @@ export const DocProtected = Node.create({
       styleId: { default: null as string | null },
       label: { default: '' },
       previewText: { default: '' },
+      /** section break inserted this session: the start type chosen for the section
+       *  AFTER it (resolved into the next sectPr at save — see insertedBreakTypes) */
+      breakStartType: { default: null as string | null },
       imageDataUrl: { default: null as string | null },
       oleProgId: { default: null as string | null },
       /** display size in CSS px (blockType === 'image'), editable via drag handles */
@@ -6011,6 +6020,8 @@ export const editorExtensions = [
   EnterReplacesSelection,
   WordSelectAllDelete,
   AutoLinkOnDelimiter,
+  ListAutoFormat,
+  DoubleClickLineEnd,
   WordEditorShortcuts,
   CaretMarksMemory,
   ColumnLayoutExtension,

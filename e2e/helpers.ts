@@ -18,6 +18,9 @@ export const ARTIFACTS_DIR = resolve(__dirname, 'artifacts')
 
 const SHELL_MAIN = join(SHELL_DIR, 'out/main/index.js')
 
+/** Largest window the specs open: fits a 13" laptop screen without covering the whole desktop */
+export const TEST_WINDOW = { width: 1280, height: 800 }
+
 interface LaunchOptions {
   /** reuse a previous scratch dir to simulate a second launch */
   userDataDir?: string
@@ -33,6 +36,16 @@ interface LaunchOptions {
   openFile?: string
   /** extra environment variables for the launched app */
   env?: Record<string, string>
+  /** extra Chromium switches (e.g. a fake camera: --use-fake-device-for-media-stream) */
+  chromiumArgs?: string[]
+  /**
+   * Let the app take the foreground. By default test windows open in the background
+   * (GENOFFICE_E2E_BACKGROUND: no Dock icon, never activated, so a run does not steal the
+   * keyboard from whoever is using the machine); input still arrives through CDP. Only
+   * specs that assert real OS focus (a full-screen show's keyboard, native contenteditable
+   * focus hand-offs) need this. GENOFFICE_E2E_FOREGROUND=1 forces it for a whole run.
+   */
+  foreground?: boolean
 }
 
 export interface LaunchedApp {
@@ -67,6 +80,7 @@ export async function launchShell(options: LaunchOptions): Promise<LaunchedApp> 
   // and they never leak into the argv the app parses for documents to open.
   const args: string[] = []
   if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu')
+  if (options.chromiumArgs) args.push(...options.chromiumArgs)
   args.push(SHELL_DIR)
   if (options.openFile) args.push(options.openFile)
   const app = await electron.launch({
@@ -77,14 +91,18 @@ export async function launchShell(options: LaunchOptions): Promise<LaunchedApp> 
       GENOFFICE_USER_DATA: userDataDir,
       GENOFFICE_NO_SPARE_VIEW: '1',
       GENOFFICE_LANG: options.lang ?? 'en',
+      ...(options.foreground || process.env.GENOFFICE_E2E_FOREGROUND === '1'
+        ? {}
+        : { GENOFFICE_E2E_BACKGROUND: '1' }),
       ...(options.env ?? {}),
       ...(process.platform === 'linux' ? { ELECTRON_DISABLE_SANDBOX: '1' } : {}),
     },
     // Playwright's Electron screencast wedges the page CDP session on Linux
     // (page.url() stays empty, no lifecycle events, evaluate hangs) — record
     // only where it works
+    // GENOFFICE_E2E_NO_VIDEO=1 skips recording (the macOS screencast can stall the launch)
     recordVideo:
-      process.platform === 'linux'
+      process.platform === 'linux' || process.env.GENOFFICE_E2E_NO_VIDEO
         ? undefined
         : {
             dir: join(ARTIFACTS_DIR, options.videoDir),
@@ -93,6 +111,18 @@ export async function launchShell(options: LaunchOptions): Promise<LaunchedApp> 
   })
   const page = await app.firstWindow()
   await waitForDocumentReady(app, page)
+  // keep test windows small (the default fills most of a laptop screen) and pinned to the
+  // top-left of the primary screen's work area, so every run opens in the same place
+  await app.evaluate(({ BrowserWindow, screen }, max) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (!win) return
+    const [w, h] = win.getContentSize() as [number, number]
+    if (w > max.width || h > max.height) {
+      win.setContentSize(Math.min(w, max.width), Math.min(h, max.height))
+    }
+    const { x, y } = screen.getPrimaryDisplay().workArea
+    win.setPosition(x, y)
+  }, TEST_WINDOW)
   return { app, page, userDataDir }
 }
 
@@ -198,4 +228,32 @@ export async function waitForPageWithUrl(
     if (remaining <= 0) throw new Error(`No window with URL containing "${urlPart}"`)
     await app.waitForEvent('window', { timeout: Math.min(remaining, 1_000) }).catch(() => {})
   }
+}
+
+/**
+ * Lay the editor out `cssWidth` CSS px wide while keeping the real window within TEST_WINDOW.
+ * Up to TEST_WINDOW.width the window itself is sized; wider layouts (a fully expanded ribbon)
+ * zoom the editor view out instead, so the window never outgrows the screen. Playwright's mouse
+ * and getBoundingClientRect both work in CSS px, so specs stay coordinate-agnostic.
+ * Call after the editor page exists (`urlPart` finds its WebContents, e.g. '://slides/').
+ */
+export async function setEditorLayoutWidth(
+  app: ElectronApplication,
+  urlPart: string,
+  cssWidth: number,
+): Promise<void> {
+  const width = Math.min(cssWidth, TEST_WINDOW.width)
+  await app.evaluate(
+    ({ BrowserWindow, screen, webContents }, { width, height, cssWidth, urlPart }) => {
+      const win = BrowserWindow.getAllWindows()[0]!
+      win.setContentSize(width, height)
+      const { x, y } = screen.getPrimaryDisplay().workArea
+      win.setPosition(x, y)
+      const wc = webContents.getAllWebContents().find((w) => w.getURL().includes(urlPart))
+      wc?.setZoomFactor(width / cssWidth)
+    },
+    { width, height: TEST_WINDOW.height, cssWidth, urlPart },
+  )
+  // let the view resize and the ribbon fit settle
+  await new Promise((r) => setTimeout(r, 400))
 }

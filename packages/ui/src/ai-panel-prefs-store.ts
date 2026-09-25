@@ -27,6 +27,7 @@ export function applyAiPanelPrefs(raw: unknown): void {
   current = next
   const html = document.documentElement
   html.dataset.aiPanelSide = next.side
+  html.dataset.ribbonFold = next.ribbonFold
   if (next.fontSize === 'default') {
     delete html.dataset.aiFontSize
     html.style.removeProperty('--ai-font-zoom')

@@ -1,17 +1,10 @@
 /** Insert tab of the slides ribbon. Extracted from Ribbon.tsx. */
-import type { InsertKind } from '../../shared/ipc'
 import { WORDART_PRESETS, wordArtStrokePx } from '@genoffice/ui'
-import {
-  CHART_GALLERY,
-  ICON_COLORS,
-  ICON_GALLERY,
-  SHAPE_GALLERY,
-  SMARTART_GALLERY,
-} from '../insert-presets'
+import { CHART_GALLERY, ICON_COLORS, ICON_GALLERY, SMARTART_GALLERY } from '../insert-presets'
 import type { StringKey } from '../i18n/locale'
 import { ChartKindThumb } from './ChartTypeDialog'
 import { TableInsertDialog } from './InsertDialogs'
-import { ShapePreview, SmartArtPreview } from './gallery-previews'
+import { SmartArtPreview } from './gallery-previews'
 import {
   Icon3d,
   IconAudio,
@@ -38,6 +31,7 @@ import { saveEditSelection } from '../TextEditOverlay'
 import {
   BIG,
   Group,
+  InsertShapeGallery,
   LayoutList,
   RbCaret,
   closeSiblingPanels,
@@ -275,29 +269,12 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
           <IconShapes size={BIG} />,
           t('ribbonShapes'),
           t('ribbonShapesTip'),
-          <div className="rb-shape-gallery">
-            {SHAPE_GALLERY.map((group) => (
-              <div key={group.group}>
-                <div className="rb-drop-title">{group.group}</div>
-                <div className="rb-shape-grid">
-                  {group.shapes.map((s) => (
-                    <button
-                      key={s.prst}
-                      className="rb-shape-cell"
-                      data-tip={s.label}
-                      aria-label={s.label}
-                      onClick={() => {
-                        setInsertDrop(null)
-                        onPickShape(s.prst as InsertKind)
-                      }}
-                    >
-                      <ShapePreview prst={s.prst} size={18} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>,
+          <InsertShapeGallery
+            onPick={(kind) => {
+              setInsertDrop(null)
+              onPickShape(kind)
+            }}
+          />,
         )}
         {dropBig(
           'smartart',

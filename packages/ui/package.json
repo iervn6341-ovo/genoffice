@@ -14,6 +14,8 @@
     "./dropdown.css": "./src/dropdown.css",
     "./find-panel.css": "./src/find-panel.css",
     "./ribbon-collapse.css": "./src/ribbon-collapse.css",
+    "./ribbon-fit.css": "./src/ribbon-fit.css",
+    "./ribbon-density.css": "./src/ribbon-density.css",
     "./markdown.css": "./src/markdown.css",
     "./ai-panel-prefs.css": "./src/ai-panel-prefs.css",
     "./ai-scope-quote.css": "./src/ai-scope-quote.css",

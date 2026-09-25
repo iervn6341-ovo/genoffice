@@ -7,6 +7,7 @@
 ;(() => {
   const SID = 'data-sid'
   const MARK = 'data-gx-inspector'
+  const IS_MAC = /mac/i.test(navigator.platform)
   // replaced by instrumentForPreview with the parse-map version this copy was built from
   const VERSION = Number('__GX_VERSION__')
   const post = (msg) => window.parent.postMessage({ ...msg, version: VERSION }, '*')
@@ -958,6 +959,25 @@
     (e) => {
       if (editing) {
         const mod = (e.metaKey || e.ctrlKey) && !e.altKey
+        if (
+          IS_MAC &&
+          (e.key === 'Home' || e.key === 'End') &&
+          !e.altKey &&
+          !e.ctrlKey &&
+          window.getSelection()
+        ) {
+          // macOS Chromium only scrolls on Home / End; move the caret to the line (⌘: text)
+          // start / end like Word and the host editors (⇧ extends)
+          e.preventDefault()
+          window
+            .getSelection()
+            .modify(
+              e.shiftKey ? 'extend' : 'move',
+              e.key === 'Home' ? 'backward' : 'forward',
+              e.metaKey ? 'documentboundary' : 'lineboundary',
+            )
+          return
+        }
         if (e.key === 'Escape') {
           // Esc = commit the text and return to the selected state (typed input is not lost, as in
           // Slides); an unchanged run goes out as a cancel and produces no history step

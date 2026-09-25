@@ -10,11 +10,24 @@ import {
   PDFNumber,
   PDFOptionList,
   PDFRef,
+  PDFStream,
   PDFString,
+  concatTransformationMatrix,
   degrees,
+  drawObject,
+  StandardFonts,
+  TextRenderingMode,
+  beginText,
+  endText,
+  popGraphicsState,
+  pushGraphicsState,
   rgb,
+  setFontAndSize,
+  setTextMatrix,
+  setTextRenderingMode,
+  showText,
 } from 'pdf-lib'
-import type { PDFPage } from 'pdf-lib'
+import type { PDFOperator, PDFPage } from 'pdf-lib'
 import { VISUAL_SIGNATURE_CONTENT_PREFIX } from '../shared/ipc'
 import type {
   DrawingInput,
@@ -522,10 +535,90 @@ export function mergeGrid(perSheet: number): { cols: number; rows: number } {
   return { cols, rows: Math.ceil(n / cols) }
 }
 
+const ANNOT_FLAG_HIDDEN = 1 << 1
+const ANNOT_FLAG_NOVIEW = 1 << 5
+
+/** A numeric array entry of a dict (refs resolved); null unless it holds `len` numbers */
+function dictNumbers(dict: PDFDict, key: string, len: number): number[] | null {
+  const arr = dict.lookupMaybe(PDFName.of(key), PDFArray)
+  if (!arr || arr.size() < len) return null
+  const out: number[] = []
+  for (let i = 0; i < len; i++) {
+    const n = arr.lookupMaybe(i, PDFNumber)
+    if (!n) return null
+    out.push(n.asNumber())
+  }
+  return out
+}
+
+/**
+ * Burn every visible annotation's normal appearance into the page content: its
+ * BBox is carried through /Matrix and fitted onto /Rect (PDF 32000 §12.5.5), the
+ * same placement a viewer draws. A page embedded as a Form XObject keeps only its
+ * content stream, so comments, markups, stamps and filled fields would vanish.
+ */
+function flattenAnnotAppearances(page: PDFPage): void {
+  const annots = page.node.Annots()
+  if (!annots) return
+  const ctx = page.doc.context
+  const ops: PDFOperator[] = []
+  for (let i = 0; i < annots.size(); i++) {
+    const annot = annots.lookupMaybe(i, PDFDict)
+    if (!annot) continue
+    const flags = annot.lookupMaybe(PDFName.of('F'), PDFNumber)?.asNumber() ?? 0
+    if (flags & (ANNOT_FLAG_HIDDEN | ANNOT_FLAG_NOVIEW)) continue
+    const ap = annot.lookupMaybe(PDFName.of('AP'), PDFDict)
+    let ref = ap?.get(PDFName.of('N'))
+    const states = ref && ctx.lookup(ref)
+    if (states instanceof PDFDict && !(states instanceof PDFStream)) {
+      // Check boxes / radios keep one appearance per state; /AS names the shown one
+      const as = annot.lookupMaybe(PDFName.of('AS'), PDFName)
+      ref = as ? states.get(as) : undefined
+    }
+    const stream = ref && ctx.lookup(ref)
+    if (!(stream instanceof PDFStream)) continue
+    const rect = dictNumbers(annot, 'Rect', 4)
+    const bbox = dictNumbers(stream.dict, 'BBox', 4)
+    if (!rect || !bbox) continue
+    const [a, b, c, d, e, f] = dictNumbers(stream.dict, 'Matrix', 6) ?? [1, 0, 0, 1, 0, 0]
+    const corners = [
+      [bbox[0]!, bbox[1]!],
+      [bbox[2]!, bbox[1]!],
+      [bbox[0]!, bbox[3]!],
+      [bbox[2]!, bbox[3]!],
+    ].map(([x, y]) => [a! * x! + c! * y! + e!, b! * x! + d! * y! + f!] as const)
+    const bx1 = Math.min(...corners.map((p) => p[0]))
+    const bx2 = Math.max(...corners.map((p) => p[0]))
+    const by1 = Math.min(...corners.map((p) => p[1]))
+    const by2 = Math.max(...corners.map((p) => p[1]))
+    const rx1 = Math.min(rect[0]!, rect[2]!)
+    const ry1 = Math.min(rect[1]!, rect[3]!)
+    const rw = Math.abs(rect[2]! - rect[0]!)
+    const rh = Math.abs(rect[3]! - rect[1]!)
+    if (bx2 - bx1 <= 0 || by2 - by1 <= 0 || rw <= 0 || rh <= 0) continue
+    const sx = rw / (bx2 - bx1)
+    const sy = rh / (by2 - by1)
+    // Appearance streams are form XObjects, but writers often omit the type keys
+    stream.dict.set(PDFName.of('Type'), PDFName.of('XObject'))
+    stream.dict.set(PDFName.of('Subtype'), PDFName.of('Form'))
+    const xref = ref instanceof PDFRef ? ref : ctx.register(stream)
+    const name = page.node.newXObject('FlatAnnot', xref)
+    ops.push(
+      pushGraphicsState(),
+      concatTransformationMatrix(sx, 0, 0, sy, rx1 - bx1 * sx, ry1 - by1 * sy),
+      drawObject(name),
+      popGraphicsState(),
+    )
+  }
+  if (ops.length > 0) page.pushOperators(...ops)
+}
+
 /**
  * N-up imposition: place every perSheet consecutive pages onto one sheet, each
- * scaled to fit its cell and centered. The sheet matches the first page's size;
- * 2-up swaps width/height so two portrait pages sit side by side.
+ * scaled to fit its cell and centered, as displayed — cropped to its CropBox,
+ * turned by its /Rotate, with its annotations' appearances burned in. The sheet
+ * matches the first page's displayed size; 2-up swaps width/height so two
+ * portrait pages sit side by side.
  */
 export async function mergePagesBytes(
   bytes: Uint8Array,
@@ -535,35 +628,56 @@ export async function mergePagesBytes(
   const src = await PDFDocument.load(bytes, { updateMetadata: false })
   const out = await PDFDocument.create()
   const total = src.getPageCount()
-  const first = src.getPage(0)
+  const pages = src.getPages()
+  const rotOf = (p: PDFPage) => ((p.getRotation().angle % 360) + 360) % 360
+  const sideways = (p: PDFPage) => rotOf(p) === 90 || rotOf(p) === 270
   const { cols, rows } = mergeGrid(perSheet)
-  const sheetW = perSheet === 2 ? first.getHeight() : first.getWidth()
-  const sheetH = perSheet === 2 ? first.getWidth() : first.getHeight()
-  // embedPages throws on pages without a content stream (e.g. our own inserted
-  // blank pages) — give those an empty stream so they embed as empty cells
-  for (const p of src.getPages()) {
+  const firstBox = pages[0]!.getCropBox()
+  const [firstW, firstH] = sideways(pages[0]!)
+    ? [firstBox.height, firstBox.width]
+    : [firstBox.width, firstBox.height]
+  const sheetW = perSheet === 2 ? firstH : firstW
+  const sheetH = perSheet === 2 ? firstW : firstH
+  for (const p of pages) {
+    // embedPages throws on pages without a content stream (e.g. our own inserted
+    // blank pages) — give those an empty stream so they embed as empty cells
     if (!p.node.Contents()) {
       p.node.set(PDFName.of('Contents'), src.context.register(src.context.stream('')))
     }
+    flattenAnnotAppearances(p)
   }
-  const embedded = await out.embedPages(src.getPages())
+  const embedded = await out.embedPages(
+    pages,
+    pages.map((p) => {
+      const { x, y, width, height } = p.getCropBox()
+      return { left: x, bottom: y, right: x + width, top: y + height }
+    }),
+  )
   const cellW = sheetW / cols
   const cellH = sheetH / rows
   for (let start = 0; start < total; start += perSheet) {
     const sheet = out.addPage([sheetW, sheetH])
     for (let i = 0; i < perSheet && start + i < total; i++) {
       const ep = embedded[start + i]!
-      const scale = Math.min(cellW / ep.width, cellH / ep.height)
-      const w = ep.width * scale
-      const h = ep.height * scale
+      const rot = rotOf(pages[start + i]!)
+      // Displayed footprint: a quarter-turned page shows its height across
+      const [dw, dh] = sideways(pages[start + i]!) ? [ep.height, ep.width] : [ep.width, ep.height]
+      const scale = Math.min(cellW / dw, cellH / dh)
+      const w = dw * scale
+      const h = dh * scale
       const col = options.direction === 'vertical' ? Math.floor(i / rows) : i % cols
       const row = options.direction === 'vertical' ? i % rows : Math.floor(i / cols)
+      const x = col * cellW + (cellW - w) / 2
+      // PDF y goes up: row 0 must land at the top of the sheet
+      const y = sheetH - (row + 1) * cellH + (cellH - h) / 2
+      // /Rotate turns the page clockwise for display; draw it turned the same way,
+      // anchoring the rotation origin so the turned page fills the cell box
       sheet.drawPage(ep, {
-        x: col * cellW + (cellW - w) / 2,
-        // PDF y goes up: row 0 must land at the top of the sheet
-        y: sheetH - (row + 1) * cellH + (cellH - h) / 2,
-        width: w,
-        height: h,
+        x: rot === 180 || rot === 270 ? x + w : x,
+        y: rot === 90 || rot === 180 ? y + h : y,
+        width: ep.width * scale,
+        height: ep.height * scale,
+        rotate: degrees(-rot),
       })
     }
     if (options.separator) {
@@ -876,6 +990,57 @@ export interface AppliedSaveRequest {
 }
 
 /** Apply markups + form values + page ops, returning new bytes. Original objects are not reordered (pdf-lib keeps untouched objects). */
+/**
+ * Watermarks are bitmaps (CJK-safe without embedding fonts), which left their
+ * text invisible to Find, copy and screen readers. Lay the same string over the
+ * bitmap as invisible text (render mode 3), rotated and sized like the image,
+ * centered on the stamp rect. Helvetica covers WinAnsi only; other text stays
+ * image-only (embedding a CJK face for an invisible layer is out of scope).
+ */
+async function drawInvisibleStampText(
+  pdfDoc: PDFDocument,
+  page: PDFPage,
+  rect: [number, number, number, number],
+  text: { value: string; size: number; angle: number },
+): Promise<void> {
+  const value = text.value.trim()
+  if (!value) return
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  let encoded
+  try {
+    encoded = font.encodeText(value)
+  } catch {
+    return
+  }
+  const [x1, y1, x2, y2] = rect
+  // same shrink rule as the bitmap: fit 80 % of the diagonal
+  const unitWidth = font.widthOfTextAtSize(value, 1)
+  const maxW = Math.hypot(x2 - x1, y2 - y1) * 0.8
+  const size = Math.max(1, Math.min(text.size, unitWidth > 0 ? maxW / unitWidth : text.size))
+  const width = unitWidth * size
+  const rad = (text.angle * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  // baseline start: back from the center by half the width along the text
+  // direction, down by ~1/3 em across it (the bitmap centers on the middle)
+  const cx = (x1 + x2) / 2
+  const cy = (y1 + y2) / 2
+  const down = size * 0.35
+  const x = cx - (width / 2) * cos + down * sin
+  const y = cy - (width / 2) * sin - down * cos
+  const fontKey = page.node.newFontDictionary(font.name, font.ref)
+  page.pushOperators(
+    pushGraphicsState(),
+    beginText(),
+    setFontAndSize(fontKey, size),
+    setTextRenderingMode(TextRenderingMode.Invisible),
+    setTextMatrix(cos, sin, -sin, cos, x, y),
+    showText(encoded),
+    endText(),
+    popGraphicsState(),
+  )
+}
+
 export async function applySaveRequest(
   bytes: Uint8Array,
   request: SavePdfRequest,
@@ -962,6 +1127,7 @@ export async function applySaveRequest(
       height: y2 - y1,
       opacity: s.opacity ?? 1,
     })
+    if (s.text) await drawInvisibleStampText(pdfDoc, page, s.rect, s.text)
   }
   if (request.metadata) applyMetadata(pdfDoc, request.metadata)
   // Page thumbnails and producer piece-info can retain a pre-redaction rendering of

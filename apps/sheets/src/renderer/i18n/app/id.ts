@@ -750,6 +750,7 @@ export const id = {
   appGroupChartActions: 'Tindakan bagan',
   appRemoveFromSheet: 'Hapus dari lembar',
   appGroupAiAssistant: 'Asisten AI',
+  appGroupAiTools: 'Alat AI',
   appAiOpenPanelDetail: 'Bilah samping obrolan',
   appGroupAiStarters: 'Mulai cepat',
   appAiStarterDetail: 'Kirim ke panel AI',

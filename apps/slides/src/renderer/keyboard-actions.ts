@@ -1,6 +1,6 @@
 /**
  * Global keyboard shortcuts extracted from App.tsx: ⌘Z undo, ⌘F
- * find, zoom, element clipboard, format painter, selection cycling, nudging…
+ * find, zoom, element clipboard, format painter, selection cycling, Enter/F2 to edit text, nudging…
  * The handler reads the latest App state through ActionCtx, so App attaches it
  * once with an empty dependency list.
  */
@@ -10,6 +10,7 @@ import * as clipboardActions from './clipboard-actions'
 import * as arrangeActions from './arrange-actions'
 import * as slideActions from './slide-actions'
 import * as showActions from './show-actions'
+import * as styleActions from './style-actions'
 import { shouldRouteUndoToDeck } from './undo-routing'
 
 /** Whether focus is in a text input (input/textarea/contentEditable) — these cases use native undo/delete */
@@ -62,6 +63,24 @@ export function handleGlobalKeydown(
     if (editing || inField) return
     e.preventDefault()
     void ctx.redo()
+    return
+  }
+  // ⌘⇧> / ⌘⇧< grow / shrink the font (PowerPoint): the selection while typing, otherwise every
+  // run of the selected boxes. e.key is the shifted glyph on most layouts, the unshifted one on some
+  if (mod && e.shiftKey && !e.altKey && ['>', '<', '.', ','].includes(e.key)) {
+    const target =
+      editing || ctx.editingCell || ctx.editingNotes || (!inField && selectedIds.length > 0)
+    if (!target) return
+    e.preventDefault()
+    styleActions.onFormat(ctx, e.key === '>' || e.key === '.' ? 'fontSizeUp' : 'fontSizeDown')
+    return
+  }
+  // ⌘B / ⌘I / ⌘U on selected boxes without typing (inside the editor the browser handles them)
+  if (mod && !e.shiftKey && !e.altKey && ['b', 'i', 'u', 'B', 'I', 'U'].includes(e.key)) {
+    if (editing || inField || selectedIds.length === 0) return
+    e.preventDefault()
+    const k = e.key.toLowerCase()
+    styleActions.onTextToggle(ctx, k === 'b' ? 'bold' : k === 'i' ? 'italic' : 'underline')
     return
   }
   // ⌘F find/replace
@@ -181,6 +200,26 @@ export function handleGlobalKeydown(
       ctx.setSelectedIds([ids[next]!])
     }
     return
+  }
+  // Enter / F2 on a selected shape or text box: start typing into it, caret at the end (PowerPoint).
+  // Body-focus check keeps Enter on ribbon buttons and inputs doing their own thing.
+  if (
+    (e.key === 'Enter' || e.key === 'F2') &&
+    !mod &&
+    !e.altKey &&
+    !e.shiftKey &&
+    !e.defaultPrevented &&
+    !editing &&
+    !ctx.editingCell &&
+    selectedIds.length === 1 &&
+    document.activeElement === document.body
+  ) {
+    const node = ctx.findNodeCtx(selectedIds[0]!)?.node
+    if (node && isEditableText(node)) {
+      e.preventDefault()
+      ctx.startEdit(selectedIds[0]!)
+      return
+    }
   }
   // ⌘A: select all elements on the page (excluding decoration layer/placeholder chips/full-page backgrounds)
   if (mod && !e.altKey && (e.key === 'a' || e.key === 'A')) {

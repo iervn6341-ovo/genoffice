@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   RibbonCollapseButton,
+  RibbonFoldGroup,
+  useRibbonLabelFit,
   RibbonExpandButton,
   useDismissablePopover,
   useRibbonCollapse,
@@ -130,6 +132,9 @@ const ICON = 20
 export function Ribbon(p: Props) {
   const { t } = useI18n()
   const collapse = useRibbonCollapse('htmlapp.ribbonCollapsed')
+  // labels / fold groups follow the width (the AI group folds before anything scrolls)
+  const ribbonBodyRef = useRef<HTMLDivElement | null>(null)
+  useRibbonLabelFit(ribbonBodyRef)
   const [themeOpen, setThemeOpen] = useState(false)
   const themeRef = useRef<HTMLDivElement>(null)
   useDismissablePopover(themeOpen, () => setThemeOpen(false), {
@@ -266,273 +271,192 @@ export function Ribbon(p: Props) {
         <RibbonExpandButton state={collapse} label={t('ribbonExpand')} />
       </div>
 
-      <div className="ribbon-body" data-ribbon-body="">
-        <div className="ribbon-group">
-          <div className="ribbon-group-items">
+      <div className="ribbon-body" data-ribbon-body="" ref={ribbonBodyRef}>
+        <RibbonFoldGroup
+          label={t('ribbonGroupInsert')}
+          icon={<IconPlus size={24} />}
+          caret={<IconChevronDown size={10} />}
+          priority={2}
+        >
+          {/* the ribbon has no Insert tab: the row itself says what these buttons do */}
+          <span className="rb-group-lead" aria-hidden="true">
+            {t('ribbonGroupInsert')}
+          </span>
+          <button
+            type="button"
+            className="rb-btn rb-view"
+            data-tip={t('insertHeading')}
+            disabled={insertOff}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => insert('heading')}
+          >
+            <IconHeading size={ICON} />
+            <span>{t('insertHeading')}</span>
+          </button>
+          <button
+            type="button"
+            className="rb-btn rb-view"
+            data-tip={t('insertParagraph')}
+            disabled={insertOff}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => insert('paragraph')}
+          >
+            <IconPilcrow size={ICON} />
+            <span>{t('insertParagraph')}</span>
+          </button>
+          <div className="rb-menu-wrap rb-split" ref={imageRef}>
             <button
               type="button"
-              className={`rb-big ai-entry${p.aiOpen ? ' active' : ''}`}
-              data-tip={t('aiOpenAssistant')}
-              aria-pressed={p.aiOpen}
-              disabled={off}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={p.onToggleAi}
-            >
-              <span className="rb-big-icon">
-                <GensparkMark size={26} />
-              </span>
-              <span>Genspark AI</span>
-            </button>
-            <button
-              type="button"
-              className="rb-big ai-entry"
-              data-tip={t('aiRestyleBtn')}
-              disabled={off}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => p.onAiPreset(t('aiRestylePrompt'))}
-            >
-              <span className="rb-big-icon">
-                <span className="ai-feature-icon" aria-hidden="true">
-                  <IconWand size={24} />
-                </span>
-              </span>
-              <span>{t('aiRestyleBtn')}</span>
-            </button>
-            <div className="rb-menu-wrap" ref={themeRef}>
-              <button
-                type="button"
-                className={`rb-big ai-entry${themeOpen ? ' active' : ''}`}
-                data-tip={t('aiThemeBtn')}
-                aria-haspopup="menu"
-                aria-expanded={themeOpen}
-                disabled={off}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setThemeOpen((v) => !v)}
-              >
-                <span className="rb-big-icon">
-                  <span className="ai-feature-icon" aria-hidden="true">
-                    <IconPalette size={24} />
-                  </span>
-                </span>
-                <span>{t('aiThemeBtn')}</span>
-              </button>
-              {themeOpen && (
-                <div className="rb-menu" role="menu">
-                  {THEME_DIRECTIONS.map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      role="menuitem"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setThemeOpen(false)
-                        p.onAiPreset(t('aiThemePrompt', { direction: t(key) }))
-                      }}
-                    >
-                      {t(key)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              className="rb-big ai-entry"
-              data-tip={t('aiSummarizeBtn')}
-              disabled={off}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => p.onAiPreset(t('aiSummarizePrompt'))}
-            >
-              <span className="rb-big-icon">
-                <span className="ai-feature-icon" aria-hidden="true">
-                  <IconSummarize size={24} />
-                </span>
-              </span>
-              <span>{t('aiSummarizeBtn')}</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="rb-sep" />
-
-        <div className="ribbon-group">
-          <div className="ribbon-group-items">
-            {/* the ribbon has no Insert tab: the row itself says what these buttons do */}
-            <span className="rb-group-lead" aria-hidden="true">
-              {t('ribbonGroupInsert')}
-            </span>
-            <button
-              type="button"
-              className="rb-btn rb-view"
-              data-tip={t('insertHeading')}
+              className="rb-btn rb-view rb-split-main"
+              data-tip={t('insertImage')}
               disabled={insertOff}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => insert('heading')}
+              onClick={() => insert('image')}
             >
-              <IconHeading size={ICON} />
-              <span>{t('insertHeading')}</span>
+              <IconPicture size={ICON} />
+              <span>{t('insertImage')}</span>
             </button>
             <button
               type="button"
-              className="rb-btn rb-view"
-              data-tip={t('insertParagraph')}
+              className={`rb-btn rb-split-caret${insertPop === 'imageUrl' ? ' active' : ''}`}
+              data-tip={t('insertImageUrl')}
+              aria-label={t('insertImageUrl')}
+              aria-haspopup="dialog"
+              aria-expanded={insertPop === 'imageUrl'}
               disabled={insertOff}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => insert('paragraph')}
+              onClick={() => toggleInsert('imageUrl')}
             >
-              <IconPilcrow size={ICON} />
-              <span>{t('insertParagraph')}</span>
+              <IconChevronDown size={14} />
             </button>
-            <div className="rb-menu-wrap rb-split" ref={imageRef}>
-              <button
-                type="button"
-                className="rb-btn rb-view rb-split-main"
-                data-tip={t('insertImage')}
-                disabled={insertOff}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => insert('image')}
+            {insertPop === 'imageUrl' && (
+              <form
+                className="rb-menu rb-url-form"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  submitImageUrl()
+                }}
               >
-                <IconPicture size={ICON} />
-                <span>{t('insertImage')}</span>
-              </button>
-              <button
-                type="button"
-                className={`rb-btn rb-split-caret${insertPop === 'imageUrl' ? ' active' : ''}`}
-                data-tip={t('insertImageUrl')}
-                aria-label={t('insertImageUrl')}
-                aria-haspopup="dialog"
-                aria-expanded={insertPop === 'imageUrl'}
-                disabled={insertOff}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => toggleInsert('imageUrl')}
-              >
-                <IconChevronDown size={14} />
-              </button>
-              {insertPop === 'imageUrl' && (
-                <form
-                  className="rb-menu rb-url-form"
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    submitImageUrl()
-                  }}
-                >
-                  <input
-                    type="url"
-                    autoFocus
-                    placeholder="https://"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                  />
-                  <button type="submit" className="rb-url-submit" disabled={!imageUrl.trim()}>
-                    {t('insertConfirm')}
-                  </button>
-                </form>
-              )}
-            </div>
-            <div className="rb-menu-wrap" ref={tableRef}>
-              <button
-                type="button"
-                className={`rb-btn rb-view${insertPop === 'table' ? ' active' : ''}`}
-                data-tip={t('insertTable')}
-                aria-haspopup="dialog"
-                aria-expanded={insertPop === 'table'}
-                disabled={insertOff}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => toggleInsert('table')}
-              >
-                <IconTable size={ICON} />
-                <span>{t('insertTable')}</span>
-                <IconChevronDown size={14} />
-              </button>
-              {insertPop === 'table' && (
-                <div
-                  className="table-picker"
-                  role="dialog"
-                  aria-label={t('insertTablePickSize')}
-                  onMouseLeave={() => setGrid({ r: 0, c: 0 })}
-                >
-                  <div className="table-picker-title">
-                    {grid.r > 0
-                      ? t('insertTableSize', { r: grid.r, c: grid.c })
-                      : t('insertTablePickSize')}
-                  </div>
-                  <div className="table-picker-grid">
-                    {Array.from({ length: TABLE_PICKER_ROWS }, (_, ri) =>
-                      Array.from({ length: TABLE_PICKER_COLS }, (_, ci) => (
-                        <button
-                          key={`${ri}-${ci}`}
-                          type="button"
-                          className={`table-cell${ri < grid.r && ci < grid.c ? ' hot' : ''}`}
-                          aria-label={t('insertTableSize', { r: ri + 1, c: ci + 1 })}
-                          onMouseEnter={() => setGrid({ r: ri + 1, c: ci + 1 })}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => insert('table', { rows: ri + 1, cols: ci + 1 })}
-                        />
-                      )),
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="rb-menu-wrap" ref={moreRef}>
-              <button
-                type="button"
-                className={`rb-btn rb-view${insertPop === 'more' ? ' active' : ''}`}
-                data-tip={t('insertMore')}
-                aria-haspopup="menu"
-                aria-expanded={insertPop === 'more'}
-                disabled={insertOff}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => toggleInsert('more')}
-              >
-                <IconPlus size={ICON} />
-                <span>{t('insertMore')}</span>
-                <IconChevronDown size={14} />
-              </button>
-              {insertPop === 'more' && (
-                <div className="rb-menu" role="menu">
-                  {MORE_KINDS.map(({ kind, Icon }) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      role="menuitem"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => insert(kind)}
-                    >
-                      <Icon size={16} />
-                      {t(INSERT_LABEL[kind])}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="rb-sep" />
-
-        <div className="ribbon-group" role="tablist">
-          <div className="ribbon-group-items">
-            {VIEW_MODES.map((mode) => {
-              const Icon = VIEW_ICON[mode]
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  role="tab"
-                  className={`rb-btn rb-view${p.view === mode ? ' active' : ''}`}
-                  aria-selected={p.view === mode}
-                  data-tip={t(VIEW_LABEL[mode])}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => p.onView(mode)}
-                >
-                  <Icon size={ICON} />
-                  <span>{t(VIEW_LABEL[mode])}</span>
+                <input
+                  type="url"
+                  autoFocus
+                  placeholder="https://"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                />
+                <button type="submit" className="rb-url-submit" disabled={!imageUrl.trim()}>
+                  {t('insertConfirm')}
                 </button>
-              )
-            })}
+              </form>
+            )}
           </div>
-        </div>
+          <div className="rb-menu-wrap" ref={tableRef}>
+            <button
+              type="button"
+              className={`rb-btn rb-view${insertPop === 'table' ? ' active' : ''}`}
+              data-tip={t('insertTable')}
+              aria-haspopup="dialog"
+              aria-expanded={insertPop === 'table'}
+              disabled={insertOff}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => toggleInsert('table')}
+            >
+              <IconTable size={ICON} />
+              <span>{t('insertTable')}</span>
+              <IconChevronDown size={14} />
+            </button>
+            {insertPop === 'table' && (
+              <div
+                className="table-picker"
+                role="dialog"
+                aria-label={t('insertTablePickSize')}
+                onMouseLeave={() => setGrid({ r: 0, c: 0 })}
+              >
+                <div className="table-picker-title">
+                  {grid.r > 0
+                    ? t('insertTableSize', { r: grid.r, c: grid.c })
+                    : t('insertTablePickSize')}
+                </div>
+                <div className="table-picker-grid">
+                  {Array.from({ length: TABLE_PICKER_ROWS }, (_, ri) =>
+                    Array.from({ length: TABLE_PICKER_COLS }, (_, ci) => (
+                      <button
+                        key={`${ri}-${ci}`}
+                        type="button"
+                        className={`table-cell${ri < grid.r && ci < grid.c ? ' hot' : ''}`}
+                        aria-label={t('insertTableSize', { r: ri + 1, c: ci + 1 })}
+                        onMouseEnter={() => setGrid({ r: ri + 1, c: ci + 1 })}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => insert('table', { rows: ri + 1, cols: ci + 1 })}
+                      />
+                    )),
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="rb-menu-wrap" ref={moreRef}>
+            <button
+              type="button"
+              className={`rb-btn rb-view${insertPop === 'more' ? ' active' : ''}`}
+              data-tip={t('insertMore')}
+              aria-haspopup="menu"
+              aria-expanded={insertPop === 'more'}
+              disabled={insertOff}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => toggleInsert('more')}
+            >
+              <IconPlus size={ICON} />
+              <span>{t('insertMore')}</span>
+              <IconChevronDown size={14} />
+            </button>
+            {insertPop === 'more' && (
+              <div className="rb-menu" role="menu">
+                {MORE_KINDS.map(({ kind, Icon }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    role="menuitem"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => insert(kind)}
+                  >
+                    <Icon size={16} />
+                    {t(INSERT_LABEL[kind])}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </RibbonFoldGroup>
+
+        <div className="rb-sep" />
+
+        <RibbonFoldGroup
+          label={t('ribbonGroupView')}
+          icon={<IconPreview size={24} />}
+          caret={<IconChevronDown size={10} />}
+          priority={3}
+          itemsRole="tablist"
+        >
+          {VIEW_MODES.map((mode) => {
+            const Icon = VIEW_ICON[mode]
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                className={`rb-btn rb-view${p.view === mode ? ' active' : ''}`}
+                aria-selected={p.view === mode}
+                data-tip={t(VIEW_LABEL[mode])}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => p.onView(mode)}
+              >
+                <Icon size={ICON} />
+                <span>{t(VIEW_LABEL[mode])}</span>
+              </button>
+            )
+          })}
+        </RibbonFoldGroup>
 
         <div className="rb-sep" />
 
@@ -575,6 +499,98 @@ export function Ribbon(p: Props) {
             </div>
           </div>
         </div>
+
+        {/* Genspark AI + one-click AI tools at the right edge (Microsoft 365's Copilot slot);
+            folds into one "AI Tools" dropdown when the window is narrow */}
+        <RibbonFoldGroup
+          label={t('aiToolsGroup')}
+          icon={<GensparkMark size={26} />}
+          caret={<IconChevronDown size={10} />}
+          priority={1}
+          className="rb-group-end"
+        >
+          <button
+            type="button"
+            className={`rb-big ai-entry${p.aiOpen ? ' active' : ''}`}
+            data-tip={t('aiOpenAssistant')}
+            aria-pressed={p.aiOpen}
+            disabled={off}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={p.onToggleAi}
+          >
+            <span className="rb-big-icon">
+              <GensparkMark size={26} />
+            </span>
+            <span>Genspark AI</span>
+          </button>
+          <button
+            type="button"
+            className="rb-big ai-entry"
+            data-tip={t('aiRestyleBtn')}
+            disabled={off}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => p.onAiPreset(t('aiRestylePrompt'))}
+          >
+            <span className="rb-big-icon">
+              <span className="ai-feature-icon" aria-hidden="true">
+                <IconWand size={24} />
+              </span>
+            </span>
+            <span>{t('aiRestyleBtn')}</span>
+          </button>
+          <div className="rb-menu-wrap" ref={themeRef}>
+            <button
+              type="button"
+              className={`rb-big ai-entry${themeOpen ? ' active' : ''}`}
+              data-tip={t('aiThemeBtn')}
+              aria-haspopup="menu"
+              aria-expanded={themeOpen}
+              disabled={off}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setThemeOpen((v) => !v)}
+            >
+              <span className="rb-big-icon">
+                <span className="ai-feature-icon" aria-hidden="true">
+                  <IconPalette size={24} />
+                </span>
+              </span>
+              <span>{t('aiThemeBtn')}</span>
+            </button>
+            {themeOpen && (
+              <div className="rb-menu" role="menu">
+                {THEME_DIRECTIONS.map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="menuitem"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setThemeOpen(false)
+                      p.onAiPreset(t('aiThemePrompt', { direction: t(key) }))
+                    }}
+                  >
+                    {t(key)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="rb-big ai-entry"
+            data-tip={t('aiSummarizeBtn')}
+            disabled={off}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => p.onAiPreset(t('aiSummarizePrompt'))}
+          >
+            <span className="rb-big-icon">
+              <span className="ai-feature-icon" aria-hidden="true">
+                <IconSummarize size={24} />
+              </span>
+            </span>
+            <span>{t('aiSummarizeBtn')}</span>
+          </button>
+        </RibbonFoldGroup>
       </div>
       <RibbonCollapseButton
         state={collapse}

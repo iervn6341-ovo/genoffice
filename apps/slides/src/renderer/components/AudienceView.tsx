@@ -10,13 +10,15 @@
  * Navigation input (clicks/→ etc.) is sent back for presenter arbitration (audienceNav); Esc ends
  * the whole show.
  */
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { RenderFill, RenderNode, RenderSlide } from '@genoffice/pptx-render'
 import type { AnimationItem, ShapeKey, ShowSyncState, TransitionKind } from '../../shared/ipc'
 import { AnimatedSlideStage, useAnimPlayer } from './AnimatedSlide'
 import { useI18n } from '../i18n/locale'
 import { MorphStage } from './MorphStage'
-import { InkLayer, type InkStroke } from './ShowInk'
+import { applyInkEvent, DEFAULT_PEN_COLOR, InkBoard, InkLayer, useInkPointer } from './ShowInk'
+import { CameraBubble } from './ShowCamera'
+import { useShowKeys } from '../use-show-keys'
 
 const ANIMATED = ['fade', 'push', 'wipe', 'split', 'circle'] as const
 
@@ -86,8 +88,8 @@ export function AudienceView() {
     nonce: 0,
   })
   const [morph, setMorph] = useState<{ fromIdx: number; toIdx: number; nonce: number } | null>(null)
-  const [strokes, setStrokes] = useState<InkStroke[]>([])
-  const [laser, setLaser] = useState<{ x: number; y: number } | null>(null)
+  // Ink is applied straight to the board: the mirrored laser must not re-render the slide
+  const board = useMemo(() => new InkBoard(), [])
 
   // Document load: session already shared; retry covers the occasional timing where the window beats the sharing
   useEffect(() => {
@@ -138,22 +140,7 @@ export function AudienceView() {
 
   useEffect(() => {
     const offSync = window.slidesApi.onShowSync(setSync)
-    const offInk = window.slidesApi.onShowInk((ev) => {
-      if (ev.type === 'clear') {
-        setStrokes([])
-        setLaser(null)
-      } else if (ev.type === 'laser') {
-        setLaser(ev.x < 0 ? null : { x: ev.x, y: ev.y })
-      } else if (ev.type === 'stroke-start') {
-        setStrokes((ss) => [...ss, { color: ev.color, points: [ev.x, ev.y] }])
-      } else if (ev.type === 'stroke-move') {
-        setStrokes((ss) => {
-          const last = ss[ss.length - 1]
-          if (!last) return ss
-          return [...ss.slice(0, -1), { ...last, points: [...last.points, ev.x, ev.y] }]
-        })
-      }
-    })
+    const offInk = window.slidesApi.onShowInk((ev) => applyInkEvent(board, ev))
     // When mounted after the presenter's first broadcast, snapshot the current state
     void window.slidesApi.audienceReady().then((s) => {
       if (s) setSync((prev) => prev ?? s)
@@ -162,7 +149,7 @@ export function AudienceView() {
       offSync()
       offInk()
     }
-  }, [])
+  }, [board])
 
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight })
@@ -171,31 +158,21 @@ export function AudienceView() {
   }, [])
 
   // Navigation input sent back to the presenter (this side doesn't change state); Esc ends the whole show
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        window.slidesApi.audienceNav('exit')
-      } else if (
-        e.key === 'ArrowRight' ||
-        e.key === 'ArrowDown' ||
-        e.key === ' ' ||
-        e.key === 'Enter' ||
-        e.key === 'PageDown'
-      ) {
-        e.preventDefault()
-        window.slidesApi.audienceNav('next')
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
-        e.preventDefault()
-        window.slidesApi.audienceNav('prev')
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+  useShowKeys({
+    onCommand: (command) => window.slidesApi.audienceNav(command),
+    onGoto: (n) => window.slidesApi.audienceNav(`goto:${n}`),
+  })
 
   const slide = sync && slides ? slides[sync.idx] : null
   const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960)
+
+  // The presenter's pointer tool works with the mouse on this screen too (PowerPoint): the
+  // laser or ink shows here at once and mirrors back to presenter view
+  const tool = sync?.tool ?? 'none'
+  const stageRef = useRef<HTMLDivElement>(null)
+  const ink = useInkPointer(board, tool, sync?.inkColor ?? DEFAULT_PEN_COLOR, stageRef, (ev) =>
+    window.slidesApi.audienceInk(ev),
+  )
 
   // Apply synced state: animation cursor seek alignment; play the transition effect on page turns (forward only)
   const shownRef = useRef(-1)
@@ -223,8 +200,7 @@ export function AudienceView() {
         setMorph(null)
         setAnim((a) => ({ kind, nonce: a.nonce + 1 }))
       }
-      setStrokes([])
-      setLaser(null)
+      board.clear()
     }
     // player.seek has a stable reference
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -239,8 +215,10 @@ export function AudienceView() {
 
   return (
     <div
-      className="slideshow"
-      onClick={() => window.slidesApi.audienceNav('next')}
+      className={`slideshow${tool !== 'none' ? ` ss-tool-${tool}` : ''}`}
+      onClick={() => {
+        if (tool === 'none') window.slidesApi.audienceNav('next')
+      }}
       onContextMenu={(e) => {
         e.preventDefault()
         window.slidesApi.audienceNav('prev')
@@ -249,7 +227,7 @@ export function AudienceView() {
       {sync.ended ? (
         <div className="ss-end">{t('paneShowEnded')}</div>
       ) : (
-        <div className="ss-stagebox" style={{ width: fitW, height: fitH }}>
+        <div ref={stageRef} className="ss-stagebox" style={{ width: fitW, height: fitH }} {...ink}>
           {morph && slides![morph.fromIdx] && slides![morph.toIdx] ? (
             <div key={`morph-${morph.nonce}`} className="ss-frame">
               <MorphStage
@@ -267,18 +245,32 @@ export function AudienceView() {
               key={anim.nonce}
               className={`ss-frame${anim.kind !== 'none' ? ` ss-anim-${anim.kind}` : ''}`}
             >
-              <AnimatedSlideStage
-                slide={slide}
-                images={images}
-                width={fitW}
-                states={player.states}
-              />
+              <div
+                className="show-zoom"
+                style={
+                  sync.zoom
+                    ? {
+                        transform: 'scale(2)',
+                        transformOrigin: `${sync.zoom.x * 100}% ${sync.zoom.y * 100}%`,
+                      }
+                    : undefined
+                }
+              >
+                <AnimatedSlideStage
+                  slide={slide}
+                  images={images}
+                  width={fitW}
+                  states={player.states}
+                />
+              </div>
             </div>
           )}
-          <InkLayer strokes={strokes} laser={laser} width={fitW} height={fitH} />
+          <CameraBubble on={!!sync.camera} width={fitW} />
+          <InkLayer board={board} width={fitW} height={fitH} />
         </div>
       )}
       {sync.black && !sync.ended && <div className="ss-black" />}
+      {sync.white && !sync.black && !sync.ended && <div className="ss-white" />}
     </div>
   )
 }

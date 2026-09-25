@@ -53,6 +53,7 @@ export const he = {
   ribbonPin: 'הצמד את רצועת הכלים',
   ribbonExpand: 'הרחב את רצועת הכלים',
   ribbonGroupInsert: 'הוספה',
+  ribbonGroupView: 'תצוגה',
   editText: 'עריכת טקסט',
   fontSize: 'גודל גופן',
   fontWeight: 'משקל',

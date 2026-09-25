@@ -8,16 +8,20 @@ import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/color-picker.css'
 import '@genoffice/ui/dropdown.css'
 import '@genoffice/ui/ribbon-collapse.css'
+import '@genoffice/ui/ribbon-fit.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/ai-panel-prefs.css'
 import '@genoffice/ui/ai-scope-quote.css'
 import '@genoffice/ui/image-viewer.css'
 import './styles.css'
+// compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
+import '@genoffice/ui/ribbon-density.css'
 import './fonts/fonts.css'
-import { applyAiPanelPrefs, installScreenTips } from '@genoffice/ui'
+import { applyAiPanelPrefs, installMacLineBoundaryKeys, installScreenTips } from '@genoffice/ui'
 import { setAltChunkHtmlConverter } from '@genoffice/docx-engine'
 
 installScreenTips()
+installMacLineBoundaryKeys()
 if (window.desktop?.convertAltChunkHtml) {
   setAltChunkHtmlConverter((html) => window.desktop.convertAltChunkHtml(html))
 }

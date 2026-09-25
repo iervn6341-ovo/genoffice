@@ -67,7 +67,7 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
         await sheet.getRange(0, 0, 1, 3).setValues([[10, 'hi', '=A1&"-x"']])
         sheet.getRange(0, 0, 1, 3).activate()
       })
-      await sheets.keyboard.press('Control+c')
+      await sheets.keyboard.press('ControlOrMeta+c')
       await sheets.waitForTimeout(300)
 
       // tile-paste into A2:C3 — row 3's formula cell becomes an si follower
@@ -88,7 +88,7 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
         }
         debug.univerAPI.getActiveWorkbook().getActiveSheet().getRange(1, 0, 2, 3).activate()
       })
-      await sheets.keyboard.press('Control+v')
+      await sheets.keyboard.press('ControlOrMeta+v')
       await sheets.waitForTimeout(800)
 
       await app.evaluate(({ webContents }) => {
@@ -106,8 +106,10 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
         // both pasted repetitions keep values and a row-shifted formula
         expect(xml).toContain('<c r="A2" s="1"><v>10</v></c>')
         expect(xml).toContain('<c r="A3" s="1"><v>10</v></c>')
-        expect(xml).toMatch(/<c r="C2" s="1"><f>A2&amp;"-x"<\/f><\/c>/)
-        expect(xml).toMatch(/<c r="C3" s="1"><f>A3&amp;"-x"<\/f><\/c>/)
+        // …and, since C3 (cloud QA), the formula's cached text result, so readers
+        // without a formula engine see "10-x" instead of an empty cell
+        expect(xml).toMatch(/<c r="C2" s="1" t="str"><f>A2&amp;"-x"<\/f><v>10-x<\/v><\/c>/)
+        expect(xml).toMatch(/<c r="C3" s="1" t="str"><f>A3&amp;"-x"<\/f><v>10-x<\/v><\/c>/)
       }).toPass({ timeout: 15_000 })
     } finally {
       await closeAndSaveVideo(launched, 'sheets-paste-shared-formula-save')

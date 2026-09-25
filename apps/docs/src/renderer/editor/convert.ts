@@ -2113,6 +2113,8 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
         if (align) image.align = align
         const wrap = node.attrs.imageWrap as ImageWrap | null
         if (wrap) image.wrap = wrap
+        const dragged = imagePosOffset(node)
+        if (wrap && dragged) image.posOffsetEmu = dragged
         if (node.attrs.imageZOrder != null) image.zOrder = Number(node.attrs.imageZOrder)
         if (node.attrs.imageRotDeg) image.rotDeg = Number(node.attrs.imageRotDeg)
         if (node.attrs.imageFlipH) image.flipH = true
@@ -2282,6 +2284,27 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
 }
 
 /** rebuild a pasted image copy from its preview bytes; null when not materializable */
+/**
+ * Where a floating picture was dragged to (column / paragraph relative EMU, the same frame
+ * the parsed anchors use). Without it a new picture saved with its wrap mode's default
+ * alignment and jumped back to the margin on reopen.
+ */
+function imagePosOffset(
+  node: PmNode,
+): { x: number; y: number; relativeTo?: 'page' | 'margin' } | undefined {
+  const x = node.attrs?.imageOffsetXEmu
+  const y = node.attrs?.imageOffsetYEmu
+  if (x == null || y == null) return undefined
+  // a page/margin-anchored float (insert_image float.anchor, imageRelV) keeps its
+  // frame; without it the offsets were rewritten as column/paragraph-relative
+  const rel = node.attrs?.imageRelV
+  return {
+    x: Number(x),
+    y: Number(y),
+    ...(rel === 'page' || rel === 'margin' ? { relativeTo: rel } : {}),
+  }
+}
+
 function imageFromProtectedAttrs(node: PmNode): NewImage | null {
   if (node.attrs?.blockType !== 'image') return null
   const src = String(node.attrs?.imageDataUrl ?? '')
@@ -2297,6 +2320,8 @@ function imageFromProtectedAttrs(node: PmNode): NewImage | null {
   if (align) image.align = align
   const wrap = node.attrs?.imageWrap as ImageWrap | null
   if (wrap) image.wrap = wrap
+  const dragged = imagePosOffset(node)
+  if (wrap && dragged) image.posOffsetEmu = dragged
   if (node.attrs?.imageZOrder != null) image.zOrder = Number(node.attrs.imageZOrder)
   if (node.attrs?.imageRotDeg) image.rotDeg = Number(node.attrs.imageRotDeg)
   if (node.attrs?.imageFlipH) image.flipH = true
@@ -2662,6 +2687,7 @@ function formulaTokensPatch(node: PmNode, original: Block): string[] | null {
 function applyRawPPr(generated: GeneratedBlock, original: Block): void {
   const structureSame =
     original.type === generated.type &&
+    (original.level ?? null) === (generated.level ?? null) &&
     (original.styleId ?? null) === (generated.styleId ?? null) &&
     JSON.stringify(original.list ?? null) === JSON.stringify(generated.list ?? null)
   if (original.rawPPr === undefined) {
@@ -2962,6 +2988,7 @@ function symRuns(run: Run): Run[] {
 
 function runFromMarks(text: string, marks: PmMark[]): Run {
   const run: Run = { text }
+  const offs = { bold: false, italic: false }
   for (const mark of marks) {
     if (mark.type === 'bold') run.bold = true
     else if (mark.type === 'italic') run.italic = true
@@ -3052,6 +3079,10 @@ function runFromMarks(text: string, marks: PmMark[]): Run {
         run.themeRFonts = JSON.parse(String(mark.attrs.themeRFonts)) as Run['themeRFonts']
       }
       if (mark.attrs?.themeColor) run.themeColor = String(mark.attrs.themeColor)
+      // an explicit off-switch (w:b/w:i val=0) survives as a model false so the
+      // serializer can write it for runs that never had raw rPr
+      if (mark.attrs?.boldOff === true) offs.bold = true
+      if (mark.attrs?.italicOff === true) offs.italic = true
     } else if (mark.type === 'rprChange') {
       run.rPrChange = {
         author: String(mark.attrs?.author ?? ''),
@@ -3061,6 +3092,8 @@ function runFromMarks(text: string, marks: PmMark[]): Run {
       }
     }
   }
+  if (offs.bold && !run.bold) run.bold = false
+  if (offs.italic && !run.italic) run.italic = false
   return run
 }
 
@@ -3097,8 +3130,8 @@ function runStyleKey(run: Run): string {
   return JSON.stringify([
     run.rawRPr ?? null,
     run.styleId ?? null,
-    !!run.bold,
-    !!run.italic,
+    run.bold ?? null,
+    run.italic ?? null,
     !!run.underline,
     !!run.strike,
     run.color ?? null,
@@ -3150,8 +3183,8 @@ function normalizedRuns(runs: Run[]): unknown[] {
           r.text,
           r.rawRPr ?? null,
           r.styleId ?? null,
-          !!r.bold,
-          !!r.italic,
+          r.bold ?? null,
+          r.italic ?? null,
           !!r.underline,
           !!r.strike,
           r.color ?? null,

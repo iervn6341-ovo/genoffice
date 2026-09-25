@@ -2052,6 +2052,11 @@ th.cell-rev-del {
   min-width: 259px;
 }
 
+/* Labels (ribbon-fit) must not squeeze the gallery below four cards + the expander */
+.ribbon-body:not([data-labels='0']) .ribbon-group-styles {
+  min-width: 335px;
+}
+
 .style-gallery-wrap {
   gap: 4px;
   min-width: 0;
@@ -11176,4 +11181,15 @@ tr > .page-gap-cut {
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
+}
+
+/* Folded Styles group (RibbonFoldGroup): the gallery's minimum width belongs to the open gallery,
+   not to the single "Styles" dropdown button */
+.ribbon-group-styles.rb-fold-group[data-folded] {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.rb-styles-glyph {
+  font-size: 20px;
+  line-height: 1;
 }

@@ -3,6 +3,8 @@
 /// `<conditionalFormatting>` section from it (mirroring the filter recipe).
 /// Highlight styles intern as new dxf entries in the stylesheet.
 
+import { BUILTIN_NUMBER_FORMATS } from './xlsx-styles'
+
 export class CfEditError extends Error {}
 
 export interface CfCellArea {
@@ -101,7 +103,7 @@ export function applyCfRules(
   const xml = worksheetXml.replace(
     /<conditionalFormatting\b[^>]*>[\s\S]*?<\/conditionalFormatting>|<conditionalFormatting\b[^>]*\/>/g,
     (block) => {
-      if (!/<extLst\b/.test(block)) return ''
+      if (!/<extLst\b/.test(block)) return keepUnloadableRules(block)
       const sqref = /\bsqref="([^"]*)"/.exec(block)?.[1]
       if (sqref === undefined) throw new CfEditError(linkedMessage(block))
       preserved.push({ sqref, text: block, matched: false })
@@ -154,6 +156,24 @@ export function applyCfRules(
     return xml.slice(0, end) + body + xml.slice(end)
   }
   return insertBeforeTail(xml, body)
+}
+
+/// Rule types the editor cannot load (renderer buildConditionalRule): they never
+/// reach the rule set the save rebuilds from, so a rewrite must carry them over
+/// verbatim — Excel's "dates occurring" / "above average" rules were deleted
+/// whenever any other rule on the sheet was edited.
+const UNLOADABLE_CF_TYPES = new Set(['timePeriod', 'aboveAverage'])
+
+const CF_RULE_RE = /<cfRule\b[^>]*?\/>|<cfRule\b[^>]*>[\s\S]*?<\/cfRule>/g
+
+/** A base CF block reduced to its unloadable rules (their priorities kept); '' when none */
+function keepUnloadableRules(block: string): string {
+  const kept = [...block.matchAll(CF_RULE_RE)]
+    .map((match) => match[0])
+    .filter((rule) => UNLOADABLE_CF_TYPES.has(/\btype="([^"]*)"/.exec(rule)?.[1] ?? ''))
+  if (kept.length === 0) return ''
+  const open = /<conditionalFormatting\b[^>]*>/.exec(block)?.[0]
+  return open === undefined ? '' : `${open}${kept.join('')}</conditionalFormatting>`
 }
 
 const CF_BLOCK_RE =
@@ -462,7 +482,60 @@ export function buildDxfXml(style: unknown): string {
     fillColor === undefined
       ? ''
       : `<fill><patternFill><bgColor rgb="${toArgb(fillColor)}"/></patternFill></fill>`
-  return `<dxf>${font}${fill}</dxf>`
+  // CT_Dxf order: font, numFmt, fill, alignment, protection, border. Rules loaded
+  // with a number format or borders keep them — dropping these here stripped them
+  // from every untouched rule the next time any rule on the sheet was edited.
+  return `<dxf>${font}${dxfNumFmtXml(s.n)}${fill}${dxfBorderXml(s.bd)}</dxf>`
+}
+
+function dxfNumFmtXml(value: unknown): string {
+  const pattern =
+    typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>).pattern
+      : undefined
+  if (typeof pattern !== 'string' || pattern === '') return ''
+  // A dxf carries its format code inline; the id only has to name it consistently
+  let id = BUILTIN_NUMBER_FORMATS.get(pattern)
+  if (id === undefined) {
+    let hash = 0
+    for (const character of pattern) hash = (hash * 31 + character.charCodeAt(0)) % 50_000
+    id = 164 + hash
+  }
+  return `<numFmt numFmtId="${id}" formatCode="${escapeXmlAttribute(pattern)}"/>`
+}
+
+/// Univer BorderStyleTypes (numeric enum) → SpreadsheetML border style names
+const BORDER_STYLE_NAMES = [
+  undefined,
+  'thin',
+  'hair',
+  'dotted',
+  'dashed',
+  'dashDot',
+  'dashDotDot',
+  'double',
+  'medium',
+  'mediumDashed',
+  'mediumDashDot',
+  'mediumDashDotDot',
+  'slantDashDot',
+  'thick',
+] as const
+
+function dxfBorderXml(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return ''
+  const edges = value as Record<string, unknown>
+  const edge = (key: string, tag: string): string => {
+    const border = edges[key]
+    if (typeof border !== 'object' || border === null) return ''
+    const record = border as Record<string, unknown>
+    const style = BORDER_STYLE_NAMES[Number(record.s)]
+    if (style === undefined) return ''
+    const color = rgbOf(record.cl)
+    return `<${tag} style="${style}">${color ? `<color rgb="${toArgb(color)}"/>` : ''}</${tag}>`
+  }
+  const inner = edge('l', 'left') + edge('r', 'right') + edge('t', 'top') + edge('b', 'bottom')
+  return inner === '' ? '' : `<border>${inner}</border>`
 }
 
 function isLine(value: unknown): boolean {

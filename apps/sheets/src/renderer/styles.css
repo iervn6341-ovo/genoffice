@@ -5585,3 +5585,18 @@ textarea:focus {
 .menu-select-drop .menu-option-icon:hover {
   background: transparent;
 }
+
+/* Insert / Delete Cells dialog (⌃⇧= / ⌃-) */
+.insert-cells-dialog fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.insert-cells-dialog .dialog-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

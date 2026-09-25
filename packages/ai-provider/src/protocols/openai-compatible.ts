@@ -4,6 +4,7 @@ import { httpBodyDetail } from '../http-error'
 import { gensparkAttributionHeaders, opencodeSessionHeaders } from '../providers'
 import { modelEchoesReasoning } from '../registry'
 import type { AiChatResponse, AiProviderConfig } from '../types'
+import { AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS } from '../local'
 import { createStreamWatchdog, type StreamWatchdog } from '../watchdog'
 import {
   jsonBodyInsteadOfSse,
@@ -116,6 +117,8 @@ export interface OpenAiRequestOptions {
   useMaxCompletionTokens?: boolean | undefined
   /** vendor-specific fields merged into the request body (e.g. DeepSeek's `thinking`) */
   bodyExtras?: Record<string, unknown> | undefined
+  /** local / LAN server: wait far longer for the first byte and between chunks than a hosted API */
+  patientTimeouts?: boolean | undefined
 }
 
 export async function streamOpenAiCompatible(
@@ -128,7 +131,9 @@ export async function streamOpenAiCompatible(
   cb: StreamCallbacks,
   options: OpenAiRequestOptions = {},
 ): Promise<void> {
-  const wd = createStreamWatchdog(cb.signal)
+  const wd = options.patientTimeouts
+    ? createStreamWatchdog(cb.signal, AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS)
+    : createStreamWatchdog(cb.signal)
   return wd.guard(() =>
     openAiCompatibleTurn(baseUrl, config, system, messages, tools, maxTokens, cb, wd, options),
   )

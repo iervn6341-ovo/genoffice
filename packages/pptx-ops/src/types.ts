@@ -15,6 +15,10 @@ export interface EditRun {
   strike?: boolean
   /** Super/subscript baseline % (positive = superscript; 0 = none, used to disable explicitly) */
   baseline?: number
+  /** Character spacing (pt) set during this edit session; absent = keep the original */
+  letterSpacing?: number
+  /** Text highlight #RRGGBB set during this edit session; null = removed; absent = keep */
+  highlight?: string | null
   /** Text outline (for WordArt), width in EMU */
   outline?: { color: string; widthEmu: number }
   /** Dynamic field (slidenum / datetime1…); text is the cached value */
@@ -43,6 +47,10 @@ export interface EditParagraph {
   startAt?: number
   /** Picture bullet source (with bullet: 'blip'); the op layer lands it as a media part */
   bulletImage?: { base64: string; ext: string }
+  /** Bullet hanging indent (EMU) / size (% of text) / color (#RRGGBB) chosen during this edit session */
+  bulletHangEmu?: number
+  bulletSizePct?: number
+  bulletColor?: string
   lineSpacingPct?: number
   spaceBeforePt?: number
   spaceAfterPt?: number

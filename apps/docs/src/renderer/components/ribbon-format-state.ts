@@ -1,9 +1,11 @@
 import type { Editor } from '@tiptap/core'
 import type { Node as PmNode } from '@tiptap/pm/model'
+import { NodeSelection } from '@tiptap/pm/state'
 import { isInTable, mergeCells, selectedRect, splitCell } from '@tiptap/pm/tables'
 import type { DocDefaults, Run, StyleInfo, TextboxDisplay } from '@genoffice/docx-engine'
 import { getActiveSubEditor } from '../editor/active-editor'
 import { effectiveSizeHalfPoints } from '../editor/text-style-resolve'
+import { isFlagActive } from '../editor/effective-format'
 import { textHasCjk } from '../line-metrics'
 import { cachedByDoc } from '../doc-cache'
 
@@ -202,7 +204,11 @@ export function computeFormatState(
   const sub = getActiveSubEditor()
   const ed = sub ?? editor
 
-  const inTable = !sub && isInTable(editor.state)
+  // a whole table picked with its move handle is a NodeSelection, not a caret in a cell —
+  // Word still shows Table Design / Table Layout for it
+  const sel = editor.state.selection
+  const tableSelected = sel instanceof NodeSelection && sel.node.type.spec.tableRole === 'table'
+  const inTable = !sub && (isInTable(editor.state) || tableSelected)
   let cellKey: number | null = null
   let cellHeightCm: number | null = null
   let cellWidthCm: number | null = null
@@ -283,8 +289,9 @@ export function computeFormatState(
     cellHeightCm,
     cellWidthCm,
     cellVAlign,
-    bold: ed.isActive('bold'),
-    italic: ed.isActive('italic'),
+    // effective values: bold/italic inherited from the style lights the button (Word)
+    bold: isFlagActive(ed.state, 'bold', sub ? {} : { styles, docDefaults }),
+    italic: isFlagActive(ed.state, 'italic', sub ? {} : { styles, docDefaults }),
     underline: ed.isActive('underline'),
     strike: ed.isActive('strike'),
     vertAlign: str(textAttrs.vertAlign),

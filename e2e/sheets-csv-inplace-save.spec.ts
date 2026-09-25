@@ -76,4 +76,43 @@ test.describe('sheets: a CSV keeps its identity through Save', () => {
       await closeAndSaveVideo(launched, 'sheets-csv-inplace-save')
     }
   })
+
+  test('a ;-separated file with a sep= line is saved back in the same dialect', async () => {
+    const scratch = await mkdtemp(join(tmpdir(), 'genoffice-csv-dialect-e2e-'))
+    const csvSource = join(scratch, 'data.csv')
+    await writeFile(csvSource, 'sep=;\r\nname;note\r\nalpha;a,b\r\n')
+
+    const launched = await launchShell({
+      onboardingSeen: true,
+      videoDir: 'sheets-csv-inplace-save',
+      openFile: csvSource,
+    })
+    try {
+      const sheets = await waitForPageWithUrl(launched.app, '://sheets/')
+      await waitForWorkbook(sheets)
+      const a1 = await cellA1(sheets)
+      await sheets.mouse.click(a1.x, a1.y)
+      await expect(sheets.locator('[data-u-comp="defined-name"] input')).toHaveValue('A1')
+      await sheets.keyboard.type('Hello', { delay: 50 })
+      await sheets.keyboard.press('Enter')
+      await launched.app.evaluate(({ dialog }) => {
+        dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as never
+      })
+      await expect(async () => {
+        await launched.app.evaluate(({ webContents }) => {
+          const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('://sheets/'))
+          wc?.send('menu:action', 'save')
+        })
+        expect((await readFile(csvSource)).toString('utf8')).toContain('Hello')
+      }).toPass({ timeout: 30_000, intervals: [2_000] })
+
+      // Same delimiter and hint line, no BOM in front of it (Excel would show the
+      // hint as data); a comma inside a field needs no quotes under ";"
+      expect((await readFile(csvSource)).toString('utf8')).toBe(
+        'sep=;\r\nHello;note\r\nalpha;a,b\r\n',
+      )
+    } finally {
+      await closeAndSaveVideo(launched, 'sheets-csv-inplace-save')
+    }
+  })
 })

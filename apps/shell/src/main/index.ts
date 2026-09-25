@@ -318,6 +318,24 @@ if (headlessArgv.kind !== 'none') {
   app.dock?.hide()
 }
 
+/**
+ * e2e background mode (GENOFFICE_E2E_BACKGROUND=1, set by the Playwright helper): test
+ * windows open behind whatever the user is working in instead of taking the foreground —
+ * no Dock icon, windows shown inactive, focus requests ignored. The drivers deliver input
+ * through CDP with page-focus emulation, so the pages still receive their keys; only
+ * specs that assert real OS keyboard focus opt back into the foreground.
+ */
+const E2E_BACKGROUND = process.env.GENOFFICE_E2E_BACKGROUND === '1'
+if (E2E_BACKGROUND) {
+  BrowserWindow.prototype.show = function show(this: BrowserWindow): void {
+    this.showInactive()
+  }
+  BrowserWindow.prototype.focus = function focus(): void {}
+  BrowserWindow.prototype.moveTop = function moveTop(): void {}
+  app.focus = () => {}
+  app.dock?.hide()
+}
+
 // The product rename from "AI Office" to GenOffice changed the userData path; migrate old user data once
 if (app.isPackaged) {
   const oldDir = join(app.getPath('appData'), 'AI Office')
@@ -485,6 +503,7 @@ function currentAiPanelPrefs(): AiPanelPrefs {
     fontSize: saved.aiPanelFontSize,
     customFontSize: saved.aiPanelCustomFontSize,
     spellcheck: saved.aiPanelSpellcheck,
+    ribbonFold: saved.ribbonFold,
   })
   return cachedAiPanelPrefs
 }
@@ -2545,6 +2564,8 @@ function refreshTitleBarOverlay(): void {
 
 function createShellWindow(): void {
   const win = new BrowserWindow({
+    // background e2e: a window created visible activates the app — show it inactive below
+    ...(E2E_BACKGROUND ? { show: false } : {}),
     width: 1360,
     height: 900,
     minWidth: 720,
@@ -2570,6 +2591,7 @@ function createShellWindow(): void {
     },
   })
   shellWindow = win
+  if (E2E_BACKGROUND) win.showInactive()
   nativeTheme.on('updated', refreshTitleBarOverlay)
   win.once('closed', () => nativeTheme.off('updated', refreshTitleBarOverlay))
   // dragging the window by the tab strip's blank (draggable) area produces no
@@ -3517,6 +3539,7 @@ function registerHomeIpc(): void {
       fontSize: 'fontSize' in raw ? raw.fontSize : prev.fontSize,
       customFontSize: 'customFontSize' in raw ? raw.customFontSize : prev.customFontSize,
       spellcheck: 'spellcheck' in raw ? raw.spellcheck : prev.spellcheck,
+      ribbonFold: 'ribbonFold' in raw ? raw.ribbonFold : prev.ribbonFold,
     })
     if (sameAiPanelPrefs(next, prev)) return prev
     cachedAiPanelPrefs = next
@@ -3525,6 +3548,7 @@ function registerHomeIpc(): void {
       aiPanelFontSize: next.fontSize,
       aiPanelCustomFontSize: next.customFontSize,
       aiPanelSpellcheck: next.spellcheck,
+      ribbonFold: next.ribbonFold,
     })
     for (const wc of webContents.getAllWebContents()) wc.send('app:ai-panel-prefs-changed', next)
     return next
@@ -4804,6 +4828,8 @@ async function runHeadlessExportEntry(
 }
 
 app.whenReady().then(async () => {
+  // no activation at launch either (a Dock-less accessory app never takes the menu bar)
+  if (E2E_BACKGROUND && process.platform === 'darwin') app.setActivationPolicy('accessory')
   installRendererProtocol({
     docs: join(DOCS_OUT, 'renderer'),
     sheets: join(SHEETS_OUT, 'renderer'),

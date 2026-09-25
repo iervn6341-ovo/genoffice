@@ -154,6 +154,7 @@ export const es = {
   aiThemePlayful: 'Divertido',
   aiThemeDark: 'Oscuro',
   aiSummarizeBtn: 'Resumen IA',
+  aiToolsGroup: 'Herramientas de IA',
   aiSummarizePrompt: 'Resume el contenido principal y los puntos clave de este documento',
   aiAttachTitle: 'Adjuntar archivos locales (o arrástralos al panel)',
   aiRemoveAttachmentTitle: 'Quitar dato adjunto',

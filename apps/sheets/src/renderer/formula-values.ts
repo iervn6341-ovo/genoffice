@@ -228,3 +228,81 @@ function parseAddressParts(address: string): { row: number; column: number } | n
 export function isErrorResult(value: unknown): value is string {
   return typeof value === 'string' && EXCEL_ERROR_LITERALS.has(value)
 }
+
+/** the journal slice {@link journaledFormulaValues} reads */
+export interface JournaledFormulaCell {
+  readonly row: number
+  readonly column: number
+  readonly formula?: string | undefined
+}
+
+/**
+ * Cells per save whose results are read back for caching. Above this the file
+ * still saves (its <f> is intact and fullCalcOnLoad makes Excel recompute); only
+ * the cached values of the overflow are left out.
+ */
+export const JOURNALED_VALUE_LIMIT = 50_000
+
+/**
+ * Live results of formulas the USER typed this session (journaled formula
+ * cells). The overlay path skips them because it may hold the previous
+ * formula's result, and only MCP batches were ever verified, so a formula
+ * entered in the grid was saved as a bare <f> — Quick Look, pandas and mobile
+ * viewers showed an empty cell until Excel recalculated. The caller must have
+ * awaited the engine settling first; a cell whose live formula differs from
+ * the journaled one, or has no result yet, is left out rather than cached
+ * against the wrong result.
+ */
+export function journaledFormulaValues(
+  journal: ReadonlyMap<string, ReadonlyMap<string, JournaledFormulaCell>>,
+  read: (addresses: string[], sheetId: string) => Record<string, CellState>,
+  skipSheet: (sheetId: string) => boolean = () => false,
+  limit = JOURNALED_VALUE_LIMIT,
+): CachedFormulaValue[] {
+  const out: CachedFormulaValue[] = []
+  let budget = limit
+  for (const [sheetId, cells] of journal) {
+    if (budget <= 0) break
+    if (skipSheet(sheetId)) continue
+    const wanted = new Map<string, JournaledFormulaCell>()
+    for (const cell of cells.values()) {
+      if (cell.formula === undefined || budget <= 0) continue
+      wanted.set(a1Address(cell.row, cell.column), cell)
+      budget -= 1
+    }
+    if (wanted.size === 0) continue
+    let live: Record<string, CellState>
+    try {
+      live = read([...wanted.keys()], sheetId)
+    } catch {
+      continue
+    }
+    for (const [address, entry] of wanted) {
+      const cell = live[address]
+      if (!cell || cell.formula === undefined) continue
+      if (normalizeFormula(cell.formula) !== normalizeFormula(entry.formula!)) continue
+      const value = modelCellValue(cell)
+      if (value === null || value === '#ERROR!') continue
+      out.push({
+        sheetId,
+        row: entry.row,
+        column: entry.column,
+        value: isErrorResult(value) ? { error: value } : value,
+      })
+    }
+  }
+  return out
+}
+
+function normalizeFormula(formula: string): string {
+  return formula.trim().replace(/^=/, '')
+}
+
+/** zero-based row/column → `A1` */
+function a1Address(row: number, column: number): string {
+  let letters = ''
+  for (let n = column + 1; n > 0; n = Math.floor((n - 1) / 26)) {
+    letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters
+  }
+  return `${letters}${row + 1}`
+}

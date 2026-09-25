@@ -51,7 +51,10 @@ export async function buildSearchIndex(doc: PDFDocumentProxy): Promise<SearchInd
     for (const it of content.items as RawTextItem[]) {
       if (typeof it.str !== 'string') continue
       if (it.str.length > 0 && it.transform) {
-        const h = it.height || Math.hypot(it.transform[2] ?? 0, it.transform[3] ?? 0)
+        // The run's font size in page space is the text matrix's vertical axis (Tf × Tm × CTM);
+        // pdf.js' `height` is a glyph-box estimate that reads 12.2 for a 12pt run, and it
+        // becomes the size the edit bar shows — prefer the exact value
+        const h = Math.hypot(it.transform[2] ?? 0, it.transform[3] ?? 0) || it.height || 0
         // Rotation tilts the baseline (b ≠ 0). A non-zero c alone is horizontal
         // shear — synthetic italics — which stays horizontally set and must keep
         // participating in block grouping.

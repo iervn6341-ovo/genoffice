@@ -53,6 +53,7 @@ export const zhTW = {
   ribbonPin: '固定功能區',
   ribbonExpand: '展開功能區',
   ribbonGroupInsert: '插入',
+  ribbonGroupView: '檢視',
   editText: '編輯文字',
   fontSize: '字號',
   fontWeight: '字重',

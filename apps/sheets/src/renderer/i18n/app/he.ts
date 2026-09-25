@@ -696,6 +696,7 @@ export const he = {
   appGroupChartActions: 'פעולות תרשים',
   appRemoveFromSheet: 'הסר מהגיליון',
   appGroupAiAssistant: 'עוזר AI',
+  appGroupAiTools: 'כלי AI',
   appAiOpenPanelDetail: 'סרגל צד לשיחה',
   appGroupAiStarters: 'התחלה מהירה',
   appAiStarterDetail: 'שלח ללוח ה-AI',

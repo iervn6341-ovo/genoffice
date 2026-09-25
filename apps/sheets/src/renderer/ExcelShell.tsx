@@ -4,6 +4,8 @@ import { platformShortcuts } from '@genoffice/i18n'
 import {
   Dropdown,
   RibbonCollapseButton,
+  RibbonFoldGroup,
+  useRibbonLabelFit,
   SHAPE_GALLERY_GROUPS,
   ShapePreview,
   useDismissablePopover,
@@ -31,6 +33,14 @@ import {
 import { ColorDropdown } from './ColorDropdown'
 import { FormatCellsDialog } from './FormatCellsDialog'
 import { AllowEditRangesDialog } from './AllowEditRangesDialog'
+import {
+  defaultCellShift,
+  directCellShift,
+  type CellShiftMode,
+  type CellShiftOption,
+  type CellShiftRange,
+} from './cell-shift'
+import { InsertCellsDialog } from './InsertCellsDialog'
 import { GoToDialog } from './GoToDialog'
 import { COLOR_SCHEMES, FONT_SCHEMES, THEME_PRESETS } from './themes'
 import { useI18n, type StringKey } from './i18n/locale'
@@ -266,6 +276,12 @@ interface ExcelShellProps {
   readonly onRefreshPivot: () => string | null
   readonly onIsSelectionInPivot: () => boolean
   readonly onGetActiveCell: () => string
+  /// the selection and sheet size, for the Insert/Delete Cells dialog default
+  readonly onGetSelectionShape: () => {
+    readonly range: CellShiftRange
+    readonly rowCount: number
+    readonly columnCount: number
+  } | null
   /// Value of the selection's top-left cell, read when Format Cells opens
   /// (number-format preview).
   readonly onGetAnchorValue: () => number | string | null
@@ -342,6 +358,7 @@ export function ExcelShell({
   onRefreshPivot,
   onIsSelectionInPivot,
   onGetActiveCell,
+  onGetSelectionShape,
   onGetAnchorValue,
   activeCellA1,
   onGoToReference,
@@ -410,6 +427,12 @@ export function ExcelShell({
   const [showGoalSeek, setShowGoalSeek] = useState(false)
   const [showConsolidateDialog, setShowConsolidateDialog] = useState(false)
   const [showGoTo, setShowGoTo] = useState(false)
+  const [cellShiftDialog, setCellShiftDialog] = useState<{
+    mode: CellShiftMode
+    initial: CellShiftOption
+  } | null>(null)
+  const onGetSelectionShapeRef = useRef(onGetSelectionShape)
+  onGetSelectionShapeRef.current = onGetSelectionShape
   const [showHeaderFooter, setShowHeaderFooter] = useState(false)
   const [showAllowEditRanges, setShowAllowEditRanges] = useState(false)
   /// Non-null while the Chart Design → Add Chart Element text prompt is open.
@@ -436,6 +459,28 @@ export function ExcelShell({
         event.preventDefault()
         setShowGoTo(true)
       }
+      // Excel's Insert Cells (⌃⇧= / ⌘⇧+) and Delete Cells (⌃- / ⌘-): matched
+      // by key position (Shift+= types "+"). Whole rows/columns skip the dialog.
+      const insertCells =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.code === 'Equal'
+      const deleteCells =
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.code === 'Minus'
+      if ((insertCells || deleteCells) && canEditSheet(event)) {
+        const shape = onGetSelectionShapeRef.current()
+        if (shape) {
+          event.preventDefault()
+          const mode: CellShiftMode = insertCells ? 'insert' : 'delete'
+          const direct = directCellShift(shape.range, shape.rowCount, shape.columnCount)
+          if (direct) onCommand(`cells-shift:${mode}:${direct}`)
+          else setCellShiftDialog({ mode, initial: defaultCellShift(mode, shape.range) })
+        }
+      }
       // Excel's Show Formulas shortcut (⌘` / Ctrl+`).
       if ((event.metaKey || event.ctrlKey) && event.key === '`') {
         event.preventDefault()
@@ -450,12 +495,24 @@ export function ExcelShell({
           onCommand('strike')
         }
       }
-      // Excel's AutoSum (Alt+= / ⌥⌘= is reserved by macOS, Excel-mac uses ⇧⌘T;
-      // plain Alt+= covers win/linux and most mac keyboards).
-      if (event.altKey && !event.metaKey && !event.ctrlKey && event.key === '=') {
+      // Excel's AutoSum: Alt+= (matched by key position — on a Mac ⌥= types "≠", so
+      // event.key never reads "=") and Excel for Mac's own ⇧⌘T.
+      const altEquals = event.altKey && !event.metaKey && !event.ctrlKey && event.code === 'Equal'
+      const shiftCmdT =
+        event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey && event.code === 'KeyT'
+      if (altEquals || shiftCmdT) {
         if (canEditSheet(event)) {
           event.preventDefault()
           onCommand('autofn:SUM')
+        }
+      }
+      // Excel's number-format shortcuts (Control+Shift+ ~ ! @ # $ %, the same keys on
+      // Mac and Windows); matched by key position since Shift turns 4 into "$".
+      if (event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey) {
+        const pattern = NUMBER_FORMAT_SHORTCUTS[event.code]
+        if (pattern && canEditSheet(event)) {
+          event.preventDefault()
+          onCommand(`format:${pattern}`)
         }
       }
       // Excel's insert current date / time (Ctrl+; / Ctrl+Shift+;).
@@ -887,6 +944,18 @@ export function ExcelShell({
           onClose={() => setShowConsolidateDialog(false)}
         />
       )}
+      {cellShiftDialog && (
+        <InsertCellsDialog
+          mode={cellShiftDialog.mode}
+          initial={cellShiftDialog.initial}
+          onApply={(option) => onCommand(`cells-shift:${cellShiftDialog.mode}:${option}`)}
+          onClose={() => {
+            setCellShiftDialog(null)
+            // Excel returns focus to the grid: ⌘Z right after OK must undo the shift
+            onCommand('focus-grid')
+          }}
+        />
+      )}
       {showGoTo && (
         <GoToDialog
           names={onListDefinedNames()}
@@ -1273,6 +1342,9 @@ function Ribbon({
   readonly onRefreshPivot: () => string | null
   readonly onIsSelectionInPivot: () => boolean
 }): React.JSX.Element {
+  // labels and fold groups follow the width (every tab renders into the same ribbon node)
+  const ribbonBodyRef = useRef<HTMLDivElement | null>(null)
+  useRibbonLabelFit(ribbonBodyRef)
   const { t } = useI18n()
   const [fontColor, setFontColor] = useState('#C00000')
   const [fillColor, setFillColor] = useState('#FFF2CC')
@@ -1403,7 +1475,7 @@ function Ribbon({
       },
     ]
     return (
-      <div className="ribbon" data-ribbon-body="">
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupChartLayouts')}>
           {canEditChart ? (
             largeMenu(t('appAddChartElement'), '📊', t('appAddChartElementTitle'), elementOptions)
@@ -1522,7 +1594,7 @@ function Ribbon({
 
   if (activeTab === 'Insert') {
     return (
-      <div className="ribbon" data-ribbon-body="">
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupTables')}>
           <RibbonButton
             large
@@ -1793,7 +1865,7 @@ function Ribbon({
       narrow: t('appMarginNarrow'),
     } as const
     return (
-      <div className="ribbon" data-ribbon-body="">
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupThemes')}>
           {largeMenu(
             t('appGroupThemes'),
@@ -1976,7 +2048,7 @@ function Ribbon({
       />
     )
     return (
-      <div className="ribbon" data-ribbon-body="">
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupFunctionLibrary')}>
           <RibbonButton
             large
@@ -2137,7 +2209,7 @@ function Ribbon({
 
   if (activeTab === 'Data') {
     return (
-      <div className="ribbon" data-ribbon-body="">
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
         <RibbonGroup label={t('appPivotTable')}>
           <RibbonButton
             large
@@ -2294,7 +2366,7 @@ function Ribbon({
 
   if (activeTab === 'View') {
     return (
-      <div className="ribbon" data-ribbon-body="">
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupWorkbookViews')}>
           <RibbonButton
             large
@@ -2391,7 +2463,7 @@ function Ribbon({
 
   if (activeTab === 'Review') {
     return (
-      <div className="ribbon" data-ribbon-body="">
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupProofing')}>
           <RibbonButton
             large
@@ -2501,7 +2573,7 @@ function Ribbon({
   }
 
   const fontSizes = [9, 10, 11, 12, 14, 16, 18, 22, 26]
-  const echoFamily = selectionFormat?.fontFamily ?? 'Aptos'
+  const echoFamily = selectionFormat?.fontFamily ?? 'Calibri'
   const echoSize = selectionFormat?.fontSize ?? 11
   const fontGroups = fontFamilyGroups(systemFontFamilies, echoFamily)
   const familyOptions = [
@@ -2516,79 +2588,11 @@ function Ribbon({
     ? fontSizes
     : [...fontSizes, echoSize].sort((a, b) => a - b)
   return (
-    <div className="ribbon" data-ribbon-body="">
-      <RibbonGroup label={t('appGroupAiAssistant')}>
-        <button
-          className={`ribbon-tool as-button large ai-entry ${aiOpen ? 'active' : ''}`}
-          data-tip={t('aiOpenAssistant')}
-          onClick={onAiToggle}
-        >
-          <span className="tool-icon-row">
-            <GensparkMark size={26} />
-          </span>
-          <span>
-            <strong>Genspark AI</strong>
-          </span>
-        </button>
-        <button
-          className="ribbon-tool as-button large ai-entry"
-          disabled={!sheetHasContent}
-          data-tip={t('aiCheckBtn')}
-          onClick={() => onAiRun(t('aiCheckPrompt'))}
-        >
-          <span className="tool-icon-row">
-            <span className="ai-feature-icon" aria-hidden="true">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M11 3.25C15.2802 3.25 18.75 6.71979 18.75 11C18.75 15.2802 15.2802 18.75 11 18.75C6.71979 18.75 3.25 15.2802 3.25 11C3.25 6.71979 6.71979 3.25 11 3.25Z" />
-                <path
-                  d="M7.5 10.8235L9.64097 12.9645C9.93755 13.2611 10.4177 13.2634 10.7171 12.9697L14.7647 9"
-                  strokeLinecap="round"
-                />
-                <path d="M20 20.5L16.5 17" strokeLinecap="round" />
-              </svg>
-            </span>
-          </span>
-          <span>
-            <strong>{t('aiCheckBtn')}</strong>
-          </span>
-        </button>
-        <button
-          className="ribbon-tool as-button large ai-entry"
-          disabled={!sheetHasContent}
-          data-tip={t('aiAnalyzeBtn')}
-          onClick={() => onAiRun(t('aiAnalyzePrompt'))}
-        >
-          <span className="tool-icon-row">
-            <span className="ai-feature-icon" aria-hidden="true">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M3.88589 14.2073H8.48682" strokeLinecap="round" />
-                <path d="M3.88589 19.0112H8.48682" strokeLinecap="round" />
-                <path d="M3.88589 9.40369H11.692" strokeLinecap="round" />
-                <path d="M3.88589 4.59998H19.1645" strokeLinecap="round" />
-                <path d="M15.1995 10.5445C15.3784 10.0908 16.0206 10.0908 16.1996 10.5445L16.706 11.8286C17.0338 12.6598 17.6918 13.3178 18.523 13.6456L19.8071 14.1521C20.2608 14.331 20.2608 14.9732 19.8071 15.1522L18.523 15.6586C17.6918 15.9864 17.0338 16.6444 16.706 17.4756L16.1996 18.7597C16.0206 19.2134 15.3784 19.2134 15.1995 18.7597L14.693 17.4756C14.3652 16.6444 13.7072 15.9864 12.876 15.6586L11.592 15.1522C11.1382 14.9732 11.1382 14.331 11.592 14.1521L12.876 13.6456C13.7072 13.3178 14.3652 12.6598 14.693 11.8286L15.1995 10.5445Z" />
-              </svg>
-            </span>
-          </span>
-          <span>
-            <strong>{t('aiAnalyzeBtn')}</strong>
-          </span>
-        </button>
-      </RibbonGroup>
-      <RibbonGroup label={t('appGroupClipboard')}>
+    <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonGroup
+        label={t('appGroupClipboard')}
+        fold={{ priority: 7, icon: <ToolSymbol symbol="📋" /> }}
+      >
         <button
           className="ribbon-tool as-button large"
           data-tip={t('appPasteTitle')}
@@ -2784,7 +2788,10 @@ function Ribbon({
           </div>
         </div>
       </RibbonGroup>
-      <RibbonGroup label={t('appGroupAlignment')}>
+      <RibbonGroup
+        label={t('appGroupAlignment')}
+        fold={{ priority: 6, icon: <ToolSymbol symbol="≡" /> }}
+      >
         <div className="ribbon-rows">
           <div className="inline-tools alignment-tools">
             <button
@@ -2874,7 +2881,10 @@ function Ribbon({
           </div>
         </div>
       </RibbonGroup>
-      <RibbonGroup label={t('appGroupNumber')}>
+      <RibbonGroup
+        label={t('appGroupNumber')}
+        fold={{ priority: 5, icon: <ToolSymbol symbol="%" /> }}
+      >
         <div className="ribbon-rows">
           <NumberFormatSelect pattern={selectionFormat?.numberFormat ?? ''} onCommand={onCommand} />
           <div className="inline-tools">
@@ -2916,7 +2926,10 @@ function Ribbon({
           </div>
         </div>
       </RibbonGroup>
-      <RibbonGroup label={t('appGroupStyles')}>
+      <RibbonGroup
+        label={t('appGroupStyles')}
+        fold={{ priority: 4, icon: <ToolSymbol symbol="▤" /> }}
+      >
         <div className="styles-stack">
           <button
             className="styles-row as-button"
@@ -2973,7 +2986,10 @@ function Ribbon({
           </div>
         </div>
       </RibbonGroup>
-      <RibbonGroup label={t('appGroupCells')}>
+      <RibbonGroup
+        label={t('appGroupCells')}
+        fold={{ priority: 3, icon: <ToolSymbol symbol="▦" /> }}
+      >
         <div className="ribbon-rows">
           <button
             className="styles-row as-button"
@@ -3034,7 +3050,10 @@ function Ribbon({
           </div>
         </div>
       </RibbonGroup>
-      <RibbonGroup label={t('appGroupEditing')}>
+      <RibbonGroup
+        label={t('appGroupEditing')}
+        fold={{ priority: 2, icon: <ToolSymbol symbol="Σ" /> }}
+      >
         <div className="ribbon-rows">
           <div className="inline-tools">
             <MenuSelect
@@ -3125,8 +3144,95 @@ function Ribbon({
           </div>
         </div>
       </RibbonGroup>
+      {/* Genspark AI + one-click AI tools at the right edge (Microsoft 365's Copilot slot);
+          folds into one "AI Tools" dropdown first on a narrow window */}
+      <RibbonGroup
+        label={t('appGroupAiTools')}
+        className="rb-group-end"
+        fold={{ priority: 1, icon: <GensparkMark size={26} /> }}
+      >
+        <button
+          className={`ribbon-tool as-button large ai-entry ${aiOpen ? 'active' : ''}`}
+          data-tip={t('aiOpenAssistant')}
+          onClick={onAiToggle}
+        >
+          <span className="tool-icon-row">
+            <GensparkMark size={26} />
+          </span>
+          <span>
+            <strong>Genspark AI</strong>
+          </span>
+        </button>
+        <button
+          className="ribbon-tool as-button large ai-entry"
+          disabled={!sheetHasContent}
+          data-tip={t('aiCheckBtn')}
+          onClick={() => onAiRun(t('aiCheckPrompt'))}
+        >
+          <span className="tool-icon-row">
+            <span className="ai-feature-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M11 3.25C15.2802 3.25 18.75 6.71979 18.75 11C18.75 15.2802 15.2802 18.75 11 18.75C6.71979 18.75 3.25 15.2802 3.25 11C3.25 6.71979 6.71979 3.25 11 3.25Z" />
+                <path
+                  d="M7.5 10.8235L9.64097 12.9645C9.93755 13.2611 10.4177 13.2634 10.7171 12.9697L14.7647 9"
+                  strokeLinecap="round"
+                />
+                <path d="M20 20.5L16.5 17" strokeLinecap="round" />
+              </svg>
+            </span>
+          </span>
+          <span>
+            <strong>{t('aiCheckBtn')}</strong>
+          </span>
+        </button>
+        <button
+          className="ribbon-tool as-button large ai-entry"
+          disabled={!sheetHasContent}
+          data-tip={t('aiAnalyzeBtn')}
+          onClick={() => onAiRun(t('aiAnalyzePrompt'))}
+        >
+          <span className="tool-icon-row">
+            <span className="ai-feature-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3.88589 14.2073H8.48682" strokeLinecap="round" />
+                <path d="M3.88589 19.0112H8.48682" strokeLinecap="round" />
+                <path d="M3.88589 9.40369H11.692" strokeLinecap="round" />
+                <path d="M3.88589 4.59998H19.1645" strokeLinecap="round" />
+                <path d="M15.1995 10.5445C15.3784 10.0908 16.0206 10.0908 16.1996 10.5445L16.706 11.8286C17.0338 12.6598 17.6918 13.3178 18.523 13.6456L19.8071 14.1521C20.2608 14.331 20.2608 14.9732 19.8071 15.1522L18.523 15.6586C17.6918 15.9864 17.0338 16.6444 16.706 17.4756L16.1996 18.7597C16.0206 19.2134 15.3784 19.2134 15.1995 18.7597L14.693 17.4756C14.3652 16.6444 13.7072 15.9864 12.876 15.6586L11.592 15.1522C11.1382 14.9732 11.1382 14.331 11.592 14.1521L12.876 13.6456C13.7072 13.3178 14.3652 12.6598 14.693 11.8286L15.1995 10.5445Z" />
+              </svg>
+            </span>
+          </span>
+          <span>
+            <strong>{t('aiAnalyzeBtn')}</strong>
+          </span>
+        </button>
+      </RibbonGroup>
     </div>
   )
+}
+
+/** Control+Shift+key → Excel's quick number formats */
+const NUMBER_FORMAT_SHORTCUTS: Record<string, string> = {
+  Backquote: 'General', // ~
+  Digit1: '#,##0.00', // ! number, two decimals, thousands separator
+  Digit2: 'h:mm AM/PM', // @ time
+  Digit3: 'd-mmm-yy', // # date
+  Digit4: '$#,##0.00', // $ currency, as the ribbon's $ button
+  Digit5: '0%', // % percent
 }
 
 function autoSumOptions(t: (key: StringKey) => string): { value: string; label: string }[] {
@@ -3441,13 +3547,40 @@ function NumberFormatSelect({
 function RibbonGroup({
   label,
   children,
+  fold,
+  className,
 }: {
   readonly label: string
   readonly children: React.ReactNode
+  /// Folds into one dropdown button on a narrow window (lower priority folds first; see
+  /// RibbonFoldGroup) instead of the ribbon scrolling
+  readonly fold?: { readonly priority: number; readonly icon: React.ReactNode }
+  readonly className?: string
 }): React.JSX.Element {
+  if (fold) {
+    return (
+      <RibbonFoldGroup
+        as="section"
+        label={label}
+        icon={fold.icon}
+        priority={fold.priority}
+        className={className}
+        itemsClassName="ribbon-group-content"
+        buttonClassName="ribbon-tool as-button large"
+        iconClassName="tool-icon-row"
+        caret={
+          <span className="tool-caret" aria-hidden="true">
+            ▾
+          </span>
+        }
+      >
+        {children}
+      </RibbonFoldGroup>
+    )
+  }
   // No visible group captions — the label stays for assistive tech.
   return (
-    <section className="ribbon-group" aria-label={label}>
+    <section className={`ribbon-group${className ? ` ${className}` : ''}`} aria-label={label}>
       <div className="ribbon-group-content">{children}</div>
     </section>
   )

@@ -666,6 +666,7 @@ export const zhTW = {
   appGroupChartActions: '圖表操作',
   appRemoveFromSheet: '從工作表中刪除',
   appGroupAiAssistant: 'AI 助理',
+  appGroupAiTools: 'AI 工具',
   appAiOpenPanelDetail: '側欄對話',
   appGroupAiStarters: '快速開始',
   appAiStarterDetail: '傳送到 AI 面板',

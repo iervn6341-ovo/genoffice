@@ -48,6 +48,38 @@ describe('applyHfText', () => {
     expect(next.text).toBe('new firstnew second')
   })
 
+  it('an edit keeps the formatting of the runs it does not touch', () => {
+    const value: HeaderFooter = {
+      text: '',
+      paras: [
+        {
+          align: 'left',
+          runs: [{ text: 'Quarterly ' }, { text: 'Report', bold: true, color: 'FF0000' }],
+        },
+      ],
+    }
+    // typed at the end: continues the bold red run
+    expect(applyHfText(value, 'Quarterly Report Q3').paras?.[0]?.runs).toEqual([
+      { text: 'Quarterly ' },
+      { text: 'Report Q3', bold: true, color: 'FF0000' },
+    ])
+    // one character changed in the plain part: the red word is untouched
+    expect(applyHfText(value, 'Quartely Report').paras?.[0]?.runs).toEqual([
+      { text: 'Quartely ' },
+      { text: 'Report', bold: true, color: 'FF0000' },
+    ])
+    // typed at the start: takes the first character's formatting
+    expect(applyHfText(value, 'Q1 Quarterly Report').paras?.[0]?.runs).toEqual([
+      { text: 'Q1 Quarterly ' },
+      { text: 'Report', bold: true, color: 'FF0000' },
+    ])
+    // a deletion across the boundary keeps both sides' formatting
+    expect(applyHfText(value, 'Quarterport').paras?.[0]?.runs).toEqual([
+      { text: 'Quarter' },
+      { text: 'port', bold: true, color: 'FF0000' },
+    ])
+  })
+
   it('converts tokens back to field sentinels', () => {
     const next = applyHfText(null, '{PAGE} / {NUMPAGES}')
     expect(next.paras?.[0]?.runs[0]?.text).toBe(`${PAGE_MARK} / ${TOTAL_PAGES_MARK}`)

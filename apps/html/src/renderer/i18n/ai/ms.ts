@@ -152,6 +152,7 @@ export const ms = {
   aiThemePlayful: 'Ceria',
   aiThemeDark: 'Gelap',
   aiSummarizeBtn: 'Ringkasan AI',
+  aiToolsGroup: 'Alat AI',
   aiSummarizePrompt: 'Ringkaskan kandungan utama dan perkara penting dokumen ini',
   aiAttachTitle: 'Lampirkan fail setempat (atau seret ke panel)',
   aiRemoveAttachmentTitle: 'Alih keluar lampiran',

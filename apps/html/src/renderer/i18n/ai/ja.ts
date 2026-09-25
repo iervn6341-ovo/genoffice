@@ -152,6 +152,7 @@ export const ja = {
   aiThemePlayful: 'ポップ',
   aiThemeDark: 'ダーク',
   aiSummarizeBtn: 'AI 要約',
+  aiToolsGroup: 'AI ツール',
   aiSummarizePrompt: 'この文書の主な内容と要点を要約してください',
   aiAttachTitle: 'ローカルファイルを添付(パネルへのドラッグ&ドロップも可)',
   aiRemoveAttachmentTitle: '添付ファイルを削除',

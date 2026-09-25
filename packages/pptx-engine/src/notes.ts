@@ -10,6 +10,11 @@
  * main process's snapshot-style undo (shallow copy of entries) covers them.
  */
 import type { OpenedPptx } from './index'
+import { patchTextElementXml } from './generate'
+import { parseSlide, type ParseContext } from './parse'
+import { parseMasterTextStyles, parsePlaceholderMap } from './placeholder'
+import { parseClrMap, parseTheme } from './theme'
+import type { Paragraph, TextElement } from './types'
 import { relsPathFor, resolveTarget, type PackageArchive } from './zip'
 import { escapeXmlText } from './xml-utils'
 
@@ -123,6 +128,100 @@ export function setSlideNotes(opened: OpenedPptx, slideIndex: number, text: stri
     next = xml.replace('</p:spTree>', () => `${NOTES_BODY_SP_OPEN}${txBody}</p:sp></p:spTree>`)
   }
   setEntry(archive, notesPath, next)
+  return true
+}
+
+/** PowerPoint's notes text size when neither the notes master nor the run sets one */
+export const NOTES_DEFAULT_FONT_PT = 12
+
+/**
+ * The notes body placeholder parsed like slide text: runs resolve size / font / colour along
+ * the notes master's <p:notesStyle> and theme, keeping the implicit markers that let an
+ * untouched run save back byte for byte.
+ */
+function parseNotesBody(archive: PackageArchive, notesPath: string): TextElement | null {
+  const xml = archive.readText(notesPath)
+  if (!xml) return null
+  const ctx: ParseContext = {}
+  let masterPath: string | undefined
+  for (const rel of archive.readRels(notesPath).values()) {
+    if (rel.type === NOTES_MASTER_REL) masterPath = resolveTarget(notesPath, rel.target)
+  }
+  const masterXml = masterPath ? (archive.readText(masterPath) ?? undefined) : undefined
+  if (masterPath) {
+    for (const rel of archive.readRels(masterPath).values()) {
+      if (rel.type !== THEME_REL) continue
+      const themeXml = archive.readText(resolveTarget(masterPath, rel.target))
+      if (themeXml) {
+        ctx.theme = parseTheme(themeXml)
+        ctx.theme.clrMap = parseClrMap(masterXml, undefined, xml)
+      }
+    }
+  }
+  if (masterXml) {
+    ctx.masterPlaceholders = parsePlaceholderMap(masterXml, ctx.theme)
+    ctx.masterTextStyles = parseMasterTextStyles(masterXml, ctx.theme)
+  }
+  let slide
+  try {
+    slide = parseSlide({ path: notesPath, slideXml: xml, ctx })
+  } catch {
+    return null
+  }
+  const body = slide.elements.find(
+    (el): el is TextElement =>
+      (el.type === 'text' || el.type === 'shape') && el.placeholder === 'body',
+  )
+  if (!body?.text) return null
+  // A size nothing declares still displays (and compares) as the notes default
+  for (const p of body.text.paragraphs) for (const r of p.runs) r.fontSize ??= NOTES_DEFAULT_FONT_PT
+  return body
+}
+
+/**
+ * Formatted notes: the body placeholder's paragraphs (trailing empty template paragraphs
+ * dropped, like getSlideNotes); [] when the slide has no notes.
+ */
+export function getSlideNotesParagraphs(archive: PackageArchive, slidePath: string): Paragraph[] {
+  const notesPath = notesPathForSlide(archive, slidePath)
+  const paras = notesPath ? (parseNotesBody(archive, notesPath)?.text?.paragraphs ?? []) : []
+  const out = [...paras]
+  while (out.length && out[out.length - 1]!.runs.every((r) => !r.text)) out.pop()
+  return out
+}
+
+/**
+ * Write formatted notes paragraphs (from applyEditParagraphs over getSlideNotesParagraphs):
+ * runs that still line up with the original <a:r>s are patched in place, a structural change
+ * rebuilds only the paragraphs, keeping bodyPr / lstStyle.
+ */
+export function setSlideNotesParagraphs(
+  opened: OpenedPptx,
+  slideIndex: number,
+  paragraphs: Paragraph[],
+): boolean {
+  const slide = opened.deck.slides[slideIndex]
+  if (!slide) return false
+  const { archive } = opened
+  const notesPath = notesPathForSlide(archive, slide.path) ?? createNotesSlide(opened, slide.path)
+  if (!notesPath) return false
+  let xml = archive.readText(notesPath)
+  if (!xml) return false
+  if (!findBodySp(xml)) {
+    xml = xml.replace(
+      '</p:spTree>',
+      () =>
+        `${NOTES_BODY_SP_OPEN}<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="zh-CN"/></a:p></p:txBody></p:sp></p:spTree>`,
+    )
+    setEntry(archive, notesPath, xml)
+  }
+  const body = findBodySp(xml)
+  const el = parseNotesBody(archive, notesPath)
+  if (!body || !el?.text) return false
+  // CT_TextBody requires at least one <a:p>
+  const paras = paragraphs.length ? paragraphs : [{ runs: [] }]
+  const patched = patchTextElementXml({ ...el, text: { ...el.text, paragraphs: paras } }, body.xml)
+  setEntry(archive, notesPath, xml.slice(0, body.start) + patched + xml.slice(body.end))
   return true
 }
 

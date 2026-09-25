@@ -467,6 +467,15 @@ export function IconSearch(props: IconProps) {
   )
 }
 
+export function IconReplace(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M 2.5 5.2 H 12 M 9.8 3 12 5.2 9.8 7.4" />
+      <path d="M 13.5 10.8 H 4 M 6.2 8.6 4 10.8 6.2 13" />
+    </Svg>
+  )
+}
+
 export function IconLink(props: IconProps) {
   return (
     <Svg {...props}>

@@ -53,6 +53,7 @@ export const th = {
   ribbonPin: 'ปักหมุด Ribbon',
   ribbonExpand: 'ขยาย Ribbon',
   ribbonGroupInsert: 'แทรก',
+  ribbonGroupView: 'มุมมอง',
   editText: 'แก้ไขข้อความ',
   fontSize: 'ขนาดตัวอักษร',
   fontWeight: 'น้ำหนัก',

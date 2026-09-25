@@ -144,6 +144,7 @@ export const zhTW = {
   aiThemePlayful: '活潑',
   aiThemeDark: '深色',
   aiSummarizeBtn: 'AI 總結',
+  aiToolsGroup: 'AI 工具',
   aiSummarizePrompt: '總結這篇文件的主要內容和要點',
   aiAttachTitle: '新增本機檔案作為附件(也可拖曳到面板)',
   aiRemoveAttachmentTitle: '移除附件',
