@@ -106,8 +106,10 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
         // both pasted repetitions keep values and a row-shifted formula
         expect(xml).toContain('<c r="A2" s="1"><v>10</v></c>')
         expect(xml).toContain('<c r="A3" s="1"><v>10</v></c>')
-        expect(xml).toMatch(/<c r="C2" s="1"><f>A2&amp;"-x"<\/f><\/c>/)
-        expect(xml).toMatch(/<c r="C3" s="1"><f>A3&amp;"-x"<\/f><\/c>/)
+        // …and, since C3 (cloud QA), the formula's cached text result, so readers
+        // without a formula engine see "10-x" instead of an empty cell
+        expect(xml).toMatch(/<c r="C2" s="1" t="str"><f>A2&amp;"-x"<\/f><v>10-x<\/v><\/c>/)
+        expect(xml).toMatch(/<c r="C3" s="1" t="str"><f>A3&amp;"-x"<\/f><v>10-x<\/v><\/c>/)
       }).toPass({ timeout: 15_000 })
     } finally {
       await closeAndSaveVideo(launched, 'sheets-paste-shared-formula-save')

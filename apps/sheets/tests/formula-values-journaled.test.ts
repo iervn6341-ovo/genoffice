@@ -133,6 +133,7 @@ describe('cached <v> XML per result type (C3)', () => {
   it('string: t="str"', async () => {
     const cell = await savedCell('abc')
     expect(cell).toContain('t="str"')
+    expect(cell).not.toMatch(/<c[^>]*\s{2}/) // no doubled whitespace in the rebuilt tag
     expect(cell).toContain('<v>abc</v>')
   })
   it('boolean: t="b" with 1/0', async () => {

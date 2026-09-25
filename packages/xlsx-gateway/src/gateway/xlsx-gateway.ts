@@ -2147,7 +2147,13 @@ function patchFormulaCachedValue(
   // no t (numeric default) otherwise; booleans use t="b" with 1/0. A null
   // result drops the cached value entirely.
   const numeric = typeof value === 'number' && Number.isFinite(value)
-  const stripped = attrs.replace(/\st="[^"]*"/g, '')
+  // collapse the whitespace around the removed r=/t= so the rebuilt tag reads
+  // `<c r="C2" s="1">`, not `<c r="C2"  s="1">`
+  const stripped = attrs
+    .replace(/\st="[^"]*"/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+$/, '')
+    .replace(/^(?=\S)/, ' ')
   let typeAttr = ''
   let valueXml = ''
   if (numeric) {
