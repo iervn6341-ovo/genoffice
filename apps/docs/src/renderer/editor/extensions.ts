@@ -823,6 +823,10 @@ export const DocDocument = Node.create({
   name: 'doc',
   topNode: true,
   content: 'block+',
+  addAttributes() {
+    // page-layout snapshot on the undo stack (layout-history.ts); display state only
+    return { layout: { default: null } }
+  },
 })
 
 export const DocText = Node.create({

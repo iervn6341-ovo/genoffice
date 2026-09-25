@@ -1,4 +1,13 @@
 import { DOC_CSS_COMMITTED_EVENT } from './editor/cjk-punct-shrink'
+import {
+  applySectionLayouts,
+  LAYOUT_ATTR,
+  recordLayoutChange,
+  restoredLayout,
+  sectionLayouts,
+  withRestoreDirty,
+  type LayoutSnapshot,
+} from './editor/layout-history'
 import { justifyShrinkPluginKey } from './editor/justify-shrink'
 import {
   useCallback,
@@ -788,10 +797,44 @@ export function App() {
     setHfVariants((v) => ({ ...v, [key]: next }))
     setHfVariantsDirty((d) => (d.includes(key) ? d : [...d, key]))
   }
+  // ── page layout on the undo stack (C7): every layout edit commits a full
+  // snapshot through recordLayoutChange; undo/redo restore it (see effect below)
+  const layoutSnapshot = (): LayoutSnapshot => ({
+    section,
+    sectionDirty,
+    sections: sectionLayouts(sections),
+    sectionsDirty,
+    titlePg,
+    titlePgDirty,
+    evenOddHf,
+    evenOddHfDirty,
+    pgNumEdit,
+    pgNumDirtySections,
+  })
+  const applyLayoutSnapshot = (s: LayoutSnapshot) => {
+    setSection(s.section)
+    setSectionDirty(s.sectionDirty)
+    setSections((prev) => applySectionLayouts(prev, s.sections))
+    setSectionsDirty([...s.sectionsDirty])
+    setTitlePg(s.titlePg)
+    setTitlePgDirty(s.titlePgDirty)
+    setEvenOddHf(s.evenOddHf)
+    setEvenOddHfDirty(s.evenOddHfDirty)
+    setPgNumEdit(s.pgNumEdit ? { ...s.pgNumEdit } : null)
+    setPgNumDirtySections([...s.pgNumDirtySections])
+  }
+  const layoutRef = useRef({ snapshot: layoutSnapshot, apply: applyLayoutSnapshot })
+  layoutRef.current = { snapshot: layoutSnapshot, apply: applyLayoutSnapshot }
+  const commitLayout = (change: (before: LayoutSnapshot) => Partial<LayoutSnapshot>) => {
+    const before = layoutRef.current.snapshot()
+    const after: LayoutSnapshot = { ...before, ...change(before) }
+    layoutRef.current.apply(after)
+    if (editor) recordLayoutChange(editor, before, after)
+  }
+
   /** "Different first page" toggle, shared by the ribbon checkbox and the on-page chip */
   const toggleTitlePg = (on: boolean) => {
-    setTitlePg(on)
-    setTitlePgDirty(true)
+    commitLayout(() => ({ titlePg: on, titlePgDirty: true }))
     setHfView(on ? 'first' : 'default')
     setStatus(on ? t('appTitlePgOn') : t('appTitlePgOff'))
   }
@@ -1241,6 +1284,21 @@ export function App() {
       forceRender()
     },
   })
+
+  // undo/redo moved the layout snapshot: restore App layout state from it (C7)
+  useEffect(() => {
+    if (!editor) return
+    const onTransaction = ({ transaction }: { transaction: Transaction }) => {
+      const restored = restoredLayout(transaction, transaction.before.attrs[LAYOUT_ATTR])
+      if (restored) {
+        layoutRef.current.apply(withRestoreDirty(restored, layoutRef.current.snapshot()))
+      }
+    }
+    editor.on('transaction', onTransaction)
+    return () => {
+      editor.off('transaction', onTransaction)
+    }
+  }, [editor])
 
   // textbox sub-editors: re-render the ribbon on focus/selection changes and
   // mark the document dirty when their content changes
@@ -2299,21 +2357,26 @@ export function App() {
     const start =
       pgNumModal.start.trim() === '' ? undefined : Math.max(0, parseInt(pgNumModal.start, 10) || 0)
     const idx = sections.length > 0 ? Math.min(activeSection, sections.length - 1) : -1
-    if (idx >= 0) {
-      setSections((prev) =>
-        prev.map((s, i) => (i === idx ? { ...s, pageNumberFmt: fmt, pageNumberStart: start } : s)),
-      )
-    }
-    if (idx < 0 || idx === sections.length - 1) {
-      setPgNumEdit({
-        ...(fmt !== undefined ? { fmt } : {}),
-        ...(start !== undefined ? { start } : {}),
-      })
-    } else {
-      setPgNumDirtySections((d) => (d.includes(idx) ? d : [...d, idx]))
-    }
+    commitLayout((before) => ({
+      sections: before.sections.map((s, i) =>
+        i === idx ? { ...s, pageNumberFmt: fmt, pageNumberStart: start } : s,
+      ),
+      ...(idx < 0 || idx === sections.length - 1
+        ? {
+            pgNumEdit: {
+              ...(fmt !== undefined ? { fmt } : {}),
+              ...(start !== undefined ? { start } : {}),
+            },
+          }
+        : {
+            pgNumDirtySections: before.pgNumDirtySections.includes(idx)
+              ? before.pgNumDirtySections
+              : [...before.pgNumDirtySections, idx],
+          }),
+    }))
     setPgNumModal(null)
     setStatus(t('appPgNumFormatSet'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- commitLayout reads the live layout through layoutRef
   }, [pgNumModal, sections, activeSection])
 
   const exportPdf = useCallback(
@@ -5479,14 +5542,20 @@ export function App() {
     onToggleAi: () => setShowAi((v) => !v),
     onSection: (next: SectionSettings) => {
       // layout applies to the cursor's section; the final section's sectPr goes through SaveOptions.section (also drives canvas geometry)
-      setSections((prev) =>
-        prev.map((s, i) => (i === activeSection ? { ...s, settings: next } : s)),
-      )
-      if (sections.length <= 1 || activeSection === sections.length - 1) {
-        setSection(next)
-        setSectionDirty(true)
-      } else {
-        setSectionsDirty((d) => (d.includes(activeSection) ? d : [...d, activeSection]))
+      const isFinal = sections.length <= 1 || activeSection === sections.length - 1
+      commitLayout((before) => ({
+        sections: before.sections.map((s, i) =>
+          i === activeSection ? { ...s, settings: next } : s,
+        ),
+        ...(isFinal
+          ? { section: next, sectionDirty: true }
+          : {
+              sectionsDirty: before.sectionsDirty.includes(activeSection)
+                ? before.sectionsDirty
+                : [...before.sectionsDirty, activeSection],
+            }),
+      }))
+      if (!isFinal) {
         setStatus(t('appSectionSettingsApplied', { n: activeSection + 1 }))
       }
     },
@@ -5544,8 +5613,7 @@ export function App() {
     },
     onTitlePg: toggleTitlePg,
     onEvenOddHf: (on: boolean) => {
-      setEvenOddHf(on)
-      setEvenOddHfDirty(true)
+      commitLayout(() => ({ evenOddHf: on, evenOddHfDirty: true }))
       setHfView(on ? 'even' : 'default')
       setStatus(on ? t('appEvenOddOn') : t('appEvenOddOff'))
     },
