@@ -12,6 +12,7 @@ import { BlockKeymap } from './blockKeymap'
 import { AiHighlight } from './aiHighlight'
 import { AiQueueAnchors } from './aiQueueAnchors'
 import { InactiveSelection } from './inactiveSelection'
+import { DoubleClickLineEnd } from './double-click-line-end'
 import { SearchHighlight } from './searchHighlight'
 import { buildMathExtensions } from './math'
 import { SelectiveEscapeMarkdown } from './markdownEscape'
@@ -95,6 +96,7 @@ export function buildExtensions(options: BuildExtensionsOptions): AnyExtension[]
     AiQueueAnchors,
     InactiveSelection,
     SearchHighlight,
+    DoubleClickLineEnd,
     Placeholder.configure({ placeholder: () => t('placeholder') }),
     SlashCommand.configure({
       controller: options.slashController,

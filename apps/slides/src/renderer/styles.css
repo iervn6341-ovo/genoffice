@@ -145,6 +145,7 @@
   /* black playback chrome (slideshow / presenter / reading view) holds in
    * both themes; numeric suffix = white alpha % */
   --slides-show-black: #000;
+  --slides-show-white: #ffffff; /* the white screen is presentation content: identical in both themes */
   --slides-show-ink: #fff;
   --slides-show-ink-88: rgb(255 255 255 / 88%);
   --slides-show-ink-85: rgb(255 255 255 / 85%);
@@ -171,6 +172,13 @@
   --slides-pv-ink: #e8e8e8;
   --slides-pv-accent: #d75342;
   --slides-pv-exit-hover: rgb(211 47 47 / 60%);
+  /* show controls: PowerPoint's dark menus and popovers (always dark, like the show) */
+  --slides-ssc-menu-bg: rgb(38 38 40 / 97%);
+  --slides-ssc-pop-bg: rgb(24 24 26 / 97%);
+  --slides-ssc-menu-line: rgb(255 255 255 / 12%);
+  --slides-ssc-menu-hover: #0a64d6;
+  --slides-ssc-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  --slides-ssc-swatch-ring: #ffffff;
 
   /* dark chips and black translucent masks/shadows hold in both themes */
   --slides-chip-remove-bg: #000;
@@ -5653,35 +5661,59 @@ body.vib .slide-list {
   margin: 0 -14px 4px;
 }
 
-.notes-pane textarea {
+/* The notes body, formatted like PowerPoint's notes pane: runs carry their own font / size /
+ * colour inline (document data); unstyled text uses the chrome text colour so default notes
+ * stay readable in both themes */
+.notes-editor {
   flex: 1;
-  border: none;
+  min-height: 0;
+  overflow-y: auto;
   outline: none;
-  resize: none;
+  font-size: 16px; /* 12pt, PowerPoint's notes default */
+  line-height: 1.35;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.notes-editor.notes-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-tertiary);
   font:
     13px/1.5 'Segoe UI',
     var(--ui-cjk),
     sans-serif;
-  color: var(--text);
-  background: transparent;
+  pointer-events: none;
 }
 
-.notes-pane textarea::placeholder {
-  color: var(--text-tertiary);
+.notes-editor > div {
+  padding-left: calc(var(--notes-level, 0) * 1.5em);
+}
+
+/* Bullets come from the notes paragraph model; the glyph is display-only (not editable text) */
+.notes-editor > div[data-glyph]::before {
+  content: attr(data-glyph);
+  display: inline-block;
+  min-width: 1.4em;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  text-decoration: none;
 }
 
 /* Long notes must stay readable at any pane height: native wheel scrolling
  * plus a slim scrollbar (PowerPoint/WPS keep the notes pane scrollable even
  * when it's dragged down to a single line) */
-.notes-pane textarea::-webkit-scrollbar {
+.notes-editor::-webkit-scrollbar {
   width: 5px;
 }
 
-.notes-pane textarea::-webkit-scrollbar-track {
+.notes-editor::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.notes-pane textarea::-webkit-scrollbar-thumb {
+.notes-editor::-webkit-scrollbar-thumb {
   border-radius: 2.5px;
   background: var(--slides-scroll-thumb);
 }
@@ -5711,8 +5743,8 @@ body.vib .slide-list {
   z-index: 1;
 }
 
-.notes-pane.notes-thin textarea {
-  line-height: 30px;
+.notes-pane.notes-thin .notes-editor {
+  padding-top: 6px;
 }
 
 /* ── Transitions tab: one-shot canvas preview played when an effect is clicked.
@@ -6477,6 +6509,7 @@ body.show-curtain::after {
 .slideshow .ss-stagebox {
   position: relative;
   line-height: 0;
+  overflow: hidden; /* Zoom magnifies inside the frame */
 }
 
 .slideshow .ss-black {
@@ -6484,6 +6517,21 @@ body.show-curtain::after {
   inset: 0;
   background: var(--slides-show-black);
   z-index: 10;
+}
+
+/* B / . and W / , cover the show like PowerPoint's black and white screens */
+.slideshow .ss-screen,
+.slideshow .ss-white {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+.slideshow .ss-screen-black {
+  background: var(--slides-show-black);
+}
+.slideshow .ss-screen-white,
+.slideshow .ss-white {
+  background: var(--slides-show-white);
 }
 
 /* Show ink overlay (presenter pen/laser pointer, mirrored for the audience) */
@@ -6497,9 +6545,12 @@ body.show-curtain::after {
 
 .ink-laser {
   position: absolute;
+  left: 0;
+  top: 0;
   width: 14px;
   height: 14px;
   margin: -7px 0 0 -7px;
+  will-change: transform;
   border-radius: 50%;
   background: radial-gradient(
     circle,
@@ -6731,7 +6782,7 @@ body.show-curtain::after {
 }
 
 .presenter .pv-top {
-  height: 44px;
+  height: 50px;
   flex: none;
   box-sizing: border-box;
   display: flex;
@@ -6746,9 +6797,20 @@ body.show-curtain::after {
   color: var(--slides-show-ink-85);
   border: none;
   border-radius: 4px;
-  font-size: 13px;
-  padding: 6px 12px;
+  font-size: 11px;
+  padding: 3px 8px;
   cursor: pointer;
+  /* PowerPoint's presenter bar: icon over a small label */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.presenter .pv-top-ico {
+  display: flex;
+  line-height: 0;
 }
 
 .presenter .pv-top-btn:hover:not(:disabled) {
@@ -6837,20 +6899,88 @@ body.show-curtain::after {
 .presenter .pv-stagebox {
   position: relative;
   line-height: 0;
+  overflow: hidden; /* Zoom magnifies inside the frame */
 }
 
-.presenter .pv-stagebox.pv-tool-pen {
+.presenter .pv-stagebox.pv-tool-pen,
+.presenter .pv-stagebox.pv-tool-highlighter,
+.slideshow.ss-tool-pen,
+.slideshow.ss-tool-highlighter {
   cursor: crosshair;
 }
 
-.presenter .pv-stagebox.pv-tool-laser {
+.presenter .pv-stagebox.pv-tool-eraser,
+.slideshow.ss-tool-eraser {
+  cursor: cell;
+}
+
+.presenter .pv-stagebox.pv-tool-laser,
+.slideshow.ss-tool-laser,
+.slideshow.ss-idle {
   cursor: none;
+}
+
+.presenter .pv-stagebox.pv-zoom-armed,
+.slideshow.ss-zoom-armed {
+  cursor: zoom-in;
+}
+
+/* Camera (PowerPoint's show toolbar): the presenter's live camera in a round bubble */
+.show-camera {
+  position: absolute;
+  right: 3%;
+  bottom: 5%;
+  z-index: 4;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--slides-show-ink);
+  background: var(--slides-show-black);
+  box-shadow: var(--slides-ssc-shadow);
+  pointer-events: none;
+}
+
+.show-camera video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirrored, like a camera preview */
+}
+
+/* Slide Show → Monitors: the Monitor picker beside Use Presenter View */
+.rb-monitor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rb-monitor select {
+  font: inherit;
+  max-width: 180px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+/* Zoom into the slide: 2× around the clicked point, animated like PowerPoint's */
+.show-zoom {
+  transition: transform 0.35s ease;
 }
 
 .presenter .pv-black {
   position: absolute;
   inset: 0;
   background: var(--slides-show-black);
+}
+
+.presenter .pv-white {
+  position: absolute;
+  inset: 0;
+  background: var(--slides-show-white);
 }
 
 .presenter .pv-end {
@@ -6863,46 +6993,219 @@ body.show-curtain::after {
 .presenter .pv-bottomrow {
   height: 56px;
   flex: none;
-  display: flex;
+  /* tools | slide navigation (centered) | spacer */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: 0 24px;
 }
 
-.presenter .pv-tools {
+/* ── Show controls (ShowControls.tsx): tool row, Pointer Options, "…" menu ── */
+.ssc-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
-.presenter .pv-tool-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--slides-show-fill-8);
-  border: 1px solid var(--slides-show-line-18);
+.ssc-anchor {
+  position: relative;
+  display: flex;
+}
+
+.ssc-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: none;
   color: var(--slides-show-ink-85);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  padding: 0;
 }
 
-.presenter .pv-tool-btn:hover:not(:disabled) {
-  background: var(--slides-show-fill-18);
+.ssc-btn:hover {
+  background: var(--slides-show-fill-14);
+  color: var(--slides-show-ink);
 }
 
-.presenter .pv-tool-btn:disabled {
-  opacity: 0.35;
+.ssc-btn.ssc-on {
+  background: var(--slides-show-fill-22);
+  color: var(--slides-show-ink);
+}
+
+/* Pointer Options popover: opens above its button */
+.ssc-pop {
+  position: absolute;
+  left: -6px;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  min-width: 250px;
+  box-sizing: border-box;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--slides-ssc-pop-bg);
+  box-shadow: var(--slides-ssc-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: normal;
+}
+
+.ssc-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--slides-show-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ssc-pop-item:hover:not(:disabled) {
+  background: var(--slides-show-fill-14);
+}
+
+.ssc-pop-item:disabled {
+  color: var(--slides-show-ink-45);
   cursor: default;
 }
 
-.presenter .pv-tool-btn.pv-tool-on {
-  background: var(--slides-pv-accent);
-  border-color: var(--slides-pv-accent);
+.ssc-pop-item.ssc-on {
+  background: var(--slides-show-fill-22);
+}
+
+.ssc-swatches {
+  display: flex;
+  gap: 4px;
+  padding: 6px 2px 0;
+}
+
+.ssc-swatch {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid var(--slides-show-line-25);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.ssc-swatch.ssc-on {
+  outline: 2px solid var(--slides-ssc-swatch-ring);
+  outline-offset: 1px;
+}
+
+/* "…" Slide Show Options: a native-looking dark menu with submenus */
+.ssc-menu {
+  position: absolute;
+  z-index: 31;
+  min-width: 180px;
+  box-sizing: border-box;
+  padding: 4px;
+  border-radius: 7px;
+  border: 1px solid var(--slides-ssc-menu-line);
+  background: var(--slides-ssc-menu-bg);
+  box-shadow: var(--slides-ssc-shadow);
+  line-height: normal;
+}
+
+.ssc-menu.ssc-more {
+  left: 0;
+  top: calc(100% + 4px);
+}
+
+.ssc-up .ssc-menu.ssc-more {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.ssc-menu-row {
+  position: relative;
+}
+
+.ssc-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
   color: var(--slides-show-ink);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.ssc-menu-item:hover:not(:disabled),
+.ssc-menu-item.ssc-open {
+  background: var(--slides-ssc-menu-hover);
+}
+
+.ssc-menu-item:disabled {
+  color: var(--slides-show-ink-40);
+}
+
+.ssc-menu-check {
+  width: 14px;
+  flex: none;
+  text-align: center;
+}
+
+.ssc-menu-label {
+  flex: 1;
+}
+
+.ssc-menu-chev {
+  margin-left: 16px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.ssc-menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--slides-ssc-menu-line);
+}
+
+.ssc-menu.ssc-submenu {
+  left: calc(100% + 2px);
+  top: -5px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.ssc-up .ssc-menu.ssc-submenu {
+  top: auto;
+  bottom: -5px;
+}
+
+/* Full-screen show: PowerPoint's bottom-left control bar, shown while the mouse moves */
+.slideshow .ss-controls {
+  position: fixed;
+  left: 20px;
+  bottom: 18px;
+  z-index: 20;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--slides-show-pill-bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+
+.slideshow .ss-controls.ss-controls-on {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .presenter .pv-nav {
@@ -6964,6 +7267,20 @@ body.show-curtain::after {
   border-radius: 2px;
 }
 
+/* Divider between the slide and the next-slide / notes column: drag to resize (PowerPoint) */
+.presenter .pv-splitter {
+  flex: none;
+  width: 7px;
+  margin-right: -7px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 1;
+}
+
+.presenter .pv-splitter:hover {
+  background: var(--slides-show-line-10);
+}
+
 .presenter .pv-side {
   width: 340px;
   flex: none;
@@ -7007,6 +7324,12 @@ body.show-curtain::after {
   color: var(--slides-show-ink-88);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.presenter .pv-notes .notes-view-para[data-glyph]::before {
+  content: attr(data-glyph);
+  display: inline-block;
+  min-width: 1.4em;
 }
 
 .presenter .pv-notes-size {
@@ -8963,6 +9286,9 @@ body.show-curtain::after {
 .slide-text-editor > div[data-bullet-text]::before {
   content: attr(data-bullet-text);
   display: inline-block;
+  /* an enlarged/reduced symbol keeps the dot's center at the text's middle, as on the canvas */
+  position: relative;
+  top: var(--bullet-shift, 0px);
   /* hangs into the left margin like the canvas bullet; the width past the hang pushes the text */
   margin-left: calc(-1 * var(--bullet-hang));
   width: var(--bullet-w);
@@ -8990,4 +9316,95 @@ body.show-curtain::after {
   background: var(--bullet-img) center / contain no-repeat;
   user-select: none;
   pointer-events: none;
+}
+
+/* Expanded Paragraph group (auto ribbon layout): two icon rows, like Office's Home tab */
+.rb-para-inline {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.rb-para-inline .rb-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Far-right group (Genspark AI sits where Microsoft 365 puts Copilot) */
+.ribbon-group.rb-group-end {
+  margin-left: auto;
+}
+
+/* Home tab small dropdowns (Character Spacing, Change Case, Line Spacing, Text Direction,
+   Align Text): glyph + caret in one compact button, like PowerPoint's AV˅ / Aa˅ */
+.rb-icon.rb-icon-drop {
+  gap: 1px;
+  padding: 0 2px 0 4px;
+}
+.rb-icon.rb-icon-drop .rb-caret {
+  width: 8px;
+  height: 8px;
+  opacity: 0.7;
+}
+
+/* Split icon button (Text Highlight): the glyph applies the last colour, the narrow caret
+   half opens the palette; the two halves share one hover outline */
+.rb-split-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.rb-split-icon > .rb-icon:first-child {
+  padding-right: 2px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.rb-split-icon > .rb-icon.rb-icon-caret {
+  min-width: 14px;
+  padding: 0 2px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.rb-split-icon > .rb-icon.rb-icon-caret .rb-caret {
+  width: 8px;
+  height: 8px;
+  opacity: 0.7;
+}
+.rb-split-icon .rb-font-color {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Text highlight palette: 5 × 3 swatches, then "No Color" */
+.rb-highlight-pop {
+  padding: 8px;
+}
+.rb-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 20px);
+  gap: 6px;
+  padding: 2px;
+}
+.rb-highlight-pop .rb-menu {
+  padding: 4px 0 0;
+  box-shadow: none;
+  border: none;
+  background: none;
+}
+
+/* Drawing group: Shape Fill / Shape Outline stacked beside Quick Styles (PowerPoint layout) */
+.rb-drawing-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.rb-drawing-col .rb-small svg {
+  width: 20px;
+  height: 20px;
+}
+.rb-drawing-col .rb-small .rb-caret {
+  width: 10px;
+  height: 10px;
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { fitRibbonLabels, labelFromTip, type RibbonFitTarget } from '../src/ribbon-fit'
+import {
+  fitRibbonFolded,
+  fitRibbonLabels,
+  labelFromTip,
+  type RibbonFitTarget,
+} from '../src/ribbon-fit'
 
 /** an element whose content width grows with the applied label level, like a real ribbon body */
 function ribbon(clientWidth: number, widthAt: (level: number) => number): RibbonFitTarget {
@@ -70,5 +75,47 @@ describe('labelFromTip', () => {
     ['Bold', 'Bold'],
   ])('%s -> %s', (tip, label) => {
     expect(labelFromTip(tip)).toBe(label)
+  })
+})
+
+describe('fitRibbonFolded (RibbonFoldGroup priority fold)', () => {
+  /** 1000px of content with labels off, +100px per label tier; each folded group saves `save` */
+  function body(clientWidth: number, priorities: number[], save = 150) {
+    const groups = priorities.map((p) => ({ dataset: { foldPriority: String(p) } as DOMStringMap }))
+    const dataset: DOMStringMap = {}
+    const el: RibbonFitTarget = {
+      dataset,
+      clientWidth,
+      get scrollWidth() {
+        const folded = groups.filter((g) => g.dataset.folded !== undefined).length
+        return 1000 + Number(dataset.labels ?? '0') * 100 - folded * save
+      },
+    }
+    return { el, groups }
+  }
+
+  it('keeps every group open while labels can still give way', () => {
+    const { el, groups } = body(1150, [2, 1])
+    expect(fitRibbonFolded(el, groups)).toEqual({ level: 1, folded: 0 })
+  })
+
+  it('folds lowest priority first, only as many as needed', () => {
+    const { el, groups } = body(800, [3, 1, 2])
+    expect(fitRibbonFolded(el, groups)).toEqual({ level: 0, folded: 2 })
+    // priority 1 and 2 folded, priority 3 (the paragraph group, say) stays open
+    expect(groups.map((g) => g.dataset.folded !== undefined)).toEqual([false, true, true])
+  })
+
+  it('unfolds when the window widens again', () => {
+    const { el, groups } = body(800, [1, 2])
+    fitRibbonFolded(el, groups)
+    ;(el as { clientWidth: number }).clientWidth = 1400
+    expect(fitRibbonFolded(el, groups)).toEqual({ level: 3, folded: 0 })
+    expect(groups.some((g) => g.dataset.folded !== undefined)).toBe(false)
+  })
+
+  it('without foldable groups it is plain label fitting', () => {
+    const { el } = body(600, [])
+    expect(fitRibbonFolded(el, [])).toEqual({ level: 0, folded: 0 })
   })
 })

@@ -43,6 +43,7 @@ export const cs = {
   ribbonPin: 'Připnout pás karet',
   ribbonExpand: 'Rozbalit pás karet',
   ribbonGroupInsert: 'Vložit',
+  ribbonGroupView: 'Zobrazení',
   editText: 'Upravit text',
   fontSize: 'Velikost písma',
   fontWeight: 'Tloušťka',

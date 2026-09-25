@@ -790,6 +790,7 @@ export const es = {
   appGroupChartActions: 'Acciones del gráfico',
   appRemoveFromSheet: 'Quitar de la hoja',
   appGroupAiAssistant: 'Asistente de IA',
+  appGroupAiTools: 'Herramientas de IA',
   appAiOpenPanelDetail: 'Barra lateral de chat',
   appGroupAiStarters: 'Inicio rápido',
   appAiStarterDetail: 'Enviar al panel de IA',

@@ -55,6 +55,7 @@ export const ko = {
   ribbonPin: '리본 고정',
   ribbonExpand: '리본 확장',
   ribbonGroupInsert: '삽입',
+  ribbonGroupView: '보기',
   editText: '텍스트 편집',
   fontSize: '글자 크기',
   fontWeight: '굵기',

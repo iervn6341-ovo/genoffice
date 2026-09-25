@@ -11,26 +11,49 @@
  * left column timer (pause/reset) + clock → big frame → toolbar (pen/laser/clear ink/blackout)
  * + page progress navigation, right column next-slide preview + notes (adjustable font size),
  * bottom full-width thumbnail strip with click-to-jump.
- * Keyboard: →/space/enter/PgDn next step; ←/PgUp previous page; Home/End first/last; B blackout; Esc exit.
+ * Keyboard (PowerPoint's): N/→/↓/space/enter/PgDn next step; P/←/↑/Backspace/PgUp previous page; Home/End first/last;
+ * B or . black screen, W or , white screen; a number then Enter jumps to that slide; Esc exit.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RenderSlide } from '@genoffice/pptx-render'
-import type { AnimationItem, ShowSyncState } from '../../shared/ipc'
+import type { AnimationItem, NotesParagraphView, ShowSyncState } from '../../shared/ipc'
 import { AnimatedSlideStage, useAnimPlayer } from './AnimatedSlide'
 import { useI18n } from '../i18n/locale'
 import { SlideThumb } from '../SlideThumb'
-import { InkLayer, type InkStroke } from './ShowInk'
+import {
+  DEFAULT_HIGHLIGHTER_COLOR,
+  DEFAULT_PEN_COLOR,
+  applyInkEvent,
+  InkBoard,
+  InkLayer,
+  useInkPointer,
+  type InkTool,
+} from './ShowInk'
+import {
+  closeShowPopovers,
+  ShowIcon,
+  ShowToolbar,
+  showOptionsMenu,
+  usePointerShortcuts,
+} from './ShowControls'
+import { NotesView } from './NotesEditor'
+import { CameraBubble } from './ShowCamera'
+import { readShowMonitor } from '../show-monitor'
 import { liftShowCurtain } from '../show-actions'
+import { toggleShowScreen, type ShowKeyCommand, type ShowScreen } from '../slideshow-utils'
+import { useShowKeys } from '../use-show-keys'
 
 /** Layout constants (aligned with styles.css) */
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
-const SIDE_W = 340
-const TOP_H = 44
+/** Side column (next slide + notes) share of the screen: PowerPoint's default split, draggable */
+const SIDE_FRAC_DEFAULT = 0.34
+const SIDE_FRAC_MIN = 0.2
+const SIDE_FRAC_MAX = 0.6
+const SIDE_FRAC_KEY = 'genoffice.slides.presenterSideFrac'
+const TOP_H = 50
 const TIMER_H = 40
 const BOTTOM_H = 56
 const FILM_H = 118
-
-const PEN_COLOR = '#e53935'
 
 /** Elapsed show seconds → mm:ss (past 1 hour minutes keep accumulating) */
 function fmtElapsed(sec: number): string {
@@ -68,11 +91,13 @@ export function PresenterView({
   }, [slides, startAt])
   const [pos, setPos] = useState(() => Math.max(0, order.indexOf(startAt)))
   const [ended, setEnded] = useState(false)
-  const [black, setBlack] = useState(false)
+  const [cover, setCover] = useState<ShowScreen>('none')
+  const black = cover === 'black'
+  const white = cover === 'white'
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight })
   /** Per-page animation lists + notes (prefetched once on entry, zero IPC on page turns) */
   const [allAnims, setAllAnims] = useState<AnimationItem[][] | null>(null)
-  const [allNotes, setAllNotes] = useState<string[]>([])
+  const [allNotes, setAllNotes] = useState<NotesParagraphView[][]>([])
   /** How the current page was entered: forward = initial state playing step by step, others = all-finished state */
   const navModeRef = useRef<'fresh' | 'all'>('fresh')
   /** Whether an external audience window was opened (swap-displays button availability) */
@@ -95,20 +120,96 @@ export function PresenterView({
   // ── Notes font size ──────────────────────────────────────────────────
   const [noteSize, setNoteSize] = useState(15)
 
-  // ── Ink/laser pointer ───────────────────────────────────────────────
-  const [tool, setTool] = useState<'none' | 'pen' | 'laser'>('none')
-  const [strokes, setStrokes] = useState<InkStroke[]>([])
-  const [laser, setLaser] = useState<{ x: number; y: number } | null>(null)
+  // ── Side column width: drag the divider (remembered on this machine) ─────────
+  const [sideFrac, setSideFrac] = useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem(SIDE_FRAC_KEY) ?? '')
+      return v >= SIDE_FRAC_MIN && v <= SIDE_FRAC_MAX ? v : SIDE_FRAC_DEFAULT
+    } catch {
+      return SIDE_FRAC_DEFAULT
+    }
+  })
+  const sideW = Math.round(Math.max(260, size.w * sideFrac))
+  const startSideDrag = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const clamp = (x: number) =>
+      Math.min(SIDE_FRAC_MAX, Math.max(SIDE_FRAC_MIN, (window.innerWidth - x) / window.innerWidth))
+    let last = sideFrac
+    const move = (ev: PointerEvent) => {
+      last = clamp(ev.clientX)
+      setSideFrac(last)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      try {
+        localStorage.setItem(SIDE_FRAC_KEY, String(last))
+      } catch {
+        // storage unavailable: the split lasts for this show
+      }
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  // ── Pointer Options: laser / pen / highlighter / eraser ─────────────────────────
+  // Ink lives on the board, not in React state: a pointer move must not re-render this view
+  const [tool, setToolState] = useState<InkTool>('none')
+  const [penColor, setPenColor] = useState<string>(DEFAULT_PEN_COLOR)
+  const [hlColor, setHlColor] = useState<string>(DEFAULT_HIGHLIGHTER_COLOR)
+  const inkColor = tool === 'highlighter' ? hlColor : penColor
+  const board = useMemo(() => new InkBoard(), [])
+  const [canErase, setCanErase] = useState(false)
+  useEffect(() => board.subscribe(() => setCanErase(board.strokes.length > 0)), [board])
   const stageboxRef = useRef<HTMLDivElement>(null)
-  const drawingRef = useRef(false)
-  const laserSentAtRef = useRef(0)
+  const ink = useInkPointer(board, tool, inkColor, stageboxRef, (ev) =>
+    window.slidesApi.presenterInk(ev),
+  )
+
+  // ── Zoom (PowerPoint's magnifier): arm, then click the slide to magnify that spot 2× ──
+  const [zoomArmed, setZoomArmed] = useState(false)
+  const [zoom, setZoom] = useState<{ x: number; y: number } | null>(null)
+  const zoomOn = zoomArmed || zoom !== null
+  const toggleZoom = useCallback(() => {
+    if (zoomArmed || zoom) {
+      setZoomArmed(false)
+      setZoom(null)
+      return
+    }
+    setToolState('none')
+    setZoomArmed(true)
+  }, [zoomArmed, zoom])
+  const setTool = useCallback((v: InkTool) => {
+    setToolState(v)
+    setZoomArmed(false)
+    setZoom(null)
+  }, [])
+  const pickColor = useCallback(
+    (hex: string) => {
+      // PowerPoint: a colour applies to the highlighter when it is active, otherwise to the pen
+      if (tool === 'highlighter') setHlColor(hex)
+      else {
+        setPenColor(hex)
+        if (tool !== 'pen') setTool('pen')
+      }
+    },
+    [tool, setTool],
+  )
+  // Ink made with the mouse on the audience screen (laser, pen…) shows here too
+  useEffect(() => window.slidesApi.onShowInk((ev) => applyInkEvent(board, ev)), [board])
+  /** Camera (PowerPoint's show toolbar): live camera bubble on both screens */
+  const [camera, setCamera] = useState(false)
+  /** A toolbar popover is open: Esc closes it instead of ending the show */
+  const popoverOpenRef = useRef(false)
+  /** The slide shown before the current one ("Last Viewed") */
+  const [lastViewed, setLastViewed] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
     void Promise.all(slides.map((_, i) => window.slidesApi.getAnimations(i))).then((lists) => {
       if (!cancelled) setAllAnims(lists)
     })
-    void Promise.all(slides.map((_, i) => window.slidesApi.getNotes(i))).then((notes) => {
+    void Promise.all(slides.map((_, i) => window.slidesApi.getNotesRich(i))).then((notes) => {
       if (!cancelled) setAllNotes(notes)
     })
     return () => {
@@ -130,7 +231,7 @@ export function PresenterView({
   // ── Multi-screen: open the audience window on entry, close on exit ─────────────
   useEffect(() => {
     let disposed = false
-    void window.slidesApi.presenterStart().then((r) => {
+    void window.slidesApi.presenterStart({ monitor: readShowMonitor() }).then((r) => {
       if (!disposed) setHasAudience(r.audience)
     })
     return () => {
@@ -148,16 +249,33 @@ export function PresenterView({
       playing: player.playing,
       ended,
       black,
+      white,
+      zoom,
+      tool,
+      inkColor,
+      camera,
     }
     window.slidesApi.presenterSync(state)
-  }, [player.epoch, player.played, player.playing, ended, black])
+  }, [
+    player.epoch,
+    player.played,
+    player.playing,
+    ended,
+    black,
+    white,
+    zoom,
+    tool,
+    inkColor,
+    camera,
+  ])
 
   // Clear ink on page turn (the audience side clears in sync)
   useEffect(() => {
-    setStrokes([])
-    setLaser(null)
+    board.clear()
     window.slidesApi.presenterInk({ type: 'clear' })
-  }, [pos])
+    setZoom(null)
+    setZoomArmed(false)
+  }, [pos, board])
 
   const exitRef = useRef(() => {})
   exitRef.current = () => onExit(order[Math.min(pos, order.length - 1)] ?? startAt)
@@ -216,8 +334,11 @@ export function PresenterView({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  const posRef = useRef(pos)
+  posRef.current = pos
   const goTo = useCallback((nextPos: number, fresh: boolean) => {
     navModeRef.current = fresh ? 'fresh' : 'all'
+    if (nextPos !== posRef.current) setLastViewed(posRef.current)
     setPos(nextPos)
   }, [])
 
@@ -250,45 +371,51 @@ export function PresenterView({
       window.slidesApi.onAudienceNav((action) => {
         if (action === 'next') nextRef.current()
         else if (action === 'prev') prevRef.current()
-        else exitRef.current()
+        else if (action === 'exit') exitRef.current()
+        else if (action.startsWith('goto:')) gotoRef.current(Number(action.slice(5)))
+        else commandRef.current(action as ShowKeyCommand)
       }),
     [],
   )
 
-  // Keyboard navigation (capture beats the editor's generic shortcuts; keys match SlideShowView + B blackout)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        exitRef.current()
-      } else if (
-        e.key === 'ArrowRight' ||
-        e.key === 'ArrowDown' ||
-        e.key === ' ' ||
-        e.key === 'Enter' ||
-        e.key === 'PageDown'
-      ) {
-        e.preventDefault()
-        next()
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
-        e.preventDefault()
-        prev()
-      } else if (e.key === 'Home') {
-        e.preventDefault()
-        setEnded(false)
-        goTo(0, false)
-      } else if (e.key === 'End') {
-        e.preventDefault()
-        setEnded(false)
-        goTo(order.length - 1, false)
-      } else if (e.key === 'b' || e.key === 'B') {
-        e.preventDefault()
-        setBlack((v) => !v)
+  // Keyboard: PowerPoint's show shortcuts, shared with the show and audience windows
+  const runCommand = useCallback(
+    (command: ShowKeyCommand) => {
+      if (command === 'exit') {
+        // Esc closes an open menu, then leaves Zoom, then ends the show
+        if (popoverOpenRef.current) return closeShowPopovers()
+        if (zoomArmed || zoom) {
+          setZoomArmed(false)
+          setZoom(null)
+          return
+        }
+        return exitRef.current()
       }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [next, prev, goTo, order.length])
+      if (command === 'black' || command === 'white')
+        return setCover((c) => toggleShowScreen(c, command))
+      setCover('none')
+      if (command === 'next') return next()
+      if (command === 'prev') return prev()
+      setEnded(false)
+      goTo(command === 'first' ? 0 : order.length - 1, false)
+    },
+    [next, prev, goTo, order.length, zoomArmed, zoom],
+  )
+  const gotoNumber = useCallback(
+    (n: number) => {
+      const p = order.indexOf(n - 1)
+      if (p < 0) return
+      setCover('none')
+      setEnded(false)
+      goTo(p, false)
+    },
+    [order, goTo],
+  )
+  useShowKeys({ onCommand: runCommand, onGoto: gotoNumber })
+  const commandRef = useRef(runCommand)
+  commandRef.current = runCommand
+  const gotoRef = useRef(gotoNumber)
+  gotoRef.current = gotoNumber
 
   // Scroll the current thumbnail into view
   const filmRef = useRef<HTMLDivElement>(null)
@@ -299,81 +426,23 @@ export function PresenterView({
   }, [pos])
 
   const clearInk = useCallback(() => {
-    setStrokes([])
-    setLaser(null)
+    board.clear()
     window.slidesApi.presenterInk({ type: 'clear' })
-  }, [])
+  }, [board])
 
-  // ── Ink pointer events (normalized coordinates, each side restores its own) ────────────
-  const normPoint = useCallback((e: React.PointerEvent): { x: number; y: number } | null => {
-    const r = stageboxRef.current?.getBoundingClientRect()
-    if (!r || r.width === 0 || r.height === 0) return null
-    return {
-      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
-    }
-  }, [])
-
-  const onStagePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      if (tool !== 'pen') return
-      const p = normPoint(e)
-      if (!p) return
-      e.currentTarget.setPointerCapture(e.pointerId)
-      drawingRef.current = true
-      setStrokes((ss) => [...ss, { color: PEN_COLOR, points: [p.x, p.y] }])
-      window.slidesApi.presenterInk({ type: 'stroke-start', x: p.x, y: p.y, color: PEN_COLOR })
-    },
-    [tool, normPoint],
-  )
-
-  const onStagePointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (tool === 'pen' && drawingRef.current) {
-        const p = normPoint(e)
-        if (!p) return
-        setStrokes((ss) => {
-          const last = ss[ss.length - 1]
-          if (!last) return ss
-          return [...ss.slice(0, -1), { ...last, points: [...last.points, p.x, p.y] }]
-        })
-        window.slidesApi.presenterInk({ type: 'stroke-move', x: p.x, y: p.y })
-      } else if (tool === 'laser') {
-        const p = normPoint(e)
-        if (!p) return
-        setLaser(p)
-        const now = performance.now()
-        if (now - laserSentAtRef.current > 30) {
-          laserSentAtRef.current = now
-          window.slidesApi.presenterInk({ type: 'laser', x: p.x, y: p.y })
-        }
-      }
-    },
-    [tool, normPoint],
-  )
-
-  const onStagePointerUp = useCallback(() => {
-    drawingRef.current = false
-  }, [])
-
-  const onStagePointerLeave = useCallback(() => {
-    if (tool === 'laser') {
-      setLaser(null)
-      window.slidesApi.presenterInk({ type: 'laser', x: -1, y: -1 })
-    }
-  }, [tool])
+  usePointerShortcuts(setTool, clearInk)
 
   if (!slide) return null
 
   // Left main area auto-fit: subtract the right column/top bar/timer row/toolbar/thumbnail strip, then take the max fit by aspect ratio
   const ar = slide.widthPx / slide.heightPx
-  const mainW = size.w - SIDE_W
+  const mainW = size.w - sideW
   const mainH = size.h - TOP_H - TIMER_H - BOTTOM_H - FILM_H
   const fitW = Math.max(80, Math.round(Math.min(mainW - 48, (mainH - 16) * ar)))
   const fitH = Math.round(fitW / ar)
 
   const nextSlide = ended ? null : (slides[order[pos + 1] ?? -1] ?? null)
-  const notes = allNotes[order[pos]!] ?? ''
+  const notes = allNotes[order[pos]!] ?? []
 
   const useShow = () => {
     keepFsRef.current = true
@@ -388,7 +457,8 @@ export function PresenterView({
           onClick={() => exitRef.current()}
           data-tip={t('panePresenterEndTip')}
         >
-          ⊗ {t('panePresenterEndShow')}
+          <span className="pv-top-ico">{ShowIcon.endShow(20)}</span>
+          <span>{t('panePresenterEndShow')}</span>
         </button>
         <button
           className="pv-top-btn"
@@ -396,11 +466,13 @@ export function PresenterView({
           onClick={() => void window.slidesApi.presenterSwap()}
           data-tip={hasAudience ? t('panePresenterSwapTip') : t('panePresenterNoSecond')}
         >
-          ⇄ {t('panePresenterSwap')}
+          <span className="pv-top-ico">{ShowIcon.swap(20)}</span>
+          <span>{t('panePresenterSwap')}</span>
         </button>
         {onUseSlideShow && (
           <button className="pv-top-btn" onClick={useShow} data-tip={t('panePresenterUseShowTip')}>
-            ▤ {t('panePresenterUseShow')}
+            <span className="pv-top-ico">{ShowIcon.slideShow(20)}</span>
+            <span>{t('panePresenterUseShow')}</span>
           </button>
         )}
         <div className="pv-top-spacer" />
@@ -436,66 +508,107 @@ export function PresenterView({
               {clock}
             </span>
           </div>
-          <div className="pv-stage" onClick={tool === 'none' ? next : undefined}>
+          <div
+            className="pv-stage"
+            onClick={(e) => {
+              if (tool !== 'none') return
+              if (zoomArmed) {
+                // magnify the clicked spot (PowerPoint's Zoom); a later click zooms back out
+                const r = stageboxRef.current?.getBoundingClientRect()
+                if (r && r.width && r.height)
+                  setZoom({
+                    x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+                    y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+                  })
+                setZoomArmed(false)
+                return
+              }
+              if (zoom) {
+                setZoom(null)
+                return
+              }
+              next()
+            }}
+          >
             {ended ? (
               <div className="pv-end">{t('panePresenterEnded')}</div>
             ) : (
               <div
                 ref={stageboxRef}
-                className={`pv-stagebox${tool !== 'none' ? ` pv-tool-${tool}` : ''}`}
+                className={`pv-stagebox${tool !== 'none' ? ` pv-tool-${tool}` : ''}${zoomArmed ? ' pv-zoom-armed' : ''}`}
                 style={{ width: fitW, height: fitH }}
-                onPointerDown={onStagePointerDown}
-                onPointerMove={onStagePointerMove}
-                onPointerUp={onStagePointerUp}
-                onPointerLeave={onStagePointerLeave}
+                {...ink}
               >
-                <AnimatedSlideStage
-                  slide={slide}
-                  images={images}
-                  width={fitW}
-                  states={player.states}
-                />
-                <InkLayer strokes={strokes} laser={laser} width={fitW} height={fitH} />
+                <div
+                  className="show-zoom"
+                  style={
+                    zoom
+                      ? {
+                          transform: 'scale(2)',
+                          transformOrigin: `${zoom.x * 100}% ${zoom.y * 100}%`,
+                        }
+                      : undefined
+                  }
+                >
+                  <AnimatedSlideStage
+                    slide={slide}
+                    images={images}
+                    width={fitW}
+                    states={player.states}
+                  />
+                </div>
+                <CameraBubble on={camera} width={fitW} onError={() => setCamera(false)} />
+                <InkLayer board={board} width={fitW} height={fitH} />
                 {black && <div className="pv-black" data-tip={t('panePresenterBlackOn')} />}
+                {white && <div className="pv-white" data-tip={t('panePresenterBlackOn')} />}
               </div>
             )}
           </div>
           <div className="pv-bottomrow">
-            <div className="pv-tools">
-              <button
-                className={`pv-tool-btn${tool === 'pen' ? ' pv-tool-on' : ''}`}
-                onClick={() => setTool((cur) => (cur === 'pen' ? 'none' : 'pen'))}
-                data-tip={t('panePresenterPen')}
-                aria-label={t('panePresenterPen')}
-              >
-                ✎
-              </button>
-              <button
-                className={`pv-tool-btn${tool === 'laser' ? ' pv-tool-on' : ''}`}
-                onClick={() => setTool((cur) => (cur === 'laser' ? 'none' : 'laser'))}
-                data-tip={t('panePresenterLaser')}
-                aria-label={t('panePresenterLaser')}
-              >
-                ◉
-              </button>
-              <button
-                className="pv-tool-btn"
-                disabled={strokes.length === 0}
-                onClick={clearInk}
-                data-tip={t('panePresenterEraseInk')}
-                aria-label={t('panePresenterEraseInk')}
-              >
-                ⌫
-              </button>
-              <button
-                className={`pv-tool-btn${black ? ' pv-tool-on' : ''}`}
-                onClick={() => setBlack((v) => !v)}
-                data-tip={t('panePresenterBlackTip')}
-                aria-label={t('panePresenterBlackTip')}
-              >
-                ▮
-              </button>
-            </div>
+            <ShowToolbar
+              tool={tool}
+              inkColor={inkColor}
+              canErase={canErase}
+              zoomOn={zoomOn}
+              black={black}
+              cameraOn={camera}
+              onCamera={() => setCamera((v) => !v)}
+              menuItems={showOptionsMenu(t, {
+                slides,
+                order,
+                pos,
+                ended,
+                lastViewed,
+                cover,
+                tool,
+                canErase,
+                presenter: true,
+                canSwap: hasAudience,
+                paused,
+                onNext: next,
+                onPrev: prev,
+                onGoto: (p) => {
+                  setCover('none')
+                  setEnded(false)
+                  goTo(p, false)
+                },
+                onCover: (c) => setCover((cur) => toggleShowScreen(cur, c)),
+                onSwap: () => void window.slidesApi.presenterSwap(),
+                ...(onUseSlideShow ? { onToggleView: useShow } : {}),
+                onTool: setTool,
+                onEraseAll: clearInk,
+                onPause: () => setPaused((v) => !v),
+                onEnd: () => exitRef.current(),
+              })}
+              onTool={setTool}
+              onColor={pickColor}
+              onEraseAll={clearInk}
+              onZoom={toggleZoom}
+              onBlack={() => setCover((c) => toggleShowScreen(c, 'black'))}
+              onOpenChange={(open) => (popoverOpenRef.current = open)}
+              // the tool row sits above the thumbnail strip: open the menu upward
+              menuUp
+            />
             <div className="pv-nav">
               <button
                 className="pv-round"
@@ -523,21 +636,31 @@ export function PresenterView({
                 ›
               </button>
             </div>
-            <div className="pv-tools" style={{ visibility: 'hidden' }} aria-hidden />
+            <div aria-hidden />
           </div>
         </div>
-        <div className="pv-side">
+        <div
+          className="pv-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          onPointerDown={startSideDrag}
+        />
+        <div className="pv-side" style={{ width: sideW }}>
           <div className="pv-section-label">{t('panePresenterNextSlide')}</div>
           <div className="pv-next">
             {nextSlide ? (
-              <SlideThumb slide={nextSlide} images={images} width={SIDE_W - 28} />
+              <SlideThumb slide={nextSlide} images={images} width={sideW - 28} />
             ) : (
               <div className="pv-next-none">{ended ? '—' : t('panePresenterLastSlide')}</div>
             )}
           </div>
           <div className="pv-section-label">{t('panePresenterNotes')}</div>
           <div className="pv-notes" style={{ fontSize: noteSize }}>
-            {notes.trim() ? notes : t('panePresenterNoNotes')}
+            {notes.some((p) => p.runs.some((r) => r.text.trim())) ? (
+              <NotesView paragraphs={notes} />
+            ) : (
+              t('panePresenterNoNotes')
+            )}
           </div>
           <div className="pv-notes-size">
             <button

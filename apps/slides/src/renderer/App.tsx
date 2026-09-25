@@ -25,6 +25,7 @@ import type {
   InsertKind,
   LinkTargetOp,
   MasterPartItem,
+  NotesParagraphView,
   PasteSlideMode,
   SectionInfo,
   SetEffectsPatch,
@@ -42,6 +43,9 @@ import {
   TextEditOverlay,
   firstFontFamily,
   liveAlign,
+  liveTextToggles,
+  sameToggles,
+  type TextToggles,
   liveBulletChar,
   liveRtl,
 } from './TextEditOverlay'
@@ -57,6 +61,7 @@ import { Ribbon, type FormatCmd, type SlidesViewMode } from './components/Ribbon
 import { contextElementTypeForNode, type ContextElementType } from './components/context-tabs'
 import { SlideShowView } from './components/SlideShowView'
 import { IconNotes, IconPlayBoxed } from './components/icons'
+import { NotesEditor, readNotesEditor } from './components/NotesEditor'
 import { PresenterView } from './components/PresenterView'
 import { CustomShowDialog } from './components/CustomShowDialog'
 import { PrintDialog } from './components/PrintDialog'
@@ -116,6 +121,7 @@ import * as clipboardActions from './clipboard-actions'
 import * as insertActions from './insert-actions'
 import * as animationActions from './animation-actions'
 import * as showActions from './show-actions'
+import { readShowMonitor, writeShowMonitor } from './show-monitor'
 import * as slideActions from './slide-actions'
 import * as pictureEditActions from './picture-edit-actions'
 import * as arrangeActions from './arrange-actions'
@@ -306,6 +312,9 @@ function collectRtls(node: RenderNode, out: Set<boolean>) {
   else if (node.type === 'group') for (const child of node.children) collectRtls(child, out)
 }
 
+/** localStorage key of the Slide Show → Use Presenter View checkbox */
+const USE_PRESENTER_VIEW_KEY = 'genoffice.slides.usePresenterView'
+
 export function App() {
   const { lang } = useI18n()
   const [slides, setSlides] = useState<RenderSlide[]>([])
@@ -493,6 +502,36 @@ export function App() {
   const [slideShow, setSlideShow] = useState<SlideShowState | null>(null)
   /** Presenter view (single-window version; mutually exclusive with slideShow) */
   const [presenter, setPresenter] = useState<{ startAt: number } | null>(null)
+  // Slide Show → Use Presenter View: on by default like PowerPoint; a per-machine preference
+  const [usePresenterView, setUsePresenterView] = useState(() => {
+    try {
+      return localStorage.getItem(USE_PRESENTER_VIEW_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
+  // Slide Show → Monitor: which screen the audience sees (null = Automatic)
+  const [showMonitor, setShowMonitor] = useState<string | null>(readShowMonitor)
+  const [monitors, setMonitors] = useState<Array<{ id: number; label: string; primary: boolean }>>(
+    [],
+  )
+  useEffect(() => {
+    const load = () => void window.slidesApi.displayList().then(setMonitors, () => {})
+    load()
+    // screens come and go (a projector plugged in): refresh when the window regains focus
+    window.addEventListener('focus', load)
+    return () => window.removeEventListener('focus', load)
+  }, [])
+  const toggleUsePresenterView = useCallback(() => {
+    setUsePresenterView((v) => {
+      try {
+        localStorage.setItem(USE_PRESENTER_VIEW_KEY, v ? '0' : '1')
+      } catch {
+        // storage unavailable: the choice lasts for this session
+      }
+      return !v
+    })
+  }, [])
   // ── Custom shows: document-level list (persisted to localStorage by file path) + management dialog ──
   const [customShows, setCustomShows] = useState<CustomShow[]>([])
   const [customShowDlgOpen, setCustomShowDlgOpen] = useState(false)
@@ -511,9 +550,17 @@ export function App() {
   // Notes buttons hide/show it entirely; drag its top edge to any height, all
   // the way down to hide.
   const [showNotes, setShowNotes] = useState(true)
-  const [notesText, setNotesText] = useState('')
-  /** Unsaved notes draft (flushed before page switch/save) */
-  const notesDraftRef = useRef<{ index: number; text: string } | null>(null)
+  /** The current slide's formatted notes as last loaded (null while loading) */
+  const [notesParas, setNotesParas] = useState<NotesParagraphView[] | null>(null)
+  const notesEditorRef = useRef<HTMLDivElement>(null)
+  /** Unsaved notes draft (flushed before page switch/save); read() extracts the pane at flush time */
+  const notesDraftRef = useRef<{
+    index: number
+    read: () => { paragraphs: EditParagraph[]; text: string }
+  } | null>(null)
+  /** The caret is in the notes pane (kept while ribbon controls borrow focus): the Font and
+   *  alignment commands act on the notes selection */
+  const [notesActive, setNotesActive] = useState(false)
   /** Notes pane height (px): default shows ~4 lines (PowerPoint-like), drag-resizable */
   const [notesHeight, setNotesHeight] = useState(100)
   const notesDragRef = useRef<{ startY: number; startH: number } | null>(null)
@@ -602,7 +649,8 @@ export function App() {
     const pending = notesDraftRef.current
     if (!pending) return
     notesDraftRef.current = null
-    const ok = await window.slidesApi.setNotes({ slideIndex: pending.index, text: pending.text })
+    const { paragraphs, text } = pending.read()
+    const ok = await window.slidesApi.setNotes({ slideIndex: pending.index, text, paragraphs })
     if (ok) setDirty(true)
   }, [])
 
@@ -1839,22 +1887,51 @@ export function App() {
     if (!hasDoc) return
     let cancelled = false
     void flushNotes()
-      .then(() => window.slidesApi.getNotes(current))
-      .then((t) => {
-        if (!cancelled) setNotesText(t)
+      .then(() => window.slidesApi.getNotesRich(current))
+      .then((paras) => {
+        if (!cancelled) setNotesParas(paras)
       })
     return () => {
       cancelled = true
     }
   }, [hasDoc, current, path, annotationsNonce, flushNotes])
 
-  const onNotesChange = useCallback(
-    (text: string) => {
-      setNotesText(text)
-      notesDraftRef.current = { index: current, text }
-    },
-    [current],
-  )
+  const onNotesEdit = useCallback(() => {
+    // the element itself, not the ref: a pane hidden before the flush still holds the text
+    const root = notesEditorRef.current
+    if (root) notesDraftRef.current = { index: current, read: () => readNotesEditor(root) }
+  }, [current])
+
+  // Leaving the notes: another slide, a slide selection or slide text editing, or a click on
+  // the slide area (ribbon clicks keep it — they format the notes selection)
+  useEffect(() => setNotesActive(false), [current])
+  // Hiding the pane unmounts the editor: save its draft and reload, so showing it again
+  // renders what was typed
+  useEffect(() => {
+    if (showNotes || !hasDoc) return
+    setNotesActive(false)
+    let cancelled = false
+    void flushNotes()
+      .then(() => window.slidesApi.getNotesRich(current))
+      .then((paras) => {
+        if (!cancelled) setNotesParas(paras)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showNotes, hasDoc, current, flushNotes])
+  useEffect(() => {
+    if (selectedIds.length || editing || editingCell) setNotesActive(false)
+  }, [selectedIds, editing, editingCell])
+  useEffect(() => {
+    if (!notesActive) return
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null
+      if (t?.closest('.stage-wrap, .slide-list')) setNotesActive(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [notesActive])
 
   // ── Comments: fetch the current page's list on page switch/document change/undo (the ribbon badge uses it too) ──────────
   useEffect(() => {
@@ -2453,7 +2530,12 @@ export function App() {
   )
 
   // Text / element styling (style-actions.ts)
-  const onFormat = useCallback((cmd: FormatCmd) => styleActions.onFormat(cmd), [])
+  const onFormat = useCallback((cmd: FormatCmd) => {
+    styleActions.onFormat(ctxRef.current, cmd)
+    // execCommand changes the DOM without a selectionchange: refresh the B/I/U highlight
+    const c = ctxRef.current
+    if (c.editing || c.editingCell || c.editingNotes) setSelToggles(liveTextToggles())
+  }, [])
   const onFontFamily = useCallback(
     (family: string) => styleActions.onFontFamily(ctxRef.current, family),
     [],
@@ -2466,12 +2548,15 @@ export function App() {
   const [selAlign, setSelAlign] = useState<ParaAlign | null>(null)
   // Effective base direction at the editing caret/selection; null outside editing / mixed
   const [selRtl, setSelRtl] = useState<boolean | null>(null)
-  const inTextEdit = !!editing || !!editingCell
+  // B / I / U / S / x² / x₂ state at the editing caret/selection (ribbon toggle highlight)
+  const [selToggles, setSelToggles] = useState<TextToggles | null>(null)
+  const inTextEdit = !!editing || !!editingCell || notesActive
   useEffect(() => {
     if (!inTextEdit) {
       setSelFont(null)
       setSelAlign(null)
       setSelRtl(null)
+      setSelToggles(null)
       return
     }
     const update = () => {
@@ -2480,6 +2565,8 @@ export function App() {
       if (!el?.isContentEditable) return
       setSelAlign(liveAlign() ?? null)
       setSelRtl(liveRtl() ?? null)
+      const live = liveTextToggles()
+      setSelToggles((v) => (v && sameToggles(v, live) ? v : live))
       const cs = window.getComputedStyle(el)
       // Prefer the model font name baked into the run container (data-font) when the display font
       // is unchanged; the computed style may be a fallback/substitution product (e.g. Arial for DengXian)
@@ -2498,7 +2585,14 @@ export function App() {
     }
     update()
     document.addEventListener('selectionchange', update)
-    return () => document.removeEventListener('selectionchange', update)
+    // ⌘B / ⌘I / ⌘U and execCommand change formatting without moving the selection
+    document.addEventListener('keyup', update)
+    document.addEventListener('input', update)
+    return () => {
+      document.removeEventListener('selectionchange', update)
+      document.removeEventListener('keyup', update)
+      document.removeEventListener('input', update)
+    }
   }, [inTextEdit])
 
   const onTextColor = useCallback((hex: string) => {
@@ -2510,7 +2604,8 @@ export function App() {
     styleActions.onAlign(ctxRef.current, align)
     // execCommand mutates only the overlay DOM (no state change, selectionchange isn't
     // guaranteed) — re-read so the ribbon highlight follows the click immediately
-    if (ctxRef.current.editing || ctxRef.current.editingCell) setSelAlign(liveAlign() ?? null)
+    const c = ctxRef.current
+    if (c.editing || c.editingCell || c.editingNotes) setSelAlign(liveAlign() ?? null)
   }, [])
   const onTextToggle = useCallback(
     (kind: 'bold' | 'italic' | 'underline' | 'strike') =>
@@ -2518,6 +2613,20 @@ export function App() {
     [],
   )
   const onStrike = useCallback(() => onTextToggle('strike'), [onTextToggle])
+  const onFontExtra = useCallback(
+    (patch: Parameters<typeof styleActions.onFontExtra>[1]) =>
+      styleActions.onFontExtra(ctxRef.current, patch),
+    [],
+  )
+  const onTextAnchorRibbon = useCallback(
+    (anchor: 'top' | 'middle' | 'bottom') => void styleActions.onTextAnchor(ctxRef.current, anchor),
+    [],
+  )
+  const onTextDirectionRibbon = useCallback(
+    (vert: 'horz' | 'vert' | 'vert270' | 'wordArtVert') =>
+      void styleActions.onTextDirection(ctxRef.current, vert),
+    [],
+  )
   const onElementTextColor = useCallback(
     (hex: string) => styleActions.onElementTextColor(ctxRef.current, hex),
     [],
@@ -2748,6 +2857,28 @@ export function App() {
     return [...found][0]!
   }, [selectedIds, editing, editingCell, inTextEdit, findNodeCtx, paraFmtTick])
 
+  // B / I / U / S / x² / x₂ highlight: the live selection while editing, otherwise "every run of
+  // the selected boxes has it" (the same rule the toggle buttons use to decide on/off)
+  const curTextToggles = useMemo((): TextToggles | null => {
+    if (inTextEdit) return selToggles
+    if (!selectedIds.length) return null
+    const runs = selectedIds.flatMap((id) => {
+      const node = findNodeCtx(id)?.node as ShapeRenderNode | undefined
+      return (node?.text?.lines ?? []).flatMap((l) =>
+        l.runs.filter((r) => !r.isBullet && r.text.trim()),
+      )
+    })
+    if (!runs.length) return null
+    return {
+      bold: runs.every((r) => r.bold),
+      italic: runs.every((r) => r.italic),
+      underline: runs.every((r) => r.underline),
+      strike: runs.every((r) => !!r.strike),
+      superscript: runs.every((r) => (r.baselinePct ?? 0) > 0),
+      subscript: runs.every((r) => (r.baselinePct ?? 0) < 0),
+    }
+  }, [inTextEdit, selToggles, selectedIds, findNodeCtx])
+
   // Current paragraph alignment for the ribbon highlight: unset text defaults to 'left',
   // so text always has exactly one alignment current; null = mixed/no text (no highlight)
   const curAlign = useMemo((): ParaAlign | null => {
@@ -2790,6 +2921,7 @@ export function App() {
     editing,
     setEditing,
     editingCell,
+    editingNotes: notesActive,
     setEditingCell,
     enteredGroupId,
     setEnteredGroupId,
@@ -2820,6 +2952,7 @@ export function App() {
     setSlideShow,
     presenter,
     setPresenter,
+    usePresenterView,
     setCustomShows,
     setCustomShowDlgOpen,
     pendingRehearse,
@@ -2919,7 +3052,7 @@ export function App() {
         canUndo={histState.canUndo}
         canRedo={histState.canRedo}
         dirty={dirty}
-        editing={!!editing || !!editingCell}
+        editing={!!editing || !!editingCell || notesActive}
         autoSave={autoSave}
         onAutoSaveChange={setAutoSave}
         onOpen={() => void openDialog()}
@@ -2973,6 +3106,10 @@ export function App() {
         onStrike={onStrike}
         onTextToggle={onTextToggle}
         onElementTextColor={onElementTextColor}
+        onFontExtra={onFontExtra}
+        curTextToggles={curTextToggles}
+        onTextAnchor={onTextAnchorRibbon}
+        onTextDirection={onTextDirectionRibbon}
         onFindReplace={() => setFindOpen(true)}
         animByParagraph={animByParagraph}
         onToggleAnimByParagraph={() => setAnimByParagraph((v) => !v)}
@@ -3036,6 +3173,14 @@ export function App() {
         onAnimPreview={() => setAnimPreview((n) => n + 1)}
         onSlideShow={startSlideShow}
         onPresenterView={startPresenterView}
+        usePresenterView={usePresenterView}
+        onToggleUsePresenterView={toggleUsePresenterView}
+        showMonitor={showMonitor}
+        monitors={monitors}
+        onShowMonitor={(label) => {
+          setShowMonitor(label)
+          writeShowMonitor(label)
+        }}
         onCustomShow={() => setCustomShowDlgOpen(true)}
         onRehearse={startRehearseShow}
         currentHidden={!!slide?.hidden}
@@ -3985,12 +4130,19 @@ export function App() {
                         className="notes-resize-handle"
                         onMouseDown={(e) => startNotesDrag(e, notesHeight)}
                       />
-                      <textarea
-                        value={notesText}
+                      <NotesEditor
+                        paragraphs={notesParas}
+                        editorRef={notesEditorRef}
+                        defaultFont={defaultFont}
                         placeholder={
                           notesHeight < 60 ? t('appNotesClickToAdd') : t('appNotesPlaceholder')
                         }
-                        onChange={(e) => onNotesChange(e.target.value)}
+                        onEdit={onNotesEdit}
+                        onFocus={() => {
+                          // PowerPoint: typing in the notes deselects the slide's shapes
+                          setSelectedIds([])
+                          setNotesActive(true)
+                        }}
                         onBlur={() => void flushNotes()}
                       />
                     </div>
@@ -4120,6 +4272,7 @@ export function App() {
           rehearseMode={slideShow.rehearse}
           onRehearseDone={onRehearseDone}
           onExit={exitSlideShow}
+          onUsePresenterView={(i) => showActions.switchShowToPresenter(ctxRef.current, i)}
         />
       )}
 

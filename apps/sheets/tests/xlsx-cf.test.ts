@@ -432,6 +432,47 @@ describe('applyCfRules with x14 extensions', () => {
   })
 })
 
+describe('applyCfRules keeps rules the editor cannot load', () => {
+  it('carries timePeriod / aboveAverage rules over verbatim while rebuilding the rest', () => {
+    const sheet =
+      '<worksheet><sheetData/>' +
+      '<conditionalFormatting sqref="A1:A10"><cfRule type="timePeriod" dxfId="3" priority="2" timePeriod="yesterday"><formula>FLOOR(A1,1)=TODAY()-1</formula></cfRule></conditionalFormatting>' +
+      '<conditionalFormatting sqref="B1:B10"><cfRule type="cellIs" dxfId="0" priority="1" operator="greaterThan"><formula>5</formula></cfRule>' +
+      '<cfRule type="aboveAverage" dxfId="4" priority="3"/></conditionalFormatting>' +
+      '<pageMargins left="0.7"/></worksheet>'
+    const dxfs = new FakeDxfs()
+    const out = applyCfRules(
+      sheet,
+      [
+        {
+          ranges: [{ startRow: 0, endRow: 9, startColumn: 1, endColumn: 1 }],
+          stopIfTrue: false,
+          rule: {
+            type: 'highlightCell',
+            subType: 'number',
+            operator: 'greaterThan',
+            value: 7,
+            style: { bl: 1 },
+          },
+        },
+      ],
+      dxfs,
+    )
+    // the unloadable rules survive with their own priorities and dxfs
+    expect(out).toContain(
+      '<conditionalFormatting sqref="A1:A10"><cfRule type="timePeriod" dxfId="3" priority="2" timePeriod="yesterday"><formula>FLOOR(A1,1)=TODAY()-1</formula></cfRule></conditionalFormatting>',
+    )
+    expect(out).toContain(
+      '<conditionalFormatting sqref="B1:B10"><cfRule type="aboveAverage" dxfId="4" priority="3"/></conditionalFormatting>',
+    )
+    // the edited rule is rebuilt (5 → 7) on a free priority; the old one is gone
+    expect(out).not.toContain('<formula>5</formula>')
+    expect(out).toMatch(
+      /<cfRule type="cellIs" dxfId="\d+" priority="1" operator="greaterThan"><formula>7<\/formula>/,
+    )
+  })
+})
+
 describe('buildDxfXml', () => {
   it('maps the Univer highlight style onto dxf font and fill', () => {
     expect(
@@ -448,6 +489,32 @@ describe('buildDxfXml', () => {
         '<fill><patternFill><bgColor rgb="FFAABBCC"/></patternFill></fill></dxf>',
     )
     expect(buildDxfXml(undefined)).toBe('<dxf></dxf>')
+  })
+
+  it("keeps a loaded rule's number format and borders in schema order", () => {
+    expect(
+      buildDxfXml({
+        bl: 1,
+        n: { pattern: '0.00%' },
+        bg: { rgb: '#FFEEDD' },
+        bd: {
+          t: { s: 1, cl: { rgb: '#FF0000' } },
+          b: { s: 8, cl: { rgb: 'rgb(0,0,255)' } },
+        },
+      }),
+    ).toBe(
+      '<dxf><font><b/></font><numFmt numFmtId="10" formatCode="0.00%"/>' +
+        '<fill><patternFill><bgColor rgb="FFFFEEDD"/></patternFill></fill>' +
+        '<border><top style="thin"><color rgb="FFFF0000"/></top>' +
+        '<bottom style="medium"><color rgb="FF0000FF"/></bottom></border></dxf>',
+    )
+    // a custom format gets a stable id and its code inline (escaped)
+    const custom = buildDxfXml({ n: { pattern: '"Q"0 "<x>"' } })
+    expect(custom).toMatch(
+      /^<dxf><numFmt numFmtId="\d+" formatCode="&quot;Q&quot;0 &quot;&lt;x&gt;&quot;"\/><\/dxf>$/,
+    )
+    expect(Number(/numFmtId="(\d+)"/.exec(custom)![1])).toBeGreaterThanOrEqual(164)
+    expect(buildDxfXml({ n: { pattern: '"Q"0 "<x>"' } })).toBe(custom)
   })
 })
 

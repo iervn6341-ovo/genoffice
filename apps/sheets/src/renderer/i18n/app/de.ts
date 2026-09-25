@@ -799,6 +799,7 @@ export const de = {
   appGroupChartActions: 'Diagrammaktionen',
   appRemoveFromSheet: 'Vom Blatt entfernen',
   appGroupAiAssistant: 'KI-Assistent',
+  appGroupAiTools: 'KI-Tools',
   appAiOpenPanelDetail: 'Chat-Seitenleiste',
   appGroupAiStarters: 'Schnellstart',
   appAiStarterDetail: 'An KI-Bereich senden',

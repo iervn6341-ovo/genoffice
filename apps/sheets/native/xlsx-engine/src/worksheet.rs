@@ -340,19 +340,14 @@ pub(crate) fn index_worksheet(
                 if element.local_name().as_ref() == b"hyperlink" =>
             {
                 if let Some(reference) = attribute_value(&reader, &element, b"ref")? {
-                    let anchor = reference.split(':').next().unwrap_or(&reference);
-                    if let Ok((row, column)) = parse_address(&anchor.replace('$', "")) {
+                    if let Some(area) = parse_area_reference(&reference) {
                         let target = match attribute_value(&reader, &element, b"id")? {
                             Some(id) => link_targets.get(&id).cloned(),
                             None => attribute_value(&reader, &element, b"location")?
                                 .map(|location| format!("#{location}")),
                         };
                         if let Some(target) = target {
-                            hyperlinks.push(HyperlinkRecord {
-                                row,
-                                column,
-                                target,
-                            });
+                            push_hyperlink_area(&mut hyperlinks, &area, &target);
                         }
                     }
                 }
@@ -1401,4 +1396,29 @@ pub(crate) fn shared_formula_si<R: std::io::BufRead>(
         return Ok(None);
     }
     Ok(attribute_value(reader, element, b"si")?.and_then(|value| value.parse::<u32>().ok()))
+}
+
+/// Hyperlinks the sheet reports per range read; the renderer rejects larger responses.
+const MAX_SHEET_HYPERLINKS: usize = 100_000;
+
+/// One record per cell of a `<hyperlink ref>` area: Excel links every cell of
+/// `ref="A1:A3"`, not only its first — taking just the anchor left A2:A3 as plain
+/// cells. Capped so a whole-column link cannot flood the range transport.
+pub(crate) fn push_hyperlink_area(
+    hyperlinks: &mut Vec<HyperlinkRecord>,
+    area: &MergedRange,
+    target: &str,
+) {
+    for row in area.start_row..=area.end_row {
+        for column in area.start_column..=area.end_column {
+            if hyperlinks.len() >= MAX_SHEET_HYPERLINKS {
+                return;
+            }
+            hyperlinks.push(HyperlinkRecord {
+                row,
+                column,
+                target: target.to_owned(),
+            });
+        }
+    }
 }

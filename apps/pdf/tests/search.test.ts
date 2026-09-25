@@ -20,9 +20,10 @@ function fakeDoc(pages: FakeItem[][]): PDFDocumentProxy {
   } as unknown as PDFDocumentProxy
 }
 
+// pdf.js text items carry the font size in their matrix (Tf × Tm × CTM)
 const item = (str: string, x: number, y: number, w: number, h: number): FakeItem => ({
   str,
-  transform: [1, 0, 0, 1, x, y],
+  transform: [h, 0, 0, h, x, y],
   width: w,
   height: h,
 })
@@ -51,6 +52,13 @@ describe('buildSearchIndex', () => {
     ])
     const index = await buildSearchIndex(doc)
     expect(index[0]!.text).toBe('line1\n\nline2')
+  })
+
+  it('takes the run size from the matrix, not the glyph-box height estimate', async () => {
+    // a 12pt run whose pdf.js box height reads 12.2: the edit bar must show 12
+    const doc = fakeDoc([[{ str: 'x', transform: [12, 0, 0, 12, 0, 0], width: 5, height: 12.2 }]])
+    const index = await buildSearchIndex(doc)
+    expect(index[0]!.items[0]!.h).toBe(12)
   })
 
   it('derives height from the transform when height is missing', async () => {

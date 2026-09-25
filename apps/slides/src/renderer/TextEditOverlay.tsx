@@ -6,13 +6,20 @@
  */
 import React, { useEffect, useRef } from 'react'
 import type { EditCaret } from './action-context'
-import { formatAutoNum, DEFAULT_INSETS_EMU, emuToPx, isWideChar } from '@genoffice/pptx-render'
+import {
+  formatAutoNum,
+  DEFAULT_INSETS_EMU,
+  emuToPx,
+  isWideChar,
+  bulletCenterShift,
+} from '@genoffice/pptx-render'
 import type { GlyphRun, ShapeRenderNode, TextLine } from '@genoffice/pptx-render'
+import { changeTextCase, type TextCaseMode } from '@genoffice/pptx-engine/text-case'
 import type { EditParagraph, EditRun, LinkTargetOp } from '../shared/ipc'
 import { decodeLinkTarget, encodeLinkTarget } from '../shared/run-link'
 import { displayFontFamily, konvaBaselineDrop } from './konva-adapter'
 import { ZOOM_PREVIEW_EVENT } from './zoom-preview'
-import { FONT_SIZES } from './components/ribbon-shared'
+import { stepFontSizePt } from '@genoffice/pptx-engine/font-size-step'
 import { bulletRunText } from './bullet-presets'
 
 interface Props {
@@ -205,8 +212,14 @@ function setEditorBullet(
     hangPx: number
     /** Picture bullet box relative to the paragraph div (px); the ::before only reserves widthPx */
     imageBox?: { x: number; y: number; w: number; h: number }
+    /** Body text size (px) of a symbol bullet: an enlarged/reduced glyph is nudged like the canvas does */
+    symbolTextPx?: number
   },
 ): void {
+  p.style.setProperty(
+    '--bullet-shift',
+    `${b.symbolTextPx ? bulletCenterShift(b.sizePx, b.symbolTextPx, 'char', undefined) : 0}px`,
+  )
   p.style.setProperty('--bullet-w', `${b.widthPx}px`)
   p.style.setProperty('--bullet-hang', `${b.hangPx}px`)
   p.style.setProperty('--bullet-font', displayFontFamily(b.font))
@@ -230,6 +243,22 @@ function setEditorBullet(
   }
 }
 
+/**
+ * Indent level ±1 on a paragraph div (Tab / ⇧Tab and the ribbon's indent buttons): the level is
+ * written on commit; editing only shows a marginLeft hint — the paragraph's own left margin (a
+ * bullet's hanging indent) plus 24px per level, since the canvas lays the real indent out.
+ */
+function shiftBlockLevel(blk: HTMLElement, delta: 1 | -1): void {
+  const cur = parseInt(blk.dataset.level ?? '0', 10) || 0
+  const next = Math.max(0, Math.min(8, cur + delta))
+  if (next === cur) return
+  if (blk.dataset.baseMl == null) blk.dataset.baseMl = String(parseFloat(blk.style.marginLeft) || 0)
+  const base = parseFloat(blk.dataset.baseMl) || 0
+  if (next) blk.dataset.level = String(next)
+  else delete blk.dataset.level
+  blk.style.marginLeft = next || base ? `${base + next * 24}px` : ''
+}
+
 /** Re-derive the ::before after a ribbon bullet toggle on a paragraph div (marks set by applySelectionParagraphFormat). */
 function refreshEditorBullet(b: HTMLElement, root: HTMLElement): void {
   const kind = b.dataset.bullet ?? b.dataset.hadBullet
@@ -238,20 +267,51 @@ function refreshEditorBullet(b: HTMLElement, root: HTMLElement): void {
     delete b.dataset.bulletImg
     return
   }
+  const keepsOriginalGlyph =
+    kind === 'char' && !b.dataset.bulletChar && !!b.dataset.bulletText && !b.dataset.bulletImg
+  const lookMarked =
+    b.dataset.bulletSizePct != null ||
+    b.dataset.bulletColor != null ||
+    b.dataset.bulletHangEmu != null
   // Toggled back on without a glyph pick: the original bullet preview still applies
-  if (kind === 'char' && !b.dataset.bulletChar && b.dataset.bulletText && !b.dataset.bulletImg)
-    return
+  if (keepsOriginalGlyph && !lookMarked) return
   if (kind === 'blip' && !b.dataset.bulletImgSrc && b.dataset.bulletImg) return
   const sample = (b.querySelector('span, a') as HTMLElement | null) ?? b
   const cs = window.getComputedStyle(sample)
-  const sizePx = parseFloat(b.style.getPropertyValue('--bullet-size')) || parseFloat(cs.fontSize)
-  let widthPx = parseFloat(b.style.getPropertyValue('--bullet-w'))
-  if (!widthPx) {
-    // Fresh bullet: the engine will write PowerPoint's 0.3125" hanging indent
-    widthPx = 22.5 * (parseFloat(root.dataset.norm ?? '') || 1)
+  const norm = parseFloat(root.dataset.norm ?? '') || 1
+  // A size chosen this session (% of the text) wins over the bullet's laid-out size
+  const sizePct = parseFloat(b.dataset.bulletSizePct ?? '')
+  const sizePx = Number.isFinite(sizePct)
+    ? (parseFloat(cs.fontSize) * sizePct) / 100
+    : parseFloat(b.style.getPropertyValue('--bullet-size')) || parseFloat(cs.fontSize)
+  // A hanging indent chosen this session (EMU, 9525 per layout px before norm)
+  const hangEmu = parseFloat(b.dataset.bulletHangEmu ?? '')
+  let widthPx = Number.isFinite(hangEmu)
+    ? (hangEmu / 9525) * norm
+    : parseFloat(b.style.getPropertyValue('--bullet-w'))
+  if (!widthPx || Number.isFinite(hangEmu)) {
+    // Fresh bullet: the engine will write PowerPoint's 0.3125" hanging indent (22.5pt). Points
+    // convert to layout px as pt × 96/72 × norm (same as the 18pt fallback font size) — omitting
+    // the 96/72 made the preview 7.5px too narrow, so the text jumped right on commit
+    if (!widthPx) widthPx = ((22.5 * 96) / 72) * norm
     b.style.marginLeft = `${widthPx}px`
   }
-  const hangPx = parseFloat(b.style.getPropertyValue('--bullet-hang')) || widthPx
+  const hangPx =
+    (Number.isFinite(hangEmu) ? widthPx : parseFloat(b.style.getPropertyValue('--bullet-hang'))) ||
+    widthPx
+  if (keepsOriginalGlyph) {
+    // Size / color / indent picked on a bullet the layout already drew: restyle it in place so
+    // its glyph and font stay (rebuilding it would fall back to the plain dot)
+    b.style.setProperty('--bullet-w', `${widthPx}px`)
+    b.style.setProperty('--bullet-hang', `${hangPx}px`)
+    b.style.setProperty('--bullet-size', `${sizePx}px`)
+    if (b.dataset.bulletColor) b.style.setProperty('--bullet-color', b.dataset.bulletColor)
+    b.style.setProperty(
+      '--bullet-shift',
+      `${bulletCenterShift(sizePx, parseFloat(cs.fontSize), 'char', undefined)}px`,
+    )
+    return
+  }
   let text = '•'
   let font = cs.fontFamily
   if (kind === 'number') {
@@ -292,7 +352,15 @@ function refreshEditorBullet(b: HTMLElement, root: HTMLElement): void {
     text = bulletRunText(b.dataset.bulletChar, b.dataset.bulletFont)
     if (b.dataset.bulletFont) font = b.dataset.bulletFont
   }
-  setEditorBullet(b, { text, font, sizePx, color: cs.color, widthPx, hangPx })
+  setEditorBullet(b, {
+    text,
+    font,
+    sizePx,
+    color: b.dataset.bulletColor ?? cs.color,
+    widthPx,
+    hangPx,
+    ...(kind === 'char' ? { symbolTextPx: parseFloat(cs.fontSize) } : {}),
+  })
 }
 
 const IMAGE_MIME: Record<string, string> = {
@@ -458,6 +526,9 @@ export function populateEditorDom(
           bold: bulletRun.bold,
           widthPx: textX - bulletRun.x,
           hangPx: marL - bulletRun.x,
+          ...(!bulletRun.numType && !bulletRun.image && textRun
+            ? { symbolTextPx: textRun.fontSizePx }
+            : {}),
           ...(bulletRun.image
             ? {
                 imageBox: {
@@ -879,17 +950,7 @@ export function TextEditOverlay({
                 ? selNow.anchorNode
                 : (selNow?.anchorNode?.parentElement ?? null)
             while (blk && blk !== ref.current && blk.tagName !== 'DIV') blk = blk.parentElement
-            if (blk && blk !== ref.current) {
-              const cur = parseInt(blk.dataset.level ?? '0', 10) || 0
-              const next = Math.max(0, Math.min(8, cur + (e.shiftKey ? -1 : 1)))
-              if (next) {
-                blk.dataset.level = String(next)
-                blk.style.marginLeft = `${next * 24}px`
-              } else {
-                delete blk.dataset.level
-                blk.style.marginLeft = ''
-              }
-            }
+            if (blk && blk !== ref.current) shiftBlockLevel(blk, e.shiftKey ? -1 : 1)
           } else if (e.key === 'Enter' && e.shiftKey) {
             // Shift+Enter = in-paragraph soft break (<a:br/>). The default behavior inserts <br>,
             // and execCommand('insertText','\n') splits the div in Chromium — both become paragraph splits,
@@ -982,6 +1043,8 @@ function sameRunFormat(a: EditRun, b: EditRun): boolean {
     a.fontSize === b.fontSize &&
     a.fontFamily === b.fontFamily &&
     a.color === b.color &&
+    a.letterSpacing === b.letterSpacing &&
+    a.highlight === b.highlight &&
     (a.link ? encodeLinkTarget(a.link) : '') === (b.link ? encodeLinkTarget(b.link) : '')
   )
 }
@@ -1065,6 +1128,10 @@ export function extractParagraphs(root: HTMLElement, norm: number): EditParagrap
           ...(inherited.fontSize != null ? { fontSize: inherited.fontSize } : {}),
           ...(inherited.fontFamily ? { fontFamily: inherited.fontFamily } : {}),
           ...(inherited.color ? { color: inherited.color } : {}),
+          ...(inherited.letterSpacing !== undefined
+            ? { letterSpacing: inherited.letterSpacing }
+            : {}),
+          ...(inherited.highlight !== undefined ? { highlight: inherited.highlight } : {}),
           ...(inherited.srcRun != null ? { srcRun: inherited.srcRun } : {}),
           link: inherited.link ?? null, // explicit null = no link (the DOM is authoritative here)
         })
@@ -1115,6 +1182,11 @@ export function extractParagraphs(root: HTMLElement, norm: number): EditParagrap
         const n = parseFloat(v ?? '')
         return Number.isNaN(n) ? undefined : n
       }
+      const bh = num(ds?.bulletHangEmu)
+      if (bh != null) curFmt.bulletHangEmu = bh
+      const bs = num(ds?.bulletSizePct)
+      if (bs != null) curFmt.bulletSizePct = bs
+      if (ds?.bulletColor) curFmt.bulletColor = ds.bulletColor
       const ls = num(ds?.lineSpacingPct)
       if (ls != null) curFmt.lineSpacingPct = ls
       const sb = num(ds?.spaceBeforePt)
@@ -1154,6 +1226,13 @@ export function extractParagraphs(root: HTMLElement, norm: number): EditParagrap
     if (el.tagName === 'SUP' || style.verticalAlign === 'super') next.baseline = 30
     else if (el.tagName === 'SUB' || style.verticalAlign === 'sub') next.baseline = -25
     if (style.color) next.color = rgbToHex(style.color)
+    // Character spacing / highlight chosen in this session (marks set by the ribbon helpers
+    // below); unmarked text keeps the model's values, so a plain round trip commits nothing
+    if (el.dataset?.spc != null) {
+      const pt = parseFloat(el.dataset.spc)
+      if (!Number.isNaN(pt)) next.letterSpacing = pt
+    }
+    if (el.dataset?.hl != null) next.highlight = el.dataset.hl === 'none' ? null : el.dataset.hl
     if (style.fontSize) {
       const px = parseFloat(style.fontSize)
       if (!Number.isNaN(px)) next.fontSize = pxToPt(px, norm)
@@ -1275,10 +1354,14 @@ export function applySelectionParagraphFormat(patch: {
   numType?: string
   startAt?: number
   bulletImage?: { base64: string; ext: string }
+  bulletHangEmu?: number
+  bulletSizePct?: number
+  bulletColor?: string
   lineSpacingPct?: number
   spaceBeforePt?: number
   spaceAfterPt?: number
   rtl?: boolean
+  indentDelta?: 1 | -1
 }): boolean {
   const sel = window.getSelection()
   if (!sel?.rangeCount) return false
@@ -1340,6 +1423,14 @@ export function applySelectionParagraphFormat(patch: {
       if (patch.startAt != null) b.dataset.startAt = String(patch.startAt)
       refreshEditorBullet(b, root)
     }
+    // Bullet look: only bulleted paragraphs take it (the engine ignores it elsewhere too)
+    if (patch.bulletHangEmu != null || patch.bulletSizePct != null || patch.bulletColor != null) {
+      if (patch.bulletHangEmu != null) b.dataset.bulletHangEmu = String(patch.bulletHangEmu)
+      if (patch.bulletSizePct != null) b.dataset.bulletSizePct = String(patch.bulletSizePct)
+      if (patch.bulletColor != null) b.dataset.bulletColor = patch.bulletColor
+      refreshEditorBullet(b, root)
+    }
+    if (patch.indentDelta != null) shiftBlockLevel(b, patch.indentDelta)
     if (patch.lineSpacingPct != null) {
       b.dataset.lineSpacingPct = String(patch.lineSpacingPct)
       // Rough live preview; the canvas re-lays out with the real metrics on commit
@@ -1394,11 +1485,28 @@ export function applySelectionParagraphFormat(patch: {
   return true
 }
 
+/**
+ * The edit root the live ribbon state reads: the focused editor, else the slide overlay (the
+ * notes pane also carries traced paragraphs, but a mounted slide overlay is what an unfocused
+ * ribbon control belongs to), else the notes pane.
+ */
+function liveEditRoot(): HTMLElement | null {
+  const active = document.activeElement
+  if (
+    active instanceof HTMLElement &&
+    active.isContentEditable &&
+    active.querySelector('[data-src-para]')
+  )
+    return active
+  const roots = Array.from(document.querySelectorAll('[data-src-para]'), (p) => p.parentElement)
+  return roots.find((r) => r && !r.classList.contains('notes-editor')) ?? roots[0] ?? null
+}
+
 /** Effective base direction at the editing selection, read from the overlay DOM (computed
  * direction covers dir="auto" inference and explicit toggles alike). undefined = no overlay
  * mounted; null = mixed. */
 export function liveRtl(): boolean | null | undefined {
-  const root = document.querySelector('[data-src-para]')?.parentElement
+  const root = liveEditRoot()
   if (!(root instanceof HTMLElement)) return undefined
   const blocks = Array.from(root.children).filter(
     (el): el is HTMLElement => el instanceof HTMLElement && el.tagName === 'DIV',
@@ -1420,7 +1528,7 @@ export function liveRtl(): boolean | null | undefined {
  * paragraph-format change, the render tree is still accurate; `null` = unknowable (mixed, or a
  * re-toggled char bullet whose glyph lives only in the engine's uncommitted state). */
 export function liveBulletChar(): string | null | undefined {
-  const root = document.querySelector('[data-src-para]')?.parentElement
+  const root = liveEditRoot()
   if (!root) return undefined
   const blocks = Array.from(root.children).filter(
     (el): el is HTMLElement => el instanceof HTMLElement && el.tagName === 'DIV',
@@ -1459,8 +1567,51 @@ export function liveBulletChar(): string | null | undefined {
  * the caret's block when collapsed; a block with no inline text-align falls back to the
  * root's, then 'left' (the engine default, so some alignment is always current).
  * undefined = no overlay mounted; null = mixed. */
+/** Ribbon B / I / U / S / x² / x₂ highlight */
+export interface TextToggles {
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  strike: boolean
+  superscript: boolean
+  subscript: boolean
+}
+
+export function sameToggles(a: TextToggles, b: TextToggles): boolean {
+  return (
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.strike === b.strike &&
+    a.superscript === b.superscript &&
+    a.subscript === b.subscript
+  )
+}
+
+/**
+ * Toggle state at the editing selection. queryCommandState follows the ancestors (a <u> around
+ * the span, a bold run container), which computed styles cannot: text-decoration is not inherited.
+ */
+export function liveTextToggles(): TextToggles {
+  const q = (cmd: string) => {
+    try {
+      return document.queryCommandState(cmd)
+    } catch {
+      return false
+    }
+  }
+  return {
+    bold: q('bold'),
+    italic: q('italic'),
+    underline: q('underline'),
+    strike: q('strikeThrough'),
+    superscript: q('superscript'),
+    subscript: q('subscript'),
+  }
+}
+
 export function liveAlign(): 'left' | 'center' | 'right' | 'justify' | null | undefined {
-  const root = document.querySelector('[data-src-para]')?.parentElement
+  const root = liveEditRoot()
   if (!(root instanceof HTMLElement)) return undefined
   const rootAlign = cssAlign(root.style.textAlign)
   const blocks = Array.from(root.children).filter(
@@ -1538,15 +1689,6 @@ export function resizeSelectionFont(dir: 1 | -1): void {
   reselectSpans(spans)
 }
 
-/** Next/previous ladder size; beyond the ladder ±10pt, clamped to 8~400 */
-function stepFontSizePt(cur: number, dir: 1 | -1): number {
-  const max = FONT_SIZES[FONT_SIZES.length - 1]!
-  if (dir > 0) return cur >= max ? Math.min(400, cur + 10) : FONT_SIZES.find((s) => s > cur)!
-  if (cur > max) return Math.max(max, cur - 10)
-  for (let i = FONT_SIZES.length - 1; i >= 0; i--) if (FONT_SIZES[i]! < cur) return FONT_SIZES[i]!
-  return FONT_SIZES[0]!
-}
-
 /** replaceWith kills the live selection — re-select the new spans so the highlight and repeated grow/shrink clicks survive */
 function reselectSpans(spans: HTMLElement[]): void {
   if (!spans.length) return
@@ -1607,6 +1749,122 @@ export function setSelectionFontSizePt(pt: number): void {
     spans.push(span)
   })
   reselectSpans(spans)
+}
+
+/**
+ * The live editor selection, widened to the word at the caret when nothing is selected —
+ * PowerPoint applies character formatting and Change Case to the whole word under the caret.
+ */
+function editorSelectionRange(root: HTMLElement): Range | null {
+  const sel = window.getSelection()
+  if (!sel?.rangeCount || !root.contains(sel.anchorNode)) return null
+  if (sel.isCollapsed) {
+    sel.modify('move', 'backward', 'word')
+    sel.modify('extend', 'forward', 'word')
+    // a trailing space belongs to the gap, not the word
+    const r = sel.getRangeAt(0)
+    const end = r.endContainer
+    if (end.nodeType === Node.TEXT_NODE && r.endOffset > 0) {
+      const text = (end as Text).data
+      let o = r.endOffset
+      while (o > 0 && /\s/.test(text[o - 1]!)) o--
+      if (o > r.startOffset || end !== r.startContainer) r.setEnd(end, o)
+    }
+    if (sel.isCollapsed) return null
+  }
+  return sel.getRangeAt(0)
+}
+
+/** Text nodes the range covers, each with the covered [start, end) slice. */
+function coveredText(
+  root: HTMLElement,
+  range: Range,
+): Array<{ node: Text; start: number; end: number }> {
+  const out: Array<{ node: Text; start: number; end: number }> = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    if (!range.intersectsNode(node)) continue
+    const start = node === range.startContainer ? range.startOffset : 0
+    const end = node === range.endContainer ? range.endOffset : node.length
+    if (end > start) out.push({ node, start, end })
+  }
+  return out
+}
+
+/**
+ * Wrap the covered part of every selected text node in a new span nested inside its current
+ * parent (so the text keeps the size/font/colour it inherits there), let `mark` style it, and
+ * re-select the result. Layout fragments around the text lose their canvas-measured widths.
+ */
+function wrapSelection(mark: (span: HTMLElement) => void): boolean {
+  const root = document.activeElement
+  if (!(root instanceof HTMLElement) || !root.isContentEditable) return false
+  const range = editorSelectionRange(root)
+  if (!range) return false
+  const spans: HTMLElement[] = []
+  for (const { node, start, end } of coveredText(root, range)) {
+    if (end < node.length) node.splitText(end)
+    const target = start > 0 ? node.splitText(start) : node
+    const span = document.createElement('span')
+    target.parentNode!.insertBefore(span, target)
+    span.appendChild(target)
+    mark(span)
+    releaseFragment(span.closest('[data-layout-fragment]'))
+    spans.push(span)
+  }
+  reselectSpans(spans)
+  return spans.length > 0
+}
+
+/** Character spacing (pt, 0 = normal) on the selection while editing. */
+export function setSelectionLetterSpacingPt(pt: number): void {
+  const root = document.activeElement as HTMLElement | null
+  const norm = parseFloat(root?.dataset.norm ?? '') || 1
+  wrapSelection((span) => {
+    span.dataset.spc = String(pt)
+    span.style.letterSpacing = `${(pt * 96 * norm) / 72}px`
+  })
+}
+
+/** Text highlight (#RRGGBB, null = no colour) on the selection while editing. */
+export function setSelectionHighlight(color: string | null): void {
+  wrapSelection((span) => {
+    span.dataset.hl = color ?? 'none'
+    span.style.backgroundColor = color ?? 'transparent'
+  })
+}
+
+/** Change Case on the selection while editing: the text itself changes, formatting stays put. */
+export function changeSelectionCase(mode: TextCaseMode): void {
+  const root = document.activeElement
+  if (!(root instanceof HTMLElement) || !root.isContentEditable) return
+  const range = editorSelectionRange(root)
+  if (!range) return
+  const { startContainer, startOffset, endContainer, endOffset } = range
+  // one call per paragraph div, so "start of a sentence" never runs across paragraphs
+  const byBlock = new Map<Element, Array<{ node: Text; start: number; end: number }>>()
+  for (const piece of coveredText(root, range)) {
+    let blk: Element | null = piece.node.parentElement
+    while (blk && blk.parentElement !== root) blk = blk.parentElement
+    const key = blk ?? root
+    byBlock.set(key, [...(byBlock.get(key) ?? []), piece])
+  }
+  for (const pieces of byBlock.values()) {
+    const cased = changeTextCase(
+      pieces.map(({ node, start, end }) => node.data.slice(start, end)),
+      mode,
+    )
+    pieces.forEach(({ node, start, end }, i) => {
+      if (cased[i] === node.data.slice(start, end)) return
+      node.replaceData(start, end - start, cased[i]!)
+      releaseFragment(fragmentAround(node, root))
+    })
+  }
+  // replaceData collapses boundaries inside the replaced text; lengths never change, so the
+  // original offsets are still right
+  window.getSelection()?.setBaseAndExtent(startContainer, startOffset, endContainer, endOffset)
+  saveEditSelection()
 }
 
 // Viewport px font size → model pt (divide back by viewport scale × autofit fontScale).

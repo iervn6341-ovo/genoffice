@@ -11,6 +11,7 @@ import {
 import type { EditSnapshot } from '../src/renderer/edit-state'
 
 const empty = (): EditSnapshot => ({
+  redactions: [],
   markups: [],
   annotDeletes: [],
   noteEdits: [],
@@ -296,6 +297,35 @@ describe('page', () => {
     expect(c.state.rotations.get(0)).toBe(270)
     expect(c.state.drawings[0]).toBe(a.state.drawings[0])
     expect(run(empty(), [{ op: 'rotatePages', pages: [0], dir: 45 }]).plan.failures).toHaveLength(1)
+  })
+
+  it('rotatePages turns pending inserted text and pictures with the page so they save upright', () => {
+    const picture = {
+      kind: 'insertImage' as const,
+      pageIndex: 0,
+      image: 'AAA',
+      rect: [0, 0, 40, 20] as [number, number, number, number],
+      layer: 'belowText' as const,
+      rotate: 0,
+    }
+    const a = run(empty(), [
+      { op: 'addTextInsert', input: { pageIndex: 0, text: 'x', origin: [10, 10], rotate: 0 } },
+      { op: 'addTextInsert', input: { pageIndex: 1, text: 'y', origin: [10, 10] } },
+      { op: 'addImageEdit', input: picture, staticFill: { kind: 'check', rect: picture.rect } },
+      { op: 'rotatePages', pages: [0], dir: 90 },
+    ])
+    expect(a.plan.failures).toEqual([])
+    expect(a.state.textInserts.map((ti) => ti.input.rotate)).toEqual([90, undefined])
+    const img = a.state.imageEdits[0]!
+    expect(img.input.kind === 'insertImage' && img.input.rotate).toBe(90)
+    // A quarter turn swaps the upright footprint about its center, like image stamps
+    expect(img.input.kind !== 'deleteImage' && img.input.rect).toEqual([10, -10, 30, 30])
+    expect(img.staticFill?.rect).toEqual([10, -10, 30, 30])
+    const b = run(a.state, [{ op: 'rotatePages', pages: [0], dir: 180 }])
+    expect(b.state.textInserts[0]!.input.rotate).toBe(270)
+    const flipped = b.state.imageEdits[0]!.input
+    expect(flipped.kind === 'insertImage' && flipped.rotate).toBe(270)
+    expect(flipped.kind !== 'deleteImage' && flipped.rect).toEqual([10, -10, 30, 30])
   })
 
   it('a batch plans against what its earlier ops deleted or claimed', () => {

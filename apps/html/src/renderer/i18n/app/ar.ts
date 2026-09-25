@@ -54,6 +54,7 @@ export const ar = {
   ribbonPin: 'تثبيت الشريط',
   ribbonExpand: 'توسيع الشريط',
   ribbonGroupInsert: 'إدراج',
+  ribbonGroupView: 'عرض',
   editText: 'تحرير النص',
   fontSize: 'حجم الخط',
   fontWeight: 'السُمك',

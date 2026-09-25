@@ -13,6 +13,8 @@ import {
   type Transaction,
 } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { ListAutoFormat } from './list-autoformat'
+import { DoubleClickLineEnd } from './double-click-line-end'
 import { appendsAtEnd, touchedTopLevelBlocks } from './touched-blocks'
 import { installProseMirrorPerf } from './prosemirror-perf'
 import type { EditorView } from '@tiptap/pm/view'
@@ -6011,6 +6013,8 @@ export const editorExtensions = [
   EnterReplacesSelection,
   WordSelectAllDelete,
   AutoLinkOnDelimiter,
+  ListAutoFormat,
+  DoubleClickLineEnd,
   WordEditorShortcuts,
   CaretMarksMemory,
   ColumnLayoutExtension,

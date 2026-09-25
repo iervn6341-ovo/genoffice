@@ -54,6 +54,7 @@ export const pl = {
   ribbonPin: 'Przypnij Wstążkę',
   ribbonExpand: 'Rozwiń Wstążkę',
   ribbonGroupInsert: 'Wstaw',
+  ribbonGroupView: 'Widok',
   editText: 'Edytuj tekst',
   fontSize: 'Rozmiar czcionki',
   fontWeight: 'Grubość',

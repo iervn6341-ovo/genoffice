@@ -23,7 +23,7 @@ import {
   type IFindReplaceProvider,
   type IReplaceAllResult,
 } from '@univerjs/find-replace'
-import { IUniverInstanceService } from '@univerjs/core'
+import { IUndoRedoService, IUniverInstanceService } from '@univerjs/core'
 import { FormulaDataModel } from '@univerjs/preset-sheets-core'
 import { Subject, type Subscription } from 'rxjs'
 import { FILE_READ_BATCH_CELLS, MAX_SCAN_CELLS } from './ai/workbook-search'
@@ -496,22 +496,32 @@ export class LazyExtendedFindModel extends FindModel {
   }
 
   async replaceAll(replaceString: string): Promise<IReplaceAllResult> {
+    // One Replace All is one undo step (Excel): the loaded-window replace and every
+    // out-of-window cell write each push their own undo item otherwise
+    const batch = this.deps.runtime.univer
+      .__getInjector()
+      .get(IUndoRedoService)
+      .__tempBatchingUndoRedo(this.unitId)
     let success = 0
     let failure = 0
     try {
-      const result = await this.inner.replaceAll(replaceString)
-      success += result.success
-      failure += result.failure
-    } catch {
-      /* the inner session may already be gone; still report the extension's */
-    }
-    for (const extra of this.currentExtras()) {
-      if (extra.replaceable !== true) {
-        failure += 1
-        continue
+      try {
+        const result = await this.inner.replaceAll(replaceString)
+        success += result.success
+        failure += result.failure
+      } catch {
+        /* the inner session may already be gone; still report the extension's */
       }
-      if (await this.writeExtraReplacement(extra, replaceString)) success += 1
-      else failure += 1
+      for (const extra of this.currentExtras()) {
+        if (extra.replaceable !== true) {
+          failure += 1
+          continue
+        }
+        if (await this.writeExtraReplacement(extra, replaceString)) success += 1
+        else failure += 1
+      }
+    } finally {
+      batch.dispose()
     }
     return { success, failure }
   }

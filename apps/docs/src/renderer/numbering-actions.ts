@@ -18,6 +18,27 @@ export interface NumberingContext {
   setStatus: (status: string) => void
 }
 
+/** Bullet library: the chosen symbol is level 1; deeper levels rotate through ○/■ */
+export function bulletPresetLevels(glyph: string): CustomNumberingLevel[] {
+  const rotation = [glyph, '○', '■']
+  return Array.from({ length: 9 }, (_, i) => ({
+    numFmt: 'bullet',
+    lvlText: rotation[i % 3],
+    indentLeft: 720 * (i + 1),
+    hanging: 360,
+  }))
+}
+
+/** Numbering library: the same format continues per level (%1 in the pattern becomes each level's counter) */
+export function numberPresetLevels(numFmt: string, pattern: string): CustomNumberingLevel[] {
+  return Array.from({ length: 9 }, (_, i) => ({
+    numFmt,
+    lvlText: pattern.replace('%1', `%${i + 1}`),
+    indentLeft: 720 * (i + 1),
+    hanging: 360,
+  }))
+}
+
 export function nextNumId(ctx: NumberingContext): string {
   let max = 2 // the blank template occupies 1/2
   for (const id of ctx.doc?.parsed.numbering.keys() ?? [])
@@ -169,12 +190,24 @@ export function continueNumbering(ctx: NumberingContext): void {
   if (!curNumId) return
   const { state } = ctx.editor
   const startIdx = state.selection.$from.index(0)
+  // Word continues the nearest earlier list of the same format: a bullet list in between
+  // must not be picked up (adopting its numId turned the numbers into bullets)
+  const defs = (ctx.editor.storage.listNumbering as { defs: Map<string, NumberingDef> }).defs
+  const ilvl = Number(attrs.ilvl) || 0
+  const fmt = (numId: string) => {
+    const lvl = defs.get(numId)?.levels[ilvl]
+    return lvl ? `${lvl.numFmt}|${lvl.lvlText}` : null
+  }
+  const curFmt = fmt(String(curNumId))
   let prevNumId: string | null = null
   state.doc.forEach((node, _offset, idx) => {
     if (idx >= startIdx) return
-    if (node.type.name === 'docListItem' && node.attrs.numId && node.attrs.numId !== curNumId) {
-      prevNumId = node.attrs.numId as string
-    }
+    if (node.type.name !== 'docListItem' || !node.attrs.numId || node.attrs.numId === curNumId)
+      return
+    const id = String(node.attrs.numId)
+    const candidate = fmt(id)
+    const compatible = curFmt && candidate ? candidate === curFmt : node.attrs.kind === attrs.kind
+    if (compatible) prevNumId = id
   })
   if (!prevNumId) return
   rewriteNumIdForward(ctx, String(curNumId), prevNumId)

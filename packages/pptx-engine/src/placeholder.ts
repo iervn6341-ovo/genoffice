@@ -174,8 +174,8 @@ export function parsePlaceholderMap(
   } catch {
     return { entries }
   }
-  // Path: p:sldLayout / p:sldMaster → p:cSld → p:spTree → p:sp[]
-  const root = asXmlNode(doc['p:sldLayout'] ?? doc['p:sldMaster'])
+  // Path: p:sldLayout / p:sldMaster / p:notesMaster → p:cSld → p:spTree → p:sp[]
+  const root = asXmlNode(doc['p:sldLayout'] ?? doc['p:sldMaster'] ?? doc['p:notesMaster'])
   const spTreeRaw = asXmlNode(root['p:cSld'])['p:spTree']
   if (!spTreeRaw) return { entries }
   const spTree = asXmlNode(spTreeRaw)
@@ -420,6 +420,11 @@ export function parseMasterTextStyles(
     doc = asXmlNode(phParser.parse(masterXml))
   } catch {
     return {}
+  }
+  // A notes master keeps one family, <p:notesStyle>, which styles the notes body placeholder
+  if (doc['p:notesMaster']) {
+    const body = parseLstStyleLevels(asXmlNode(doc['p:notesMaster'])['p:notesStyle'], theme, src)
+    return body ? { body } : {}
   }
   const txRaw = asXmlNode(doc['p:sldMaster'])['p:txStyles']
   if (!txRaw) return {}

@@ -54,6 +54,7 @@ export const ru = {
   ribbonPin: 'Закрепить ленту',
   ribbonExpand: 'Развернуть ленту',
   ribbonGroupInsert: 'Вставка',
+  ribbonGroupView: 'Вид',
   editText: 'Изменить текст',
   fontSize: 'Размер шрифта',
   fontWeight: 'Насыщенность',

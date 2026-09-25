@@ -11,7 +11,9 @@
     "./table-grid": "./src/table-grid.ts",
     "./identity": "./src/identity.ts",
     "./named-action": "./src/named-action.ts",
-    "./background-promote": "./src/background-promote.ts"
+    "./background-promote": "./src/background-promote.ts",
+    "./text-case": "./src/text-case.ts",
+    "./font-size-step": "./src/font-size-step.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

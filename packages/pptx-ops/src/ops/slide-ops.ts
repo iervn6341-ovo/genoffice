@@ -41,7 +41,10 @@ import {
   setSlideBgGraphicsHidden,
   setSlideHidden,
   setSlideLayout,
+  getSlideNotes,
+  getSlideNotesParagraphs,
   setSlideNotes,
+  setSlideNotesParagraphs,
   setSlideSize,
   setSlideTransition,
   elementSpid,
@@ -55,6 +58,8 @@ import {
   type SlideTransitionKind,
   type TextElement,
 } from '@genoffice/pptx-engine'
+import { applyEditParagraphs } from '../edit-text'
+import type { EditParagraph } from '../types'
 import {
   coerceBytes,
   dataUrlExt,
@@ -664,10 +669,30 @@ register({
   name: 'setNotes',
   validate(op, ctx) {
     resolveSlide(ctx, op)
-    if (typeof op.text !== 'string') throw new GuidedError('op "setNotes" needs "text".')
+    if (typeof op.text !== 'string' && !Array.isArray(op.paragraphs)) {
+      throw new GuidedError('op "setNotes" needs "text" (or "paragraphs": an EditParagraph array).')
+    }
   },
   apply(op, ctx): OpRecord {
     const { index } = resolveSlide(ctx, op)
+    // Formatted notes from the notes pane: merged into the notes body like slide text, so
+    // untouched runs keep their bytes. The pane cannot show links, so links are never
+    // edited from here (an omitted link keeps the old one)
+    if (Array.isArray(op.paragraphs)) {
+      const slide = ctx.opened.deck.slides[index]!
+      const edited = (op.paragraphs as EditParagraph[]).map((p) => ({
+        ...p,
+        runs: p.runs.map(({ link: _link, ...r }) => r),
+      }))
+      const merged = applyEditParagraphs(
+        getSlideNotesParagraphs(ctx.opened.archive, slide.path),
+        edited,
+      )
+      if (!setSlideNotesParagraphs(ctx.opened, index, merged)) {
+        throw new GuidedError(`op "setNotes": notes for slide ${index} could not be written.`)
+      }
+      return { op, after: getSlideNotes(ctx.opened.archive, slide.path) }
+    }
     if (!setSlideNotes(ctx.opened, index, String(op.text))) {
       throw new GuidedError(`op "setNotes": notes for slide ${index} could not be written.`)
     }

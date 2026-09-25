@@ -55,6 +55,7 @@ export const en = {
   ribbonPin: 'Pin the ribbon',
   ribbonExpand: 'Expand the Ribbon',
   ribbonGroupInsert: 'Insert',
+  ribbonGroupView: 'View',
   editText: 'Edit text',
   fontSize: 'Font size',
   fontWeight: 'Weight',

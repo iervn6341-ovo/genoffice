@@ -3560,3 +3560,29 @@ fn source_linked_chart_formats_follow_the_cells() {
     assert_eq!(style.size, Some(12.0));
     assert_eq!(style.bold, Some(true));
 }
+
+#[test]
+fn range_hyperlinks_link_every_cell_of_the_area() {
+    let mut links = Vec::new();
+    let area = parse_area_reference("$A$1:A3").unwrap();
+    worksheet::push_hyperlink_area(&mut links, &area, "https://example.com/");
+    let single = parse_area_reference("C5").unwrap();
+    worksheet::push_hyperlink_area(&mut links, &single, "#Sheet2!A1");
+    let cells: Vec<(usize, usize, &str)> = links
+        .iter()
+        .map(|link| (link.row, link.column, link.target.as_str()))
+        .collect();
+    assert_eq!(
+        cells,
+        vec![
+            (0, 0, "https://example.com/"),
+            (1, 0, "https://example.com/"),
+            (2, 0, "https://example.com/"),
+            (4, 2, "#Sheet2!A1"),
+        ]
+    );
+    // a whole-column link stays within the transport cap
+    let mut many = Vec::new();
+    worksheet::push_hyperlink_area(&mut many, &parse_area_reference("A1:A1048576").unwrap(), "x");
+    assert_eq!(many.len(), 100_000);
+}

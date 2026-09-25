@@ -56,6 +56,7 @@ export const hi = {
   ribbonPin: 'रिबन पिन करें',
   ribbonExpand: 'रिबन विस्तृत करें',
   ribbonGroupInsert: 'सम्मिलित करें',
+  ribbonGroupView: 'दृश्य',
   editText: 'टेक्स्ट संपादित करें',
   fontSize: 'फ़ॉन्ट आकार',
   fontWeight: 'मोटाई',

@@ -7,6 +7,7 @@ import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/color-picker.css'
 import '@genoffice/ui/dropdown.css'
 import '@genoffice/ui/ribbon-collapse.css'
+import '@genoffice/ui/ribbon-fit.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/ai-panel-prefs.css'
 import '@genoffice/ui/ai-scope-quote.css'
@@ -17,6 +18,8 @@ import { installCanvasFontFallback, registerCellFontAliases } from './cell-font-
 import { LocaleProvider, setModuleLang } from './i18n/locale'
 import type { UiTheme } from '../shared/desktop-api'
 import './styles.css'
+// compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
+import '@genoffice/ui/ribbon-density.css'
 
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeUpdate', ({ updates }) => {

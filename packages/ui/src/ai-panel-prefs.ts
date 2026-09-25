@@ -1,5 +1,7 @@
 export const AI_FONT_SIZES = ['default', 'large', 'xlarge', 'custom'] as const
 export type AiPanelSide = 'left' | 'right'
+/** Ribbon layout: `classic` keeps groups collapsed to dropdown buttons; `auto` expands them while there is room */
+export type RibbonFold = 'classic' | 'auto'
 export type AiFontSize = (typeof AI_FONT_SIZES)[number]
 
 /** Body text size of `.ai-chat` in every app's stylesheet; the presets scale from it */
@@ -20,6 +22,8 @@ export interface AiPanelPrefs {
   /** Body text size in px, used only when `fontSize` is `'custom'` */
   readonly customFontSize: number
   readonly spellcheck: boolean
+  /** Ribbon overflow style; rides on this record because it reaches every renderer the same way */
+  readonly ribbonFold: RibbonFold
 }
 
 export const DEFAULT_AI_PANEL_PREFS: AiPanelPrefs = {
@@ -27,6 +31,7 @@ export const DEFAULT_AI_PANEL_PREFS: AiPanelPrefs = {
   fontSize: 'default',
   customFontSize: AI_FONT_BASE_PX,
   spellcheck: true,
+  ribbonFold: 'auto',
 }
 
 export function isAiFontSize(value: unknown): value is AiFontSize {
@@ -58,7 +63,8 @@ export function sameAiPanelPrefs(a: AiPanelPrefs, b: AiPanelPrefs): boolean {
     a.side === b.side &&
     a.fontSize === b.fontSize &&
     a.customFontSize === b.customFontSize &&
-    a.spellcheck === b.spellcheck
+    a.spellcheck === b.spellcheck &&
+    a.ribbonFold === b.ribbonFold
   )
 }
 
@@ -72,5 +78,6 @@ export function normalizeAiPanelPrefs(raw: unknown): AiPanelPrefs {
       clampAiCustomFontSize(obj.customFontSize) ?? DEFAULT_AI_PANEL_PREFS.customFontSize,
     spellcheck:
       typeof obj.spellcheck === 'boolean' ? obj.spellcheck : DEFAULT_AI_PANEL_PREFS.spellcheck,
+    ribbonFold: obj.ribbonFold === 'classic' ? 'classic' : 'auto',
   }
 }

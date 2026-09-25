@@ -152,6 +152,7 @@ export const nl = {
   aiThemePlayful: 'Speels',
   aiThemeDark: 'Donker',
   aiSummarizeBtn: 'AI-samenvatting',
+  aiToolsGroup: 'AI-hulpmiddelen',
   aiSummarizePrompt: 'Vat de hoofdinhoud en kernpunten van dit document samen',
   aiAttachTitle: 'Lokale bestanden bijvoegen (of sleep ze naar het paneel)',
   aiRemoveAttachmentTitle: 'Bijlage verwijderen',

@@ -79,8 +79,11 @@ import {
 } from '@genoffice/ai-provider'
 import { shutdownCodexAppServers } from '@genoffice/ai-provider/codex-app-server'
 import {
+  DEFAULT_CSV_DIALECT,
+  csvDialectOf,
   csvToXlsxBuffer,
   decodeCsvBuffer,
+  encodeCsvForDialect,
   sheetCsvToXlsxBuffer,
 } from '@genoffice/xlsx-gateway/gateway/csv-import'
 import {
@@ -2986,11 +2989,12 @@ export function registerSheetsIpc(): void {
       if (savedSha !== undefined && entry.sessions.has(request.sessionId)) {
         entry.sessions.set(request.sessionId, { ...session, sha256: savedSha })
       }
-      // UTF-8 BOM so Excel decodes the reopened file correctly.
-      await writeFile(
-        session.csvSourcePath,
-        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(request.csvContent, 'utf8')]),
-      )
+      // Write back in the file's own dialect (delimiter, sep= line, charset, BOM):
+      // the guard above proved the disk copy is still the one we opened, so its
+      // bytes say how it was written. A deleted file gets Excel-friendly UTF-8.
+      const original = await readFile(session.csvSourcePath).catch(() => null)
+      const dialect = original ? csvDialectOf(original, legacyCsvCharset()) : DEFAULT_CSV_DIALECT
+      await writeFile(session.csvSourcePath, encodeCsvForDialect(request.csvContent, dialect))
     }
 
     // The sidecar session still streams the pre-save bytes; swap it for a

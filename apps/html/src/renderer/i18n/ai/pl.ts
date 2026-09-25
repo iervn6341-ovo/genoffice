@@ -152,6 +152,7 @@ export const pl = {
   aiThemePlayful: 'Zabawny',
   aiThemeDark: 'Ciemny',
   aiSummarizeBtn: 'Podsumowanie AI',
+  aiToolsGroup: 'Narzędzia AI',
   aiSummarizePrompt: 'Podsumuj główną treść i kluczowe punkty tego dokumentu',
   aiAttachTitle: 'Załącz pliki lokalne (lub przeciągnij je na panel)',
   aiRemoveAttachmentTitle: 'Usuń załącznik',

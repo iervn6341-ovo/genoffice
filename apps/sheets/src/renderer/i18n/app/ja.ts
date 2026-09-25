@@ -793,6 +793,7 @@ export const ja = {
   appRemoveFromSheet: 'シートから削除',
   // AI Tab
   appGroupAiAssistant: 'AI アシスタント',
+  appGroupAiTools: 'AI ツール',
   appAiOpenPanelDetail: 'サイドバーで会話',
   appGroupAiStarters: 'クイック スタート',
   appAiStarterDetail: 'AI パネルに送信',

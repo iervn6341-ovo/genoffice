@@ -1,9 +1,11 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { ChainedCommands, Editor } from '@tiptap/core'
-import type { Command } from '@tiptap/pm/state'
+import { NodeSelection, type Command } from '@tiptap/pm/state'
 import type { Mark, Node as PMNode, ResolvedPos } from '@tiptap/pm/model'
 import {
+  CellSelection,
+  TableMap,
   addColumnAfter,
   addColumnBefore,
   addRowAfter,
@@ -33,15 +35,19 @@ import type {
   ThemeColors,
   ThemeFonts,
 } from '@genoffice/docx-engine'
+import { bulletPresetLevels, numberPresetLevels } from '../numbering-actions'
+import { FORMAT_MARKS } from '../editor/caret-marks'
 import {
   ColorPicker,
   Dropdown,
   RibbonCollapseButton,
+  keepEditorFocusOnRibbonPress,
   isSymbolFontFamily,
   labelFromTip,
   useDismissablePopover,
   useRibbonCollapse,
   useRibbonLabelFit,
+  RibbonFoldGroup,
 } from '@genoffice/ui'
 import { HIGHLIGHT_CSS } from '../editor/extensions'
 import { applyCase, type CaseMode } from '../editor/case-transform'
@@ -521,27 +527,6 @@ const HIGHLIGHTS = [
 const LINE_SPACINGS = [1, 1.15, 1.5, 2, 2.5, 3]
 
 // ---- List library presets (bullets/numbering/multilevel): picking one creates a numbering definition ----
-
-/** Bullet library: the chosen symbol is level 1; deeper levels rotate through ○/■ */
-function bulletPresetLevels(glyph: string): CustomNumberingLevel[] {
-  const rotation = [glyph, '○', '■']
-  return Array.from({ length: 9 }, (_, i) => ({
-    numFmt: 'bullet',
-    lvlText: rotation[i % 3],
-    indentLeft: 720 * (i + 1),
-    hanging: 360,
-  }))
-}
-
-/** Numbering library: the same format continues per level (%1 in the pattern becomes each level's counter) */
-function numberPresetLevels(numFmt: string, pattern: string): CustomNumberingLevel[] {
-  return Array.from({ length: 9 }, (_, i) => ({
-    numFmt,
-    lvlText: pattern.replace('%1', `%${i + 1}`),
-    indentLeft: 720 * (i + 1),
-    hanging: 360,
-  }))
-}
 
 const BULLET_LIBRARY = ['•', '○', '■', '◆', '➢', '✦']
 
@@ -1063,6 +1048,22 @@ function RibbonInner({
   const runTableCommand = (command: Command) => {
     if (!canEdit) return
     editor.view.focus()
+    // The table handle selects the table node; table commands work on cells, so hand
+    // them every cell of it (Word: the whole table is selected, rows/columns included)
+    const sel = editor.state.selection
+    if (sel instanceof NodeSelection && sel.node.type.spec.tableRole === 'table') {
+      const map = TableMap.get(sel.node)
+      const start = sel.from + 1
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          CellSelection.create(
+            editor.state.doc,
+            start + map.map[0]!,
+            start + map.map[map.map.length - 1]!,
+          ),
+        ),
+      )
+    }
     command(editor.state, editor.view.dispatch)
   }
 
@@ -1939,7 +1940,11 @@ function RibbonInner({
   )
 
   return (
-    <div className={`ribbon ${collapse.rootClass}`} ref={collapse.rootRef}>
+    <div
+      className={`ribbon ${collapse.rootClass}`}
+      ref={collapse.rootRef}
+      onMouseDownCapture={keepEditorFocusOnRibbonPress}
+    >
       <div
         className={`ribbon-tabs ${IN_TAB ? '' : IS_MAC ? 'ribbon-tabs-mac' : 'ribbon-tabs-win'}`}
         onDoubleClick={collapse.onTabsDoubleClick}
@@ -2855,176 +2860,62 @@ function RibbonInner({
           </div>
         ) : tab === 'home' ? (
           <>
-            {/* ---- Genspark AI (first slot: entry + one-click AI actions) ---- */}
-            <div className="ribbon-group">
-              <div className="ribbon-group-items">
-                <button
-                  className={`rb-big ai-entry ${showAi ? 'active' : ''}`}
-                  data-tip={t('aiOpenAssistant')}
-                  onClick={onToggleAi}
-                >
-                  <span className="rb-big-icon">
-                    <GensparkMark size={26} />
-                  </span>
-                  <span>Genspark AI</span>
-                </button>
-                <button
-                  className="rb-big ai-entry"
-                  disabled={docEmpty}
-                  data-tip={t('aiSummarizeBtn')}
-                  onClick={() => onAiPreset(t('aiSummarizePrompt'))}
-                >
-                  <span className="rb-big-icon">
-                    <span className="ai-feature-icon" aria-hidden="true">
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path
-                          d="M13.875 21H12H6.5C5.39543 21 4.5 20.1046 4.5 19V5C4.5 3.89543 5.39543 3 6.5 3H17.5C18.6046 3 19.5 3.89543 19.5 5V9V12V13"
-                          strokeLinecap="round"
-                        />
-                        <path d="M8.00001 7H16" strokeLinecap="round" />
-                        <path d="M8.00007 10.2032H14.0001" strokeLinecap="round" />
-                        <path d="M8.00007 13.4062H12.0001" strokeLinecap="round" />
-                        <path
-                          d="M17 14L17.2579 14.697C17.5961 15.611 17.7652 16.068 18.0986 16.4014C18.432 16.7348 18.889 16.9039 19.803 17.2421L20.5 17.5L19.803 17.7579C18.889 18.0961 18.432 18.2652 18.0986 18.5986C17.7652 18.932 17.5961 19.389 17.2579 20.303L17 21L16.7421 20.303C16.4039 19.389 16.2348 18.932 15.9014 18.5986C15.568 18.2652 15.111 18.0961 14.197 17.7579L13.5 17.5L14.197 17.2421C15.111 16.9039 15.568 16.7348 15.9014 16.4014C16.2348 16.068 16.4039 15.611 16.7421 14.697L17 14Z"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                  </span>
-                  <span>{t('aiSummarizeBtn')}</span>
-                </button>
-                <button
-                  className="rb-big ai-entry"
-                  disabled={docEmpty}
-                  data-tip={t('aiPolishBtn')}
-                  onClick={() =>
-                    onAiPreset(
-                      t(
-                        editor.state.selection.empty ? 'aiPolishPrompt' : 'aiPolishSelectionPrompt',
-                      ),
-                    )
-                  }
-                >
-                  <span className="rb-big-icon">
-                    <span className="ai-feature-icon" aria-hidden="true">
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path
-                          d="M5.00012 20.7481L8.80319 20.7482L21.7482 7.80317L17.945 4L5 16.945L5.00012 20.7481Z"
-                          strokeLinejoin="round"
-                        />
-                        <path d="M15.1406 6.80469L18.9438 10.6079" />
-                        <path
-                          d="M8 3L8.22106 3.59745C8.51094 4.38087 8.65589 4.77259 8.94166 5.05833C9.22743 5.34409 9.61914 5.48903 10.4026 5.77893L11 6L10.4026 6.22107C9.61914 6.51097 9.22743 6.65592 8.94166 6.94167C8.65589 7.22741 8.51094 7.61913 8.22106 8.40255L8 9L7.77894 8.40255C7.48906 7.61913 7.34411 7.22741 7.05834 6.94167C6.77257 6.65592 6.38086 6.51097 5.59743 6.22107L5 6L5.59743 5.77893C6.38086 5.48903 6.77257 5.34409 7.05834 5.05833C7.34411 4.77259 7.48906 4.38087 7.77894 3.59745L8 3Z"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                  </span>
-                  <span>{t('aiPolishBtn')}</span>
-                </button>
-                <button
-                  className="rb-big ai-entry"
-                  disabled={docEmpty}
-                  data-tip={t('aiTidyBtn')}
-                  onClick={() => onAiPreset(t('aiTidyPrompt'))}
-                >
-                  <span className="rb-big-icon">
-                    <span className="ai-feature-icon" aria-hidden="true">
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M4 5H20" strokeLinecap="round" />
-                        <path d="M4 9H16" strokeLinecap="round" />
-                        <path d="M4 13H11" strokeLinecap="round" />
-                        <path d="M4 17H10" strokeLinecap="round" />
-                        <path
-                          d="M17 14L17.2579 14.697C17.5961 15.611 17.7652 16.068 18.0986 16.4014C18.432 16.7348 18.889 16.9039 19.803 17.2421L20.5 17.5L19.803 17.7579C18.889 18.0961 18.432 18.2652 18.0986 18.5986C17.7652 18.932 17.5961 19.389 17.2579 20.303L17 21L16.7421 20.303C16.4039 19.389 16.2348 18.932 15.9014 18.5986C15.568 18.2652 15.111 18.0961 14.197 17.7579L13.5 17.5L14.197 17.2421C15.111 16.9039 15.568 16.7348 15.9014 16.4014C16.2348 16.068 16.4039 15.611 16.7421 14.697L17 14Z"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                  </span>
-                  <span>{t('aiTidyBtn')}</span>
-                </button>
-              </div>
-              <div className="ribbon-group-label">Genspark AI</div>
-            </div>
-
-            <div className="ribbon-sep" />
-
             {/* ---- Clipboard ---- */}
-            <div className="ribbon-group">
-              <div className="ribbon-group-items">
+            <RibbonFoldGroup
+              label={t('ribbonGroupClipboard')}
+              icon={<IconPaste />}
+              caret={<IconCaret />}
+              priority={4}
+            >
+              <button
+                className="rb-big"
+                disabled={!canEdit}
+                onClick={() => void clipboard('paste')}
+              >
+                <span className="rb-big-icon">
+                  <IconPaste size={28} />
+                </span>
+                <span>{t('ribbonPaste')}</span>
+              </button>
+              <div className="rb-col">
                 <button
-                  className="rb-big"
+                  className="rb-small"
                   disabled={!canEdit}
-                  onClick={() => void clipboard('paste')}
+                  data-tip={t('ribbonCutTip')}
+                  aria-label={t('ribbonCutTip')}
+                  onClick={() => void clipboard('cut')}
                 >
-                  <span className="rb-big-icon">
-                    <IconPaste size={28} />
+                  <IconCut />
+                  <span className="rb-lbl" data-tier="1">
+                    {labelFromTip(t('ribbonCutTip'))}
                   </span>
-                  <span>{t('ribbonPaste')}</span>
                 </button>
-                <div className="rb-col">
-                  <button
-                    className="rb-small"
-                    disabled={!canEdit}
-                    data-tip={t('ribbonCutTip')}
-                    aria-label={t('ribbonCutTip')}
-                    onClick={() => void clipboard('cut')}
-                  >
-                    <IconCut />
-                    <span className="rb-lbl" data-tier="1">
-                      {labelFromTip(t('ribbonCutTip'))}
-                    </span>
-                  </button>
-                  <button
-                    className="rb-small"
-                    disabled={!hasDoc}
-                    data-tip={t('ribbonCopyTip')}
-                    aria-label={t('ribbonCopyTip')}
-                    onClick={() => void clipboard('copy')}
-                  >
-                    <IconCopy />
-                    <span className="rb-lbl" data-tier="1">
-                      {labelFromTip(t('ribbonCopyTip'))}
-                    </span>
-                  </button>
-                  <button
-                    className={`rb-small ${painter ? 'active' : ''}`}
-                    disabled={!canEdit || !!sub}
-                    data-tip={painter ? t('ribbonPainterActiveTip') : t('ribbonPainterTip')}
-                    aria-label={painter ? t('ribbonPainterActiveTip') : t('ribbonPainterTip')}
-                    onClick={togglePainter}
-                  >
-                    <IconFormatPainter />
-                    <span className="rb-lbl" data-tier="1">
-                      {labelFromTip(t('ribbonPainterTip'))}
-                    </span>
-                  </button>
-                </div>
+                <button
+                  className="rb-small"
+                  disabled={!hasDoc}
+                  data-tip={t('ribbonCopyTip')}
+                  aria-label={t('ribbonCopyTip')}
+                  onClick={() => void clipboard('copy')}
+                >
+                  <IconCopy />
+                  <span className="rb-lbl" data-tier="1">
+                    {labelFromTip(t('ribbonCopyTip'))}
+                  </span>
+                </button>
+                <button
+                  className={`rb-small ${painter ? 'active' : ''}`}
+                  disabled={!canEdit || !!sub}
+                  data-tip={painter ? t('ribbonPainterActiveTip') : t('ribbonPainterTip')}
+                  aria-label={painter ? t('ribbonPainterActiveTip') : t('ribbonPainterTip')}
+                  onClick={togglePainter}
+                >
+                  <IconFormatPainter />
+                  <span className="rb-lbl" data-tier="1">
+                    {labelFromTip(t('ribbonPainterTip'))}
+                  </span>
+                </button>
               </div>
-              <div className="ribbon-group-label">{t('ribbonGroupClipboard')}</div>
-            </div>
+            </RibbonFoldGroup>
 
             <div className="ribbon-sep" />
 
@@ -3233,7 +3124,15 @@ function RibbonInner({
                     disabled={!canEdit}
                     data-tip={t('ribbonClearFormatting')}
                     aria-label={t('ribbonClearFormatting')}
-                    onClick={() => chain().unsetAllMarks().run()}
+                    onClick={() => {
+                      // formatting marks only: comments, links, fields and tracked
+                      // insertions/deletions are content, not formatting. unsetMark also
+                      // drops a stored mark at a bare caret, where unsetAllMarks is a no-op
+                      // (Word: typing after Clear Formatting comes out plain).
+                      let c = chain()
+                      for (const name of FORMAT_MARKS) c = c.unsetMark(name)
+                      c.run()
+                    }}
                   >
                     <IconClearFormat />
                   </button>
@@ -3367,451 +3266,574 @@ function RibbonInner({
             <div className="ribbon-sep" />
 
             {/* ---- Paragraph ---- */}
-            <div className="ribbon-group">
-              <div className="ribbon-group-items rb-font-group">
-                <div className="rb-row">
-                  <div className="rb-split-wrap">
-                    <button
-                      className={`rb-icon ${fs.listBullet ? 'active' : ''}`}
-                      disabled={!canEdit || !!sub}
-                      data-tip={t('ribbonBullets')}
-                      aria-label={t('ribbonBullets')}
-                      onClick={() => toggleList('bullet')}
-                    >
-                      <IconBullets />
-                    </button>
-                    <button
-                      className={`rb-caret${dropdown === 'bulletLib' ? ' active' : ''}`}
-                      disabled={!canEdit || !!sub}
-                      data-tip={t('ribbonBullets')}
-                      aria-label={t('ribbonBullets')}
-                      onClick={() => setDropdown((v) => (v === 'bulletLib' ? null : 'bulletLib'))}
-                    >
-                      <IconCaret />
-                    </button>
-                    {dropdown === 'bulletLib' && (
-                      <div data-rb-panel="" className="layout-menu list-gallery list-gallery-word">
-                        <div className="list-gallery-title">{t('ribbonBulletLibTitle')}</div>
+            <RibbonFoldGroup
+              label={t('ribbonGroupParagraph')}
+              icon={<IconAlignLeft />}
+              caret={<IconCaret />}
+              priority={5}
+              itemsClassName="ribbon-group-items rb-font-group"
+            >
+              <div className="rb-row">
+                <div className="rb-split-wrap">
+                  <button
+                    className={`rb-icon ${fs.listBullet ? 'active' : ''}`}
+                    disabled={!canEdit || !!sub}
+                    data-tip={t('ribbonBullets')}
+                    aria-label={t('ribbonBullets')}
+                    onClick={() => toggleList('bullet')}
+                  >
+                    <IconBullets />
+                  </button>
+                  <button
+                    className={`rb-caret${dropdown === 'bulletLib' ? ' active' : ''}`}
+                    disabled={!canEdit || !!sub}
+                    data-tip={t('ribbonBullets')}
+                    aria-label={t('ribbonBullets')}
+                    onClick={() => setDropdown((v) => (v === 'bulletLib' ? null : 'bulletLib'))}
+                  >
+                    <IconCaret />
+                  </button>
+                  {dropdown === 'bulletLib' && (
+                    <div data-rb-panel="" className="layout-menu list-gallery list-gallery-word">
+                      <div className="list-gallery-title">{t('ribbonBulletLibTitle')}</div>
+                      <button
+                        className={`list-gallery-card list-gallery-none${!fs.listBullet && !fs.listOrdered ? ' selected' : ''}`}
+                        onClick={() => {
+                          clearList()
+                          setDropdown(null)
+                        }}
+                      >
+                        {t('ribbonListNone')}
+                      </button>
+                      {BULLET_LIBRARY.map((glyph) => (
                         <button
-                          className={`list-gallery-card list-gallery-none${!fs.listBullet && !fs.listOrdered ? ' selected' : ''}`}
+                          key={glyph}
+                          className="list-gallery-card list-gallery-glyph"
                           onClick={() => {
-                            clearList()
+                            applyListPreset(bulletPresetLevels(glyph))
                             setDropdown(null)
                           }}
                         >
-                          {t('ribbonListNone')}
+                          {glyph}
                         </button>
-                        {BULLET_LIBRARY.map((glyph) => (
-                          <button
-                            key={glyph}
-                            className="list-gallery-card list-gallery-glyph"
-                            onClick={() => {
-                              applyListPreset(bulletPresetLevels(glyph))
-                              setDropdown(null)
-                            }}
-                          >
-                            {glyph}
-                          </button>
-                        ))}
-                        <button
-                          className="list-gallery-define"
-                          onClick={() => {
-                            setListDialog(true)
-                            setDropdown(null)
-                          }}
-                        >
-                          {t('ribbonDefineNewBullet')}…
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="rb-split-wrap">
-                    <button
-                      className={`rb-icon ${fs.listOrdered ? 'active' : ''}`}
-                      disabled={!canEdit || !!sub}
-                      data-tip={t('ribbonNumbering')}
-                      aria-label={t('ribbonNumbering')}
-                      onClick={() => toggleList('ordered')}
-                    >
-                      <IconNumbered />
-                    </button>
-                    <button
-                      className={`rb-caret${dropdown === 'numberLib' ? ' active' : ''}`}
-                      disabled={!canEdit || !!sub}
-                      data-tip={t('ribbonNumbering')}
-                      aria-label={t('ribbonNumbering')}
-                      onClick={() => setDropdown((v) => (v === 'numberLib' ? null : 'numberLib'))}
-                    >
-                      <IconCaret />
-                    </button>
-                    {dropdown === 'numberLib' && (
-                      <div data-rb-panel="" className="layout-menu list-gallery list-gallery-word">
-                        <div className="list-gallery-title">{t('ribbonNumberLibTitle')}</div>
-                        <button
-                          className={`list-gallery-card list-gallery-none${!fs.listBullet && !fs.listOrdered ? ' selected' : ''}`}
-                          onClick={() => {
-                            clearList()
-                            setDropdown(null)
-                          }}
-                        >
-                          {t('ribbonListNone')}
-                        </button>
-                        {NUMBER_LIBRARY.map((n, i) => {
-                          const levels = numberPresetLevels(n.numFmt, n.pattern)
-                          return (
-                            <button
-                              key={i}
-                              className="list-gallery-card list-gallery-preview"
-                              onClick={() => {
-                                applyListPreset(levels)
-                                setDropdown(null)
-                              }}
-                            >
-                              {[1, 2, 3].map((v) => (
-                                <span key={v} className="list-gallery-preview-row">
-                                  <span className="list-gallery-preview-prefix">
-                                    {n.pattern.replace('%1', formatNumber(v, n.numFmt))}
-                                  </span>
-                                  <span className="list-gallery-preview-line" />
-                                </span>
-                              ))}
-                            </button>
-                          )
-                        })}
-                        <button
-                          className="list-gallery-define"
-                          onClick={() => {
-                            setListDialog(true)
-                            setDropdown(null)
-                          }}
-                        >
-                          {t('ribbonDefineNewNumber')}…
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="rb-split-wrap">
-                    <button
-                      className="rb-icon"
-                      disabled={!canEdit || !!sub}
-                      data-tip={t('ribbonMultilevelTip')}
-                      aria-label={t('ribbonMultilevelTip')}
-                      onClick={() => setDropdown((v) => (v === 'multiLib' ? null : 'multiLib'))}
-                    >
-                      <IconMultilevel />
-                    </button>
-                    {dropdown === 'multiLib' && (
-                      <div data-rb-panel="" className="layout-menu list-gallery list-gallery-multi">
-                        {MULTILEVEL_LIBRARY.map((levels, i) => (
+                      ))}
+                      <button
+                        className="list-gallery-define"
+                        onClick={() => {
+                          setListDialog(true)
+                          setDropdown(null)
+                        }}
+                      >
+                        {t('ribbonDefineNewBullet')}…
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="rb-split-wrap">
+                  <button
+                    className={`rb-icon ${fs.listOrdered ? 'active' : ''}`}
+                    disabled={!canEdit || !!sub}
+                    data-tip={t('ribbonNumbering')}
+                    aria-label={t('ribbonNumbering')}
+                    onClick={() => toggleList('ordered')}
+                  >
+                    <IconNumbered />
+                  </button>
+                  <button
+                    className={`rb-caret${dropdown === 'numberLib' ? ' active' : ''}`}
+                    disabled={!canEdit || !!sub}
+                    data-tip={t('ribbonNumbering')}
+                    aria-label={t('ribbonNumbering')}
+                    onClick={() => setDropdown((v) => (v === 'numberLib' ? null : 'numberLib'))}
+                  >
+                    <IconCaret />
+                  </button>
+                  {dropdown === 'numberLib' && (
+                    <div data-rb-panel="" className="layout-menu list-gallery list-gallery-word">
+                      <div className="list-gallery-title">{t('ribbonNumberLibTitle')}</div>
+                      <button
+                        className={`list-gallery-card list-gallery-none${!fs.listBullet && !fs.listOrdered ? ' selected' : ''}`}
+                        onClick={() => {
+                          clearList()
+                          setDropdown(null)
+                        }}
+                      >
+                        {t('ribbonListNone')}
+                      </button>
+                      {NUMBER_LIBRARY.map((n, i) => {
+                        const levels = numberPresetLevels(n.numFmt, n.pattern)
+                        return (
                           <button
                             key={i}
-                            className="list-gallery-card list-gallery-card-multi"
+                            className="list-gallery-card list-gallery-preview"
                             onClick={() => {
                               applyListPreset(levels)
                               setDropdown(null)
                             }}
                           >
-                            {[0, 1, 2].map((lvl) => (
-                              <span key={lvl} style={{ paddingLeft: lvl * 10 }}>
-                                {previewLevelText(levels, lvl)} ———
+                            {[1, 2, 3].map((v) => (
+                              <span key={v} className="list-gallery-preview-row">
+                                <span className="list-gallery-preview-prefix">
+                                  {n.pattern.replace('%1', formatNumber(v, n.numFmt))}
+                                </span>
+                                <span className="list-gallery-preview-line" />
                               </span>
                             ))}
                           </button>
-                        ))}
+                        )
+                      })}
+                      <button
+                        className="list-gallery-define"
+                        onClick={() => {
+                          setListDialog(true)
+                          setDropdown(null)
+                        }}
+                      >
+                        {t('ribbonDefineNewNumber')}…
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="rb-split-wrap">
+                  <button
+                    className="rb-icon"
+                    disabled={!canEdit || !!sub}
+                    data-tip={t('ribbonMultilevelTip')}
+                    aria-label={t('ribbonMultilevelTip')}
+                    onClick={() => setDropdown((v) => (v === 'multiLib' ? null : 'multiLib'))}
+                  >
+                    <IconMultilevel />
+                  </button>
+                  {dropdown === 'multiLib' && (
+                    <div data-rb-panel="" className="layout-menu list-gallery list-gallery-multi">
+                      {MULTILEVEL_LIBRARY.map((levels, i) => (
                         <button
-                          className="list-gallery-define"
+                          key={i}
+                          className="list-gallery-card list-gallery-card-multi"
                           onClick={() => {
-                            setListDialog(true)
+                            applyListPreset(levels)
                             setDropdown(null)
                           }}
                         >
-                          {t('ribbonDefineNewList')}…
+                          {[0, 1, 2].map((lvl) => (
+                            <span key={lvl} style={{ paddingLeft: lvl * 10 }}>
+                              {previewLevelText(levels, lvl)} ———
+                            </span>
+                          ))}
                         </button>
-                      </div>
-                    )}
-                  </div>
-                  <span className="rb-mini-sep" />
-                  <button
-                    className="rb-icon"
-                    disabled={!canEdit || !!sub}
-                    data-tip={t('ribbonDecreaseIndent')}
-                    aria-label={t('ribbonDecreaseIndent')}
-                    onClick={() => changeIndent(-1)}
-                  >
-                    <IconIndentDec />
-                  </button>
-                  <button
-                    className="rb-icon"
-                    disabled={!canEdit || !!sub}
-                    data-tip={t('ribbonIncreaseIndent')}
-                    aria-label={t('ribbonIncreaseIndent')}
-                    onClick={() => changeIndent(1)}
-                  >
-                    <IconIndentInc />
-                  </button>
-                  <span className="rb-mini-sep" />
-                  <button
-                    className="rb-icon"
-                    disabled
-                    data-tip={t('ribbonNotSupportedSuffix', { label: t('ribbonSort') })}
-                    aria-label={t('ribbonNotSupportedSuffix', { label: t('ribbonSort') })}
-                  >
-                    <IconSort />
-                  </button>
-                  <button
-                    className={`rb-icon ${showMarks ? 'active' : ''}`}
-                    disabled={!hasDoc}
-                    data-tip={t('ribbonShowMarks')}
-                    aria-label={t('ribbonShowMarks')}
-                    onClick={() => onShowMarks(!showMarks)}
-                  >
-                    <IconPilcrow />
-                  </button>
+                      ))}
+                      <button
+                        className="list-gallery-define"
+                        onClick={() => {
+                          setListDialog(true)
+                          setDropdown(null)
+                        }}
+                      >
+                        {t('ribbonDefineNewList')}…
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="rb-row">
+                <span className="rb-mini-sep" />
+                <button
+                  className="rb-icon"
+                  disabled={!canEdit || !!sub}
+                  data-tip={t('ribbonDecreaseIndent')}
+                  aria-label={t('ribbonDecreaseIndent')}
+                  onClick={() => changeIndent(-1)}
+                >
+                  <IconIndentDec />
+                </button>
+                <button
+                  className="rb-icon"
+                  disabled={!canEdit || !!sub}
+                  data-tip={t('ribbonIncreaseIndent')}
+                  aria-label={t('ribbonIncreaseIndent')}
+                  onClick={() => changeIndent(1)}
+                >
+                  <IconIndentInc />
+                </button>
+                <span className="rb-mini-sep" />
+                <button
+                  className="rb-icon"
+                  disabled
+                  data-tip={t('ribbonNotSupportedSuffix', { label: t('ribbonSort') })}
+                  aria-label={t('ribbonNotSupportedSuffix', { label: t('ribbonSort') })}
+                >
+                  <IconSort />
+                </button>
+                <button
+                  className={`rb-icon ${showMarks ? 'active' : ''}`}
+                  disabled={!hasDoc}
+                  data-tip={t('ribbonShowMarks')}
+                  aria-label={t('ribbonShowMarks')}
+                  onClick={() => onShowMarks(!showMarks)}
+                >
+                  <IconPilcrow />
+                </button>
+              </div>
+              <div className="rb-row">
+                <button
+                  className={`rb-icon ${activeAlign === 'left' ? 'active' : ''}`}
+                  disabled={!canEdit}
+                  data-tip={t('ribbonAlignLeftTip')}
+                  aria-label={t('ribbonAlignLeftTip')}
+                  onClick={() => setSelectionAlign(ed, 'left')}
+                >
+                  <IconAlignLeft />
+                </button>
+                <button
+                  className={`rb-icon ${activeAlign === 'center' ? 'active' : ''}`}
+                  disabled={!canEdit}
+                  data-tip={t('ribbonAlignCenterTip')}
+                  aria-label={t('ribbonAlignCenterTip')}
+                  onClick={() => setSelectionAlign(ed, 'center')}
+                >
+                  <IconAlignCenter />
+                </button>
+                <button
+                  className={`rb-icon ${activeAlign === 'right' ? 'active' : ''}`}
+                  disabled={!canEdit}
+                  data-tip={t('ribbonAlignRightTip')}
+                  aria-label={t('ribbonAlignRightTip')}
+                  onClick={() => setSelectionAlign(ed, 'right')}
+                >
+                  <IconAlignRight />
+                </button>
+                <button
+                  className={`rb-icon ${activeAlign === 'justify' ? 'active' : ''}`}
+                  disabled={!canEdit}
+                  data-tip={t('ribbonJustifyTip')}
+                  aria-label={t('ribbonJustifyTip')}
+                  onClick={() => setSelectionAlign(ed, 'justify')}
+                >
+                  <IconAlignJustify />
+                </button>
+                <span className="rb-mini-sep" />
+                <button
+                  className={`rb-icon ${!fs.bidi ? 'active' : ''}`}
+                  disabled={!canEdit || !!sub}
+                  data-tip={t('ribbonDirLtrTip')}
+                  aria-label={t('ribbonDirLtrTip')}
+                  onClick={() => setParagraphDirection(editor, 'ltr')}
+                >
+                  <IconDirLtr />
+                </button>
+                <button
+                  className={`rb-icon ${fs.bidi ? 'active' : ''}`}
+                  disabled={!canEdit || !!sub}
+                  data-tip={t('ribbonDirRtlTip')}
+                  aria-label={t('ribbonDirRtlTip')}
+                  onClick={() => setParagraphDirection(editor, 'rtl')}
+                >
+                  <IconDirRtl />
+                </button>
+                <span className="rb-mini-sep" />
+                <div className="rb-split-wrap">
                   <button
-                    className={`rb-icon ${activeAlign === 'left' ? 'active' : ''}`}
+                    className={`rb-icon ${activeSpacing ? 'active' : ''}`}
                     disabled={!canEdit}
-                    data-tip={t('ribbonAlignLeftTip')}
-                    aria-label={t('ribbonAlignLeftTip')}
-                    onClick={() => setSelectionAlign(ed, 'left')}
+                    data-tip={t('ribbonLineSpacing')}
+                    aria-label={t('ribbonLineSpacing')}
+                    onClick={() => setDropdown((v) => (v === 'spacing' ? null : 'spacing'))}
                   >
-                    <IconAlignLeft />
+                    <IconLineSpacing />
+                    <span className="rb-caret-inline">
+                      <IconCaret />
+                    </span>
                   </button>
-                  <button
-                    className={`rb-icon ${activeAlign === 'center' ? 'active' : ''}`}
-                    disabled={!canEdit}
-                    data-tip={t('ribbonAlignCenterTip')}
-                    aria-label={t('ribbonAlignCenterTip')}
-                    onClick={() => setSelectionAlign(ed, 'center')}
-                  >
-                    <IconAlignCenter />
-                  </button>
-                  <button
-                    className={`rb-icon ${activeAlign === 'right' ? 'active' : ''}`}
-                    disabled={!canEdit}
-                    data-tip={t('ribbonAlignRightTip')}
-                    aria-label={t('ribbonAlignRightTip')}
-                    onClick={() => setSelectionAlign(ed, 'right')}
-                  >
-                    <IconAlignRight />
-                  </button>
-                  <button
-                    className={`rb-icon ${activeAlign === 'justify' ? 'active' : ''}`}
-                    disabled={!canEdit}
-                    data-tip={t('ribbonJustifyTip')}
-                    aria-label={t('ribbonJustifyTip')}
-                    onClick={() => setSelectionAlign(ed, 'justify')}
-                  >
-                    <IconAlignJustify />
-                  </button>
-                  <span className="rb-mini-sep" />
-                  <button
-                    className={`rb-icon ${!fs.bidi ? 'active' : ''}`}
-                    disabled={!canEdit || !!sub}
-                    data-tip={t('ribbonDirLtrTip')}
-                    aria-label={t('ribbonDirLtrTip')}
-                    onClick={() => setParagraphDirection(editor, 'ltr')}
-                  >
-                    <IconDirLtr />
-                  </button>
-                  <button
-                    className={`rb-icon ${fs.bidi ? 'active' : ''}`}
-                    disabled={!canEdit || !!sub}
-                    data-tip={t('ribbonDirRtlTip')}
-                    aria-label={t('ribbonDirRtlTip')}
-                    onClick={() => setParagraphDirection(editor, 'rtl')}
-                  >
-                    <IconDirRtl />
-                  </button>
-                  <span className="rb-mini-sep" />
-                  <div className="rb-split-wrap">
-                    <button
-                      className={`rb-icon ${activeSpacing ? 'active' : ''}`}
-                      disabled={!canEdit}
-                      data-tip={t('ribbonLineSpacing')}
-                      aria-label={t('ribbonLineSpacing')}
-                      onClick={() => setDropdown((v) => (v === 'spacing' ? null : 'spacing'))}
-                    >
-                      <IconLineSpacing />
-                      <span className="rb-caret-inline">
-                        <IconCaret />
-                      </span>
-                    </button>
-                    {dropdown === 'spacing' && (
-                      <div data-rb-panel="" className="spacing-menu">
-                        {LINE_SPACINGS.map((s) => (
-                          <button
-                            key={s}
-                            className={activeSpacing === s ? 'active' : ''}
-                            // presets are multiples: clear any atLeast/exact rule so they take effect
-                            onClick={() =>
-                              setParaAttr({ lineSpacing: s, lineRule: null, lineRawTwips: null })
-                            }
-                          >
-                            {s.toFixed(2).replace(/0+$/, '').replace(/\.$/, '.0')}
-                          </button>
-                        ))}
+                  {dropdown === 'spacing' && (
+                    <div data-rb-panel="" className="spacing-menu">
+                      {LINE_SPACINGS.map((s) => (
                         <button
+                          key={s}
+                          className={activeSpacing === s ? 'active' : ''}
+                          // presets are multiples: clear any atLeast/exact rule so they take effect
                           onClick={() =>
-                            setParaAttr({ lineSpacing: null, lineRule: null, lineRawTwips: null })
+                            setParaAttr({ lineSpacing: s, lineRule: null, lineRawTwips: null })
                           }
                         >
-                          {t('ribbonDefault')}
+                          {s.toFixed(2).replace(/0+$/, '').replace(/\.$/, '.0')}
                         </button>
-                        {onParagraphDialog && (
-                          <button
-                            onClick={() => {
-                              setDropdown(null)
-                              onParagraphDialog()
-                            }}
-                          >
-                            {t('ribbonLineSpacingOptions')}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="rb-split-wrap">
-                    <button
-                      className={`rb-icon ${fs.shadingFill ? 'active' : ''}`}
-                      disabled={!canEdit}
-                      data-tip={t('ribbonParagraphShading')}
-                      aria-label={t('ribbonParagraphShading')}
-                      onClick={() => setDropdown((v) => (v === 'shading' ? null : 'shading'))}
-                    >
-                      <IconShading />
-                      <span className="rb-caret-inline">
-                        <IconCaret />
-                      </span>
-                    </button>
-                    {dropdown === 'shading' && (
-                      <div data-rb-panel="" className="color-palette">
-                        {COLORS.map((c) => (
-                          <button
-                            key={c.hex}
-                            className="color-swatch"
-                            style={{ background: `#${c.hex}` }}
-                            data-tip={t(c.nameKey)}
-                            aria-label={t(c.nameKey)}
-                            onClick={() => setParaAttr({ shadingFill: c.hex })}
-                          />
-                        ))}
+                      ))}
+                      <button
+                        onClick={() =>
+                          setParaAttr({ lineSpacing: null, lineRule: null, lineRawTwips: null })
+                        }
+                      >
+                        {t('ribbonDefault')}
+                      </button>
+                      {onParagraphDialog && (
                         <button
-                          className="color-clear"
-                          onClick={() => setParaAttr({ shadingFill: null })}
+                          onClick={() => {
+                            setDropdown(null)
+                            onParagraphDialog()
+                          }}
                         >
-                          {t('ribbonNoShading')}
+                          {t('ribbonLineSpacingOptions')}
                         </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="rb-split-wrap">
-                    <button
-                      className={`rb-icon ${fs.paraBorders ? 'active' : ''}`}
-                      disabled={!canEdit}
-                      data-tip={t('ribbonParagraphBorders')}
-                      aria-label={t('ribbonParagraphBorders')}
-                      onClick={() => setDropdown((v) => (v === 'borders' ? null : 'borders'))}
-                    >
-                      <IconBorderAll />
-                      <span className="rb-caret-inline">
-                        <IconCaret />
-                      </span>
-                    </button>
-                    {dropdown === 'borders' && (
-                      <div data-rb-panel="" className="spacing-menu borders-menu">
-                        <button onClick={() => setParaAttr({ borders: 'b' })}>
-                          {t('ribbonBorderBottom')}
-                        </button>
-                        <button onClick={() => setParaAttr({ borders: 't' })}>
-                          {t('ribbonBorderTop')}
-                        </button>
-                        <button onClick={() => setParaAttr({ borders: 'l' })}>
-                          {t('ribbonBorderLeft')}
-                        </button>
-                        <button onClick={() => setParaAttr({ borders: 'r' })}>
-                          {t('ribbonBorderRight')}
-                        </button>
-                        <button onClick={() => setParaAttr({ borders: 'tblr' })}>
-                          {t('ribbonBorderBox')}
-                        </button>
-                        <button onClick={() => setParaAttr({ borders: null })}>
-                          {t('ribbonNoBorders')}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="rb-split-wrap">
+                  <button
+                    className={`rb-icon ${fs.shadingFill ? 'active' : ''}`}
+                    disabled={!canEdit}
+                    data-tip={t('ribbonParagraphShading')}
+                    aria-label={t('ribbonParagraphShading')}
+                    onClick={() => setDropdown((v) => (v === 'shading' ? null : 'shading'))}
+                  >
+                    <IconShading />
+                    <span className="rb-caret-inline">
+                      <IconCaret />
+                    </span>
+                  </button>
+                  {dropdown === 'shading' && (
+                    <div data-rb-panel="" className="color-palette">
+                      {COLORS.map((c) => (
+                        <button
+                          key={c.hex}
+                          className="color-swatch"
+                          style={{ background: `#${c.hex}` }}
+                          data-tip={t(c.nameKey)}
+                          aria-label={t(c.nameKey)}
+                          onClick={() => setParaAttr({ shadingFill: c.hex })}
+                        />
+                      ))}
+                      <button
+                        className="color-clear"
+                        onClick={() => setParaAttr({ shadingFill: null })}
+                      >
+                        {t('ribbonNoShading')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="rb-split-wrap">
+                  <button
+                    className={`rb-icon ${fs.paraBorders ? 'active' : ''}`}
+                    disabled={!canEdit}
+                    data-tip={t('ribbonParagraphBorders')}
+                    aria-label={t('ribbonParagraphBorders')}
+                    onClick={() => setDropdown((v) => (v === 'borders' ? null : 'borders'))}
+                  >
+                    <IconBorderAll />
+                    <span className="rb-caret-inline">
+                      <IconCaret />
+                    </span>
+                  </button>
+                  {dropdown === 'borders' && (
+                    <div data-rb-panel="" className="spacing-menu borders-menu">
+                      <button onClick={() => setParaAttr({ borders: 'b' })}>
+                        {t('ribbonBorderBottom')}
+                      </button>
+                      <button onClick={() => setParaAttr({ borders: 't' })}>
+                        {t('ribbonBorderTop')}
+                      </button>
+                      <button onClick={() => setParaAttr({ borders: 'l' })}>
+                        {t('ribbonBorderLeft')}
+                      </button>
+                      <button onClick={() => setParaAttr({ borders: 'r' })}>
+                        {t('ribbonBorderRight')}
+                      </button>
+                      <button onClick={() => setParaAttr({ borders: 'tblr' })}>
+                        {t('ribbonBorderBox')}
+                      </button>
+                      <button onClick={() => setParaAttr({ borders: null })}>
+                        {t('ribbonNoBorders')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="ribbon-group-label">{t('ribbonGroupParagraph')}</div>
-            </div>
+            </RibbonFoldGroup>
 
             <div className="ribbon-sep" />
 
-            {/* ---- Styles ---- */}
-            <div className="ribbon-group ribbon-group-styles">
-              <div className="ribbon-group-items rb-split-wrap style-gallery-wrap">
-                <div className="style-gallery" ref={styleGalleryRef}>
-                  {renderStyleCards(false)}
-                </div>
-                {/* clipped cards stay reachable through the expander grid */}
-                {styleGalleryOverflow && (
-                  <button
-                    className="style-gallery-more"
-                    data-tip={t('ribbonMoreStyles')}
-                    aria-label={t('ribbonMoreStyles')}
-                    aria-expanded={dropdown === 'styleGallery'}
-                    onClick={() =>
-                      setDropdown((v) => (v === 'styleGallery' ? null : 'styleGallery'))
-                    }
-                  >
-                    <IconCaret />
-                  </button>
-                )}
-                {dropdown === 'styleGallery' && (
-                  <div data-rb-panel="" className="style-gallery-menu">
-                    {renderStyleCards(true)}
-                  </div>
-                )}
+            {/* ---- Styles (folds before Paragraph, like Word's Styles gallery) ---- */}
+            <RibbonFoldGroup
+              label={t('ribbonGroupStyles')}
+              icon={<span className="rb-styles-glyph">Aa</span>}
+              caret={<IconCaret />}
+              priority={3}
+              className="ribbon-group-styles"
+              itemsClassName="ribbon-group-items rb-split-wrap style-gallery-wrap"
+            >
+              <div className="style-gallery" ref={styleGalleryRef}>
+                {renderStyleCards(false)}
               </div>
-              <div className="ribbon-group-label">{t('ribbonGroupStyles')}</div>
-            </div>
+              {/* clipped cards stay reachable through the expander grid */}
+              {styleGalleryOverflow && (
+                <button
+                  className="style-gallery-more"
+                  data-tip={t('ribbonMoreStyles')}
+                  aria-label={t('ribbonMoreStyles')}
+                  aria-expanded={dropdown === 'styleGallery'}
+                  onClick={() => setDropdown((v) => (v === 'styleGallery' ? null : 'styleGallery'))}
+                >
+                  <IconCaret />
+                </button>
+              )}
+              {dropdown === 'styleGallery' && (
+                <div data-rb-panel="" className="style-gallery-menu">
+                  {renderStyleCards(true)}
+                </div>
+              )}
+            </RibbonFoldGroup>
 
             <div className="ribbon-sep" />
 
             {/* ---- Editing (Word's Find / Replace group, labelled when there is room) ---- */}
-            <div className="ribbon-group">
-              <div className="ribbon-group-items">
-                <div className="rb-col">
-                  <button
-                    className="rb-small"
-                    disabled={!hasDoc || !onFind}
-                    data-tip={t('appFindPlaceholder')}
-                    aria-label={t('appFindPlaceholder')}
-                    onClick={() => onFind?.()}
-                  >
-                    <IconSearch />
-                    <span className="rb-lbl" data-tier="2">
-                      {t('appFindPlaceholder')}
-                    </span>
-                  </button>
-                  <button
-                    className="rb-small"
-                    disabled={!canEdit || !onReplace}
-                    data-tip={t('appReplace')}
-                    aria-label={t('appReplace')}
-                    onClick={() => onReplace?.()}
-                  >
-                    <IconReplace />
-                    <span className="rb-lbl" data-tier="2">
-                      {t('appReplace')}
-                    </span>
-                  </button>
-                </div>
+            <RibbonFoldGroup
+              label={t('ribbonGroupEditing')}
+              icon={<IconSearch />}
+              caret={<IconCaret />}
+              priority={2}
+            >
+              <div className="rb-col">
+                <button
+                  className="rb-small"
+                  disabled={!hasDoc || !onFind}
+                  data-tip={t('appFindPlaceholder')}
+                  aria-label={t('appFindPlaceholder')}
+                  onClick={() => onFind?.()}
+                >
+                  <IconSearch />
+                  <span className="rb-lbl" data-tier="2">
+                    {t('appFindPlaceholder')}
+                  </span>
+                </button>
+                <button
+                  className="rb-small"
+                  disabled={!canEdit || !onReplace}
+                  data-tip={t('appReplace')}
+                  aria-label={t('appReplace')}
+                  onClick={() => onReplace?.()}
+                >
+                  <IconReplace />
+                  <span className="rb-lbl" data-tier="2">
+                    {t('appReplace')}
+                  </span>
+                </button>
               </div>
-              <div className="ribbon-group-label">{t('appReplace')}</div>
-            </div>
+            </RibbonFoldGroup>
+
+            {/* ---- Genspark AI + one-click AI tools: right edge, where Microsoft 365 puts Copilot;
+                 folds into one "AI Tools" dropdown first on a narrow window ---- */}
+            <RibbonFoldGroup
+              label={t('ribbonAiTools')}
+              icon={<GensparkMark size={26} />}
+              caret={<IconCaret />}
+              priority={1}
+              className="rb-group-end"
+            >
+              <button
+                className={`rb-big ai-entry ${showAi ? 'active' : ''}`}
+                data-tip={t('aiOpenAssistant')}
+                onClick={onToggleAi}
+              >
+                <span className="rb-big-icon">
+                  <GensparkMark size={26} />
+                </span>
+                <span>Genspark AI</span>
+              </button>
+              <button
+                className="rb-big ai-entry"
+                disabled={docEmpty}
+                data-tip={t('aiSummarizeBtn')}
+                onClick={() => onAiPreset(t('aiSummarizePrompt'))}
+              >
+                <span className="rb-big-icon">
+                  <span className="ai-feature-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path
+                        d="M13.875 21H12H6.5C5.39543 21 4.5 20.1046 4.5 19V5C4.5 3.89543 5.39543 3 6.5 3H17.5C18.6046 3 19.5 3.89543 19.5 5V9V12V13"
+                        strokeLinecap="round"
+                      />
+                      <path d="M8.00001 7H16" strokeLinecap="round" />
+                      <path d="M8.00007 10.2032H14.0001" strokeLinecap="round" />
+                      <path d="M8.00007 13.4062H12.0001" strokeLinecap="round" />
+                      <path
+                        d="M17 14L17.2579 14.697C17.5961 15.611 17.7652 16.068 18.0986 16.4014C18.432 16.7348 18.889 16.9039 19.803 17.2421L20.5 17.5L19.803 17.7579C18.889 18.0961 18.432 18.2652 18.0986 18.5986C17.7652 18.932 17.5961 19.389 17.2579 20.303L17 21L16.7421 20.303C16.4039 19.389 16.2348 18.932 15.9014 18.5986C15.568 18.2652 15.111 18.0961 14.197 17.7579L13.5 17.5L14.197 17.2421C15.111 16.9039 15.568 16.7348 15.9014 16.4014C16.2348 16.068 16.4039 15.611 16.7421 14.697L17 14Z"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                </span>
+                <span>{t('aiSummarizeBtn')}</span>
+              </button>
+              <button
+                className="rb-big ai-entry"
+                disabled={docEmpty}
+                data-tip={t('aiPolishBtn')}
+                onClick={() =>
+                  onAiPreset(
+                    t(editor.state.selection.empty ? 'aiPolishPrompt' : 'aiPolishSelectionPrompt'),
+                  )
+                }
+              >
+                <span className="rb-big-icon">
+                  <span className="ai-feature-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path
+                        d="M5.00012 20.7481L8.80319 20.7482L21.7482 7.80317L17.945 4L5 16.945L5.00012 20.7481Z"
+                        strokeLinejoin="round"
+                      />
+                      <path d="M15.1406 6.80469L18.9438 10.6079" />
+                      <path
+                        d="M8 3L8.22106 3.59745C8.51094 4.38087 8.65589 4.77259 8.94166 5.05833C9.22743 5.34409 9.61914 5.48903 10.4026 5.77893L11 6L10.4026 6.22107C9.61914 6.51097 9.22743 6.65592 8.94166 6.94167C8.65589 7.22741 8.51094 7.61913 8.22106 8.40255L8 9L7.77894 8.40255C7.48906 7.61913 7.34411 7.22741 7.05834 6.94167C6.77257 6.65592 6.38086 6.51097 5.59743 6.22107L5 6L5.59743 5.77893C6.38086 5.48903 6.77257 5.34409 7.05834 5.05833C7.34411 4.77259 7.48906 4.38087 7.77894 3.59745L8 3Z"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                </span>
+                <span>{t('aiPolishBtn')}</span>
+              </button>
+              <button
+                className="rb-big ai-entry"
+                disabled={docEmpty}
+                data-tip={t('aiTidyBtn')}
+                onClick={() => onAiPreset(t('aiTidyPrompt'))}
+              >
+                <span className="rb-big-icon">
+                  <span className="ai-feature-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4 5H20" strokeLinecap="round" />
+                      <path d="M4 9H16" strokeLinecap="round" />
+                      <path d="M4 13H11" strokeLinecap="round" />
+                      <path d="M4 17H10" strokeLinecap="round" />
+                      <path
+                        d="M17 14L17.2579 14.697C17.5961 15.611 17.7652 16.068 18.0986 16.4014C18.432 16.7348 18.889 16.9039 19.803 17.2421L20.5 17.5L19.803 17.7579C18.889 18.0961 18.432 18.2652 18.0986 18.5986C17.7652 18.932 17.5961 19.389 17.2579 20.303L17 21L16.7421 20.303C16.4039 19.389 16.2348 18.932 15.9014 18.5986C15.568 18.2652 15.111 18.0961 14.197 17.7579L13.5 17.5L14.197 17.2421C15.111 16.9039 15.568 16.7348 15.9014 16.4014C16.2348 16.068 16.4039 15.611 16.7421 14.697L17 14Z"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                </span>
+                <span>{t('aiTidyBtn')}</span>
+              </button>
+            </RibbonFoldGroup>
           </>
         ) : tab === 'draw' ? (
           <DrawTab

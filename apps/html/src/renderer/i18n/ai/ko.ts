@@ -151,6 +151,7 @@ export const ko = {
   aiThemePlayful: '경쾌한',
   aiThemeDark: '다크',
   aiSummarizeBtn: 'AI 요약',
+  aiToolsGroup: 'AI 도구',
   aiSummarizePrompt: '이 문서의 주요 내용과 핵심 사항을 요약해 주세요',
   aiAttachTitle: '로컬 파일을 첨부 (패널로 끌어다 놓아도 됩니다)',
   aiRemoveAttachmentTitle: '첨부 파일 제거',

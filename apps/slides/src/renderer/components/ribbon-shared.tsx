@@ -16,14 +16,36 @@ import type {
   TransitionKind,
 } from '../../shared/ipc'
 import type { InkPenSettings, InkTool } from '../ink'
+import type { TextToggles } from '../TextEditOverlay'
+import type { TextCaseMode } from '@genoffice/pptx-engine/text-case'
+import { FONT_SIZE_LADDER } from '@genoffice/pptx-engine/font-size-step'
 import type { WordArtPreset } from '@genoffice/ui'
-import type { ChartPresetDef, IconDef, SmartArtDef } from '../insert-presets'
+import {
+  SHAPE_GALLERY,
+  type ChartPresetDef,
+  type IconDef,
+  type SmartArtDef,
+} from '../insert-presets'
+import { ShapePreview } from './gallery-previews'
 import type { SlideThemePreset } from '../themes'
 import type { ChartStyleInfo } from '@genoffice/pptx-render'
 import { useI18n, type StringKey } from '../i18n/locale'
 
 export type InsertDropKey =
-  'shapes' | 'icons' | 'chart' | 'smartart' | 'wordart' | 'zoom' | 'addanim'
+  | 'shapes'
+  | 'icons'
+  | 'chart'
+  | 'smartart'
+  | 'wordart'
+  | 'zoom'
+  | 'addanim'
+  // Home tab small dropdowns (Font / Paragraph extras)
+  | 'charSpacing'
+  | 'changeCase'
+  | 'highlight'
+  | 'lineSpacingTop'
+  | 'alignText'
+  | 'textDir'
 
 export const BIG = 28
 
@@ -37,6 +59,14 @@ export type FormatCmd =
   | 'removeFormat'
   | 'fontSizeUp'
   | 'fontSizeDown'
+
+/** Format commands that also work on selected text boxes without editing (PowerPoint) */
+export const ELEMENT_FORMAT_CMDS: ReadonlySet<FormatCmd> = new Set<FormatCmd>([
+  'fontSizeUp',
+  'fontSizeDown',
+  'superscript',
+  'subscript',
+])
 
 /** View modes: normal editing / outline / slide sorter / reading view. */
 export type SlidesViewMode = 'normal' | 'outline' | 'sorter' | 'reading'
@@ -78,9 +108,7 @@ export const FONT_FAMILIES = [
 ]
 
 /** Font size dropdown candidates (pt, same ladder as PowerPoint) */
-export const FONT_SIZES = [
-  8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96,
-]
+export const FONT_SIZES = FONT_SIZE_LADDER
 
 /** Font color palette (applied with onMouseDown while editing, so the native picker doesn't steal focus and commit the edit) */
 export const TEXT_COLORS = [
@@ -135,6 +163,32 @@ export const RIBBON_SHAPE_STYLES: ShapeStylePreset[] = [
   ...SHAPE_STYLE_PRESETS,
   ...STYLE_ACCENTS.map((c) => ({ fill: '#FFFFFF', stroke: c, dash: 'dash' })),
 ]
+
+/** The Shapes gallery shared by the Insert and Home tabs (Home's Drawing group mirrors PowerPoint's). */
+export function InsertShapeGallery({ onPick }: { onPick: (kind: InsertKind) => void }) {
+  return (
+    <div className="rb-shape-gallery">
+      {SHAPE_GALLERY.map((group) => (
+        <div key={group.group}>
+          <div className="rb-drop-title">{group.group}</div>
+          <div className="rb-shape-grid">
+            {group.shapes.map((s) => (
+              <button
+                key={s.prst}
+                className="rb-shape-cell"
+                data-tip={s.label}
+                aria-label={s.label}
+                onClick={() => onPick(s.prst as InsertKind)}
+              >
+                <ShapePreview prst={s.prst} size={18} />
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 /** Thin dropdown chevron (replaces the ▾ text glyph) */
 export function RbCaret() {
@@ -270,9 +324,12 @@ export function Group({
   children,
   groupId,
   collapse,
+  className,
 }: {
   label: string
   children: ReactNode
+  /** extra class on the group root, e.g. `rb-group-end` to push it to the ribbon's right edge */
+  className?: string
   /** identity for width measurement + collapse bookkeeping */
   groupId?: string
   /** present on collapsible groups; `collapsed` switches to the dropdown form */
@@ -280,7 +337,7 @@ export function Group({
 }) {
   if (collapse?.collapsed) {
     return (
-      <div className="ribbon-group" data-rbgroup={groupId}>
+      <div className={`ribbon-group${className ? ` ${className}` : ''}`} data-rbgroup={groupId}>
         <div className="ribbon-group-items">
           <div className="rb-drop-wrap">
             <button
@@ -307,7 +364,7 @@ export function Group({
     )
   }
   return (
-    <div className="ribbon-group" data-rbgroup={groupId}>
+    <div className={`ribbon-group${className ? ` ${className}` : ''}`} data-rbgroup={groupId}>
       <div className="ribbon-group-items">{children}</div>
       <div className="ribbon-group-label">{label}</div>
     </div>
@@ -436,6 +493,19 @@ export interface Props {
     spaceAfterPt?: number
     indentDelta?: 1 | -1
   }) => void
+  /** Home → Font extras on the edited selection or the selected text boxes: character spacing
+   *  (pt, 0 = normal), text highlight (#RRGGBB, null = no colour) and Change Case */
+  onFontExtra: (patch: {
+    letterSpacingPt?: number
+    highlight?: string | null
+    textCase?: TextCaseMode
+  }) => void
+  /** B / I / U / S / x² / x₂ state for the ribbon highlight (null = no text in focus) */
+  curTextToggles: TextToggles | null
+  /** Home → Paragraph → Align Text (vertical anchor) on the edited or selected text boxes */
+  onTextAnchor: (anchor: 'top' | 'middle' | 'bottom') => void
+  /** Home → Paragraph → Text Direction on the edited or selected text boxes */
+  onTextDirection: (vert: 'horz' | 'vert' | 'vert270' | 'wordArtVert') => void
   onInsertTable: (rows: number, cols: number) => void
   /** Current page's transition effect (for display) */
   transition: TransitionKind
@@ -468,6 +538,13 @@ export interface Props {
   onSlideShow: (fromStart: boolean) => void
   /** Start presenter view (single-window version: current page + next-page preview + notes + timer) */
   onPresenterView: (fromStart: boolean) => void
+  /** Slide Show → Monitors → Use Presenter View (PowerPoint default: on) */
+  usePresenterView: boolean
+  onToggleUsePresenterView: () => void
+  /** Slide Show → Monitor: the display label shows go to (null = Automatic) and the connected screens */
+  showMonitor: string | null
+  monitors: Array<{ id: number; label: string; primary: boolean }>
+  onShowMonitor: (label: string | null) => void
   /** Open the custom show management dialog (create/edit/play page subsets) */
   onCustomShow: () => void
   /** Start rehearsal timing (plays the show recording each page's dwell time; can be saved as auto-advance times afterwards) */
@@ -643,6 +720,8 @@ export interface RibbonTabCtx extends Pick<
   | 'onCut'
   | 'onElementTextColor'
   | 'onFindReplace'
+  | 'onFontExtra'
+  | 'curTextToggles'
   | 'onFontFamily'
   | 'onFontSize'
   | 'onFormat'
@@ -670,7 +749,9 @@ export interface RibbonTabCtx extends Pick<
   | 'onSetLayout'
   | 'onSlideShow'
   | 'onStrike'
+  | 'onTextAnchor'
   | 'onTextColor'
+  | 'onTextDirection'
   | 'onTextToggle'
   | 'onToggleAi'
   | 'onToggleFormat'
@@ -683,6 +764,8 @@ export interface RibbonTabCtx extends Pick<
   closePanels: (keep: RibbonPanelKey[]) => void
   collapseOpen: string | null
   collapsedGroups: string[]
+  /** Settings → General ribbon layout is "auto": groups start expanded and fold as the window narrows */
+  autoFold: boolean
   colorOpen: boolean
   commitFontDraft: () => void
   commitSizeDraft: () => void
@@ -697,6 +780,19 @@ export interface RibbonTabCtx extends Pick<
     disabled?: boolean,
   ) => ReactNode
   fmtBtn: (cmd: FormatCmd, label: ReactNode, title: string, className?: string) => ReactNode
+  /** Small icon + caret dropdown (Home → Font / Paragraph extras); shares dropBig's open state */
+  dropIcon: (
+    key: InsertDropKey,
+    icon: ReactNode,
+    title: string,
+    content: ReactNode,
+    disabled?: boolean,
+  ) => ReactNode
+  insertDrop: InsertDropKey | null
+  /** Shape Format's Quick Styles / Shape Fill / Shape Outline menus, reused by Home → Drawing */
+  renderQuickStyles: (variant?: 'big' | 'small', label?: string) => ReactNode
+  renderShapeFill: (variant?: 'big' | 'small', label?: string) => ReactNode
+  renderShapeOutline: (variant?: 'big' | 'small', label?: string) => ReactNode
   fontOpen: boolean
   iconColor: string
   lastBulletColor: string

@@ -153,6 +153,7 @@ export const fr = {
   aiThemePlayful: 'Ludique',
   aiThemeDark: 'Sombre',
   aiSummarizeBtn: 'Résumé IA',
+  aiToolsGroup: 'Outils IA',
   aiSummarizePrompt: 'Résumez le contenu principal et les points clés de ce document',
   aiAttachTitle: 'Joindre des fichiers locaux (ou faites-les glisser sur le panneau)',
   aiRemoveAttachmentTitle: 'Supprimer la pièce jointe',

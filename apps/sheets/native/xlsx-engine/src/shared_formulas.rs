@@ -146,9 +146,13 @@ pub fn translate_shared_formula(
                 }
                 out.push_str(&shift_cell_token(token, row_delta, column_delta)?);
             }
-            byte => {
-                out.push(byte as char);
-                i += 1;
+            _ => {
+                // Copy a whole character: names and unquoted sheet qualifiers may be
+                // non-ASCII (売上, Données), and pushing their UTF-8 bytes one by one
+                // as chars turned them into mojibake (#NAME? in every follower cell)
+                let ch = formula[i..].chars().next()?;
+                out.push(ch);
+                i += ch.len_utf8();
             }
         }
     }
@@ -267,6 +271,19 @@ fn column_to_letters(mut column: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_non_ascii_names_and_sheet_qualifiers_intact() {
+        // defined names and unquoted sheet names may be any Unicode letters
+        assert_eq!(
+            translate_shared_formula("売上+A1", 1, 0).as_deref(),
+            Some("売上+A2")
+        );
+        assert_eq!(
+            translate_shared_formula("Données!A1*Größe", 0, 1).as_deref(),
+            Some("Données!B1*Größe")
+        );
+    }
 
     #[test]
     fn shifts_relative_refs_and_keeps_absolute_parts() {

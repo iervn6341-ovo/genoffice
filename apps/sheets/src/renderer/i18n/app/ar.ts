@@ -718,6 +718,7 @@ export const ar = {
   appGroupChartActions: 'إجراءات المخطط',
   appRemoveFromSheet: 'إزالة من الورقة',
   appGroupAiAssistant: 'مساعد الذكاء الاصطناعي',
+  appGroupAiTools: 'أدوات الذكاء الاصطناعي',
   appAiOpenPanelDetail: 'محادثة في الجزء الجانبي',
   appGroupAiStarters: 'بدء سريع',
   appAiStarterDetail: 'إرسال إلى لوحة الذكاء الاصطناعي',

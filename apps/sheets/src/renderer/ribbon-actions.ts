@@ -1473,6 +1473,28 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
       }
       case 'autofn': {
         if (!worksheet) return
+        // Excel's usual AutoSum: the empty cell under (or right of) a run of numbers is
+        // selected alone — the run above, else to the left, becomes the argument
+        if (range.getHeight() === 1 && range.getWidth() === 1) {
+          const row = range.getRow()
+          const column = range.getColumn()
+          const isNumber = (r: number, c: number) =>
+            r >= 0 && c >= 0 && typeof worksheet.getRange(r, c).getValue() === 'number'
+          let top = row
+          while (isNumber(top - 1, column)) top -= 1
+          let left = column
+          if (top === row) while (isNumber(row, left - 1)) left -= 1
+          if (top === row && left === column) {
+            ctx.setMessage(t('appAutofnSelectCells', { fn: argument }))
+            return
+          }
+          const from = `${columnLabel(top === row ? left : column)}${top + 1}`
+          const to =
+            top === row ? `${columnLabel(column - 1)}${row + 1}` : `${columnLabel(column)}${row}`
+          // into the selected cell itself — the "below the selection" notice would be wrong
+          worksheet.getRange(row, column).setFormula(`=${argument}(${from}:${to})`)
+          return
+        }
         if (range.getHeight() < 2) {
           ctx.setMessage(t('appAutofnSelectCells', { fn: argument }))
           return

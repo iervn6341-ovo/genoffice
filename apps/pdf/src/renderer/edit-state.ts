@@ -1,6 +1,7 @@
 import type { LocalMarkup } from './annotations'
 import type { LocalDrawing } from './DrawLayer'
 import type { LocalImageEdit } from './ImageEditLayer'
+import type { LocalRedaction } from './RedactionLayer'
 import type { SavedNoteAnnot } from './note-threads'
 import type { HeaderFooterConfig, WatermarkConfig } from './stamps'
 import type { LocalTextEdit, LocalTextInsert } from './text-edit-preview'
@@ -50,6 +51,8 @@ export interface LocalNoteEdit {
 }
 
 export interface EditSnapshot {
+  /** Area redactions: applied only by the save-a-copy flow, but undoable like any mark */
+  redactions: LocalRedaction[]
   markups: LocalMarkup[]
   annotDeletes: LocalAnnotDelete[]
   noteEdits: LocalNoteEdit[]

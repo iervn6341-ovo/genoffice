@@ -225,6 +225,13 @@ export function addElement(slide: Slide, opts: NewElementOptions): TextElement {
       : {}),
     text: {
       paragraphs: opts.paragraphs?.length ? opts.paragraphs : [{ runs: [{ text: '' }] }],
+      // the XML already carries the anchor; mirror it in the model so the first render matches
+      // the saved file instead of showing top-anchored text until the deck is reopened
+      ...(opts.bodyPr?.anchor
+        ? {
+            anchor: ({ t: 'top', ctr: 'middle', b: 'bottom' } as const)[opts.bodyPr.anchor],
+          }
+        : {}),
       ...(opts.bodyPr?.autoFit ? { autofit: opts.bodyPr.autoFit } : {}),
     },
   }

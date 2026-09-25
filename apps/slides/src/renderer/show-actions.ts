@@ -17,8 +17,25 @@ export function liftShowCurtain(): void {
   document.body.classList.remove('show-curtain')
 }
 
+/**
+ * From Beginning / From Current Slide (F5, ⇧F5, ⌘↩): with "Use Presenter View" on and a
+ * second screen connected, PowerPoint plays the slides there and keeps presenter view with
+ * the notes on this screen; otherwise the show fills this screen.
+ */
 export function startSlideShow(ctx: ActionCtx, fromStart: boolean): void {
   if (ctx.slides.length === 0 || ctx.slideShow || ctx.presenter) return
+  if (!ctx.usePresenterView) {
+    playFullScreen(ctx, fromStart)
+    return
+  }
+  dropShowCurtain()
+  void window.slidesApi.displayCount().then(
+    (n) => (n > 1 ? startPresenterView(ctx, fromStart) : playFullScreen(ctx, fromStart)),
+    () => playFullScreen(ctx, fromStart),
+  )
+}
+
+function playFullScreen(ctx: ActionCtx, fromStart: boolean): void {
   dropShowCurtain()
   ctx.setEditing(null)
   ctx.setCtxMenu(null)
@@ -108,6 +125,13 @@ export function switchPresenterToShow(ctx: ActionCtx, lastIndex: number): void {
   ctx.setPresenter(null)
   ctx.setCurrent(lastIndex)
   ctx.setSlideShow({ startAt: lastIndex })
+}
+
+/** "Use Presenter View" from the full-screen show's options menu: continue in presenter view */
+export function switchShowToPresenter(ctx: ActionCtx, lastIndex: number): void {
+  ctx.setSlideShow(null)
+  ctx.setCurrent(lastIndex)
+  ctx.setPresenter({ startAt: lastIndex })
 }
 
 export async function toggleHidden(ctx: ActionCtx, index: number): Promise<void> {

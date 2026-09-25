@@ -3,7 +3,8 @@
  * format, fill/stroke, background, theme, table style, and chart edits.
  * Functions read the latest App state through ActionCtx.
  */
-import type { ShapeRenderNode } from '@genoffice/pptx-render'
+import type { RenderSlide, ShapeRenderNode } from '@genoffice/pptx-render'
+import type { TextCaseMode } from '@genoffice/pptx-engine/text-case'
 import type {
   EditBackgroundOp,
   EditChartOp,
@@ -16,23 +17,64 @@ import { FIT_WIDTH } from './app-constants'
 import {
   applySelectionFontFamily,
   applySelectionParagraphFormat,
+  changeSelectionCase,
   resizeSelectionFont,
   restoreEditSelection,
   setSelectionFontSizePt,
+  setSelectionHighlight,
+  setSelectionLetterSpacingPt,
 } from './TextEditOverlay'
 import type { FormatCmd } from './components/Ribbon'
+import { ELEMENT_FORMAT_CMDS } from './components/ribbon-shared'
 import type { SlideThemePreset } from './themes'
 import { t } from './i18n/locale'
 
-export function onFormat(cmd: FormatCmd): void {
-  if (cmd === 'fontSizeUp') resizeSelectionFont(1)
-  else if (cmd === 'fontSizeDown') resizeSelectionFont(-1)
-  else document.execCommand(cmd)
+/** Text is being typed — in a slide box, a table cell or the notes pane: commands act on the live selection */
+function typing(ctx: ActionCtx): boolean {
+  return !!(ctx.editing || ctx.editingCell || ctx.editingNotes)
+}
+
+export function onFormat(ctx: ActionCtx, cmd: FormatCmd): void {
+  if (typing(ctx) || !ELEMENT_FORMAT_CMDS.has(cmd)) {
+    if (cmd === 'fontSizeUp') resizeSelectionFont(1)
+    else if (cmd === 'fontSizeDown') resizeSelectionFont(-1)
+    else document.execCommand(cmd)
+    return
+  }
+  if (!ctx.selectedIds.length) return
+  let patch: { fontSizeStep?: 1 | -1; baseline?: number }
+  if (cmd === 'fontSizeUp' || cmd === 'fontSizeDown') {
+    patch = { fontSizeStep: cmd === 'fontSizeUp' ? 1 : -1 }
+  } else {
+    // Toggle like Bold: every run already raised (lowered) → back to normal, else apply to all
+    const sign = cmd === 'superscript' ? 1 : -1
+    let allOn = true
+    for (const id of ctx.selectedIds) {
+      const node = ctx.findNodeCtx(id)?.node
+      const text =
+        node && (node.type === 'text' || node.type === 'shape')
+          ? (node as ShapeRenderNode).text
+          : undefined
+      const runs =
+        text?.lines.flatMap((l) => l.runs).filter((r) => !r.isBullet && r.text.trim()) ?? []
+      if (!runs.length || runs.some((r) => Math.sign(r.baselinePct ?? 0) !== sign)) allOn = false
+    }
+    patch = { baseline: allOn ? 0 : cmd === 'superscript' ? 30 : -25 }
+  }
+  const groupId = ctx.groupIdOf(ctx.selectedIds[0]!)
+  void window.slidesApi
+    .setElementFont({
+      slideIndex: ctx.current,
+      sourceIds: ctx.selectedIds,
+      ...patch,
+      ...(groupId ? { groupId } : {}),
+    })
+    .then((r) => r && ctx.applySlide(ctx.current, r))
 }
 
 // While editing, change the caret selection; with only an element selected, change it wholesale (applies to all the element's text runs)
 export function onFontFamily(ctx: ActionCtx, family: string): void {
-  if (ctx.editing || ctx.editingCell) {
+  if (typing(ctx)) {
     applySelectionFontFamily(family)
     return
   }
@@ -49,7 +91,7 @@ export function onFontFamily(ctx: ActionCtx, family: string): void {
 }
 
 export function onFontSize(ctx: ActionCtx, pt: number): void {
-  if (ctx.editing || ctx.editingCell) {
+  if (typing(ctx)) {
     setSelectionFontSizePt(pt)
     return
   }
@@ -67,7 +109,7 @@ export function onFontSize(ctx: ActionCtx, pt: number): void {
 
 // While editing, change the caret's paragraph; with only an element selected, use the element-level paragraph format op (all paragraphs)
 export function onAlign(ctx: ActionCtx, align: 'left' | 'center' | 'right' | 'justify'): void {
-  if (ctx.editing || ctx.editingCell) {
+  if (typing(ctx)) {
     document.execCommand(
       align === 'left'
         ? 'justifyLeft'
@@ -158,6 +200,10 @@ const SELECTION_PATCH_KEYS = new Set([
   'numType',
   'startAt',
   'bulletImage',
+  'bulletHangEmu',
+  'bulletSizePct',
+  'bulletColor',
+  'indentDelta',
   'lineSpacingPct',
   'spaceBeforePt',
   'spaceAfterPt',
@@ -179,7 +225,13 @@ export function onParagraphFormat(ctx: ActionCtx, patch: ParagraphFormatPatch): 
     if (!(active instanceof HTMLElement && active.isContentEditable)) restoreEditSelection()
     if (applySelectionParagraphFormat(patch)) return
   }
-  if (!ctx.selectedIds.length) return
+  // Typing in a text box may leave selectedIds empty: fall back to the box being edited
+  const targetIds = ctx.selectedIds.length
+    ? ctx.selectedIds
+    : ctx.editing
+      ? [ctx.editing.sourceId]
+      : []
+  if (!targetIds.length) return
   // Picking an explicit glyph / scheme / picture always applies (no toggle-off)
   if (
     patch.bullet &&
@@ -187,9 +239,9 @@ export function onParagraphFormat(ctx: ActionCtx, patch: ParagraphFormatPatch): 
     !patch.bulletChar &&
     !patch.numType &&
     !patch.bulletImage &&
-    ctx.selectedIds.length === 1
+    targetIds.length === 1
   ) {
-    const node = ctx.findNodeCtx(ctx.selectedIds[0]!)?.node
+    const node = ctx.findNodeCtx(targetIds[0]!)?.node
     const text =
       node && (node.type === 'text' || node.type === 'shape')
         ? (node as ShapeRenderNode).text
@@ -204,11 +256,11 @@ export function onParagraphFormat(ctx: ActionCtx, patch: ParagraphFormatPatch): 
       : null
     if (cur === patch.bullet) patch = { ...patch, bullet: 'none' }
   }
-  const groupId = ctx.groupIdOf(ctx.selectedIds[0]!)
+  const groupId = ctx.groupIdOf(targetIds[0]!)
   void window.slidesApi
     .setElementParagraphFormat({
       slideIndex: ctx.current,
-      sourceIds: ctx.selectedIds,
+      sourceIds: targetIds,
       ...patch,
       ...(groupId ? { groupId } : {}),
     })
@@ -337,4 +389,67 @@ export async function openChartDataDialog(ctx: ActionCtx): Promise<void> {
     ctx.setChartDataDialogInit(data)
     ctx.setChartDataDialogOpen(true)
   }
+}
+
+/** Boxes a text-box command applies to: the selection, or the box being typed in */
+function textTargets(ctx: ActionCtx): string[] {
+  if (ctx.selectedIds.length) return ctx.selectedIds
+  return ctx.editing ? [ctx.editing.sourceId] : []
+}
+
+// Home → Font extras (Character Spacing / Text Highlight / Change Case): while editing they act on
+// the selection (the word at the caret when nothing is selected), otherwise on every run of the
+// selected boxes
+export function onFontExtra(
+  ctx: ActionCtx,
+  patch: { letterSpacingPt?: number; highlight?: string | null; textCase?: TextCaseMode },
+): void {
+  if (typing(ctx)) {
+    const active = document.activeElement
+    if (!(active instanceof HTMLElement && active.isContentEditable)) restoreEditSelection()
+    if (patch.textCase) changeSelectionCase(patch.textCase)
+    if (patch.letterSpacingPt !== undefined) setSelectionLetterSpacingPt(patch.letterSpacingPt)
+    if (patch.highlight !== undefined) setSelectionHighlight(patch.highlight)
+    return
+  }
+  if (!ctx.selectedIds.length) return
+  const groupId = ctx.groupIdOf(ctx.selectedIds[0]!)
+  void window.slidesApi
+    .setElementFont({
+      slideIndex: ctx.current,
+      sourceIds: ctx.selectedIds,
+      ...patch,
+      ...(groupId ? { groupId } : {}),
+    })
+    .then((r) => r && ctx.applySlide(ctx.current, r))
+}
+
+// Home → Paragraph → Align Text / Text Direction: shape-level body properties, so they apply to
+// the whole box even while typing in it (the editor follows the re-rendered node)
+export async function onTextAnchor(
+  ctx: ActionCtx,
+  anchor: 'top' | 'middle' | 'bottom',
+): Promise<void> {
+  let slide: RenderSlide | null = null
+  for (const sourceId of textTargets(ctx)) {
+    slide =
+      (await window.slidesApi.setTextAnchor({ slideIndex: ctx.current, sourceId, anchor })) ?? slide
+  }
+  if (slide) ctx.applySlide(ctx.current, slide)
+}
+
+export async function onTextDirection(
+  ctx: ActionCtx,
+  vert: 'horz' | 'vert' | 'vert270' | 'wordArtVert',
+): Promise<void> {
+  let slide: RenderSlide | null = null
+  for (const sourceId of textTargets(ctx)) {
+    slide =
+      (await window.slidesApi.setTextBodyProps({
+        slideIndex: ctx.current,
+        sourceId,
+        props: { vert },
+      })) ?? slide
+  }
+  if (slide) ctx.applySlide(ctx.current, slide)
 }

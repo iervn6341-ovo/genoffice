@@ -1092,6 +1092,97 @@ describe('per-paragraph format on the editing selection', () => {
     div.remove()
   })
 
+  it('bullet size / color / hanging indent chosen in the editor reach the engine patch', () => {
+    const div = populate(HEADING_AND_BODY)
+    div.contentEditable = 'true'
+    div.focus()
+    const blocks = div.querySelectorAll<HTMLElement>('[data-src-para]')
+    const sel = window.getSelection()!
+    const range = document.createRange()
+    range.selectNodeContents(blocks[1]!)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    expect(applySelectionParagraphFormat({ bulletSizePct: 150 })).toBe(true)
+    expect(applySelectionParagraphFormat({ bulletColor: '#C43E1C', bulletHangEmu: 457200 })).toBe(
+      true,
+    )
+
+    const out = extractParagraphs(div, 1)
+    expect(out[0]!.bulletSizePct).toBeUndefined() // only the selected paragraph is marked
+    expect(out[1]!.bulletSizePct).toBe(150)
+    expect(out[1]!.bulletColor).toBe('#C43E1C')
+    expect(out[1]!.bulletHangEmu).toBe(457200)
+    expect(collectParagraphFormatPatches(out)).toEqual([
+      {
+        index: 1,
+        patch: { bulletHangEmu: 457200, bulletSizePct: 150, bulletColor: '#C43E1C' },
+      },
+    ])
+    div.remove()
+  })
+
+  it('restyling an existing bullet in the preview keeps its glyph and centres a resized dot', () => {
+    const div = populate(HEADING_AND_BODY)
+    div.contentEditable = 'true'
+    div.focus()
+    const blocks = div.querySelectorAll<HTMLElement>('[data-src-para]')
+    const glyph = blocks[1]!.dataset.bulletText
+    const textPx = parseFloat(blocks[1]!.style.getPropertyValue('--bullet-size'))
+    expect(glyph).toBeTruthy()
+    const sel = window.getSelection()!
+    const range = document.createRange()
+    range.selectNodeContents(blocks[1]!)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    applySelectionParagraphFormat({ bulletSizePct: 150, bulletColor: '#112233' })
+
+    expect(blocks[1]!.dataset.bulletText).toBe(glyph) // not rebuilt as the plain dot
+    expect(blocks[1]!.style.getPropertyValue('--bullet-color')).toBe('#112233')
+    const grown = parseFloat(blocks[1]!.style.getPropertyValue('--bullet-size'))
+    expect(grown).toBeGreaterThan(textPx)
+    // an enlarged symbol is nudged down so its centre stays at the text's middle (as on the canvas)
+    expect(parseFloat(blocks[1]!.style.getPropertyValue('--bullet-shift'))).toBeGreaterThan(0)
+    div.remove()
+  })
+
+  it("a fresh bullet reserves PowerPoint's 0.3125in (22.5pt = 30px) hanging indent", () => {
+    const div = populate(HEADING_AND_BODY)
+    div.contentEditable = 'true'
+    div.focus()
+    const blocks = div.querySelectorAll<HTMLElement>('[data-src-para]')
+    const sel = window.getSelection()!
+    const range = document.createRange()
+    range.selectNodeContents(blocks[0]!) // the heading has no bullet yet
+    sel.removeAllRanges()
+    sel.addRange(range)
+    expect(applySelectionParagraphFormat({ bullet: 'char' })).toBe(true)
+    // 22.5pt at 96dpi = 30px; the preview once used 22.5px and the text jumped on commit
+    expect(blocks[0]!.style.getPropertyValue('--bullet-w')).toBe('30px')
+    expect(blocks[0]!.style.marginLeft).toBe('30px')
+    div.remove()
+  })
+
+  it('ribbon indent buttons change the level mark instead of an element-wide op', () => {
+    const div = populate(HEADING_AND_BODY)
+    div.contentEditable = 'true'
+    div.focus()
+    const blocks = div.querySelectorAll<HTMLElement>('[data-src-para]')
+    const sel = window.getSelection()!
+    const range = document.createRange()
+    range.selectNodeContents(blocks[1]!)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    const before = extractParagraphs(div, 1)[1]!.level ?? 0
+    applySelectionParagraphFormat({ indentDelta: 1 })
+    expect(extractParagraphs(div, 1)[1]!.level).toBe(before + 1)
+    applySelectionParagraphFormat({ indentDelta: -1 })
+    expect(extractParagraphs(div, 1)[1]!.level ?? 0).toBe(before)
+    // never below level 0
+    applySelectionParagraphFormat({ indentDelta: -1 })
+    expect(extractParagraphs(div, 1)[1]!.level ?? 0).toBe(0)
+    div.remove()
+  })
+
   it('toggle-off: applying the current kind again turns the bullet off', () => {
     const div = populate(HEADING_AND_BODY)
     div.contentEditable = 'true'

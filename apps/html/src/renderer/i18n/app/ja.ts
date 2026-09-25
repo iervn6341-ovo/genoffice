@@ -55,6 +55,7 @@ export const ja = {
   ribbonPin: 'リボンの固定',
   ribbonExpand: 'リボンを展開する',
   ribbonGroupInsert: '挿入',
+  ribbonGroupView: '表示',
   editText: 'テキスト編集',
   fontSize: 'フォントサイズ',
   fontWeight: '太さ',

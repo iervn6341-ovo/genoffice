@@ -449,6 +449,11 @@ const config = {
     gatekeeperAssess: false,
     entitlements: 'build/entitlements.mac.plist',
     entitlementsInherit: 'build/entitlements.mac.plist',
+    // macOS asks before the first camera use (Slides show → Camera); the prompt shows this text
+    extendInfo: {
+      NSCameraUsageDescription:
+        'GenOffice shows your camera on the slides when you turn on Camera during a slide show.',
+    },
     notarize: true,
     extraResources: [
       {

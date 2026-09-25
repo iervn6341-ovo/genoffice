@@ -135,6 +135,8 @@ export const ar = {
   ribbonStylePaneTip: 'جزء الأنماط: استعراض كافة الأنماط، وإنشاء الأنماط أو تحديثها من التحديد',
   ribbonMoreStyles: 'المزيد من الأنماط',
   ribbonGroupStyles: 'أنماط',
+  ribbonAiTools: 'أدوات الذكاء الاصطناعي',
+  ribbonGroupEditing: 'التحرير',
   ribbonAiAssistant: 'Genspark',
   ribbonAiAssistantTip: 'فتح مساعد الذكاء الاصطناعي',
   ribbonRemoveTableStyleTip: 'إزالة نمط الجدول',

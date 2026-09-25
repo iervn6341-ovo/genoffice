@@ -117,6 +117,8 @@ export interface ActionCtx {
   setEditing: Set<EditingState | null>
   editingCell: EditingCellState | null
   setEditingCell: Set<EditingCellState | null>
+  /** The caret is in the notes pane: text commands act on its selection */
+  editingNotes: boolean
   enteredGroupId: string | null
   setEnteredGroupId: Set<string | null>
   enteredGroupNode: GroupRenderNode | null
@@ -154,6 +156,8 @@ export interface ActionCtx {
   setSlideShow: Set<SlideShowState | null>
   presenter: { startAt: number } | null
   setPresenter: Set<{ startAt: number } | null>
+  /** Slide Show → Use Presenter View: shows open presenter view when a second screen is connected */
+  usePresenterView: boolean
   setCustomShows: Set<CustomShow[]>
   setCustomShowDlgOpen: Set<boolean>
   pendingRehearse: number[] | null

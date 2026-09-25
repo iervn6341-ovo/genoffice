@@ -148,6 +148,7 @@ export const he = {
   aiThemePlayful: 'שובב',
   aiThemeDark: 'כהה',
   aiSummarizeBtn: 'סיכום AI',
+  aiToolsGroup: 'כלי AI',
   aiSummarizePrompt: 'סכם את התוכן העיקרי ואת הנקודות המרכזיות של מסמך זה',
   aiAttachTitle: 'צירוף קבצים מקומיים (אפשר גם לגרור אל החלונית)',
   aiRemoveAttachmentTitle: 'הסרת הקובץ המצורף',

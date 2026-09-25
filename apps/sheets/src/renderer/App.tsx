@@ -3688,7 +3688,15 @@ export function App(): React.JSX.Element {
       // A disposing workbook can race the read; keep the last echo.
       return
     }
-    const next = toSelectionFormat(selectionStyle(range), pattern, selectionLinkTarget(range))
+    const echo = toSelectionFormat(selectionStyle(range), pattern, selectionLinkTarget(range))
+    // A cell without its own font is in the workbook's Normal font — the face the grid
+    // draws and the file saves (Calibri 11 for a new workbook), not a fixed UI default
+    const normal = lazyWorkbookRef.current?.file.styles?.[0]
+    const next: SelectionFormat = {
+      ...echo,
+      fontFamily: echo.fontFamily ?? normal?.fontFamily ?? 'Calibri',
+      fontSize: echo.fontSize ?? normal?.fontSize ?? 11,
+    }
     setSelectionFormat((previous) => (selectionFormatEquals(previous, next) ? previous : next))
   }
 

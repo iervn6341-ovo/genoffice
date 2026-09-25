@@ -139,6 +139,8 @@ export const de = {
     'Formatvorlagenbereich: alle Formatvorlagen anzeigen, aus der Auswahl neue erstellen oder aktualisieren',
   ribbonMoreStyles: 'Weitere Formatvorlagen',
   ribbonGroupStyles: 'Formatvorlagen',
+  ribbonAiTools: 'KI-Tools',
+  ribbonGroupEditing: 'Bearbeiten',
   ribbonAiAssistant: 'Genspark',
   ribbonAiAssistantTip: 'KI-Assistenten öffnen',
   ribbonRemoveTableStyleTip: 'Tabellenformatvorlage entfernen',

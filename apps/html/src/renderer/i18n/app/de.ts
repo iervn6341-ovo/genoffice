@@ -56,6 +56,7 @@ export const de = {
   ribbonPin: 'Menüband anheften',
   ribbonExpand: 'Menüband erweitern',
   ribbonGroupInsert: 'Einfügen',
+  ribbonGroupView: 'Ansicht',
   editText: 'Text bearbeiten',
   fontSize: 'Schriftgröße',
   fontWeight: 'Stärke',

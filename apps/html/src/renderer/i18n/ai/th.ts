@@ -150,6 +150,7 @@ export const th = {
   aiThemePlayful: 'สนุกสนาน',
   aiThemeDark: 'โทนมืด',
   aiSummarizeBtn: 'สรุปด้วย AI',
+  aiToolsGroup: 'เครื่องมือ AI',
   aiSummarizePrompt: 'สรุปเนื้อหาหลักและประเด็นสำคัญของเอกสารนี้',
   aiAttachTitle: 'แนบไฟล์ในเครื่อง (หรือลากมาวางบนแผงก็ได้)',
   aiRemoveAttachmentTitle: 'เอาสิ่งที่แนบออก',

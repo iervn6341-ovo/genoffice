@@ -22,6 +22,8 @@ import {
   THEME_COLOR_SHADES,
   STANDARD_COLORS,
   useRibbonLabelFit,
+  useAiPanelPrefs,
+  keepEditorFocusOnRibbonPress,
 } from '@genoffice/ui'
 import { getRecentColors, pushRecentColor } from '../recent-colors'
 import { ICON_COLORS } from '../insert-presets'
@@ -89,6 +91,7 @@ import {
   IconShapes,
   IconShapeStyle,
   IconFillColor,
+  IconOutlineColor,
   IconObjFlipH,
   IconObjFlipV,
   IconReplacePicture,
@@ -118,6 +121,8 @@ import {
   type Props,
   type RibbonPanelKey,
   type RibbonTabCtx,
+  type InsertDropKey,
+  ELEMENT_FORMAT_CMDS,
 } from './ribbon-shared'
 export type { FormatCmd, SlidesViewMode } from './ribbon-shared'
 import type { FormatCmd } from './ribbon-shared'
@@ -695,6 +700,9 @@ function DisabledBig({ icon, label }: { icon: ReactNode; label: string }) {
  * body overflows, these groups (in order) fold into a single dropdown button */
 const COLLAPSE_ORDER: Record<string, string[]> = {
   animations: ['motionPaths', 'animation'],
+  // Home starts fully expanded and folds back to the compact look (auto layout only)
+  // AI first, Paragraph late: its options stay expanded while the width allows
+  home: ['aiTools', 'drawing', 'paragraph', 'slides'],
 }
 
 /** Checkbox row for toggle commands (View tab's Show group) */
@@ -1139,6 +1147,10 @@ export function Ribbon({
   onStrike,
   onTextToggle,
   onElementTextColor,
+  onFontExtra,
+  curTextToggles,
+  onTextAnchor,
+  onTextDirection,
   onFindReplace,
   animByParagraph,
   onToggleAnimByParagraph,
@@ -1164,6 +1176,11 @@ export function Ribbon({
   onAnimPreview,
   onSlideShow,
   onPresenterView,
+  usePresenterView,
+  onToggleUsePresenterView,
+  showMonitor,
+  monitors,
+  onShowMonitor,
   onCustomShow,
   onRehearse,
   currentHidden,
@@ -1297,9 +1314,7 @@ export function Ribbon({
   const [slideShowOpen, setSlideShowOpen] = useState(false)
   const [slideShowFromStart, setSlideShowFromStart] = useState(false)
   // Insert tab dropdown galleries (at most one open at a time)
-  const [insertDrop, setInsertDrop] = useState<
-    'shapes' | 'icons' | 'chart' | 'smartart' | 'wordart' | 'zoom' | 'addanim' | null
-  >(null)
+  const [insertDrop, setInsertDrop] = useState<InsertDropKey | null>(null)
   // Chart design: dropdown panels (add chart element / change colors, at most one open at a time)
   const [chartDrop, setChartDrop] = useState<'elements' | 'colors' | null>(null)
   // Draw tab pen gallery: per-preset customisations live for the session;
@@ -1382,6 +1397,8 @@ export function Ribbon({
   // an estimate, corrected by measurement as soon as the group first folds).
   const collapse = useRibbonCollapse('ai-slides-ribbon-collapsed')
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  // Settings → General: `auto` starts the Home tab expanded, `classic` keeps its groups collapsed
+  const autoFold = useAiPanelPrefs().ribbonFold === 'auto'
   // shows text beside the icons when the window is wide enough (ribbon-fit)
   useRibbonLabelFit(bodyRef)
   const inlineWidthsRef = useRef(new Map<string, number>())
@@ -1389,20 +1406,33 @@ export function Ribbon({
   useLayoutEffect(() => {
     setCollapsedGroups([])
     setCollapseOpen(null)
-  }, [tab])
+  }, [tab, autoFold])
   useLayoutEffect(() => {
     const el = bodyRef.current
     if (!el) return
-    const order = COLLAPSE_ORDER[tab] ?? []
+    const order = tab === 'home' && !autoFold ? [] : (COLLAPSE_ORDER[tab] ?? [])
     if (!order.length) return
     const evaluate = () => {
       // hidden (collapsed ribbon): offsets read 0 and would poison the width caches
       if (!el.clientWidth) return
       const kids = Array.from(el.children) as HTMLElement[]
       if (!kids.length) return
-      const first = kids[0]!
-      const last = kids[kids.length - 1]!
-      let fullWidth = last.offsetLeft + last.offsetWidth - first.offsetLeft
+      // Natural content width: each child's box plus its fixed margins and the flex gaps. An
+      // auto margin (the right-aligned AI group) is slack, not content — measuring first-left
+      // to last-right would count it and keep folded groups from ever unfolding.
+      const bodyCs = window.getComputedStyle(el)
+      const gap = parseFloat(bodyCs.columnGap) || 0
+      let fullWidth = gap * (kids.length - 1)
+      for (const k of kids) {
+        const cs = window.getComputedStyle(k)
+        fullWidth += k.offsetWidth + (parseFloat(cs.marginRight) || 0)
+        if (!k.classList.contains('rb-group-end')) fullWidth += parseFloat(cs.marginLeft) || 0
+      }
+      // the body's own padding is not room for groups
+      const inner =
+        el.clientWidth -
+        (parseFloat(bodyCs.paddingLeft) || 0) -
+        (parseFloat(bodyCs.paddingRight) || 0)
       // refresh width caches and normalize the measured extent to "all expanded"
       const saving = (g: string) =>
         Math.max(
@@ -1429,14 +1459,14 @@ export function Ribbon({
         }
         return k
       }
-      const mustCollapse = fitCount(el.clientWidth)
+      const mustCollapse = fitCount(inner)
       // integer offset* measurements make the normalized width jitter by a
       // couple of px — demand a little real slack before unfolding so a
       // borderline width can't oscillate
       const next =
         mustCollapse >= collapsedGroups.length
           ? mustCollapse
-          : Math.min(Math.max(fitCount(el.clientWidth - 8), mustCollapse), collapsedGroups.length)
+          : Math.min(Math.max(fitCount(inner - 8), mustCollapse), collapsedGroups.length)
       if (next !== collapsedGroups.length) setCollapsedGroups(order.slice(0, next))
     }
     evaluate()
@@ -1446,7 +1476,7 @@ export function Ribbon({
     // locale, contextual controls) — watch every group as well
     el.querySelectorAll<HTMLElement>('.ribbon-group').forEach((g) => ro.observe(g))
     return () => ro.disconnect()
-  }, [tab, collapsedGroups])
+  }, [tab, collapsedGroups, autoFold])
 
   // Contextual tab auto-switch: pictures/tables/charts jump to their format
   // tab; shapes only reveal Shape Format (PowerPoint parity, so Home stays put for
@@ -1489,6 +1519,36 @@ export function Ribbon({
           <RbCaret />
         </span>
         <span>{label}</span>
+      </button>
+      {insertDrop === key && (
+        <div className="rb-drop" onMouseDown={(e) => e.stopPropagation()}>
+          {content}
+        </div>
+      )}
+    </div>
+  )
+  const dropIcon = (
+    key: NonNullable<typeof insertDrop>,
+    icon: ReactNode,
+    title: string,
+    content: ReactNode,
+    disabled = !hasDoc,
+  ) => (
+    <div className="rb-drop-wrap">
+      <button
+        className={`rb-icon rb-icon-drop ${insertDrop === key ? 'active' : ''}`}
+        disabled={disabled}
+        data-tip={title}
+        aria-label={title}
+        aria-expanded={insertDrop === key}
+        onMouseDown={(e) => {
+          e.stopPropagation()
+          closeSiblingPanels(e, closePanels, 'insert')
+        }}
+        onClick={() => setInsertDrop((v) => (v === key ? null : key))}
+      >
+        {icon}
+        <RbCaret />
       </button>
       {insertDrop === key && (
         <div className="rb-drop" onMouseDown={(e) => e.stopPropagation()}>
@@ -1568,19 +1628,225 @@ export function Ribbon({
   }
 
   // Format buttons use onMouseDown+preventDefault, avoiding stealing contentEditable focus and triggering a commit
-  const fmtBtn = (cmd: FormatCmd, label: ReactNode, title: string, className?: string) => (
-    <button
-      className={`rb-icon${className ? ` ${className}` : ''}`}
-      disabled={!editing}
-      data-tip={editing ? title : t('ribbonEditableHint', { title })}
-      aria-label={title}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        if (editing) onFormat(cmd)
-      }}
-    >
-      {label}
-    </button>
+  const fmtBtn = (cmd: FormatCmd, label: ReactNode, title: string, className?: string) => {
+    // grow/shrink and super/subscript also act on selected text boxes (PowerPoint)
+    const live = !!editing || (hasTextSelection && ELEMENT_FORMAT_CMDS.has(cmd))
+    return (
+      <button
+        className={`rb-icon${className ? ` ${className}` : ''}`}
+        disabled={!live}
+        data-tip={live ? title : t('ribbonEditableHint', { title })}
+        aria-label={title}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          if (live) onFormat(cmd)
+        }}
+      >
+        {label}
+      </button>
+    )
+  }
+
+  /** Quick Styles gallery (Shape Format tab; Home → Drawing as a small row) */
+  const renderQuickStyles = (variant: 'big' | 'small' = 'big', label?: string) => (
+    <div className="rb-drop-wrap">
+      <button
+        className={`${variant === 'big' ? 'rb-big' : 'rb-small'} ${shapeStyleOpen ? 'active' : ''}`}
+        disabled={!onShapeStyle}
+        data-tip={t('ribbonShapeStyleTip')}
+        onMouseDown={(e) => {
+          e.stopPropagation()
+          closeSiblingPanels(e, closePanels, 'shapeStyle')
+        }}
+        onClick={() => setShapeStyleOpen((v) => !v)}
+      >
+        {variant === 'big' ? (
+          <>
+            <span className="rb-big-icon">
+              <IconShapeStyle size={BIG} />
+              <RbCaret />
+            </span>
+            <span>{label ?? t('ribbonGroupShapeStyle')}</span>
+          </>
+        ) : (
+          <>
+            <IconShapeStyle size={20} />
+            <span>{label ?? t('ribbonGroupShapeStyle')}</span>
+            <RbCaret />
+          </>
+        )}
+      </button>
+      {shapeStyleOpen && (
+        <div className="rb-drop rb-menu ctx-style-grid" onMouseDown={(e) => e.stopPropagation()}>
+          {RIBBON_SHAPE_STYLES.map((s, si) => (
+            <button
+              key={si}
+              className="ctx-style-cell"
+              style={{
+                background: s.fill,
+                borderColor: s.stroke,
+                borderStyle: s.dash ? 'dashed' : 'solid',
+              }}
+              aria-label={`${s.fill} / ${s.stroke}${s.dash ? ` (${s.dash})` : ''}`}
+              onClick={() => {
+                setShapeStyleOpen(false)
+                onShapeStyle?.(s)
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+  /** Shape Fill menu (Shape Format tab; Home → Drawing as a small row) */
+  const renderShapeFill = (variant: 'big' | 'small' = 'big', label?: string) => (
+    <div className="rb-drop-wrap">
+      <button
+        className={`${variant === 'big' ? 'rb-big' : 'rb-small'} ${shapeFillOpen ? 'active' : ''}`}
+        disabled={!onShapeFill}
+        data-tip={t('paneFormatFill')}
+        onMouseDown={(e) => {
+          e.stopPropagation()
+          closeSiblingPanels(e, closePanels, 'shapeFill')
+        }}
+        onClick={() => setShapeFillOpen((v) => !v)}
+      >
+        {variant === 'big' ? (
+          <>
+            <span className="rb-big-icon">
+              <IconFillColor size={BIG} />
+              <RbCaret />
+            </span>
+            <span>{label ?? t('paneFormatFill')}</span>
+          </>
+        ) : (
+          <>
+            <IconFillColor size={20} />
+            <span>{label ?? t('paneFormatFill')}</span>
+            <RbCaret />
+          </>
+        )}
+      </button>
+      {shapeFillOpen && (
+        <ShapeFillMenu
+          currentFill={contextShapeFill ?? null}
+          onPickFill={(fill) => onShapeFill?.(fill)}
+          onPickImage={onShapeFillImage}
+          onMoreGradient={() => {
+            if (!formatOpen) onToggleFormat()
+          }}
+          onClose={() => setShapeFillOpen(false)}
+        />
+      )}
+    </div>
+  )
+  /** Shape Outline menu (Shape Format tab; Home → Drawing as a small row) */
+  const renderShapeOutline = (variant: 'big' | 'small' = 'big', label?: string) => (
+    <div className="rb-drop-wrap">
+      <button
+        className={`${variant === 'big' ? 'rb-big' : 'rb-small'} ${pictureBorderOpen ? 'active' : ''}`}
+        disabled={!onPictureStroke}
+        onMouseDown={(e) => {
+          e.stopPropagation()
+          closeSiblingPanels(e, closePanels, 'pictureBorder')
+        }}
+        onClick={() => {
+          pictureBorderDraft.current = null
+          setPictureBorderOpen((v) => !v)
+        }}
+        data-tip={t('paneFormatOutline')}
+      >
+        {variant === 'big' ? (
+          <>
+            <span className="rb-big-icon">
+              <IconPageBorders size={BIG} />
+              <RbCaret />
+            </span>
+            <span>{label ?? t('paneFormatOutline')}</span>
+          </>
+        ) : (
+          <>
+            <IconOutlineColor size={20} />
+            <span>{label ?? t('paneFormatOutline')}</span>
+            <RbCaret />
+          </>
+        )}
+      </button>
+      {pictureBorderOpen && (
+        <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+          <label className="rb-menu-input">
+            {t('paneFormatOutlineColor')}
+            <input
+              type="color"
+              defaultValue={toPickerHex(contextPictureStroke?.color) ?? '#000000'}
+              onPointerDown={(e) => armColorInput(e.currentTarget)}
+              onChange={(e) => commitPictureBorder({ color: e.target.value })}
+            />
+          </label>
+          <div className="rb-menu-sep" />
+          {[0.5, 1, 1.5, 2.25, 3, 4.5, 6].map((pt) => (
+            <button
+              key={pt}
+              className={contextPictureStroke?.widthPt === pt ? 'active' : ''}
+              onClick={() => {
+                setPictureBorderOpen(false)
+                commitPictureBorder({ widthPt: pt }, true)
+              }}
+            >
+              {pt} pt
+            </button>
+          ))}
+          <div className="rb-menu-sep" />
+          {(
+            [
+              ['solid', t('ribbonLineSolid')],
+              ['dash', t('ribbonLineDash')],
+              ['sysDot', t('ribbonLineDot')],
+              ['dashDot', t('ribbonLineDashDot')],
+            ] as const
+          ).map(([dash, label]) => (
+            <button
+              key={dash}
+              className={
+                contextPictureStroke &&
+                (dash === 'solid'
+                  ? !contextPictureStroke.dashPreset
+                  : contextPictureStroke.dashPreset === dash)
+                  ? 'active'
+                  : ''
+              }
+              onClick={() => {
+                setPictureBorderOpen(false)
+                onPictureStroke?.({
+                  color: toPickerHex(contextPictureStroke?.color) ?? '#000000',
+                  widthPt: contextPictureStroke?.widthPt ?? 1,
+                  dash,
+                })
+              }}
+            >
+              {label}
+            </button>
+          ))}
+          <div className="rb-menu-sep" />
+          <button
+            className={!contextPictureStroke ? 'active' : ''}
+            onClick={() => {
+              setPictureBorderOpen(false)
+              // A pending debounced color commit still holds the prior draft
+              // in its closure and would re-apply the border after the clear
+              if (pictureBorderTimer.current) {
+                window.clearTimeout(pictureBorderTimer.current)
+                pictureBorderTimer.current = null
+              }
+              pictureBorderDraft.current = null
+              onPictureStroke?.(null)
+            }}
+          >
+            {t('paneFormatNoOutline')}
+          </button>
+        </div>
+      )}
+    </div>
   )
 
   const tabCtx: RibbonTabCtx = {
@@ -1616,6 +1882,10 @@ export function Ribbon({
     onCopy,
     onCut,
     onElementTextColor,
+    onFontExtra,
+    curTextToggles,
+    onTextAnchor,
+    onTextDirection,
     onFindReplace,
     onFontFamily,
     onFontSize,
@@ -1655,10 +1925,16 @@ export function Ribbon({
     arrangeOpen,
     collapseOpen,
     collapsedGroups,
+    autoFold,
     colorOpen,
     commitFontDraft,
     commitSizeDraft,
     dropBig,
+    dropIcon,
+    insertDrop,
+    renderQuickStyles,
+    renderShapeFill,
+    renderShapeOutline,
     fontDraft,
     setFontDraft,
     fmtBtn,
@@ -1701,7 +1977,11 @@ export function Ribbon({
   }
 
   return (
-    <div className={`ribbon ${collapse.rootClass}`} ref={collapse.rootRef}>
+    <div
+      className={`ribbon ${collapse.rootClass}`}
+      ref={collapse.rootRef}
+      onMouseDownCapture={keepEditorFocusOnRibbonPress}
+    >
       <div
         className={`ribbon-tabs ${IN_TAB ? '' : IS_MAC ? 'ribbon-tabs-mac' : 'ribbon-tabs-win'}${
           anyPanelOpen ? ' ribbon-tabs-nodrag' : ''
@@ -2459,6 +2739,36 @@ export function Ribbon({
                 <span>{t('ribbonRehearse')}</span>
               </button>
               <DisabledBig icon={<IconRecord size={BIG} />} label={t('ribbonRecord')} />
+            </Group>
+            <div className="ribbon-sep" />
+            <Group label={t('ribbonGroupMonitors')}>
+              <div className="rb-check-grid">
+                <label className="rb-monitor" data-tip={t('ribbonShowMonitorTip')}>
+                  <span>{t('ribbonShowMonitor')}</span>
+                  <select
+                    value={showMonitor ?? ''}
+                    disabled={!hasDoc}
+                    onChange={(e) => onShowMonitor(e.target.value || null)}
+                  >
+                    <option value="">{t('ribbonMonitorAutomatic')}</option>
+                    {/* a remembered screen that is unplugged right now stays selectable */}
+                    {showMonitor && !monitors.some((m) => m.label === showMonitor) && (
+                      <option value={showMonitor}>{showMonitor}</option>
+                    )}
+                    {monitors.map((m) => (
+                      <option key={m.id} value={m.label}>
+                        {m.primary ? `${m.label} (${t('ribbonMonitorPrimary')})` : m.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <RbCheck
+                  label={t('ribbonUsePresenterView')}
+                  on={usePresenterView}
+                  title={t('ribbonUsePresenterViewTip')}
+                  onClick={onToggleUsePresenterView}
+                />
+              </div>
             </Group>
           </>
         ) : tab === 'review' ? (
@@ -3260,179 +3570,11 @@ export function Ribbon({
               </div>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupShapeStyle')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${shapeStyleOpen ? 'active' : ''}`}
-                  disabled={!onShapeStyle}
-                  data-tip={t('ribbonShapeStyleTip')}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'shapeStyle')
-                  }}
-                  onClick={() => setShapeStyleOpen((v) => !v)}
-                >
-                  <span className="rb-big-icon">
-                    <IconShapeStyle size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonGroupShapeStyle')}</span>
-                </button>
-                {shapeStyleOpen && (
-                  <div
-                    className="rb-drop rb-menu ctx-style-grid"
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    {RIBBON_SHAPE_STYLES.map((s, si) => (
-                      <button
-                        key={si}
-                        className="ctx-style-cell"
-                        style={{
-                          background: s.fill,
-                          borderColor: s.stroke,
-                          borderStyle: s.dash ? 'dashed' : 'solid',
-                        }}
-                        aria-label={`${s.fill} / ${s.stroke}${s.dash ? ` (${s.dash})` : ''}`}
-                        onClick={() => {
-                          setShapeStyleOpen(false)
-                          onShapeStyle?.(s)
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Group>
+            <Group label={t('ribbonGroupShapeStyle')}>{renderQuickStyles()}</Group>
             <div className="ribbon-sep" />
-            <Group label={t('paneFormatFill')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${shapeFillOpen ? 'active' : ''}`}
-                  disabled={!onShapeFill}
-                  data-tip={t('paneFormatFill')}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'shapeFill')
-                  }}
-                  onClick={() => setShapeFillOpen((v) => !v)}
-                >
-                  <span className="rb-big-icon">
-                    <IconFillColor size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('paneFormatFill')}</span>
-                </button>
-                {shapeFillOpen && (
-                  <ShapeFillMenu
-                    currentFill={contextShapeFill ?? null}
-                    onPickFill={(fill) => onShapeFill?.(fill)}
-                    onPickImage={onShapeFillImage}
-                    onMoreGradient={() => {
-                      if (!formatOpen) onToggleFormat()
-                    }}
-                    onClose={() => setShapeFillOpen(false)}
-                  />
-                )}
-              </div>
-            </Group>
+            <Group label={t('paneFormatFill')}>{renderShapeFill()}</Group>
             <div className="ribbon-sep" />
-            <Group label={t('paneFormatOutline')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${pictureBorderOpen ? 'active' : ''}`}
-                  disabled={!onPictureStroke}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'pictureBorder')
-                  }}
-                  onClick={() => {
-                    pictureBorderDraft.current = null
-                    setPictureBorderOpen((v) => !v)
-                  }}
-                  data-tip={t('paneFormatOutline')}
-                >
-                  <span className="rb-big-icon">
-                    <IconPageBorders size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('paneFormatOutline')}</span>
-                </button>
-                {pictureBorderOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    <label className="rb-menu-input">
-                      {t('paneFormatOutlineColor')}
-                      <input
-                        type="color"
-                        defaultValue={toPickerHex(contextPictureStroke?.color) ?? '#000000'}
-                        onPointerDown={(e) => armColorInput(e.currentTarget)}
-                        onChange={(e) => commitPictureBorder({ color: e.target.value })}
-                      />
-                    </label>
-                    <div className="rb-menu-sep" />
-                    {[0.5, 1, 1.5, 2.25, 3, 4.5, 6].map((pt) => (
-                      <button
-                        key={pt}
-                        className={contextPictureStroke?.widthPt === pt ? 'active' : ''}
-                        onClick={() => {
-                          setPictureBorderOpen(false)
-                          commitPictureBorder({ widthPt: pt }, true)
-                        }}
-                      >
-                        {pt} pt
-                      </button>
-                    ))}
-                    <div className="rb-menu-sep" />
-                    {(
-                      [
-                        ['solid', t('ribbonLineSolid')],
-                        ['dash', t('ribbonLineDash')],
-                        ['sysDot', t('ribbonLineDot')],
-                        ['dashDot', t('ribbonLineDashDot')],
-                      ] as const
-                    ).map(([dash, label]) => (
-                      <button
-                        key={dash}
-                        className={
-                          contextPictureStroke &&
-                          (dash === 'solid'
-                            ? !contextPictureStroke.dashPreset
-                            : contextPictureStroke.dashPreset === dash)
-                            ? 'active'
-                            : ''
-                        }
-                        onClick={() => {
-                          setPictureBorderOpen(false)
-                          onPictureStroke?.({
-                            color: toPickerHex(contextPictureStroke?.color) ?? '#000000',
-                            widthPt: contextPictureStroke?.widthPt ?? 1,
-                            dash,
-                          })
-                        }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <div className="rb-menu-sep" />
-                    <button
-                      className={!contextPictureStroke ? 'active' : ''}
-                      onClick={() => {
-                        setPictureBorderOpen(false)
-                        // A pending debounced color commit still holds the prior draft
-                        // in its closure and would re-apply the border after the clear
-                        if (pictureBorderTimer.current) {
-                          window.clearTimeout(pictureBorderTimer.current)
-                          pictureBorderTimer.current = null
-                        }
-                        pictureBorderDraft.current = null
-                        onPictureStroke?.(null)
-                      }}
-                    >
-                      {t('paneFormatNoOutline')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </Group>
+            <Group label={t('paneFormatOutline')}>{renderShapeOutline()}</Group>
           </>
         ) : null}
       </div>

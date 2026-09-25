@@ -151,6 +151,7 @@ export const hi = {
   aiThemePlayful: 'चंचल',
   aiThemeDark: 'डार्क',
   aiSummarizeBtn: 'AI सारांश',
+  aiToolsGroup: 'AI टूल',
   aiSummarizePrompt: 'इस दस्तावेज़ की मुख्य सामग्री और प्रमुख बिंदुओं का सारांश दें',
   aiAttachTitle: 'स्थानीय फ़ाइलें संलग्न करें (या उन्हें पैनल पर खींचें)',
   aiRemoveAttachmentTitle: 'अनुलग्नक हटाएँ',

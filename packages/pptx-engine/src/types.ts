@@ -238,6 +238,9 @@ export interface TextRun {
   color?: ResolvedColor
   /** Text highlight color <a:rPr><a:highlight> (drawn as a background behind the run) */
   highlight?: ResolvedColor
+  /** The user set or removed the highlight: the patch path rewrites <a:highlight> (an untouched
+   *  one keeps its original bytes, so a theme-colour highlight is not baked into srgbClr) */
+  highlightEdited?: boolean
   /** color is display-only (from schemeClr/inheritance, not an explicit run srgbClr);
    * the patch path won't write srgbClr from it, avoiding baking in theme colors and breaking theme switches */
   colorFollowsTheme?: boolean

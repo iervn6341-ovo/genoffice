@@ -132,8 +132,13 @@ export function clearParagraphFormatting(editor: Editor): void {
 /** apply a gallery paragraph style; not for textbox sub-editors (no docHeading in their schema) */
 export function applyParagraphStyle(editor: Editor, key: 'p' | 'h1' | 'h2' | 'h3'): void {
   let c = editor.chain().focus()
-  if (key === 'p') c = c.setNode('docParagraph')
-  else c = c.setNode('docHeading', { level: Number(key.slice(1)) })
+  // setNode keeps the block's other attrs, including the styleId it was opened with: a
+  // reopened Heading 2 switched to Heading 3 / Normal kept styleId "Heading2" and saved as
+  // Heading 2 again. Dropping it lets the save pick the document's own style for the level
+  // (its heading style ids may be localized) or Normal.
+  if (key === 'p') c = c.setNode('docParagraph', { styleId: null })
+  else
+    c = c.setNode('docHeading', { level: Number(key.slice(1)), styleId: null, outlineOnly: null })
   // Word-like: applying a paragraph style sheds the runs' direct font/size/color.
   // Those render as inline span styles and would otherwise mask the style's look
   // entirely (the click would seem to do nothing on documents whose body runs

@@ -142,6 +142,8 @@ export const ko = {
   ribbonStylePaneTip: '스타일 창: 모든 스타일을 보고 선택 영역에서 스타일을 새로 만들거나 업데이트',
   ribbonMoreStyles: '스타일 더 보기',
   ribbonGroupStyles: '스타일',
+  ribbonAiTools: 'AI 도구',
+  ribbonGroupEditing: '편집',
   // Home · AI
   ribbonAiAssistant: 'Genspark',
   ribbonAiAssistantTip: 'AI 도우미 열기',

@@ -144,6 +144,8 @@ export const ja = {
     'スタイル ウィンドウ:すべてのスタイルを表示し、選択範囲からスタイルを新規作成/更新',
   ribbonMoreStyles: 'その他のスタイル',
   ribbonGroupStyles: 'スタイル',
+  ribbonAiTools: 'AI ツール',
+  ribbonGroupEditing: '編集',
   // Home · AI
   ribbonAiAssistant: 'Genspark',
   ribbonAiAssistantTip: 'AI アシスタントを開く',

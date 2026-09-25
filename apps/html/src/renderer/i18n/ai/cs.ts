@@ -152,6 +152,7 @@ export const cs = {
   aiThemePlayful: 'Hravý',
   aiThemeDark: 'Tmavý',
   aiSummarizeBtn: 'Shrnout s AI',
+  aiToolsGroup: 'Nástroje AI',
   aiSummarizePrompt: 'Shrň hlavní obsah a klíčové body tohoto dokumentu',
   aiAttachTitle: 'Připojit místní soubory (nebo je přetáhněte na panel)',
   aiRemoveAttachmentTitle: 'Odebrat přílohu',

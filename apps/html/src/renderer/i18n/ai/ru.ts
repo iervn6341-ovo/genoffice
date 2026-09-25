@@ -152,6 +152,7 @@ export const ru = {
   aiThemePlayful: 'Игривый',
   aiThemeDark: 'Тёмный',
   aiSummarizeBtn: 'ИИ-резюме',
+  aiToolsGroup: 'Инструменты ИИ',
   aiSummarizePrompt: 'Кратко изложите основное содержание и ключевые моменты этого документа',
   aiAttachTitle: 'Прикрепить локальные файлы (или перетащите их на панель)',
   aiRemoveAttachmentTitle: 'Удалить вложение',

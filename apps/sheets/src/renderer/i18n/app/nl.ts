@@ -785,6 +785,7 @@ export const nl = {
   appGroupChartActions: 'Grafiekacties',
   appRemoveFromSheet: 'Van werkblad verwijderen',
   appGroupAiAssistant: 'AI-assistent',
+  appGroupAiTools: 'AI-hulpmiddelen',
   appAiOpenPanelDetail: 'Chatzijbalk',
   appGroupAiStarters: 'Snel starten',
   appAiStarterDetail: 'Naar het AI-deelvenster sturen',

@@ -52,6 +52,7 @@ export const zh = {
   ribbonPin: '固定功能区',
   ribbonExpand: '展开功能区',
   ribbonGroupInsert: '插入',
+  ribbonGroupView: '视图',
   editText: '编辑文字',
   fontSize: '字号',
   fontWeight: '字重',

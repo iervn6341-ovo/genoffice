@@ -2113,6 +2113,8 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
         if (align) image.align = align
         const wrap = node.attrs.imageWrap as ImageWrap | null
         if (wrap) image.wrap = wrap
+        const dragged = imagePosOffset(node)
+        if (wrap && dragged) image.posOffsetEmu = dragged
         if (node.attrs.imageZOrder != null) image.zOrder = Number(node.attrs.imageZOrder)
         if (node.attrs.imageRotDeg) image.rotDeg = Number(node.attrs.imageRotDeg)
         if (node.attrs.imageFlipH) image.flipH = true
@@ -2282,6 +2284,17 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
 }
 
 /** rebuild a pasted image copy from its preview bytes; null when not materializable */
+/**
+ * Where a floating picture was dragged to (column / paragraph relative EMU, the same frame
+ * the parsed anchors use). Without it a new picture saved with its wrap mode's default
+ * alignment and jumped back to the margin on reopen.
+ */
+function imagePosOffset(node: PmNode): { x: number; y: number } | undefined {
+  const x = node.attrs?.imageOffsetXEmu
+  const y = node.attrs?.imageOffsetYEmu
+  return x != null && y != null ? { x: Number(x), y: Number(y) } : undefined
+}
+
 function imageFromProtectedAttrs(node: PmNode): NewImage | null {
   if (node.attrs?.blockType !== 'image') return null
   const src = String(node.attrs?.imageDataUrl ?? '')
@@ -2297,6 +2310,8 @@ function imageFromProtectedAttrs(node: PmNode): NewImage | null {
   if (align) image.align = align
   const wrap = node.attrs?.imageWrap as ImageWrap | null
   if (wrap) image.wrap = wrap
+  const dragged = imagePosOffset(node)
+  if (wrap && dragged) image.posOffsetEmu = dragged
   if (node.attrs?.imageZOrder != null) image.zOrder = Number(node.attrs.imageZOrder)
   if (node.attrs?.imageRotDeg) image.rotDeg = Number(node.attrs.imageRotDeg)
   if (node.attrs?.imageFlipH) image.flipH = true
@@ -2662,6 +2677,7 @@ function formulaTokensPatch(node: PmNode, original: Block): string[] | null {
 function applyRawPPr(generated: GeneratedBlock, original: Block): void {
   const structureSame =
     original.type === generated.type &&
+    (original.level ?? null) === (generated.level ?? null) &&
     (original.styleId ?? null) === (generated.styleId ?? null) &&
     JSON.stringify(original.list ?? null) === JSON.stringify(generated.list ?? null)
   if (original.rawPPr === undefined) {

@@ -54,6 +54,7 @@ export const ms = {
   ribbonPin: 'Semat Reben',
   ribbonExpand: 'Kembangkan Reben',
   ribbonGroupInsert: 'Sisip',
+  ribbonGroupView: 'Paparan',
   editText: 'Edit teks',
   fontSize: 'Saiz fon',
   fontWeight: 'Ketebalan',

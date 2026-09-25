@@ -5,6 +5,8 @@ import { useEditorState } from '@tiptap/react'
 import {
   Dropdown,
   RibbonCollapseButton,
+  RibbonFoldGroup,
+  useRibbonLabelFit,
   RibbonExpandButton,
   useDismissablePopover,
   useRibbonCollapse,
@@ -179,6 +181,9 @@ export function Ribbon({
 }: Props) {
   const { t } = useI18n()
   const collapse = useRibbonCollapse('mdapp.ribbonCollapsed')
+  // labels / fold groups follow the width (the AI group folds before anything scrolls)
+  const ribbonBodyRef = useRef<HTMLDivElement | null>(null)
+  useRibbonLabelFit(ribbonBodyRef)
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
   const linkInputRef = useRef<HTMLInputElement>(null)
@@ -326,45 +331,7 @@ export function Ribbon({
         <RibbonExpandButton state={collapse} label={t('ribbonExpand')} />
       </div>
 
-      <div className="ribbon-body" data-ribbon-body="">
-        <div className="ribbon-group">
-          <div className="ribbon-group-items">
-            <button
-              type="button"
-              className={`rb-big ai-entry${aiOpen ? ' active' : ''}`}
-              data-tip={t('aiOpenAssistant')}
-              disabled={disabled}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={onToggleAi}
-            >
-              <span className="rb-big-icon">
-                <GensparkMark size={26} />
-              </span>
-              <span>Genspark AI</span>
-            </button>
-            {aiPresets.map(({ kind, btn, prompt }) => (
-              <button
-                key={kind}
-                type="button"
-                className="rb-big ai-entry"
-                data-tip={t(btn)}
-                disabled={off || state?.empty}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onAiPreset(prompt())}
-              >
-                <span className="rb-big-icon">
-                  <span className="ai-feature-icon" aria-hidden="true">
-                    <AiFeatureIcon kind={kind} />
-                  </span>
-                </span>
-                <span>{t(btn)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="rb-sep" />
-
+      <div className="ribbon-body" data-ribbon-body="" ref={ribbonBodyRef}>
         <div className="ribbon-group">
           <div className="ribbon-group-items">
             <Dropdown
@@ -532,6 +499,47 @@ export function Ribbon({
             </IconBtn>
           </div>
         </div>
+
+        {/* Genspark AI + one-click AI tools at the right edge (Microsoft 365's Copilot slot);
+            folds into one "AI Tools" dropdown when the window is narrow */}
+        <RibbonFoldGroup
+          label={t('aiToolsGroup')}
+          icon={<GensparkMark size={26} />}
+          priority={1}
+          className="rb-group-end"
+        >
+          <button
+            type="button"
+            className={`rb-big ai-entry${aiOpen ? ' active' : ''}`}
+            data-tip={t('aiOpenAssistant')}
+            disabled={disabled}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onToggleAi}
+          >
+            <span className="rb-big-icon">
+              <GensparkMark size={26} />
+            </span>
+            <span>Genspark AI</span>
+          </button>
+          {aiPresets.map(({ kind, btn, prompt }) => (
+            <button
+              key={kind}
+              type="button"
+              className="rb-big ai-entry"
+              data-tip={t(btn)}
+              disabled={off || state?.empty}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onAiPreset(prompt())}
+            >
+              <span className="rb-big-icon">
+                <span className="ai-feature-icon" aria-hidden="true">
+                  <AiFeatureIcon kind={kind} />
+                </span>
+              </span>
+              <span>{t(btn)}</span>
+            </button>
+          ))}
+        </RibbonFoldGroup>
       </div>
       <RibbonCollapseButton
         state={collapse}

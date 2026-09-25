@@ -55,6 +55,7 @@ export const id = {
   ribbonPin: 'Sematkan Pita',
   ribbonExpand: 'Perluas Pita',
   ribbonGroupInsert: 'Sisipkan',
+  ribbonGroupView: 'Tampilan',
   editText: 'Edit teks',
   fontSize: 'Ukuran font',
   fontWeight: 'Ketebalan',

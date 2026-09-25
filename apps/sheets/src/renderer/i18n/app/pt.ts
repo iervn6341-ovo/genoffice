@@ -789,6 +789,7 @@ export const pt = {
   appGroupChartActions: 'Ações do gráfico',
   appRemoveFromSheet: 'Remover da planilha',
   appGroupAiAssistant: 'Assistente de IA',
+  appGroupAiTools: 'Ferramentas de IA',
   appAiOpenPanelDetail: 'Barra lateral de chat',
   appGroupAiStarters: 'Início rápido',
   appAiStarterDetail: 'Enviar ao painel de IA',

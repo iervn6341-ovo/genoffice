@@ -57,6 +57,7 @@ export const fr = {
   ribbonPin: 'Épingler le ruban',
   ribbonExpand: 'Développer le ruban',
   ribbonGroupInsert: 'Insertion',
+  ribbonGroupView: 'Affichage',
   editText: 'Modifier le texte',
   fontSize: 'Taille de police',
   fontWeight: 'Graisse',

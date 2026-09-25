@@ -141,6 +141,8 @@ export const zh = {
   ribbonStylePaneTip: '样式窗格:查看全部样式,从选区新建/更新样式',
   ribbonMoreStyles: '更多样式',
   ribbonGroupStyles: '样式',
+  ribbonAiTools: 'AI 工具',
+  ribbonGroupEditing: '编辑',
   // Home · AI
   ribbonAiAssistant: 'Genspark',
   ribbonAiAssistantTip: '打开 AI 助手',

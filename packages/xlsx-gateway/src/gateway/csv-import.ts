@@ -74,31 +74,45 @@ function sniffUtf16WithoutBom(bytes: Uint8Array): 'utf-16le' | 'utf-16be' | null
   return oddNul >= evenNul ? 'utf-16le' : 'utf-16be'
 }
 
-export function decodeCsvBuffer(bytes: Uint8Array, preferred?: string): string {
-  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    return decode(bytes.subarray(3), 'utf-8') ?? ''
-  }
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) return decode(bytes.subarray(2), 'utf-16le') ?? ''
-  if (bytes[0] === 0xfe && bytes[1] === 0xff) return decode(bytes.subarray(2), 'utf-16be') ?? ''
+/** The charset CSV bytes decode with, and whether a byte-order mark leads them */
+export interface CsvCharset {
+  /** WHATWG encoding label */
+  readonly charset: string
+  readonly bom: boolean
+}
+
+/**
+ * Picks the charset: BOM, then BOM-less UTF-16, then strict UTF-8, then the
+ * legacy charsets Excel writes (`preferred`, from the UI language, first).
+ */
+export function detectCsvCharset(bytes: Uint8Array, preferred?: string): CsvCharset {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
+    return { charset: 'utf-8', bom: true }
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return { charset: 'utf-16le', bom: true }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return { charset: 'utf-16be', bom: true }
   const bomless = sniffUtf16WithoutBom(bytes)
-  if (bomless) return decode(bytes, bomless) ?? ''
+  if (bomless) return { charset: bomless, bom: false }
+  if (decode(bytes, 'utf-8', true) !== null) return { charset: 'utf-8', bom: false }
 
-  const utf8 = decode(bytes, 'utf-8', true)
-  if (utf8 !== null) return utf8
-
-  let best = decode(bytes, 'utf-8') ?? ''
-  let bestScore = score(best)
+  let charset = 'utf-8'
+  let bestScore = score(decode(bytes, 'utf-8') ?? '')
   const candidates = preferred ? [preferred, ...LEGACY_CHARSETS] : LEGACY_CHARSETS
-  for (const charset of candidates) {
-    const candidate = decode(bytes, charset)
-    if (candidate === null) continue
-    const candidateScore = score(candidate)
+  for (const candidate of candidates) {
+    const text = decode(bytes, candidate)
+    if (text === null) continue
+    const candidateScore = score(text)
     if (candidateScore > bestScore) {
-      best = candidate
+      charset = candidate
       bestScore = candidateScore
     }
   }
-  return best
+  return { charset, bom: false }
+}
+
+export function decodeCsvBuffer(bytes: Uint8Array, preferred?: string): string {
+  const { charset, bom } = detectCsvCharset(bytes, preferred)
+  const body = bom ? bytes.subarray(charset === 'utf-8' ? 3 : 2) : bytes
+  return decode(body, charset) ?? ''
 }
 
 /// Excel's own hint line: a first line of exactly `sep=<char>` names the
@@ -353,4 +367,77 @@ async function xlsxBufferFromRows(
   zip.file('xl/styles.xml', MINIMAL_STYLESHEET_XML)
   zip.file('xl/worksheets/sheet1.xml', buildWorksheetXml(rows))
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+}
+
+/** How an opened CSV was written, so a save can write it back the same way */
+export interface CsvDialect extends CsvCharset {
+  readonly delimiter: string
+  /** the file starts with Excel's `sep=` hint line */
+  readonly sepLine: boolean
+}
+
+export function csvDialectOf(bytes: Uint8Array, preferred?: string): CsvDialect {
+  const text = decodeCsvBuffer(bytes, preferred)
+  return {
+    ...detectCsvCharset(bytes, preferred),
+    delimiter: resolveImportDelimiter(text),
+    sepLine: splitSepDeclaration(text).delimiter !== undefined,
+  }
+}
+
+/** What a CSV with no source file (or an unreadable one) is written as: Excel-friendly UTF-8 */
+export const DEFAULT_CSV_DIALECT: CsvDialect = {
+  charset: 'utf-8',
+  bom: true,
+  delimiter: ',',
+  sepLine: false,
+}
+
+const csvDialectField = (text: string, delimiter: string): string =>
+  text.includes('"') || text.includes(delimiter) || /[\r\n]/.test(text)
+    ? `"${text.replace(/"/g, '""')}"`
+    : text
+
+/**
+ * Re-writes the app's comma-separated export of a sheet in an opened file's own
+ * dialect — delimiter, `sep=` line, charset and BOM — so saving a `;`-separated
+ * or UTF-16 CSV in place does not turn it into a different file for the tools
+ * that read it. UTF-8 is written with a BOM (except a BOM-less `sep=` file), and
+ * legacy 8-bit charsets (no encoder here) keep their delimiter but come back as
+ * UTF-8 with a BOM too.
+ */
+export function encodeCsvForDialect(commaCsv: string, dialect: CsvDialect): Uint8Array {
+  const { delimiter } = dialect
+  const body =
+    delimiter === ','
+      ? commaCsv
+      : parseCsv(commaCsv, ',')
+          .map(
+            (row) => row.map((field) => csvDialectField(field, delimiter)).join(delimiter) + '\r\n',
+          )
+          .join('')
+  const text = (dialect.sepLine ? `sep=${delimiter}\r\n` : '') + body
+  if (dialect.charset === 'utf-16le' || dialect.charset === 'utf-16be') {
+    const units = new Uint8Array((text.length + (dialect.bom ? 1 : 0)) * 2)
+    const view = new DataView(units.buffer)
+    const le = dialect.charset === 'utf-16le'
+    let offset = 0
+    if (dialect.bom) {
+      view.setUint16(0, 0xfeff, le)
+      offset = 2
+    }
+    for (let index = 0; index < text.length; index += 1) {
+      view.setUint16(offset + index * 2, text.charCodeAt(index), le)
+    }
+    return units
+  }
+  // UTF-8 carries a BOM (legacy charsets land here too): Excel for Mac reads BOM-less
+  // UTF-8 as Mac Roman, so a reopened non-ASCII cell would turn to mojibake. A sep=
+  // file keeps its own choice — behind a BOM Excel ignores the hint and shows it as data.
+  const utf8 = new TextEncoder().encode(text)
+  if (dialect.sepLine && dialect.charset === 'utf-8' && !dialect.bom) return utf8
+  const out = new Uint8Array(utf8.length + 3)
+  out.set([0xef, 0xbb, 0xbf])
+  out.set(utf8, 3)
+  return out
 }

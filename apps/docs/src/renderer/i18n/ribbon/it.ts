@@ -139,6 +139,8 @@ export const it = {
     'Riquadro stili: sfoglia tutti gli stili, crea o aggiorna stili dalla selezione',
   ribbonMoreStyles: 'Altri stili',
   ribbonGroupStyles: 'Stili',
+  ribbonAiTools: 'Strumenti IA',
+  ribbonGroupEditing: 'Modifica',
   ribbonAiAssistant: 'Genspark',
   ribbonAiAssistantTip: "Apri l'assistente IA",
   ribbonRemoveTableStyleTip: 'Rimuovi stile tabella',

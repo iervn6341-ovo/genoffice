@@ -151,6 +151,7 @@ export const en = {
   aiThemePlayful: 'Playful',
   aiThemeDark: 'Dark',
   aiSummarizeBtn: 'AI Summarize',
+  aiToolsGroup: 'AI Tools',
   aiSummarizePrompt: 'Summarize the main content and key points of this document',
   aiAttachTitle: 'Attach local files (or drag them onto the panel)',
   aiRemoveAttachmentTitle: 'Remove attachment',

@@ -202,7 +202,7 @@ export class StylesheetEditor {
   }
 }
 
-const BUILTIN_NUMBER_FORMATS = new Map<string, number>([
+export const BUILTIN_NUMBER_FORMATS = new Map<string, number>([
   ['General', 0],
   ['0', 1],
   ['0.00', 2],

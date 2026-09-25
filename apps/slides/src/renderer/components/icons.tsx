@@ -253,6 +253,39 @@ export function IconCharSpacing(props: IconProps) {
   )
 }
 
+/** Change Case (MS-style): "Aa" */
+export function IconChangeCase(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <TextGlyph x={2.5} y={17.5} s={14}>
+        Aa
+      </TextGlyph>
+    </Svg>
+  )
+}
+
+/** Align Text (vertical alignment): text lines centred in a frame, arrows to top and bottom */
+export function IconAlignText(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3.75" y="3.75" width="16.5" height="16.5" rx="1.5" />
+      <path d="M 7.5 10.5 h 9 M 7.5 13.5 h 9" />
+      <path d="M 12 3.75 v 3 M 10.5 5.25 12 6.75 13.5 5.25 M 12 20.25 v -3 M 10.5 18.75 12 17.25 13.5 18.75" />
+    </Svg>
+  )
+}
+
+/** Text Direction: a rotated "A" beside a downward arrow */
+export function IconTextDirection(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M 4 7.5 14 4.5 M 4 7.5 14 10.5 M 7.4 6.5 v 3" />
+      <path d="M 18 4.5 v 15 M 15.75 17.25 18 19.5 20.25 17.25" />
+      <path d="M 4 14.25 h 9 M 4 18 h 9" />
+    </Svg>
+  )
+}
+
 /** MS-style text highlighter: marker nib only; the color bar is rendered by the button */
 export function IconTextHighlight(props: IconProps) {
   return (

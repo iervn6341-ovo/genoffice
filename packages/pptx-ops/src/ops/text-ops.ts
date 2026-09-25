@@ -20,6 +20,7 @@ import {
   setElementParagraphFormat,
   setGroupChildFont,
   setGroupChildParagraphFormat,
+  TEXT_CASE_MODES,
   type OpenedPptx,
   type Slide,
   type ElementFontPatch,
@@ -235,8 +236,43 @@ register({
     if (typeof op.font !== 'object' || op.font === null) {
       throw new GuidedError('op "setFont" needs "font": an ElementFontPatch object.')
     }
-    const font = op.font as { color?: unknown; fontSizePt?: unknown }
+    const font = op.font as {
+      color?: unknown
+      fontSizePt?: unknown
+      letterSpacingPt?: unknown
+      highlight?: unknown
+      textCase?: unknown
+      fontSizeStep?: unknown
+      baseline?: unknown
+    }
+    if (font.fontSizeStep !== undefined && font.fontSizeStep !== 1 && font.fontSizeStep !== -1) {
+      throw new GuidedError('op "setFont": "font.fontSizeStep" must be 1 (grow) or -1 (shrink).')
+    }
+    if (font.baseline !== undefined) {
+      requireFinite(font.baseline, 'setFont', 'font.baseline')
+      if (Math.abs(font.baseline) > 100) {
+        throw new GuidedError('op "setFont": "font.baseline" must be -100..100 (percent).')
+      }
+    }
     if (font.color !== undefined) requireHexColor(font.color, 'setFont', 'font.color')
+    if (font.highlight !== undefined && font.highlight !== null) {
+      requireHexColor(font.highlight, 'setFont', 'font.highlight')
+    }
+    if (font.letterSpacingPt !== undefined) {
+      requireFinite(font.letterSpacingPt, 'setFont', 'font.letterSpacingPt')
+      // PowerPoint's own range for Character Spacing → More Spacing
+      if (Math.abs(font.letterSpacingPt) > 1584) {
+        throw new GuidedError('op "setFont": "font.letterSpacingPt" must be -1584..1584 (points).')
+      }
+    }
+    if (
+      font.textCase !== undefined &&
+      !(TEXT_CASE_MODES as readonly unknown[]).includes(font.textCase)
+    ) {
+      throw new GuidedError(
+        `op "setFont": "font.textCase" must be one of ${TEXT_CASE_MODES.join(' / ')}.`,
+      )
+    }
     if (font.fontSizePt !== undefined) {
       requireFinite(font.fontSizePt, 'setFont', 'font.fontSizePt')
       if (font.fontSizePt < FONT_SIZE_PT_MIN || font.fontSizePt > FONT_SIZE_PT_MAX) {

@@ -254,6 +254,7 @@ import {
   resolvedCommentsPluginKey,
   revisionDisplayState,
 } from './editor/extensions'
+import type { ListAutoFormatStorage } from './editor/list-autoformat'
 import { setDkColor } from './editor/dark-page'
 import { useUiThemeIsDark } from './ui-theme'
 import { type InkAnnotation, type InkTool } from './editor/ink'
@@ -305,6 +306,8 @@ import {
   allocateListNumId as allocateListNumIdImpl,
   continueNumbering as continueNumberingImpl,
   createCustomListDef as createCustomListDefImpl,
+  bulletPresetLevels,
+  numberPresetLevels,
   restartNumbering as restartNumberingImpl,
   type NumberingContext,
 } from './numbering-actions'
@@ -2128,6 +2131,31 @@ export function App() {
     (kind: 'bullet' | 'ordered') => allocateListNumIdImpl(numberingCtxRef.current, kind),
     [],
   )
+  // Word's list AutoFormat ("* ", "1. ", "a) " …): "*" joins the document's bullet list like
+  // the Bullets button; the others start a new list of that exact format at 1
+  useEffect(() => {
+    const store: ListAutoFormatStorage | undefined = editor?.storage.listAutoFormat
+    if (!editor || !store) return
+    store.resolve = (spec) => {
+      if (spec.kind === 'bullet' && spec.glyph === '•') {
+        let found: string | null = null
+        editor.state.doc.descendants((n) => {
+          if (!found && n.type.name === 'docListItem' && n.attrs.kind === 'bullet' && n.attrs.numId)
+            found = String(n.attrs.numId)
+          return !found
+        })
+        return found ?? allocateListNumId('bullet')
+      }
+      return createCustomListDef(
+        spec.kind === 'bullet'
+          ? bulletPresetLevels(spec.glyph)
+          : numberPresetLevels(spec.numFmt, spec.pattern),
+      )
+    }
+    return () => {
+      store.resolve = null
+    }
+  }, [editor, allocateListNumId, createCustomListDef])
   const restartNumbering = useCallback(() => restartNumberingImpl(numberingCtxRef.current), [])
   const continueNumbering = useCallback(() => continueNumberingImpl(numberingCtxRef.current), [])
 

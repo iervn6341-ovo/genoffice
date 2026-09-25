@@ -237,6 +237,70 @@ describe('mergePagesBytes', () => {
   })
 })
 
+/** Text runs of one page: string + pdf.js transform (user space of that page) */
+async function pageRuns(bytes: Uint8Array, pageNo = 1) {
+  const doc = await getDocument({ data: bytes.slice() }).promise
+  const page = await doc.getPage(pageNo)
+  const content = await page.getTextContent()
+  const runs = (content.items as { str?: string; transform?: number[] }[])
+    .filter((it) => it.str)
+    .map((it) => ({ str: it.str!, t: it.transform! }))
+  await doc.cleanup()
+  return runs
+}
+
+describe('mergePagesBytes keeps pages as displayed', () => {
+  it('turns a /Rotate page the way it shows and sizes the sheet from its displayed box', async () => {
+    const src = await PDFDocument.create()
+    const font = await src.embedFont('Helvetica')
+    const page = src.addPage([200, 100])
+    page.drawText('TURNED', { x: 20, y: 40, size: 12, font })
+    page.setRotation(degrees(90))
+    src.addPage([100, 200])
+    const out = await mergePagesBytes(await src.save(), mergeOpts(4))
+    const sheet = (await PDFDocument.load(out)).getPage(0)
+    // First page displays 100 wide × 200 tall
+    expect([sheet.getWidth(), sheet.getHeight()]).toEqual([100, 200])
+    const run = (await pageRuns(out)).find((r) => r.str === 'TURNED')!
+    // Displayed clockwise-turned: the baseline runs down the sheet, not across it
+    expect(Math.abs(run.t[0]!)).toBeLessThan(1e-6)
+    expect(run.t[1]!).toBeLessThan(0)
+    // …and it stays inside the top-left cell (50 × 100)
+    expect(run.t[4]!).toBeGreaterThanOrEqual(0)
+    expect(run.t[4]!).toBeLessThanOrEqual(50)
+    expect(run.t[5]!).toBeGreaterThanOrEqual(100)
+    expect(run.t[5]!).toBeLessThanOrEqual(200)
+  })
+
+  it('burns visible annotation appearances into the cells and skips hidden ones', async () => {
+    const src = await PDFDocument.create()
+    const page = src.addPage([200, 200])
+    const form = src.getForm()
+    const shown = form.createTextField('shown')
+    shown.setText('FIELDVALUE')
+    shown.addToPage(page, { x: 20, y: 150, width: 150, height: 24 })
+    const hidden = form.createTextField('hidden')
+    hidden.setText('HIDDENVALUE')
+    hidden.addToPage(page, { x: 20, y: 40, width: 150, height: 24, hidden: true })
+    src.addPage([200, 200])
+    const out = await mergePagesBytes(await src.save(), mergeOpts(2))
+    const strs = (await pageRuns(out)).map((r) => r.str).join(' ')
+    expect(strs).toContain('FIELDVALUE')
+    expect(strs).not.toContain('HIDDENVALUE')
+  })
+
+  it('embeds only the CropBox region', async () => {
+    const src = await PDFDocument.create()
+    const page = src.addPage([200, 200])
+    page.setCropBox(0, 0, 100, 200)
+    src.addPage([100, 200])
+    const sheet = (
+      await PDFDocument.load(await mergePagesBytes(await src.save(), mergeOpts(4)))
+    ).getPage(0)
+    expect([sheet.getWidth(), sheet.getHeight()]).toEqual([100, 200])
+  })
+})
+
 describe('mergePdfBytes', () => {
   it('appends all pages of the other PDFs in order', async () => {
     const first = await makePdf([[100, 100]])

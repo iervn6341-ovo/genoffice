@@ -382,6 +382,48 @@ describe('applyTextEdits', () => {
     }
   })
 
+  it('a picked size is page-space pt even when the run is scaled through its matrix', async () => {
+    if (!existsSync('/System/Library/Fonts/Supplemental/Arial Unicode.ttf')) return
+    // Producers (Word, Chrome print) often draw Tf-16 text through a 0.75 matrix: a 12pt run.
+    // The size box shows 12, so picking 14 must draw 14pt, not 14 × 0.75 = 10.5pt
+    const doc = await PDFDocument.create()
+    const page = doc.addPage([595, 842])
+    const font = await doc.embedFont(StandardFonts.Helvetica)
+    const { concatTransformationMatrix, popGraphicsState, pushGraphicsState } =
+      await import('pdf-lib')
+    page.pushOperators(pushGraphicsState(), concatTransformationMatrix(0.75, 0, 0, 0.75, 0, 0))
+    page.drawText('Scaled run', { x: 100, y: 900, size: 16, font })
+    page.pushOperators(popGraphicsState())
+    const w = font.widthOfTextAtSize('Scaled run', 16) * 0.75
+    const bytes = await doc.save({ useObjectStreams: false })
+    const base: TextEditInput = {
+      pageIndex: 0,
+      rect: [70, 670, 75 + w + 5, 675 + 16],
+      oldText: 'Scaled run',
+      newText: 'Resized run',
+      fontSize: 12,
+    }
+    const sizeOf = async (out: Uint8Array, text: string) => {
+      const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs')
+      const pdf = await getDocument({ data: out.slice(), useSystemFonts: true }).promise
+      try {
+        const content = await (await pdf.getPage(1)).getTextContent()
+        const item = content.items.find((i) => 'str' in i && i.str === text)
+        if (!item || !('transform' in item)) throw new Error(`no run "${text}"`)
+        return Math.hypot(item.transform[2], item.transform[3])
+      } finally {
+        await pdf.loadingTask.destroy()
+      }
+    }
+    // whole-edit size
+    expect(
+      await sizeOf(await applyAll(bytes, [{ ...base, newFontSize: 14 }]), 'Resized run'),
+    ).toBeCloseTo(14, 1)
+    // selection-level size on the first word
+    const sel = await applyAll(bytes, [{ ...base, styleRuns: [{ start: 0, end: 7, size: 20 }] }])
+    expect(await sizeOf(sel, 'Resized')).toBeCloseTo(20, 1)
+  })
+
   it('applies user font-size and color overrides on rebuild', async () => {
     if (!existsSync('/System/Library/Fonts/Supplemental/Arial Unicode.ttf')) return
     const f = await makeFixture('Recolor me')

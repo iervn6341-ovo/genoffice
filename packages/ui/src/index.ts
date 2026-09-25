@@ -14,6 +14,7 @@ export {
   type AiFontSize,
   type AiPanelPrefs,
   type AiPanelSide,
+  type RibbonFold,
 } from './ai-panel-prefs'
 export { applyAiPanelPrefs, useAiPanelPrefs, aiPanelWidthAtPointer } from './ai-panel-prefs-store'
 export {
@@ -26,6 +27,7 @@ export {
   type ColorSwatch,
 } from './color-picker'
 export { installScreenTips } from './screentip'
+export { handleMacLineBoundaryKey, installMacLineBoundaryKeys } from './mac-line-keys'
 export {
   installPopoverDismiss,
   useDismissablePopover,
@@ -98,7 +100,10 @@ export {
 export {
   RIBBON_LABEL_MAX_LEVEL,
   fitRibbonLabels,
+  fitRibbonFolded,
   labelFromTip,
   useRibbonLabelFit,
   type RibbonFitTarget,
 } from './ribbon-fit'
+export { keepEditorFocusOnRibbonPress } from './ribbon-focus'
+export { RibbonFoldGroup } from './RibbonFoldGroup'

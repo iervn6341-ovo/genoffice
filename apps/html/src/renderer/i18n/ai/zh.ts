@@ -143,6 +143,7 @@ export const zh = {
   aiThemePlayful: '活泼',
   aiThemeDark: '深色',
   aiSummarizeBtn: 'AI 总结',
+  aiToolsGroup: 'AI 工具',
   aiSummarizePrompt: '总结这篇文档的主要内容和要点',
   aiAttachTitle: '添加本地文件作为附件(也可拖拽到面板)',
   aiRemoveAttachmentTitle: '移除附件',

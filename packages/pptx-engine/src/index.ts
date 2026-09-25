@@ -92,6 +92,10 @@ import { moveSlide } from './sections'
 import { cleanupSupersededSlideResources, removePartWithOwnedResources } from './resource-cleanup'
 
 export * from './types'
+export { changeTextCase, TEXT_CASE_MODES, type TextCaseMode } from './text-case'
+import { changeTextCase, type TextCaseMode } from './text-case'
+import { stepFontSizePt } from './font-size-step'
+export { FONT_SIZE_LADDER, stepFontSizePt } from './font-size-step'
 export { cleanupSupersededSlideResources }
 export type { ResourceCleanupStats } from './resource-cleanup'
 export {
@@ -252,7 +256,15 @@ export {
   type ChartAxisStyle,
 } from './chart'
 export { parseChartExXml } from './chartex'
-export { getSlideNotes, setSlideNotes, notesPathForSlide, unescapeXml } from './notes'
+export {
+  getSlideNotes,
+  setSlideNotes,
+  getSlideNotesParagraphs,
+  setSlideNotesParagraphs,
+  NOTES_DEFAULT_FONT_PT,
+  notesPathForSlide,
+  unescapeXml,
+} from './notes'
 export {
   getSlideComments,
   addSlideComment,
@@ -2921,9 +2933,36 @@ export interface ElementFontPatch {
   underline?: boolean
   /** #RRGGBB (explicit color: clears theme-link/inheritance flags) */
   color?: string
+  /** Character spacing <a:rPr spc> in pt (Home → Font → Character Spacing); 0 = normal */
+  letterSpacingPt?: number
+  /** Text highlight <a:highlight> #RRGGBB; null removes it ("No Color") */
+  highlight?: string | null
+  /** Home → Font → Change Case, applied to the text itself (runs keep their formatting) */
+  textCase?: TextCaseMode
+  /** Increase / Decrease Font Size: each run steps along the ladder from its own size */
+  fontSizeStep?: 1 | -1
+  /** Superscript / subscript baseline % (30 / -25; 0 = normal) */
+  baseline?: number
 }
 
 function applyFontPatch(paragraphs: Paragraph[], patch: ElementFontPatch): void {
+  if (patch.textCase) {
+    for (const p of paragraphs) {
+      // fields (slide number / date) are recomputed by PowerPoint, so their cached text stays
+      const idx = p.runs.map((r, i) => (r.field ? -1 : i)).filter((i) => i >= 0)
+      const cased = changeTextCase(
+        idx.map((i) => p.runs[i]!.text),
+        patch.textCase,
+      )
+      idx.forEach((ri, k) => {
+        const r = p.runs[ri]!
+        if (r.text !== cased[k]) {
+          r.text = cased[k]!
+          delete r.rawXml
+        }
+      })
+    }
+  }
   for (const p of paragraphs) {
     // Empty paragraph (e.g. a blank table cell): leave an empty marker run so the
     // format persists and text typed later inherits it
@@ -2976,6 +3015,21 @@ function applyFontPatch(paragraphs: Paragraph[], patch: ElementFontPatch): void 
         delete r.colorFollowsTheme
         delete r.colorInherited
         delete r.colorNodeXml
+      }
+      // "Normal" is kept as an explicit 0 so the save writes spc="0" over an inherited spacing
+      if (patch.letterSpacingPt !== undefined) r.letterSpacing = patch.letterSpacingPt
+      if (patch.fontSizeStep) {
+        r.fontSize = stepFontSizePt(r.fontSize ?? 18, patch.fontSizeStep)
+        delete r.fontSizeImplicit
+      }
+      if (patch.baseline !== undefined) {
+        if (patch.baseline) r.baseline = patch.baseline
+        else delete r.baseline
+      }
+      if (patch.highlight !== undefined) {
+        if (patch.highlight) r.highlight = patch.highlight
+        else delete r.highlight
+        r.highlightEdited = true
       }
     }
   }

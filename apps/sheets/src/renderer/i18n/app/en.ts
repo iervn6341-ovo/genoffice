@@ -731,6 +731,7 @@ export const en = {
   appGroupChartActions: 'Chart actions',
   appRemoveFromSheet: 'Remove from sheet',
   appGroupAiAssistant: 'AI assistant',
+  appGroupAiTools: 'AI Tools',
   appAiOpenPanelDetail: 'Chat sidebar',
   appGroupAiStarters: 'Quick start',
   appAiStarterDetail: 'Send to AI panel',

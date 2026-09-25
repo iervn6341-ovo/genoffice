@@ -28,6 +28,15 @@ import { GuidedError, register, type Op, type OpContext } from './registry'
 
 type Rect = [number, number, number, number]
 
+/** Swap a rect's width and height about its center (a quarter-turned upright footprint) */
+const swapAboutCenter = ([x1, y1, x2, y2]: readonly number[]): Rect => {
+  const cx = (x1! + x2!) / 2
+  const cy = (y1! + y2!) / 2
+  const hw = (x2! - x1!) / 2
+  const hh = (y2! - y1!) / 2
+  return [cx - hh, cy - hw, cx + hh, cy + hw]
+}
+
 const str = (v: unknown, field: string): string => {
   if (typeof v !== 'string' || v.length === 0)
     throw new GuidedError(`"${field}" must be a non-empty string`)
@@ -552,7 +561,7 @@ register({
 
 register({
   name: 'rotatePages',
-  touches: ['rotations', 'drawings'],
+  touches: ['rotations', 'drawings', 'textInserts', 'imageEdits'],
   validate(op, ctx) {
     if (!Array.isArray(op.pages) || op.pages.length === 0)
       throw new GuidedError('"pages" must list at least one original page index')
@@ -569,19 +578,33 @@ register({
       if (nv === 0) rotations.delete(p)
       else rotations.set(p, nv)
     }
-    if (dir === 180) return { rotations, drawings: s.drawings }
+    // Pending inserted text and pictures preview upright in screen space and are
+    // counter-rotated against the page's final display rotation at save time; that
+    // rotation moves with the turn, or the save would write them sideways
+    const turn = (r: number | undefined) => ((((r ?? 0) + dir) % 360) + 360) % 360
+    const textInserts = s.textInserts.map((ti) =>
+      pages.has(ti.input.pageIndex)
+        ? { ...ti, input: { ...ti.input, rotate: turn(ti.input.rotate) } }
+        : ti,
+    )
+    const quarter = dir !== 180
+    const imageEdits = s.imageEdits.map((e) => {
+      if (e.input.kind !== 'insertImage' || !pages.has(e.input.pageIndex)) return e
+      const rect = quarter ? swapAboutCenter(e.input.rect) : e.input.rect
+      return {
+        ...e,
+        input: { ...e.input, rect, rotate: turn(e.input.rotate) },
+        ...(e.staticFill ? { staticFill: { ...e.staticFill, rect } } : {}),
+      }
+    })
+    if (!quarter) return { rotations, drawings: s.drawings, textInserts, imageEdits }
     // Image stamps draw upright, so a quarter turn swaps their displayed width and
     // height: swap the user-space rect about its center to keep the aspect ratio
     const drawings = s.drawings.map((d) => {
       if (d.input.kind !== 'image' || !pages.has(d.input.pageIndex)) return d
-      const [x1, y1, x2, y2] = d.input.rect
-      const cx = (x1 + x2) / 2
-      const cy = (y1 + y2) / 2
-      const hw = (x2 - x1) / 2
-      const hh = (y2 - y1) / 2
-      return { ...d, input: { ...d.input, rect: [cx - hh, cy - hw, cx + hh, cy + hw] as Rect } }
+      return { ...d, input: { ...d.input, rect: swapAboutCenter(d.input.rect) } }
     })
-    return { rotations, drawings }
+    return { rotations, drawings, textInserts, imageEdits }
   },
 })
 

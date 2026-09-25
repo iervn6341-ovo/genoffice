@@ -73,3 +73,96 @@ export function formatClock(ms: number): string {
   const sec = Math.max(0, Math.floor(ms / 1000))
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 }
+
+// ── Show keyboard (PowerPoint's slide-show shortcuts) ────────────────────────────
+
+/** Screen cover: B / . blanks to black, W / , to white; the same key (or navigating) brings the slide back. */
+export type ShowScreen = 'none' | 'black' | 'white'
+
+export type ShowKeyCommand = 'next' | 'prev' | 'first' | 'last' | 'exit' | 'black' | 'white'
+
+export interface ShowKeyResult {
+  command: ShowKeyCommand | null
+  /** 1-based slide number typed before Enter (PowerPoint: digits, then Enter, jumps to that slide) */
+  goto: number | null
+  /** digits typed so far */
+  buffer: string
+  /** the key was a show key, so the caller must preventDefault */
+  handled: boolean
+}
+
+const MAX_GOTO_DIGITS = 4
+
+/**
+ * Map one keydown to a show command, following PowerPoint:
+ * next = N / Enter / Space / → / ↓ / PageDown; previous = P / Backspace / ← / ↑ / PageUp;
+ * Home / End = first / last; Esc = end show; B / . black; W / , white;
+ * typing a number then Enter goes to that slide (Backspace edits the number, Esc cancels it).
+ * Keys held with ⌘ / Ctrl / Alt are left alone.
+ */
+export function showKeyCommand(
+  key: string,
+  buffer: string,
+  mods: { meta?: boolean; ctrl?: boolean; alt?: boolean } = {},
+): ShowKeyResult {
+  const none: ShowKeyResult = { command: null, goto: null, buffer, handled: false }
+  if (mods.meta || mods.ctrl || mods.alt) return none
+  const cmd = (command: ShowKeyCommand): ShowKeyResult => ({
+    command,
+    goto: null,
+    buffer: '',
+    handled: true,
+  })
+  if (/^[0-9]$/.test(key)) {
+    return {
+      command: null,
+      goto: null,
+      buffer: (buffer + key).slice(-MAX_GOTO_DIGITS),
+      handled: true,
+    }
+  }
+  switch (key) {
+    case 'Enter':
+      return buffer
+        ? { command: null, goto: Number(buffer), buffer: '', handled: true }
+        : cmd('next')
+    case 'Backspace':
+      return buffer
+        ? { command: null, goto: null, buffer: buffer.slice(0, -1), handled: true }
+        : cmd('prev')
+    case 'Escape':
+      return buffer ? { command: null, goto: null, buffer: '', handled: true } : cmd('exit')
+    case 'n':
+    case 'N':
+    case ' ':
+    case 'ArrowRight':
+    case 'ArrowDown':
+    case 'PageDown':
+      return cmd('next')
+    case 'p':
+    case 'P':
+    case 'ArrowLeft':
+    case 'ArrowUp':
+    case 'PageUp':
+      return cmd('prev')
+    case 'Home':
+      return cmd('first')
+    case 'End':
+      return cmd('last')
+    case 'b':
+    case 'B':
+    case '.':
+      return cmd('black')
+    case 'w':
+    case 'W':
+    case ',':
+      return cmd('white')
+    default:
+      return none
+  }
+}
+
+/** Toggle a screen cover: pressing the same key again restores the slide. */
+export function toggleShowScreen(current: ShowScreen, pressed: 'black' | 'white'): ShowScreen {
+  return current === pressed ? 'none' : pressed
+}

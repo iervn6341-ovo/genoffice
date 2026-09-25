@@ -4,19 +4,23 @@ import App from './App'
 import { PresentView } from './PresentView'
 import { LocaleProvider } from './i18n/locale'
 import type { UiTheme } from '../shared/ipc'
-import { applyAiPanelPrefs, installScreenTips } from '@genoffice/ui'
+import { applyAiPanelPrefs, installMacLineBoundaryKeys, installScreenTips } from '@genoffice/ui'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/dropdown.css'
 import '@genoffice/ui/find-panel.css'
 import '@genoffice/ui/color-picker.css'
 import '@genoffice/ui/ribbon-collapse.css'
+import '@genoffice/ui/ribbon-fit.css'
 import '@genoffice/ui/ai-panel-prefs.css'
 import '@genoffice/ui/ai-scope-quote.css'
 import '@genoffice/ui/image-dialogs.css'
 import './styles.css'
+// compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
+import '@genoffice/ui/ribbon-density.css'
 
 installScreenTips()
+installMacLineBoundaryKeys()
 
 function applyTheme(theme: UiTheme): void {
   if (theme === 'system') document.documentElement.removeAttribute('data-theme')

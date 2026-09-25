@@ -57,6 +57,7 @@ export const nl = {
   ribbonPin: 'Het lint vastmaken',
   ribbonExpand: 'Het lint uitvouwen',
   ribbonGroupInsert: 'Invoegen',
+  ribbonGroupView: 'Beeld',
   editText: 'Tekst bewerken',
   fontSize: 'Lettergrootte',
   fontWeight: 'Gewicht',
