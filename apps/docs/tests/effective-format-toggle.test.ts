@@ -166,4 +166,25 @@ describe('effective bold/italic (C1)', () => {
     editor.commands.setTextSelection({ from: 1, to: 6 })
     expect(isFlagActive(editor.state, 'bold', ctx)).toBe(false)
   })
+
+  it('a gallery heading (level only, styleId null) inherits its level style bold', async () => {
+    const { editor } = await headingEditor()
+    const tr = editor.state.tr.setNodeMarkup(0, undefined, {
+      ...editor.state.doc.firstChild!.attrs,
+      styleId: null,
+      level: 1,
+    })
+    editor.view.dispatch(tr)
+    editor.commands.setTextSelection({ from: 1, to: 6 })
+    const ctx = styleContextOf(editor)
+    expect(isFlagActive(editor.state, 'bold', ctx)).toBe(true)
+    toggleEffectiveFlag(editor, 'bold')
+    expect(isFlagActive(editor.state, 'bold', ctx)).toBe(false)
+    expect(
+      headingText(editor).marks.find((m) => m.type.name === 'docTextStyle')?.attrs.boldOff,
+    ).toBe(true)
+    // a plain paragraph with no styleId resolves to Normal (not bold)
+    const body = editor.state.doc.child(1)
+    expect(effectiveFlag('bold', body.firstChild!.marks, body, ctx)).toBe(false)
+  })
 })

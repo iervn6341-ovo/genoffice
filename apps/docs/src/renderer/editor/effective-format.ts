@@ -40,6 +40,31 @@ export function inheritedFlag(
   return !!(display(charStyleId)?.[flag] ?? display(paraStyleId)?.[flag] ?? ctx.docDefaults?.[flag])
 }
 
+/**
+ * The paragraph style a text block renders with: its own styleId; else, for a
+ * heading from the style gallery (level only, no styleId), the style defining
+ * that outline level — the one the `hN` CSS rules use; else the default
+ * paragraph style (Normal).
+ */
+export function paragraphStyleId(node: PmNode, ctx: StyleContext): string | null {
+  const own = node.attrs.styleId
+  if (typeof own === 'string' && own) return own
+  if (!ctx.styles) return null
+  if (node.type.name === 'docHeading') {
+    const level = Number(node.attrs.level)
+    const named = ctx.styles.get(`Heading${level}`)
+    if (named?.type === 'paragraph') return named.styleId
+    for (const info of ctx.styles.values()) {
+      if (info.type === 'paragraph' && info.headingLevel === level && !info.headingLevelInherited)
+        return info.styleId
+    }
+  }
+  for (const info of ctx.styles.values()) {
+    if (info.type === 'paragraph' && info.isDefault) return info.styleId
+  }
+  return null
+}
+
 /** Effective flag for a run with these marks inside `parent` */
 export function effectiveFlag(
   flag: ToggleFlag,
@@ -50,7 +75,7 @@ export function effectiveFlag(
   if (marks.some((m) => m.type.name === flag)) return true
   const style = marks.find((m) => m.type.name === 'docTextStyle')
   if (style?.attrs[OFF_ATTR[flag]] === true) return false
-  return inheritedFlag(flag, style?.attrs.styleId, parent.attrs.styleId, ctx)
+  return inheritedFlag(flag, style?.attrs.styleId, paragraphStyleId(parent, ctx), ctx)
 }
 
 /** Is the flag effectively on across the selection (every text run; the caret's marks when empty)? */
@@ -90,7 +115,7 @@ function marksWithFlag(
   if (on) return markType.create().addToSet(out)
   const style = out.find((m) => m.type === styleType)
   const off = OFF_ATTR[flag]
-  const needsOff = inheritedFlag(flag, style?.attrs.styleId, parent.attrs.styleId, ctx)
+  const needsOff = inheritedFlag(flag, style?.attrs.styleId, paragraphStyleId(parent, ctx), ctx)
   if (!styleType) return out
   if (needsOff) {
     out = styleType.create({ ...(style?.attrs ?? {}), [off]: true }).addToSet(out)

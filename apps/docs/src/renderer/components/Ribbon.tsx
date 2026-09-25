@@ -37,7 +37,7 @@ import type {
 } from '@genoffice/docx-engine'
 import { bulletPresetLevels, numberPresetLevels } from '../numbering-actions'
 import { FORMAT_MARKS } from '../editor/caret-marks'
-import { effectiveFlag, toggleEffectiveFlag } from '../editor/effective-format'
+import { effectiveFlag, paragraphStyleId, toggleEffectiveFlag } from '../editor/effective-format'
 import {
   ColorPicker,
   Dropdown,
@@ -1637,7 +1637,7 @@ function RibbonInner({
       const styleDisplayOf = (id: unknown) =>
         typeof id === 'string' && id ? styles?.get(id)?.display : undefined
       const charStyle = styleDisplayOf(tsMark?.attrs.styleId)
-      const paraStyle = styleDisplayOf($from.parent.attrs.styleId)
+      const paraStyle = styleDisplayOf(paragraphStyleId($from.parent, { styles, docDefaults }))
       for (const t of ['bold', 'italic', 'underline', 'strike'] as const) {
         const styleFlag =
           charStyle?.[t] ??
