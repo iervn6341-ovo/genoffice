@@ -101,6 +101,7 @@ import {
   type VisualActionContext,
 } from './visual-actions'
 import type { FWorksheet } from '@univerjs/sheets/facade'
+import { ILayoutService } from '@univerjs/preset-sheets-core'
 import {
   cellShiftAction,
   parseCellShiftCommand,
@@ -320,6 +321,11 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
   const cellShift = parseCellShiftCommand(command)
   if (cellShift) {
     runCellShift(ctx, runtime, worksheet, cellShift.mode, cellShift.option)
+    return
+  }
+  if (command === 'focus-grid') {
+    // a dialog closed: hand keyboard focus back to the grid so ⌘Z / arrows reach it
+    runtime.univer.__getInjector().get(ILayoutService).focus()
     return
   }
   switch (command) {

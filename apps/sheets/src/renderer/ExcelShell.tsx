@@ -949,7 +949,11 @@ export function ExcelShell({
           mode={cellShiftDialog.mode}
           initial={cellShiftDialog.initial}
           onApply={(option) => onCommand(`cells-shift:${cellShiftDialog.mode}:${option}`)}
-          onClose={() => setCellShiftDialog(null)}
+          onClose={() => {
+            setCellShiftDialog(null)
+            // Excel returns focus to the grid: ⌘Z right after OK must undo the shift
+            onCommand('focus-grid')
+          }}
         />
       )}
       {showGoTo && (

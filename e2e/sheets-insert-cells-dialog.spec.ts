@@ -88,7 +88,8 @@ test('Insert Cells dialog: shift down, undo, redo, Esc; Delete Cells: shift up',
 
     await sheets.keyboard.press('ControlOrMeta+z')
     await expect.poll(() => valueAt(sheets, 1, 1)).toBe('moved')
-    await sheets.keyboard.press('ControlOrMeta+Shift+z')
+    // redo: ⌘⇧Z on macOS, Ctrl+Y elsewhere (Excel's bindings)
+    await sheets.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+y')
     await expect.poll(() => valueAt(sheets, 2, 1)).toBe('moved')
 
     await sheets.keyboard.press('ControlOrMeta+Minus')
