@@ -41,6 +41,8 @@ export interface DvApplyOptions {
   /** keep the existing rules, replace those on the same ranges, drop `remove`, add the rest */
   readonly append?: boolean | undefined
   readonly remove?: readonly DvCellArea[] | undefined
+  /** workbookPr/@date1904: panel date strings serialize through the 1904 epoch */
+  readonly date1904?: boolean | undefined
 }
 
 export function applyDvRules(
@@ -48,7 +50,8 @@ export function applyDvRules(
   rules: readonly DvWireRule[],
   options: DvApplyOptions = {},
 ): string {
-  if (options.append) return appendDvRules(worksheetXml, rules, options.remove ?? [])
+  const serialize = (rule: DvWireRule) => serializeRule(rule, options.date1904 === true)
+  if (options.append) return appendDvRules(worksheetXml, rules, options.remove ?? [], serialize)
   if (/<x14:dataValidation\b/.test(worksheetXml)) {
     throw new DvEditError(
       'This sheet has extended (x14) data validation — editing its rules is not ' +
@@ -61,7 +64,7 @@ export function applyDvRules(
   )
   if (rules.length === 0) return xml
 
-  const body = rules.map(serializeRule).join('')
+  const body = rules.map(serialize).join('')
   const section = `<dataValidations count="${rules.length}">${body}</dataValidations>`
   const anchor =
     /<hyperlinks\b|<printOptions\b|<pageMargins\b|<pageSetup\b|<headerFooter\b|<rowBreaks\b|<colBreaks\b|<drawing\b|<legacyDrawing\b|<picture\b|<oleObjects\b|<tableParts\b|<extLst\b/.exec(
@@ -83,6 +86,7 @@ function appendDvRules(
   worksheetXml: string,
   rules: readonly DvWireRule[],
   remove: readonly DvCellArea[],
+  serialize: (rule: DvWireRule) => string,
 ): string {
   const section = DV_SECTION_RE.exec(worksheetXml)
   const replaced = new Set(
@@ -101,7 +105,7 @@ function appendDvRules(
         : entry.replace(/\bsqref="[^"]*"/, `sqref="${remaining.join(' ')}"`),
     )
   }
-  const entries = [...kept, ...rules.map(serializeRule)]
+  const entries = [...kept, ...rules.map(serialize)]
   const xml = section ? worksheetXml.replace(section[0], '') : worksheetXml
   if (entries.length === 0) return xml
   const body = `<dataValidations count="${entries.length}">${entries.join('')}</dataValidations>`
@@ -126,7 +130,7 @@ function insertBeforeTail(xml: string, section: string): string {
   return xml.slice(0, end) + section + xml.slice(end)
 }
 
-function serializeRule(wireRule: DvWireRule): string {
+function serializeRule(wireRule: DvWireRule, date1904: boolean): string {
   if (wireRule.ranges.length === 0) {
     throw new DvEditError('A data-validation rule has no ranges.')
   }
@@ -194,7 +198,7 @@ function serializeRule(wireRule: DvWireRule): string {
   }
   attrs.push(`sqref="${wireRule.ranges.map(toRef).join(' ')}"`)
 
-  const formulas = serializeFormulas(type, rule)
+  const formulas = serializeFormulas(type, rule, date1904)
   return formulas === ''
     ? `<dataValidation ${attrs.join(' ')}/>`
     : `<dataValidation ${attrs.join(' ')}>${formulas}</dataValidation>`
@@ -209,9 +213,13 @@ function errorStyleName(value: unknown): string | undefined {
   return DV_ERROR_STYLE_NAMES[style]
 }
 
-function serializeFormulas(type: string | undefined, rule: Record<string, unknown>): string {
-  const formula1 = formulaText(type, rule.formula1)
-  const formula2 = formulaText(type, rule.formula2)
+function serializeFormulas(
+  type: string | undefined,
+  rule: Record<string, unknown>,
+  date1904: boolean,
+): string {
+  const formula1 = formulaText(type, rule.formula1, date1904)
+  const formula2 = formulaText(type, rule.formula2, date1904)
   return (
     (formula1 === undefined ? '' : `<formula1>${escapeXmlText(formula1)}</formula1>`) +
     (formula2 === undefined ? '' : `<formula2>${escapeXmlText(formula2)}</formula2>`)
@@ -221,7 +229,11 @@ function serializeFormulas(type: string | undefined, rule: Record<string, unknow
 /// Inverse of the install-side formula transforms: list literals regain their
 /// quotes, `=`-prefixed references/formulas lose the prefix, and panel-edited
 /// date/time strings become Excel serial numbers.
-function formulaText(type: string | undefined, raw: unknown): string | undefined {
+function formulaText(
+  type: string | undefined,
+  raw: unknown,
+  date1904: boolean,
+): string | undefined {
   if (raw === undefined || raw === null) return undefined
   const text = String(raw)
   if (text === '') return undefined
@@ -233,7 +245,9 @@ function formulaText(type: string | undefined, raw: unknown): string | undefined
   }
   if (type === 'date') {
     const serial = dateToSerial(text)
-    if (serial !== undefined) return String(serial)
+    // a 1904-system workbook counts days from 1904-01-01: 1462 fewer (Excel
+    // otherwise reads 2026 bounds as 2030); numbers are already file serials
+    if (serial !== undefined) return String(date1904 ? serial - DATE1904_OFFSET_DAYS : serial)
   }
   if (type === 'time') {
     const fraction = timeToFraction(text)
@@ -244,6 +258,8 @@ function formulaText(type: string | undefined, raw: unknown): string | undefined
 
 /// 'YYYY-MM-DD[ HH:mm[:ss]]' (or slashes) → Excel serial (days since
 /// 1899-12-30). Plain numbers and references pass through untouched.
+const DATE1904_OFFSET_DAYS = 1462
+
 function dateToSerial(text: string): number | undefined {
   const match =
     /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/.exec(

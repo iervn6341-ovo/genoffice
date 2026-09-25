@@ -1108,7 +1108,11 @@ export async function planCellEditsToXlsx(
     if (worksheetXml === undefined) continue
     worksheetXmls.set(
       state.sheetName,
-      applyDvRules(worksheetXml, state.rules, { append: state.append, remove: state.remove }),
+      applyDvRules(worksheetXml, state.rules, {
+        append: state.append,
+        remove: state.remove,
+        date1904: workbookUsesDate1904(originalWorkbookXml),
+      }),
     )
   }
 
@@ -2971,4 +2975,10 @@ function escapeRegExp(input: string): string {
 
 function readXmlAttribute(attributes: string, name: string): string | undefined {
   return new RegExp(`(?:^|\\s)${escapeRegExp(name)}="([^"]*)"`).exec(attributes)?.[1]
+}
+
+/// workbookPr/@date1904 (ST_OnOff: "1"/"true"/"on")
+export function workbookUsesDate1904(workbookXml: string): boolean {
+  const attr = /<(?:\w+:)?workbookPr\b[^>]*\bdate1904="([^"]*)"/.exec(workbookXml)?.[1]
+  return attr === '1' || attr === 'true' || attr === 'on'
 }
