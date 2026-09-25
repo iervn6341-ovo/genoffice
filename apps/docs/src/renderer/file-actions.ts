@@ -56,6 +56,7 @@ import { docStyleCss } from './doc-style-css'
 import { setNoteNumFmts } from './note-format'
 import type { CompareEntry } from './editor/compare'
 import { blocksToPmDoc, pmDocOptions, pmDocToSavePlan, type PmNode } from './editor/convert'
+import { insertedBreakTypes } from './ai/pending-sections'
 import { TABLE_TRAILING_SKIP, setLazyMediaHashes } from './editor/extensions'
 import { TRACK_IGNORE } from './editor/revisions'
 import {
@@ -588,7 +589,15 @@ function deriveAutoFileName(editor: Editor): string | null {
 export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array | null> {
   const { doc, editor } = ctx
   if (!doc || !editor) return null
-  const plan = pmDocToSavePlan(editor.getJSON() as PmNode, doc.parsed.blocks)
+  // start types of section breaks inserted this session come from the break
+  // paragraphs still in the document (undo-safe), not from insert-time state
+  const breakTypes = insertedBreakTypes(editor.state.doc, ctx.sections, applySectionStartType)
+  const json = editor.getJSON() as PmNode
+  for (const [index, genXml] of breakTypes.genXml) {
+    const node = json.content?.[index]
+    if (node) node.attrs = { ...node.attrs, genXml }
+  }
+  const plan = pmDocToSavePlan(json, doc.parsed.blocks)
   // chart data edits patch the chart's own zip part, not the body XML
   const partXml: Record<string, string> = {}
   const partBinary: Record<string, string> = {}
@@ -628,7 +637,9 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
       : undefined
   // page-setup edits for non-final sections: rewrite the sectPr inside their section-break paragraphs (the final section uses options.section)
   let saveBlocks = plan.saveBlocks
-  const dirtySectionIdxs = [...new Set([...ctx.sectionsDirty, ...ctx.pgNumDirtySections])]
+  const dirtySectionIdxs = [
+    ...new Set([...ctx.sectionsDirty, ...ctx.pgNumDirtySections, ...breakTypes.bySection.keys()]),
+  ]
   if (dirtySectionIdxs.length > 0) {
     const rewrites = new Map<number, SectPrRewrite>()
     for (const si of dirtySectionIdxs) {
@@ -637,7 +648,7 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
       const blk = doc.parsed.blocks.find((b) => b.docxIndex === sec.lastBlockIndex)
       if (!blk?.originalXml || !sec.sectPrXml) continue
       let sectPr = applySectionSettings(sec.sectPrXml, sec.settings)
-      sectPr = applySectionStartType(sectPr, sec.startType)
+      sectPr = applySectionStartType(sectPr, breakTypes.bySection.get(si) ?? sec.startType)
       sectPr = applyTitlePg(sectPr, sec.titlePg)
       // touch w:pgNumType only when the page-number format was edited (avoids dropping unmodeled attrs like chapStyle)
       if (ctx.pgNumDirtySections.includes(si)) {
@@ -658,7 +669,7 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
   })
   const bytes = await saveDocx(doc.parsed, saveBlocks, {
     section: ctx.sectionDirty && ctx.section ? ctx.section : undefined,
-    sectionStartType: ctx.trailingStartType ?? undefined,
+    sectionStartType: breakTypes.trailing ?? ctx.trailingStartType ?? undefined,
     pgNumType: ctx.pgNumEdit ?? undefined,
     sectionHf: sectionHf.length > 0 ? sectionHf : undefined,
     numbering: ctx.numberingDirty ? ctx.pendingNumbering : undefined,

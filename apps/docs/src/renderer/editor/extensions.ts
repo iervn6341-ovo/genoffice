@@ -3401,6 +3401,9 @@ export const DocProtected = Node.create({
       styleId: { default: null as string | null },
       label: { default: '' },
       previewText: { default: '' },
+      /** section break inserted this session: the start type chosen for the section
+       *  AFTER it (resolved into the next sectPr at save — see insertedBreakTypes) */
+      breakStartType: { default: null as string | null },
       imageDataUrl: { default: null as string | null },
       oleProgId: { default: null as string | null },
       /** display size in CSS px (blockType === 'image'), editable via drag handles */

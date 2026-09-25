@@ -1968,17 +1968,6 @@ export function App() {
     [],
   )
 
-  // inserting a section break needs one save for the new section to take effect; the
-  // flag is consumed in the render after state commit, guaranteeing the save closure
-  // sees the latest sectionsDirty/trailingStartType
-  const pendingSectionSaveRef = useRef(false)
-  useEffect(() => {
-    if (pendingSectionSaveRef.current && doc?.filePath) {
-      pendingSectionSaveRef.current = false
-      void save(false, true)
-    }
-  })
-
   /**
    * Insert a section break: the new break paragraph takes a copy of the current
    * section's sectPr (content before the break keeps the original
@@ -2053,6 +2042,10 @@ export function App() {
             label: 'Section break paragraph',
             previewText: '',
             genXml,
+            // the chosen type belongs to the NEXT sectPr; the save derives it from
+            // this attr (insertedBreakTypes), so undo/redo of the insert stays
+            // consistent with the file. A pending (AI) section patches its own XML.
+            breakStartType: pendingXml || ai ? null : type,
           },
         })
         .run()
@@ -2065,6 +2058,8 @@ export function App() {
             i === targetSection ? { ...s, startType: type, sectPrXml: pendingXml } : s,
           ),
         )
+      } else if (!ai) {
+        // UI insert: nothing to hold in app state — the paragraph carries the type
       } else if (live.length === 0 || targetSection === live.length - 1) {
         setTrailingStartType(type)
       } else {
@@ -2073,20 +2068,10 @@ export function App() {
         )
         setSectionsDirty((d) => (d.includes(targetSection) ? d : [...d, targetSection]))
       }
-      const labels: Record<SectionInfo['startType'], string> = {
-        nextPage: t('appBreakNextPage'),
-        continuous: t('appBreakContinuous'),
-        evenPage: t('appBreakEvenPage'),
-        oddPage: t('appBreakOddPage'),
-        // parse-only start type (single-column: acts like next page); the UI never inserts it
-        nextColumn: t('appBreakNextPage'),
-      }
-      if (doc.filePath) {
-        pendingSectionSaveRef.current = true
-        setStatus(t('appSectionBreakInserted', { type: labels[type] }))
-      } else {
-        setStatus(t('appSectionBreakPending'))
-      }
+      // No immediate save: a silent write + reparse ignored AutoSave off and
+      // wiped the undo stack (C6). The break is an ordinary undoable edit and
+      // its new section is written — and laid out — by the next save.
+      setStatus(t('appSectionBreakPending'))
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveSectPrXml is rebuilt per render from the state listed here
     [
