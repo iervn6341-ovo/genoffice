@@ -23,7 +23,11 @@ import {
 } from './edit-journal'
 import { activeCsvSheet, handleExportCsv, serializeActiveSheetCsv } from './csv-export'
 import type { CellState } from '@genoffice/xlsx-gateway/domain/workbook.types'
-import { verifiedFormulaValues } from './formula-values'
+import {
+  journaledFormulaValues,
+  verifiedFormulaValues,
+  type CachedFormulaValue,
+} from './formula-values'
 import { t } from './i18n/locale'
 import { abortStagedEditsTransfer, stageEditsForSave, type StagedEdits } from './save-edits-staging'
 import { showToast } from './toast-bus'
@@ -37,6 +41,9 @@ import {
   collectNoteStates,
 } from './univer-sync'
 import type { LazyWorkbookState, UniverRuntime } from './univer-state'
+
+/** How long a save waits for pending formula results before caching them. */
+const FORMULA_SETTLE_TIMEOUT_MS = 3_000
 
 /** The App refs/state the save flow needs; built fresh per call. */
 export interface SaveContext {
@@ -209,8 +216,28 @@ export async function handleSave(
   )
   // Journaled formulas an MCP batch saw settle (see formula-values.ts) were left
   // out above because the overlay could be stale; their values are read live here.
-  const journaledValues = ctx.readCells ? verifiedFormulaValues(ctx.readCells) : []
-  const formulaValues = [...overlayValues, ...journaledValues]
+  const verifiedValues = ctx.readCells ? verifiedFormulaValues(ctx.readCells) : []
+  // Formulas typed in the grid: wait for the engine to settle (bounded), then
+  // cache their live results so non-recalculating readers see values (C3).
+  let typedValues: CachedFormulaValue[] = []
+  const hasJournaledFormula = [...state.editJournal.cells.values()].some((cells) =>
+    [...cells.values()].some((cell) => cell.formula !== undefined),
+  )
+  if (ctx.readCells && hasJournaledFormula) {
+    const settled = await formulaEngineSettled(ctx.univerRef.current)
+    if (settled) {
+      typedValues = journaledFormulaValues(state.editJournal.cells, ctx.readCells, (sheetId) =>
+        isSheetRemoved(state.editJournal, sheetId),
+      )
+    }
+  }
+  const valueKeys = new Set<string>()
+  const formulaValues = [...overlayValues, ...verifiedValues, ...typedValues].filter((cell) => {
+    const key = `${cell.sheetId}:${cell.row}:${cell.column}`
+    if (valueKeys.has(key)) return false
+    valueKeys.add(key)
+    return true
+  })
   // The gateway fails closed when these additions ride with structural or
   // sheet changes (their coordinates entangle). Instead of bouncing the
   // user, hold them back and save in two sequential phases: structure
@@ -567,4 +594,16 @@ const SAVE_ERROR_PATTERNS = [
 export function localizeSaveError(message: string): string | null {
   const hit = SAVE_ERROR_PATTERNS.find(([pattern]) => message.includes(pattern))
   return hit ? t(hit[1]) : null
+}
+
+/** true once the formula engine has no pending computation (false on timeout
+ *  or when the runtime has no formula facade, e.g. in tests) */
+async function formulaEngineSettled(runtime: UniverRuntime | null): Promise<boolean> {
+  try {
+    const formula = runtime?.univerAPI.getFormula()
+    if (!formula) return false
+    return await formula.whenComputingCompleteAsync(FORMULA_SETTLE_TIMEOUT_MS)
+  } catch {
+    return false
+  }
 }
