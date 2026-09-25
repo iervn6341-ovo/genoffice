@@ -40,7 +40,7 @@ test('Heading 1: turn off Bold, type, undo/redo, save/reopen', async () => {
     // setup only: make the paragraph Heading 1 through the style gallery
     await p.locator('.ribbon-tab', { hasText: /^Home$/ }).click()
     await p.locator('.ribbon-body', { hasText: 'Heading 1' }).getByText('Heading 1').first().click()
-    await p.keyboard.press('Meta+a')
+    await p.keyboard.press('ControlOrMeta+a')
     await expect(boldBtn(p)).toHaveClass(/active/)
 
     await boldBtn(p).click()
@@ -50,15 +50,15 @@ test('Heading 1: turn off Bold, type, undo/redo, save/reopen', async () => {
     await p.keyboard.type(' more')
     await expect(boldBtn(p)).not.toHaveClass(/active/)
 
-    await p.keyboard.press('Meta+z') // typing
-    await p.keyboard.press('Meta+z') // un-bold
-    await p.keyboard.press('Meta+a')
+    await p.keyboard.press('ControlOrMeta+z') // typing
+    await p.keyboard.press('ControlOrMeta+z') // un-bold
+    await p.keyboard.press('ControlOrMeta+a')
     await expect(boldBtn(p)).toHaveClass(/active/)
-    await p.keyboard.press('Meta+Shift+z')
-    await p.keyboard.press('Meta+a')
+    await p.keyboard.press('ControlOrMeta+Shift+z')
+    await p.keyboard.press('ControlOrMeta+a')
     await expect(boldBtn(p)).not.toHaveClass(/active/)
 
-    await p.keyboard.press('Meta+Shift+s')
+    await p.keyboard.press('ControlOrMeta+Shift+s')
     await expect.poll(() => existsSync(out), { timeout: 20_000 }).toBe(true)
     await expect
       .poll(() => execFileSync('unzip', ['-p', out, 'word/document.xml']).toString(), {
@@ -77,8 +77,8 @@ test('Heading 1: turn off Bold, type, undo/redo, save/reopen', async () => {
     await p2.locator('.doc-page h1').first().click()
     await expect(boldBtn(p2)).not.toHaveClass(/active/)
     // continue editing: bold it back on
-    await p2.keyboard.press('Meta+a')
-    await p2.keyboard.press('Meta+b')
+    await p2.keyboard.press('ControlOrMeta+a')
+    await p2.keyboard.press('ControlOrMeta+b')
     await expect(boldBtn(p2)).toHaveClass(/active/)
   } finally {
     re.app.process().kill('SIGKILL')

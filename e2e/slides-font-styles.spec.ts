@@ -85,7 +85,7 @@ test.describe('font styles on a selected text box (whole box)', () => {
       }
       await btn(s, 'Bold').click()
       await expect.poll(async () => (await runs(s))[0]!.bold).toBe(true)
-      await s.keyboard.press('Meta+z')
+      await s.keyboard.press('ControlOrMeta+z')
       await expect.poll(async () => (await runs(s))[0]!.bold).toBe(false)
     } finally {
       kill(launched)
@@ -95,13 +95,13 @@ test.describe('font styles on a selected text box (whole box)', () => {
   test('⌘B / ⌘I / ⌘U work without entering the box', async () => {
     const { s, launched } = await deckWithBox('Keys')
     try {
-      await s.keyboard.press('Meta+b')
+      await s.keyboard.press('ControlOrMeta+b')
       await expect.poll(async () => (await runs(s))[0]!.bold).toBe(true)
-      await s.keyboard.press('Meta+i')
+      await s.keyboard.press('ControlOrMeta+i')
       await expect.poll(async () => (await runs(s))[0]!.italic).toBe(true)
-      await s.keyboard.press('Meta+u')
+      await s.keyboard.press('ControlOrMeta+u')
       await expect.poll(async () => (await runs(s))[0]!.underline).toBe(true)
-      await s.keyboard.press('Meta+b')
+      await s.keyboard.press('ControlOrMeta+b')
       await expect.poll(async () => (await runs(s))[0]!.bold).toBe(false)
     } finally {
       kill(launched)
@@ -143,9 +143,9 @@ test.describe('font styles on a selected text box (whole box)', () => {
         .locator('.slide-thumb, .ribbon')
         .first()
         .evaluate(() => (document.activeElement as HTMLElement)?.blur())
-      await s.keyboard.press('Meta+Shift+>')
+      await s.keyboard.press('ControlOrMeta+Shift+>')
       await expect.poll(pt).toBe(36)
-      await s.keyboard.press('Meta+Shift+<')
+      await s.keyboard.press('ControlOrMeta+Shift+<')
       await expect.poll(pt).toBe(32)
     } finally {
       kill(launched)
@@ -221,9 +221,9 @@ test.describe('font styles while typing (selection only, kept after commit)', ()
     const { s, launched } = await deckWithBox('keep world')
     try {
       await selectLastWord(s)
-      await s.keyboard.press('Meta+b')
-      await s.keyboard.press('Meta+i')
-      await s.keyboard.press('Meta+u')
+      await s.keyboard.press('ControlOrMeta+b')
+      await s.keyboard.press('ControlOrMeta+i')
+      await s.keyboard.press('ControlOrMeta+u')
       await expect.poll(() => pressed(s, 'Bold')).toBe(true)
       await expect.poll(() => pressed(s, 'Italic')).toBe(true)
       await expect.poll(() => pressed(s, 'Underline')).toBe(true)
@@ -241,9 +241,9 @@ test.describe('font styles while typing (selection only, kept after commit)', ()
       const base = (await runs(s))[0]!.sizePx
       await selectLastWord(s)
       await btn(s, 'Increase Font Size').click() // 18 → 20
-      await s.keyboard.press('Meta+Shift+>') // 20 → 24
+      await s.keyboard.press('ControlOrMeta+Shift+>') // 20 → 24
       await btn(s, 'Decrease Font Size').click() // 24 → 20
-      await s.keyboard.press('Meta+Shift+>') // 20 → 24
+      await s.keyboard.press('ControlOrMeta+Shift+>') // 20 → 24
       const font = s.locator('input.rb-font-input').first()
       await font.click()
       await font.fill('Georgia')

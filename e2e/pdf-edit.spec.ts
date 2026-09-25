@@ -153,7 +153,7 @@ const pageBox = async (p: Page) => (await p.locator('.pdf-page').first().boundin
 /** ⌘S, then wait for the file itself: the "Unsaved" badge clears before the write lands */
 const save = async (p: Page, file: string) => {
   const before = readFileSync(file)
-  await p.keyboard.press('Meta+s')
+  await p.keyboard.press('ControlOrMeta+s')
   await expect.poll(() => !readFileSync(file).equals(before), { timeout: 15_000 }).toBe(true)
   await expect(p.getByText('Unsaved')).toHaveCount(0, { timeout: 15_000 })
 }
@@ -165,7 +165,7 @@ test('edit text: picked size, bold, font and colour save as shown; the thumbnail
     await p.locator('button', { hasText: 'Edit text' }).first().click()
     const run = (await p.getByText('Scaled heading text').first().boundingBox())!
     await p.mouse.click(run.x + run.width / 2, run.y + run.height / 2)
-    await p.keyboard.press('Meta+a')
+    await p.keyboard.press('ControlOrMeta+a')
     await p.keyboard.type('Renamed heading')
     const size = p.locator('.pdf-textedit-sizenum')
     await expect(size).toHaveValue('12') // the page-space size, not the Tf 16
@@ -200,7 +200,8 @@ test('edit text: picked size, bold, font and colour save as shown; the thumbnail
     const { items, fills } = await readPage(f.pdf)
     const edited = items.find((i) => i.str === 'Renamed heading')!
     expect(edited.size).toBeCloseTo(14, 1)
-    expect(edited.font).toMatch(/TimesNewRoman.*Bold/)
+    // Linux has no Times New Roman: fontconfig substitutes the metric-compatible Liberation Serif
+    expect(edited.font).toMatch(/(TimesNewRoman|LiberationSerif).*Bold/)
     expect(fills).toContain('#ff0000')
     expect(items.find((i) => i.str === 'Body line stays put')?.size).toBeCloseTo(12, 1)
   } finally {
@@ -279,7 +280,8 @@ test('Insert text: the dialog’s font, bold and italic land in the file', async
     )
     expect(added.map((i) => i.str).join('')).toBe('Added remark')
     for (const run of added) {
-      expect(run.font).toMatch(/CourierNew.*BoldItalic/)
+      // Linux has no Courier New: fontconfig substitutes the metric-compatible Liberation Mono
+      expect(run.font).toMatch(/(CourierNew|LiberationMono).*BoldItalic/)
       expect(run.size).toBeCloseTo(14, 1)
     }
   } finally {
@@ -359,13 +361,13 @@ test('redaction marks and Clear marks go through undo / redo', async () => {
     await drag(0.1, 0.1)
     await drag(0.1, 0.3)
     await expect(marks).toHaveCount(2)
-    await p.keyboard.press('Meta+z')
+    await p.keyboard.press('ControlOrMeta+z')
     await expect(marks).toHaveCount(1)
-    await p.keyboard.press('Meta+Shift+z')
+    await p.keyboard.press('ControlOrMeta+Shift+z')
     await expect(marks).toHaveCount(2)
     await p.locator('button', { hasText: 'Clear marks' }).click()
     await expect(marks).toHaveCount(0)
-    await p.keyboard.press('Meta+z')
+    await p.keyboard.press('ControlOrMeta+z')
     await expect(marks).toHaveCount(2)
   } finally {
     launched.app.process().kill('SIGKILL')

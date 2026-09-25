@@ -64,11 +64,14 @@ test('Home / End move by line, ⇧ extends, ⌘ goes to the document ends', asyn
     await p.keyboard.press('Shift+End')
     await expect.poll(() => selectedText(p)).toBe('XHello worldY')
     await p.keyboard.press('End')
+    // let the editor read the collapsed selection before Enter (a synthetic
+    // key burst can outrun the selectionchange; a person cannot)
+    await expect.poll(() => selectedText(p)).toBe('')
     await p.keyboard.press('Enter')
     await p.keyboard.type('second line')
-    await p.keyboard.press('Meta+Home')
+    await p.keyboard.press('ControlOrMeta+Home')
     await p.keyboard.type('S')
-    await p.keyboard.press('Meta+End')
+    await p.keyboard.press('ControlOrMeta+End')
     await p.keyboard.type('E')
     await expect
       .poll(() => blocks(p).then((b) => b.map((x) => x.text)))
@@ -123,7 +126,7 @@ test('list AutoFormat: markers start lists, Enter on an empty item ends one, ⌘
     await p.keyboard.press('Enter')
     await p.keyboard.type('* ')
     await expect.poll(() => blocks(p).then((x) => x.at(-1)?.type)).toBe('docListItem')
-    await p.keyboard.press('Meta+z')
+    await p.keyboard.press('ControlOrMeta+z')
     await expect
       .poll(() => blocks(p).then((x) => x.at(-1)))
       .toEqual({ type: 'docParagraph', text: '* ' })
@@ -152,7 +155,7 @@ test('Clear Formatting at the caret types plain; a reopened heading restyled sav
     await launched.app.evaluate(({ dialog }, file) => {
       dialog.showSaveDialog = (async () => ({ canceled: false, filePath: file })) as never
     }, out)
-    await p.keyboard.press('Meta+b')
+    await p.keyboard.press('ControlOrMeta+b')
     await p.keyboard.type('bold ')
     await p.locator('.ribbon-body button[aria-label^="Clear All Formatting"]').first().click()
     await p.keyboard.type('plain')
@@ -168,7 +171,7 @@ test('Clear Formatting at the caret types plain; a reopened heading restyled sav
     await p.keyboard.press('Enter')
     await p.keyboard.type('Heading text')
     await p.locator('.style-card', { hasText: 'Heading 2' }).click()
-    await p.keyboard.press('Meta+Shift+s')
+    await p.keyboard.press('ControlOrMeta+Shift+s')
     await expect.poll(() => existsSync(out), { timeout: 20_000 }).toBe(true)
     await expect.poll(pStyles).toEqual(['<w:pStyle w:val="Heading2"'])
   } finally {
@@ -186,12 +189,12 @@ test('Clear Formatting at the caret types plain; a reopened heading restyled sav
     await p2.getByText('Heading text').click()
     await p2.locator('.style-card', { hasText: 'Heading 3' }).click()
     let before = execFileSync('unzip', ['-p', out, 'word/document.xml']).toString()
-    await p2.keyboard.press('Meta+s')
+    await p2.keyboard.press('ControlOrMeta+s')
     await expect.poll(pStyles, { timeout: 15_000 }).toEqual(['<w:pStyle w:val="Heading3"'])
     await p2.getByText('Heading text').click()
     await p2.locator('.style-card', { hasText: 'Normal' }).click()
     before = execFileSync('unzip', ['-p', out, 'word/document.xml']).toString()
-    await p2.keyboard.press('Meta+s')
+    await p2.keyboard.press('ControlOrMeta+s')
     await expect
       .poll(() => execFileSync('unzip', ['-p', out, 'word/document.xml']).toString() !== before, {
         timeout: 15_000,

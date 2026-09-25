@@ -103,9 +103,9 @@ test.describe('notes pane formatting', () => {
     const { s, launched } = await blankDeck()
     try {
       await typeNotes(s, 'alpha beta', 4)
-      await s.keyboard.press('Meta+b')
-      await s.keyboard.press('Meta+i')
-      await s.keyboard.press('Meta+Shift+>') // 12 → 14 on PowerPoint's ladder
+      await s.keyboard.press('ControlOrMeta+b')
+      await s.keyboard.press('ControlOrMeta+i')
+      await s.keyboard.press('ControlOrMeta+Shift+>') // 12 → 14 on PowerPoint's ladder
       await leaveNotes(s)
       await expect
         .poll(() => runOf(s, 'beta'))
@@ -143,7 +143,7 @@ test.describe('slide show on two screens', () => {
       await s.keyboard.press('Escape')
       await s.keyboard.press('Escape')
       await typeNotes(s, 'Say hello first', 5)
-      await s.keyboard.press('Meta+b')
+      await s.keyboard.press('ControlOrMeta+b')
       await leaveNotes(s)
 
       await s.locator('.ribbon-tab', { hasText: 'Slide Show' }).click()

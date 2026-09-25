@@ -29,7 +29,8 @@ test('section break: no silent save, undo/redo intact', async () => {
     await p.waitForFunction(() => Boolean((window as unknown as DocsWindow).__aidocs?.editor))
     await p.locator('.doc-page').first().click()
     await p.keyboard.type('First section')
-    await p.keyboard.press('Meta+s')
+    // first save through Save As so it lands at the stubbed dialog path
+    await p.keyboard.press('ControlOrMeta+Shift+s')
     await expect.poll(() => statSync(file, { throwIfNoEntry: false })?.size ?? 0).toBeGreaterThan(0)
     const savedAt = statSync(file).mtimeMs
 
@@ -53,15 +54,15 @@ test('section break: no silent save, undo/redo intact', async () => {
         return n
       })
     expect(await breaks()).toBe(1)
-    await p.keyboard.press('Meta+z')
+    await p.keyboard.press('ControlOrMeta+z')
     expect(await breaks()).toBe(0)
-    await p.keyboard.press('Meta+z')
+    await p.keyboard.press('ControlOrMeta+z')
     await expect(p.locator('.doc-page')).not.toContainText('more')
-    await p.keyboard.press('Meta+Shift+z')
-    await p.keyboard.press('Meta+Shift+z')
+    await p.keyboard.press('ControlOrMeta+Shift+z')
+    await p.keyboard.press('ControlOrMeta+Shift+z')
     expect(await breaks()).toBe(1)
 
-    await p.keyboard.press('Meta+s')
+    await p.keyboard.press('ControlOrMeta+s')
     await expect.poll(() => statSync(file).mtimeMs).toBeGreaterThan(savedAt)
   } finally {
     launched.app.process().kill('SIGKILL')

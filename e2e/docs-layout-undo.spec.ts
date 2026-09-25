@@ -35,15 +35,15 @@ test('orientation change is undone before the typed word', async () => {
     await expect.poll(() => pageIsLandscape(p)).toBe(true)
 
     await p.locator('.doc-page').first().click()
-    await p.keyboard.press('Meta+z')
+    await p.keyboard.press('ControlOrMeta+z')
     await expect.poll(() => pageIsLandscape(p)).toBe(false)
     await expect(p.locator('.doc-page').first()).toContainText('word')
 
-    await p.keyboard.press('Meta+Shift+z')
+    await p.keyboard.press('ControlOrMeta+Shift+z')
     await expect.poll(() => pageIsLandscape(p)).toBe(true)
 
-    await p.keyboard.press('Meta+z')
-    await p.keyboard.press('Meta+z')
+    await p.keyboard.press('ControlOrMeta+z')
+    await p.keyboard.press('ControlOrMeta+z')
     await expect(p.locator('.doc-page').first()).not.toContainText('word')
   } finally {
     launched.app.process().kill('SIGKILL')

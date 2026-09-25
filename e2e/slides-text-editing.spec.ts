@@ -99,6 +99,9 @@ async function domVsCanvas(s: Page) {
 
 /** the editor and the canvas may differ by sub-pixel rounding only */
 const TOL = 1
+/** the bullet glyph comes from the platform's symbol font (Linux draws it ~0.004px
+    wider than the canvas measure); the regression guarded here was a ~5px shift */
+const BULLET_TOL = 1.5
 
 async function withDeck<T>(text: string, fn: (s: Page, l: LaunchedApp) => Promise<T>): Promise<T> {
   const launched = await launchShell({ onboardingSeen: true, videoDir: 'slides-text-editing' })
@@ -141,9 +144,9 @@ test.describe('slides text editing: editor matches canvas', () => {
         const { dom, canvas } = await domVsCanvas(s)
         // the whole run (bullet + text) must end where the canvas ends: a too-narrow preview
         // indent used to leave the text ~5px left of its committed position
-        expect(Math.abs(dom.x - canvas.x)).toBeLessThanOrEqual(TOL)
-        expect(Math.abs(dom.w - canvas.w)).toBeLessThanOrEqual(TOL)
-        expect(Math.abs(dom.y - canvas.y)).toBeLessThanOrEqual(TOL)
+        expect(Math.abs(dom.x - canvas.x)).toBeLessThanOrEqual(BULLET_TOL)
+        expect(Math.abs(dom.w - canvas.w)).toBeLessThanOrEqual(BULLET_TOL)
+        expect(Math.abs(dom.y - canvas.y)).toBeLessThanOrEqual(BULLET_TOL)
       })
     })
   }
