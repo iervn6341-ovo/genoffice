@@ -1,7 +1,7 @@
 ---
 name: genoffice-qa
 description: >
-  Development and QA workflow for GenOffice Word, Excel, and PowerPoint-like services.
+  Development, QA and E2E testing workflow for GenOffice Word, Excel, PowerPoint-like services, the PDF editor, Markdown and HTML.
   Use whenever implementing, modifying, debugging, reviewing, or testing GenOffice editor
   functionality. Benchmark user-visible behavior against Microsoft Office and verify
   realistic workflows, undo/redo, persistence, edge cases, interoperability, and regressions.
@@ -106,6 +106,26 @@ when modifying:
 - import/export;
 - rendering;
 - shared commands.
+
+## E2E Testing Runs
+
+When the task is to **test** a service (smoke run, regression run, bug hunt),
+read:
+
+`testing/README.md` — how to build and run, harness hooks, known false
+failures, verified Mac/Office parity rules.
+
+Then the service checklist:
+
+- `testing/word.md`
+- `testing/excel.md`
+- `testing/powerpoint.md`
+- `testing/pdf-markdown-html.md` (PDF editor, Markdown, HTML)
+
+Add any new trap, false failure, or Office behavior you directly verify to
+the matching "GenOffice notes" section, so the next run inherits it.
+
+---
 
 Before declaring a task complete, read:
 
