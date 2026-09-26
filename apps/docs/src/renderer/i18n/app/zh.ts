@@ -342,6 +342,12 @@ export const zh = {
   appIndentLeft: '左缩进',
   appIndentRight: '右缩进',
   appIndentFirstLine: '首行缩进',
+  appIndentSpecial: '特殊',
+  appIndentSpecialNone: '(无)',
+  appIndentSpecialFirst: '首行',
+  appIndentSpecialHanging: '悬挂',
+  appIndentBy: '缩进值',
+  appUnitChars: '字符',
   appSpaceBefore: '段前间距',
   appSpaceAfter: '段后间距',
   // Equations

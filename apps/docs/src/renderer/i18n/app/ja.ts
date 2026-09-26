@@ -353,6 +353,12 @@ export const ja = {
   appIndentLeft: '左インデント',
   appIndentRight: '右インデント',
   appIndentFirstLine: '1 行目の字下げ',
+  appIndentSpecial: '最初の行',
+  appIndentSpecialNone: '(なし)',
+  appIndentSpecialFirst: '字下げ',
+  appIndentSpecialHanging: 'ぶら下げ',
+  appIndentBy: '幅',
+  appUnitChars: '字',
   appSpaceBefore: '段落前の間隔',
   appSpaceAfter: '段落後の間隔',
   // Equations

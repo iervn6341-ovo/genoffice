@@ -88,8 +88,13 @@ test('Insert Cells dialog: shift down, undo, redo, Esc; Delete Cells: shift up',
 
     await sheets.keyboard.press('ControlOrMeta+z')
     await expect.poll(() => valueAt(sheets, 1, 1)).toBe('moved')
-    // redo: ⌘⇧Z on macOS, Ctrl+Y elsewhere (Excel's bindings)
-    await sheets.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+y')
+    // redo: on macOS ⇧⌘Z is a native menu accelerator Playwright can't fire,
+    // so click the QAT Redo (same path); Ctrl+Y elsewhere (Excel's binding)
+    if (process.platform === 'darwin') {
+      await sheets.getByRole('button', { name: 'Redo', exact: true }).click()
+    } else {
+      await sheets.keyboard.press('Control+y')
+    }
     await expect.poll(() => valueAt(sheets, 2, 1)).toBe('moved')
 
     await sheets.keyboard.press('ControlOrMeta+Minus')

@@ -19,7 +19,7 @@ import {
 } from '@tiptap/pm/tables'
 import { platformShortcuts } from '@genoffice/i18n'
 import { Dropdown, isSymbolFontFamily, type DropdownOption } from '@genoffice/ui'
-import { useI18n, type StringKey } from '../i18n/locale'
+import { getLang, useI18n, type StringKey } from '../i18n/locale'
 import { fontFamiliesFor, isEastAsianFontName } from '../font-list'
 import { useSystemFontFamilies } from '../system-fonts'
 import { cssFontFamily } from '../line-metrics'
@@ -750,6 +750,26 @@ export function FontDialog({ editor, onClose }: { editor: Editor; onClose: () =>
 
 const PT_PER_TWIP = 1 / 20
 
+type SpecialIndent = 'none' | 'first' | 'hanging'
+
+const round2 = (v: number) => Math.round(v * 100) / 100
+
+/** UI languages whose Word measures paragraph indents in characters (字元) */
+const isCjkLang = (lang: string) => lang === 'zh' || lang === 'zh-TW' || lang === 'ja' || lang === 'ko'
+
+/** rendered font size (pt) at the caret — the width of one indent character */
+function paraFontPt(editor: Editor): number {
+  try {
+    let node: Node | null = editor.view.domAtPos(editor.state.selection.from).node
+    if (node && node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement
+    const px = node ? parseFloat(getComputedStyle(node as Element).fontSize) : NaN
+    if (px > 0) return round2(px * 0.75)
+  } catch {
+    // detached view: fall through to the Word body default
+  }
+  return 12
+}
+
 type AlignValue = 'left' | 'center' | 'right' | 'justify'
 
 /** visual alignment values; setSelectionAlign resolves them per paragraph direction */
@@ -787,12 +807,37 @@ export function ParagraphDialog({ editor, onClose }: { editor: Editor; onClose: 
   const [lineRule, setLineRule] = useState<string>(initRule)
   const [lineSpacing, setLineSpacing] = useState<number>(Math.round(initMultiple * 100) / 100)
   const [linePt, setLinePt] = useState<number>(rawTwips ? Math.round(rawTwips / 2) / 10 : 12)
-  const twipsToPt = (v: unknown) => Math.round((Number(v) || 0) * PT_PER_TWIP)
-  const [indentLeft, setIndentLeft] = useState(twipsToPt(attrs.indentLeft))
-  const [indentRight, setIndentRight] = useState(twipsToPt(attrs.indentRight))
-  const [indentFirstLine, setIndentFirstLine] = useState(twipsToPt(attrs.indentFirstLine))
-  const [spaceBefore, setSpaceBefore] = useState(twipsToPt(attrs.spaceBefore))
-  const [spaceAfter, setSpaceAfter] = useState(twipsToPt(attrs.spaceAfter))
+  const twipsToPt = (v: unknown) => round2((Number(v) || 0) * PT_PER_TWIP)
+  // Word's indent block: Left / Right plus Special (none / first line /
+  // hanging) By. East Asian Word measures indents in characters (1 ch = the
+  // paragraph's font size, "2 字元" is the customary first-line indent);
+  // elsewhere the default By is 0.5" (36pt). Left shows where the first
+  // line starts: a hanging paragraph's w:left minus the hang (probed: Word
+  // after ⌘T, w:left 480 w:hanging 480, shows Left 0, Hanging 24pt).
+  const [unitTwips] = useState(() => (isCjkLang(getLang()) ? paraFontPt(editor) * 20 : 20))
+  const charUnits = unitTwips !== 20
+  const toUnits = (twips: number) => round2(twips / unitTwips)
+  const initFirst = Number(attrs.indentFirstLine) || 0
+  const initSpecial: SpecialIndent = initFirst > 0 ? 'first' : initFirst < 0 ? 'hanging' : 'none'
+  const initLeft = (Number(attrs.indentLeft) || 0) - (initFirst < 0 ? -initFirst : 0)
+  const initial = {
+    left: toUnits(initLeft),
+    right: toUnits(Number(attrs.indentRight) || 0),
+    special: initSpecial,
+    by: toUnits(Math.abs(initFirst)),
+    spaceBefore: twipsToPt(attrs.spaceBefore),
+    spaceAfter: twipsToPt(attrs.spaceAfter),
+  }
+  const [indentLeft, setIndentLeft] = useState(initial.left)
+  const [indentRight, setIndentRight] = useState(initial.right)
+  const [special, setSpecial] = useState<SpecialIndent>(initial.special)
+  const [specialBy, setSpecialBy] = useState(initial.by)
+  const [spaceBefore, setSpaceBefore] = useState(initial.spaceBefore)
+  const [spaceAfter, setSpaceAfter] = useState(initial.spaceAfter)
+  const pickSpecial = (v: SpecialIndent) => {
+    setSpecial(v)
+    if (v !== 'none' && specialBy <= 0) setSpecialBy(charUnits ? 2 : 36)
+  }
 
   const apply = () => {
     if (!editor.isEditable) {
@@ -800,6 +845,26 @@ export function ParagraphDialog({ editor, onClose }: { editor: Editor; onClose: 
       return
     }
     const ptToTwips = (pt: number) => (pt > 0 ? Math.round(pt / PT_PER_TWIP) : null)
+    const unitsToTwips = (u: number) => Math.round(u * unitTwips)
+    // untouched fields keep their exact twips (no unit round-trip drift, and
+    // an OK on an imported hanging paragraph never flattens it)
+    const indentChanged =
+      indentLeft !== initial.left ||
+      special !== initial.special ||
+      (special !== 'none' && specialBy !== initial.by)
+    const by = special === 'none' ? 0 : unitsToTwips(specialBy)
+    const indent: Record<string, number | null> = {}
+    if (indentChanged) {
+      const left = unitsToTwips(indentLeft) + (special === 'hanging' ? by : 0)
+      indent.indentLeft = left > 0 ? left : null
+      indent.indentFirstLine = by > 0 ? (special === 'hanging' ? -by : by) : null
+    }
+    if (indentRight !== initial.right) {
+      indent.indentRight = indentRight > 0 ? unitsToTwips(indentRight) : null
+    }
+    const spacingAttrs: Record<string, number | null> = {}
+    if (spaceBefore !== initial.spaceBefore) spacingAttrs.spaceBefore = ptToTwips(spaceBefore)
+    if (spaceAfter !== initial.spaceAfter) spacingAttrs.spaceAfter = ptToTwips(spaceAfter)
     const spacing =
       lineRule === 'exact' || lineRule === 'atLeast'
         ? { lineSpacing: null, lineRule, lineRawTwips: Math.max(20, Math.round(linePt * 20)) }
@@ -813,27 +878,32 @@ export function ParagraphDialog({ editor, onClose }: { editor: Editor; onClose: 
     setSelectionAlign(editor, align)
     setParaAttrs(editor, {
       ...spacing,
-      indentLeft: ptToTwips(indentLeft),
-      indentRight: ptToTwips(indentRight),
-      indentFirstLine: ptToTwips(indentFirstLine),
-      spaceBefore: ptToTwips(spaceBefore),
-      spaceAfter: ptToTwips(spaceAfter),
+      ...indent,
+      ...spacingAttrs,
     })
     onClose()
   }
 
-  const numInput = (label: string, value: number, set: (v: number) => void) => (
+  const numInput = (
+    label: string,
+    value: number,
+    set: (v: number) => void,
+    unit: 'pt' | 'indent' = 'pt',
+  ) => (
     <label>
       {label}
       <span className="para-num">
         <input
           type="number"
           min={0}
-          max={400}
+          max={unit === 'indent' && charUnits ? 100 : 400}
+          step={unit === 'indent' && charUnits ? 0.5 : 1}
           value={value}
           onChange={(e) => set(Math.max(0, Number(e.target.value) || 0))}
         />
-        <span className="para-unit">pt</span>
+        <span className="para-unit">
+          {unit === 'indent' && charUnits ? t('appUnitChars') : 'pt'}
+        </span>
       </span>
     </label>
   )
@@ -918,9 +988,24 @@ export function ParagraphDialog({ editor, onClose }: { editor: Editor; onClose: 
           )}
         </div>
         <div className="font-dialog-row">
-          {numInput(t('appIndentLeft'), indentLeft, setIndentLeft)}
-          {numInput(t('appIndentRight'), indentRight, setIndentRight)}
-          {numInput(t('appIndentFirstLine'), indentFirstLine, setIndentFirstLine)}
+          {numInput(t('appIndentLeft'), indentLeft, setIndentLeft, 'indent')}
+          {numInput(t('appIndentRight'), indentRight, setIndentRight, 'indent')}
+        </div>
+        <div className="font-dialog-row">
+          <label>
+            {t('appIndentSpecial')}
+            <Dropdown
+              value={special}
+              ariaLabel={t('appIndentSpecial')}
+              options={[
+                { value: 'none', label: t('appIndentSpecialNone') },
+                { value: 'first', label: t('appIndentSpecialFirst') },
+                { value: 'hanging', label: t('appIndentSpecialHanging') },
+              ]}
+              onPick={(v) => pickSpecial(v as SpecialIndent)}
+            />
+          </label>
+          {special !== 'none' && numInput(t('appIndentBy'), specialBy, setSpecialBy, 'indent')}
         </div>
         <div className="font-dialog-row">
           {numInput(t('appSpaceBefore'), spaceBefore, setSpaceBefore)}

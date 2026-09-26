@@ -93,3 +93,19 @@ export function defaultEastAsiaFontFor(lang: Lang): string | undefined {
       return undefined
   }
 }
+
+/**
+ * settings.xml w:defaultTabStop (twips) for new blank documents: Chinese Word
+ * templates use a two-character grid (probed zh-TW: 480 = 2 × 12pt; zh: 420 =
+ * 2 × 10.5pt). Other languages keep Word's 0.5" default (undefined).
+ */
+export function defaultTabStopFor(lang: Lang): number | undefined {
+  switch (lang) {
+    case 'zh':
+      return 420
+    case 'zh-TW':
+      return 480
+    default:
+      return undefined
+  }
+}

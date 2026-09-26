@@ -694,6 +694,13 @@ function runStepIndent(op: Op, env: RunEnv): OpResult {
 function runStepHangingIndent(op: Op, env: RunEnv): OpResult {
   const { tr, ctx, sel } = env
   const delta = Number(op.delta)
+  // Word steps to the document's default tab stop (probed zh-TW Word, grid
+  // 480: ⌘T → left 24pt, first line -24pt), not a fixed half inch
+  const grid = Number(
+    (env.editor.storage as { tabStops?: { defaultTabStopTwips?: number | null } }).tabStops
+      ?.defaultTabStopTwips,
+  )
+  const STEP = grid > 0 ? grid : INDENT_STEP
   const target = targetOf(op)
   const matched = matchTarget(tr.doc, target, sel)
   const scoped = scopedRange(target, sel)
@@ -703,11 +710,11 @@ function runStepHangingIndent(op: Op, env: RunEnv): OpResult {
       const left = Number(p.node.attrs.indentLeft) || 0
       const nextLeft = Math.max(
         delta > 0
-          ? Math.floor(left / INDENT_STEP) * INDENT_STEP + INDENT_STEP
-          : Math.ceil(left / INDENT_STEP) * INDENT_STEP - INDENT_STEP,
+          ? Math.floor(left / STEP) * STEP + STEP
+          : Math.ceil(left / STEP) * STEP - STEP,
         0,
       )
-      const nextHanging = nextLeft > 0 ? -Math.min(nextLeft, INDENT_STEP) : 0
+      const nextHanging = nextLeft > 0 ? -Math.min(nextLeft, STEP) : 0
       if (nextLeft === left && nextHanging === (Number(p.node.attrs.indentFirstLine) || 0)) continue
       tr.setNodeMarkup(
         p.pos,

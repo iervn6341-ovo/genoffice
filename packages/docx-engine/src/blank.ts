@@ -148,11 +148,22 @@ export interface BlankDocxOptions {
    * Word/our renderer then substitute per script when CJK text appears.
    */
   eastAsiaFont?: string
+  /**
+   * settings.xml w:defaultTabStop in twips. East Asian Word templates use a
+   * two-character grid (zh-TW 480 = 2 × 12pt, zh 420 = 2 × 10.5pt), which
+   * also sizes the first-line indent Tab creates at a paragraph start.
+   * Omitted = no settings part (Word's 720).
+   */
+  defaultTabStopTwips?: number
 }
 
 /** Build a minimal valid .docx: one empty paragraph, A4 portrait, standard styles. */
 export async function buildBlankDocx(options?: BlankDocxOptions): Promise<Uint8Array> {
   const zip = new JSZip()
+  const tabStop =
+    options?.defaultTabStopTwips != null && options.defaultTabStopTwips > 0
+      ? Math.round(options.defaultTabStopTwips)
+      : null
 
   zip.file(
     '[Content_Types].xml',
@@ -162,6 +173,9 @@ export async function buildBlankDocx(options?: BlankDocxOptions): Promise<Uint8A
       '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
       '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
       '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>' +
+      (tabStop != null
+        ? '<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>'
+        : '') +
       '</Types>',
   )
 
@@ -177,11 +191,21 @@ export async function buildBlankDocx(options?: BlankDocxOptions): Promise<Uint8A
     `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
       '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
       '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>' +
+      (tabStop != null
+        ? '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>'
+        : '') +
       '</Relationships>',
   )
 
   zip.file('word/styles.xml', stylesXml(options?.eastAsiaFont))
   zip.file('word/numbering.xml', NUMBERING_XML)
+  if (tabStop != null) {
+    zip.file(
+      'word/settings.xml',
+      `${XML_DECL}<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+        `<w:defaultTabStop w:val="${tabStop}"/></w:settings>`,
+    )
+  }
 
   const sectPr =
     '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +

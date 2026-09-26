@@ -81,7 +81,7 @@ import { createSaveSerializer } from './save-until-persisted'
 import { checkMissingFonts, collectDocFonts } from './font-check'
 import { setDocFontTable } from './line-metrics'
 import { adoptEmbeddedFonts } from './embedded-fonts'
-import { defaultEastAsiaFontFor } from './font-list'
+import { defaultEastAsiaFontFor, defaultTabStopFor } from './font-list'
 import { hasPrintableHeaderFooter } from './pagination'
 import { clearPrintZoom, setPrintZoom } from './print-zoom'
 import { showToast } from './components/toast-bus'
@@ -465,7 +465,10 @@ export async function newFile(ctx: FileActionContext): Promise<boolean | undefin
   if (!ctx.editor) return
   const generation = ++openGeneration
   try {
-    const bytes = await buildBlankDocx({ eastAsiaFont: defaultEastAsiaFontFor(getLang()) })
+    const bytes = await buildBlankDocx({
+      eastAsiaFont: defaultEastAsiaFontFor(getLang()),
+      defaultTabStopTwips: defaultTabStopFor(getLang()),
+    })
     const parsed = await parseDocx(bytes)
     if (generation !== openGeneration) return
     setLazyMediaHashes([])

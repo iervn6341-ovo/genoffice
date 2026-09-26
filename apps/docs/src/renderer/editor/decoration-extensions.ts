@@ -3,6 +3,7 @@ import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/p
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { isInTable } from '@tiptap/pm/tables'
+import { closeHistory } from '@tiptap/pm/history'
 import { t } from '../i18n/locale'
 import { type TabStop } from '@genoffice/docx-engine'
 
@@ -800,14 +801,76 @@ export const TabStopExtension = Extension.create({
     // to the next cell — those handlers live on DocListItem / NativeTableSupport
     // and run after this one returns false. An unhandled Tab would leave the
     // editor and cycle the ribbon buttons (github.com/genspark-ai/genoffice/issues/101).
+    const storage = this.storage as TabStopStorage
+    // Word AutoFormat "Set left- and first-indent with tabs and backspaces":
+    // at the very start of a paragraph that already has text, Tab becomes
+    // indentation (1st Tab: first-line indent of one default tab stop, next
+    // Tabs: left indent += one stop) and Backspace undoes it in reverse
+    // (first-line indent → 0, then left indent -= one stop). Probed in Word
+    // (zh-TW, 12pt, defaultTabStop 480): Tab → firstLine 24pt; Tab → left
+    // 24pt; Backspace → firstLine 0; Backspace → left 0.
+    const tabStepTwips = () => {
+      const grid = storage.defaultTabStopTwips
+      return grid != null && grid > 0 ? grid : DEFAULT_TAB_TWIPS
+    }
+    const indentTarget = () => {
+      const { selection } = this.editor.state
+      if (!selection.empty) return null
+      const { $from } = selection
+      const para = $from.parent
+      if (!para.isTextblock || $from.parentOffset !== 0 || para.content.size === 0) return null
+      if (!('indentFirstLine' in para.attrs) || !('indentLeft' in para.attrs)) return null
+      return { pos: $from.before(), para }
+    }
+    const setIndent = (pos: number, attrs: Record<string, unknown>) => {
+      const { state, view } = this.editor
+      const para = state.doc.nodeAt(pos)
+      if (!para) return
+      // its own undo step (Word undoes the indent, not the typing before it)
+      const tr = closeHistory(state.tr.setNodeMarkup(pos, undefined, { ...para.attrs, ...attrs }))
+      view.dispatch(tr.scrollIntoView())
+    }
     const insertTab = () => {
       if (!this.editor.isEditable) return false
       if (this.editor.isActive('docListItem')) return false
       if (isInTable(this.editor.state)) return false
       const { state, view } = this.editor
       if (!state.selection.$from.parent.isTextblock) return true
+      const target = indentTarget()
+      if (target) {
+        const step = tabStepTwips()
+        const firstLine = Number(target.para.attrs.indentFirstLine ?? 0)
+        const left = Number(target.para.attrs.indentLeft ?? 0)
+        // a hanging indent is list-like layout; keep the literal tab there
+        if (firstLine >= 0) {
+          setIndent(
+            target.pos,
+            firstLine < step ? { indentFirstLine: step } : { indentLeft: left + step },
+          )
+          return true
+        }
+      }
       view.dispatch(state.tr.insertText('\t').scrollIntoView())
       return true
+    }
+    const backspaceIndent = () => {
+      if (!this.editor.isEditable) return false
+      if (this.editor.isActive('docListItem')) return false
+      if (isInTable(this.editor.state)) return false
+      const target = indentTarget()
+      if (!target) return false
+      const firstLine = Number(target.para.attrs.indentFirstLine ?? 0)
+      const left = Number(target.para.attrs.indentLeft ?? 0)
+      if (firstLine > 0) {
+        setIndent(target.pos, { indentFirstLine: null })
+        return true
+      }
+      if (firstLine === 0 && left > 0) {
+        const next = Math.max(0, left - tabStepTwips())
+        setIndent(target.pos, { indentLeft: next === 0 ? null : next })
+        return true
+      }
+      return false
     }
     const swallowShiftTab = () => {
       if (!this.editor.isEditable) return false
@@ -818,6 +881,7 @@ export const TabStopExtension = Extension.create({
     return {
       Tab: insertTab,
       'Shift-Tab': swallowShiftTab,
+      Backspace: backspaceIndent,
     }
   },
   addProseMirrorPlugins() {

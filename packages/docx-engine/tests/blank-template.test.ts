@@ -20,6 +20,12 @@ describe('blank document template (new-document / AI generation base)', () => {
     }
   })
 
+  it('writes settings.xml w:defaultTabStop only when a tab grid is requested', async () => {
+    expect((await parseDocx(await buildBlankDocx())).defaultTabStopTwips).toBeUndefined()
+    const zhTw = await parseDocx(await buildBlankDocx({ defaultTabStopTwips: 480 }))
+    expect(zhTw.defaultTabStopTwips).toBe(480)
+  })
+
   it('AI-generated content (headings, paragraphs, lists) saves and reparses correctly', async () => {
     const bytes = await buildBlankDocx()
     const doc = await parseDocx(bytes)

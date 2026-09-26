@@ -353,6 +353,12 @@ export const ko = {
   appIndentLeft: '왼쪽 들여쓰기',
   appIndentRight: '오른쪽 들여쓰기',
   appIndentFirstLine: '첫 줄 들여쓰기',
+  appIndentSpecial: '첫 줄',
+  appIndentSpecialNone: '(없음)',
+  appIndentSpecialFirst: '첫 줄',
+  appIndentSpecialHanging: '내어쓰기',
+  appIndentBy: '값',
+  appUnitChars: '글자',
   appSpaceBefore: '단락 앞 간격',
   appSpaceAfter: '단락 뒤 간격',
   // Equations

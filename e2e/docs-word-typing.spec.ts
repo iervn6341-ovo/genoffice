@@ -223,3 +223,75 @@ test('a double-click right of a line never swallows the paragraph break', async 
     launched.app.process().kill('SIGKILL')
   }
 })
+
+test('Tab / Backspace at a paragraph start set and clear the indent like Word', async () => {
+  const { mkdtempSync, existsSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const out = join(mkdtempSync(join(tmpdir(), 'docs-typing-')), 'tab-indent.docx')
+  const indent = () =>
+    p.evaluate(() => {
+      const para = (window as unknown as DocsWindow).__aidocs!.editor.state.doc.firstChild
+      return {
+        first: para.attrs.indentFirstLine as number | null,
+        left: para.attrs.indentLeft as number | null,
+        text: para.textContent as string,
+      }
+    })
+  const { p, launched } = await blankDoc()
+  try {
+    await launched.app.evaluate(({ dialog }, file) => {
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath: file })) as never
+    }, out)
+    const step = await p.evaluate(
+      () =>
+        ((window as unknown as DocsWindow).__aidocs!.editor.storage.tabStops
+          .defaultTabStopTwips as number | null) ?? 720,
+    )
+    await p.keyboard.type('今天我要來講一個故事')
+    await p.keyboard.press('Home')
+    // Home moves the DOM caret; let the editor read it before the Tab
+    await expect
+      .poll(() =>
+        p.evaluate(() => (window as unknown as DocsWindow).__aidocs!.editor.state.selection.from),
+      )
+      .toBe(1)
+    // Word: 1st Tab → first-line indent of one tab stop (no tab character)
+    await p.keyboard.press('Tab')
+    await expect.poll(indent).toEqual({ first: step, left: null, text: '今天我要來講一個故事' })
+    // 2nd Tab → the whole paragraph moves one stop
+    await p.keyboard.press('Tab')
+    await expect.poll(indent).toEqual({ first: step, left: step, text: '今天我要來講一個故事' })
+    // Backspace undoes it in reverse: first-line indent, then left indent
+    await p.keyboard.press('Backspace')
+    await expect.poll(indent).toEqual({ first: null, left: step, text: '今天我要來講一個故事' })
+    await p.keyboard.press('Backspace')
+    await expect.poll(indent).toEqual({ first: null, left: null, text: '今天我要來講一個故事' })
+    await p.keyboard.press('ControlOrMeta+z')
+    await expect.poll(indent).toEqual({ first: null, left: step, text: '今天我要來講一個故事' })
+    await p.keyboard.press('ControlOrMeta+Shift+z')
+    await expect.poll(indent).toEqual({ first: null, left: null, text: '今天我要來講一個故事' })
+    await p.keyboard.press('Tab')
+    // mid-text Tab still types a tab character
+    await p.keyboard.press('End')
+    await expect
+      .poll(() =>
+        p.evaluate(() => (window as unknown as DocsWindow).__aidocs!.editor.state.selection.from),
+      )
+      .toBe(11)
+    await p.keyboard.press('Tab')
+    await expect.poll(indent).toEqual({ first: step, left: null, text: '今天我要來講一個故事\t' })
+    await p.keyboard.press('ControlOrMeta+Shift+s')
+    await expect.poll(() => existsSync(out), { timeout: 20_000 }).toBe(true)
+    await expect
+      .poll(() =>
+        execFileSync('unzip', ['-p', out, 'word/document.xml'])
+          .toString()
+          .match(/<w:ind [^>]*>/g),
+      )
+      .toEqual([`<w:ind w:firstLine="${step}"/>`])
+  } finally {
+    launched.app.process().kill('SIGKILL')
+  }
+})
