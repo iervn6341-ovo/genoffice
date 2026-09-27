@@ -247,6 +247,8 @@ const api: SlidesApi = {
   hasSlideClipboard: () => ipcRenderer.invoke('slides:has-slide-clipboard'),
   clipboardProbe: () => ipcRenderer.invoke('slides:clipboard-probe'),
   deleteSlide: (slideIndex: number) => ipcRenderer.invoke('slides:delete-slide', slideIndex),
+  deleteSlides: (slideIndices: number[]) =>
+    ipcRenderer.invoke('slides:delete-slides', slideIndices),
   reorderElement: (op: ReorderElementOp) => ipcRenderer.invoke('slides:reorder-element', op),
   editTableCell: (op: EditTableCellOp) => ipcRenderer.invoke('slides:edit-table-cell', op),
   tableStructure: (op: TableStructureIpcOp) => ipcRenderer.invoke('slides:table-structure', op),

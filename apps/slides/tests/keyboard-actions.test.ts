@@ -15,7 +15,12 @@ vi.mock('../src/renderer/clipboard-actions', () => ({
   duplicateSelected: vi.fn(),
   deleteSelected: vi.fn(),
 }))
-vi.mock('../src/renderer/slide-actions', () => ({ cutSlideAt: vi.fn(), deleteSlideAt: vi.fn() }))
+vi.mock('../src/renderer/slide-actions', () => ({
+  cutSlideAt: vi.fn(),
+  deleteSlideAt: vi.fn(),
+  deleteSlidesAt: vi.fn(),
+  duplicateSlideAt: vi.fn(),
+}))
 vi.mock('../src/renderer/arrange-actions', () => ({}))
 vi.mock('../src/renderer/show-actions', () => ({ startSlideShow: vi.fn() }))
 
@@ -28,6 +33,7 @@ function makeCtx(over: Record<string, unknown> = {}): ActionCtx {
     slide: { nodes: [] },
     slides: [{}],
     current: 0,
+    slideSelection: [],
     masterItems: null,
     inkTool: 'select',
     viewMode: 'normal',
@@ -195,6 +201,26 @@ describe('Delete/Backspace on the thumbnail pane', () => {
     handleGlobalKeydown(ctx, e)
     expect(e.defaultPrevented).toBe(true)
     expect(slideActions.deleteSlideAt).toHaveBeenCalledWith(ctx, 1)
+  })
+
+  it('deletes the whole thumbnail multi-selection in one call', () => {
+    const ctx = makeCtx({ current: 3, slides: [{}, {}, {}, {}], slideSelection: [1, 3] })
+    const e = plain('Delete')
+    handleGlobalKeydown(ctx, e)
+    expect(e.defaultPrevented).toBe(true)
+    expect(slideActions.deleteSlidesAt).toHaveBeenCalledWith(ctx, [1, 3])
+    expect(slideActions.deleteSlideAt).not.toHaveBeenCalled()
+  })
+
+  it('⌘⇧D duplicates the current slide (PowerPoint for Mac); ⌘D alone does not', () => {
+    const ctx = makeCtx({ current: 1, slides: [{}, {}] })
+    const dup = keydown('D', { shiftKey: true })
+    handleGlobalKeydown(ctx, dup)
+    expect(dup.defaultPrevented).toBe(true)
+    expect(slideActions.duplicateSlideAt).toHaveBeenCalledWith(ctx, 1)
+    vi.clearAllMocks()
+    handleGlobalKeydown(ctx, keydown('d'))
+    expect(slideActions.duplicateSlideAt).not.toHaveBeenCalled()
   })
 
   it('also deletes in the slide sorter view', () => {

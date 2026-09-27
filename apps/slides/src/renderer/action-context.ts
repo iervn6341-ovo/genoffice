@@ -102,6 +102,9 @@ export interface ActionCtx {
   setSlides: Set<RenderSlide[]>
   current: number
   setCurrent: Set<number>
+  /** Thumbnail multi-selection (slide indices, includes current); ≤1 entry = just the current slide */
+  slideSelection: number[]
+  setSlideSelection: Set<number[]>
   /** slides[current] */
   slide: RenderSlide | undefined
   path: string | null

@@ -1150,6 +1150,12 @@ body.vib .slide-list {
   border-color: var(--accent);
 }
 
+/* thumbnail multi-selection (Shift/⌘-click): every member gets the accent frame */
+.thumb.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .thumb-num {
   position: absolute;
   left: 4px;

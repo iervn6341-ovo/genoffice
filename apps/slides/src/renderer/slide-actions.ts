@@ -68,6 +68,23 @@ export async function deleteSlideAt(ctx: ActionCtx, index: number): Promise<void
   }
 }
 
+/** Delete the thumbnail multi-selection as one undo step (PowerPoint: Delete on selected thumbnails) */
+export async function deleteSlidesAt(ctx: ActionCtx, indices: number[]): Promise<void> {
+  if (indices.length >= ctx.slides.length) {
+    ctx.setStatus(t('appStatusKeepOneSlide'))
+    return
+  }
+  const r = await window.slidesApi.deleteSlides(indices)
+  if (!r) return
+  ctx.setSlides(r)
+  // PowerPoint lands on the slide that took the first deleted one's place
+  ctx.setCurrent(Math.min(Math.min(...indices), r.length - 1))
+  ctx.setSlideSelection([])
+  ctx.setSelectedIds([])
+  ctx.setEditing(null)
+  ctx.setDirty(true)
+}
+
 export async function cutSlideAt(ctx: ActionCtx, index: number): Promise<void> {
   if (ctx.slides.length <= 1) {
     ctx.setStatus(t('appStatusKeepOneSlide'))

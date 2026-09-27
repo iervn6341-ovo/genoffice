@@ -2846,6 +2846,22 @@ export function registerSlidesIpc(): void {
     return r ? buildAllRenderSlides(session.opened, session.fitWidthPx) : null
   })
 
+  ipcMain.handle('slides:delete-slides', (e, slideIndices: number[]) => {
+    const session = sessions.get(e.sender.id)
+    if (!session || !Array.isArray(slideIndices)) return null
+    const count = session.opened.deck.slides.length
+    // distinct, in range, highest first so earlier deletions don't shift later indices
+    const indices = [...new Set(slideIndices)]
+      .filter((i) => Number.isInteger(i) && i >= 0 && i < count)
+      .sort((a, b) => b - a)
+    // a deck always keeps one slide (same rule as deleting a single one)
+    if (indices.length === 0 || indices.length >= count) return null
+    const r = sessionTxn(session, {
+      ops: indices.map((i) => ({ op: 'deleteSlide' as const, target: { slide: i } })),
+    })
+    return r ? buildAllRenderSlides(session.opened, session.fitWidthPx) : null
+  })
+
   ipcMain.handle('slides:edit-table-cell', (e, op: EditTableCellOp) => {
     const session = sessions.get(e.sender.id)
     if (!session) return null

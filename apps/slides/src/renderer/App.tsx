@@ -362,6 +362,12 @@ export function App() {
   /** Theme body default font (fallback for the font box when the selection has no text element) */
   const [defaultFont, setDefaultFont] = useState<string | null>(null)
   const [current, setCurrent] = useState(0)
+  /// Thumbnail multi-selection (PowerPoint: Shift-click range, ⌘-click toggle); holds
+  /// the current slide too, and ≤1 entry means just the current slide.
+  const [slideSelection, setSlideSelection] = useState<number[]>([])
+  const slideAnchorRef = useRef(0)
+  // indices go stale when slides are added, removed or reordered
+  useEffect(() => setSlideSelection([]), [slides.length])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   /** Group being edited from inside (double-click to enter, click outside/Esc to exit); the selection may contain its children */
   const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null)
@@ -2910,6 +2916,8 @@ export function App() {
     setSlides,
     current,
     setCurrent,
+    slideSelection,
+    setSlideSelection,
     slide,
     path,
     setPath,
@@ -3583,10 +3591,39 @@ export function App() {
                           const thumbItem = (s: RenderSlide, i: number) => (
                             <div
                               key={i}
-                              className={`thumb ${i === current ? 'active' : ''} ${s.hidden ? 'thumb-hidden' : ''}${thumbDragCls(i)}`}
+                              className={`thumb ${i === current ? 'active' : ''} ${s.hidden ? 'thumb-hidden' : ''}${slideSelection.length > 1 && slideSelection.includes(i) ? ' selected' : ''}${thumbDragCls(i)}`}
                               data-tip={s.hidden ? t('appThumbHiddenTitle') : undefined}
                               {...thumbDragProps(i)}
-                              onClick={() => {
+                              onClick={(e) => {
+                                if (e.shiftKey) {
+                                  // range from the last plain-clicked thumbnail
+                                  const a = Math.min(
+                                    slideSelection.length > 0 ? slideAnchorRef.current : current,
+                                    slides.length - 1,
+                                  )
+                                  const [lo, hi] = a < i ? [a, i] : [i, a]
+                                  setSlideSelection(
+                                    Array.from({ length: hi - lo + 1 }, (_, k) => lo + k),
+                                  )
+                                } else if (e.metaKey || e.ctrlKey) {
+                                  const base =
+                                    slideSelection.length > 0 ? slideSelection : [current]
+                                  const next = base.includes(i)
+                                    ? base.filter((x) => x !== i)
+                                    : [...base, i].sort((x, y) => x - y)
+                                  // the last selected thumbnail can't be toggled off
+                                  if (next.length === 0) return
+                                  setSlideSelection(next)
+                                  if (!next.includes(i)) {
+                                    setCurrent(next[next.length - 1]!)
+                                    setSelectedIds([])
+                                    setEditing(null)
+                                    return
+                                  }
+                                } else {
+                                  slideAnchorRef.current = i
+                                  setSlideSelection([i])
+                                }
                                 setCurrent(i)
                                 setSelectedIds([])
                                 setEditing(null)

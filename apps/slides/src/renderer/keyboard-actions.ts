@@ -266,7 +266,8 @@ export function handleGlobalKeydown(
       (e.key === 'Delete' || e.key === 'Backspace')
     ) {
       e.preventDefault()
-      void slideActions.deleteSlideAt(ctx, ctx.current)
+      if (ctx.slideSelection.length > 1) void slideActions.deleteSlidesAt(ctx, ctx.slideSelection)
+      else void slideActions.deleteSlideAt(ctx, ctx.current)
       return
     }
     // ⌘C/⌘X act on the current slide (thumbnail-pane behavior)
@@ -276,6 +277,18 @@ export function handleGlobalKeydown(
     } else if (mod && !e.altKey && !e.shiftKey && (e.key === 'x' || e.key === 'X')) {
       e.preventDefault()
       void slideActions.cutSlideAt(ctx, ctx.current)
+    } else if (
+      mod &&
+      !e.altKey &&
+      e.shiftKey &&
+      !ctx.masterItems &&
+      ctx.slides.length > 0 &&
+      (e.key === 'd' || e.key === 'D')
+    ) {
+      // ⌘⇧D duplicates the current slide (PowerPoint for Mac, observed:
+      // thumbnail selected → ⌘⇧D adds a copy after it; ⌘D does not)
+      e.preventDefault()
+      void slideActions.duplicateSlideAt(ctx, ctx.current)
     }
     return
   }

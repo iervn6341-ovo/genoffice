@@ -1396,6 +1396,8 @@ export interface SlidesApi {
   clipboardProbe: () => Promise<boolean>
   /** Delete a slide (refused when only one page remains); returns the full RenderSlide array */
   deleteSlide: (slideIndex: number) => Promise<RenderSlide[] | null>
+  /** Delete several slides as one undo step (thumbnail multi-selection) */
+  deleteSlides: (slideIndices: number[]) => Promise<RenderSlide[] | null>
   /** Bring element to front/back or move one layer forward/backward */
   reorderElement: (op: ReorderElementOp) => Promise<RenderSlide | null>
   /** Table cell text edit */

@@ -85,7 +85,7 @@ Office-parity details already probed, and where state can be read.
   | Service | Hook |
   |---|---|
   | Docs | `window.__aidocs.editor` (TipTap/ProseMirror): `state.doc`, `state.selection`, `storage.*`. |
-  | Sheets | `window.__genofficeDebug.univerAPI` (Univer facade). Only present when `GENOFFICE_DEBUG_HOOKS=1` (set by the helpers). |
+  | Sheets | `window.__genofficeDebug.univerAPI` (Univer facade). Only present when `GENOFFICE_DEBUG_HOOKS=1`; the helpers do NOT set it — each Sheets spec sets `process.env.GENOFFICE_DEBUG_HOOKS = '1'` at the top before `launchShell`. |
   | Slides / PDF / Markdown / HTML | DOM plus the saved file. |
 
 - **Save dialogs.** Stub them from the main process:
@@ -112,6 +112,10 @@ Check these before filing a bug.
 | ⌘⇧Z, ⌘⇧S or another menu shortcut does nothing in Playwright | It is a native menu accelerator, which Playwright keyboard events never reach | Click the equivalent toolbar/QAT button (same code path) or call the menu item |
 | Focus/typing specs fail only in some runs | The screen is locked, or the user is active in another app (macOS won't let a background app take key focus) | Check the lock state (`CGSessionCopyCurrentDictionary`) and the frontmost app, then rerun while idle |
 | One unit test times out only in the full `npm test` | Load (e.g. the password-hash dialog test) | Rerun the file alone; report it only if it fails alone |
+| Shift/⌘-click does nothing in a spec | Playwright's `click({ modifiers: [...] })` delivers `shiftKey: false` in this Electron setup (verified with a DOM listener) | Hold the key: `keyboard.down('Shift')` → `mouse.click()` → `keyboard.up('Shift')` |
+| A reopened xlsx cell reads as `"$1,200.00"` (string) through `getValue()` | Streamed (lazy) workbooks store the display text in the Univer cell; the formula bar, formulas and the saved file still use the number | Check the formula bar, a dependent formula, or the saved `<v>` — not `getValue()` |
+| Slides ⌘⇧S / ⌘S, Markdown ⌘S do nothing | Native menu accelerators; macOS has no ribbon File tab in Slides | Click the menu item from the main process: `app.evaluate(({ Menu, BrowserWindow }) => { /* find the item in Menu.getApplicationMenu() by label */ item.click(undefined, BrowserWindow.getAllWindows()[0]) })` |
+| A pptx "slide N" check fails after reorder/undo | `ppt/slides/slideN.xml` part names are not the slide order | Read the order from `ppt/presentation.xml` `<p:sldIdLst>` |
 | `apps/sheets/tests/xlsx-sidecar-cancel.test.ts` fails | Node 26 locally; CI uses Node 22 | Pre-existing, ignore |
 | html2docx tests fail | They need Chromium | Set `CHROME_PATH="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"` |
 
