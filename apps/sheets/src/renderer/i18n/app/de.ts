@@ -664,6 +664,8 @@ export const de = {
   appIndexing: '{name} wird indiziert: {rows} Zeilen bereit.',
   appStreamingRows: '{name} wird gestreamt: {rows} Zeilen verfügbar.',
   appLoadRangeFailed: 'Der sichtbare Bereich kann nicht geladen werden.',
+  appCircularRefs: 'Zirkelbezüge: {cell}',
+  appCircularRefsOther: 'Zirkelbezüge',
   appFullyLoaded:
     'Arbeitsmappe vollständig geladen — Formeln werden live neu berechnet, Zeilen/Spalten bearbeitbar.',
   appRangeMustBeVector:

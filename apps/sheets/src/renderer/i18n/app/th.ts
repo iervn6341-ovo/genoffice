@@ -589,6 +589,8 @@ export const th = {
   appIndexing: 'กำลังทำดัชนี {name}: พร้อมแล้ว {rows} แถว',
   appStreamingRows: 'กำลังโหลด {name} แบบสตรีม: ใช้ได้ {rows} แถว',
   appLoadRangeFailed: 'โหลดช่วงที่มองเห็นไม่ได้',
+  appCircularRefs: 'การอ้างอิงแบบวงกลม: {cell}',
+  appCircularRefsOther: 'การอ้างอิงแบบวงกลม',
   appFullyLoaded: 'เวิร์กบุ๊กโหลดเต็มแล้ว — สูตรคำนวณใหม่แบบสด แก้ไขแถว/คอลัมน์ได้',
   appRangeMustBeVector: '{range} ต้องเป็นเซลล์แถวเดียวหรือคอลัมน์เดียว',
   appRangeTooManyCells: '{range} ครอบคลุมเกิน {max} เซลล์',

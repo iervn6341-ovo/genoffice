@@ -655,6 +655,8 @@ export const es = {
   appIndexing: 'Indexando {name}: {rows} filas listas.',
   appStreamingRows: 'Cargando {name} por streaming: {rows} filas disponibles.',
   appLoadRangeFailed: 'No se puede cargar el rango visible.',
+  appCircularRefs: 'Referencias circulares: {cell}',
+  appCircularRefsOther: 'Referencias circulares',
   appFullyLoaded:
     'Libro completamente cargado — las fórmulas se recalculan en vivo y las filas/columnas son editables.',
   appRangeMustBeVector: '{range} debe ser una sola fila o una sola columna de celdas.',

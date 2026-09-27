@@ -602,6 +602,8 @@ export const en = {
   appStreamingRows: 'Streaming {name}: {rows} rows available.',
   appLoadRangeFailed: 'Unable to load the visible range.',
   appFullyLoaded: 'Workbook fully loaded — formulas recalculate live, rows/columns editable.',
+  appCircularRefs: 'Circular References: {cell}',
+  appCircularRefsOther: 'Circular References',
   appRangeMustBeVector: '{range} must be a single row or a single column of cells.',
   appRangeTooManyCells: '{range} covers more than {max} cells.',
   appCopyLoadingRange: 'Loading {range} for copy…',

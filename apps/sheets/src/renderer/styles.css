@@ -1583,6 +1583,14 @@ button.check-item:hover {
   text-overflow: ellipsis;
 }
 
+/* Excel's "Circular References: C3" — a standing notice, not a transient message */
+.status-circular {
+  flex-shrink: 0;
+  margin-left: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .status-right {
   display: flex;
   align-items: center;

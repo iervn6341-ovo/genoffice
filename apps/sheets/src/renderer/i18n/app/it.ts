@@ -652,6 +652,8 @@ export const it = {
   appIndexing: 'Indicizzazione di {name}: {rows} righe pronte.',
   appStreamingRows: 'Caricamento in streaming di {name}: {rows} righe disponibili.',
   appLoadRangeFailed: "Impossibile caricare l'intervallo visibile.",
+  appCircularRefs: 'Riferimenti circolari: {cell}',
+  appCircularRefsOther: 'Riferimenti circolari',
   appFullyLoaded:
     'Cartella di lavoro completamente caricata — le formule si ricalcolano in tempo reale, righe/colonne modificabili.',
   appRangeMustBeVector: '{range} deve essere una singola riga o una singola colonna di celle.',

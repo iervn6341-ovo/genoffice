@@ -221,6 +221,9 @@ interface ExcelShellProps {
   readonly onIsCellEditing: () => boolean
   /// Left side of the status bar (ready / streaming / AI progress messages).
   readonly statusMessage: string
+  /// Excel's "Circular References: C3" status-bar indicator: the cycle cell on the
+  /// active sheet, '' for a cycle on another sheet, null when there is none.
+  readonly circularReference?: string | null
   /// Zoom of the active sheet in percent, echoed by the status-bar slider.
   readonly zoomPercent: number
   /// True when the edit journal has unsaved changes (enables the QAT Save).
@@ -384,6 +387,7 @@ export function ExcelShell({
   onCommand,
   onIsCellEditing,
   statusMessage,
+  circularReference = null,
   zoomPercent,
   canSave,
   onSave,
@@ -802,6 +806,13 @@ export function ExcelShell({
           <footer className="status-bar">
             <div className="status-left">
               <span className="status-msg">{statusMessage}</span>
+              {circularReference != null && (
+                <span className="status-circular">
+                  {circularReference
+                    ? t('appCircularRefs', { cell: circularReference })
+                    : t('appCircularRefsOther')}
+                </span>
+              )}
             </div>
             <div className="status-right">
               <button

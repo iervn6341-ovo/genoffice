@@ -618,6 +618,8 @@ export const ms = {
   appIndexing: 'Mengindeks {name}: {rows} baris sedia.',
   appStreamingRows: 'Menstrim {name}: {rows} baris tersedia.',
   appLoadRangeFailed: 'Tidak dapat memuatkan julat yang kelihatan.',
+  appCircularRefs: 'Rujukan Membulat: {cell}',
+  appCircularRefsOther: 'Rujukan Membulat',
   appFullyLoaded:
     'Buku kerja dimuatkan sepenuhnya — formula dikira semula secara langsung, baris/lajur boleh diedit.',
   appRangeMustBeVector: '{range} mesti satu baris atau satu lajur sel.',

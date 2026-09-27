@@ -634,6 +634,8 @@ export const ru = {
   appIndexing: 'Индексирование {name}: готово строк — {rows}.',
   appStreamingRows: 'Потоковая загрузка {name}: доступно строк — {rows}.',
   appLoadRangeFailed: 'Не удаётся загрузить видимый диапазон.',
+  appCircularRefs: 'Циклические ссылки: {cell}',
+  appCircularRefsOther: 'Циклические ссылки',
   appFullyLoaded:
     'Книга полностью загружена — формулы пересчитываются вживую, строки и столбцы доступны для редактирования.',
   appRangeMustBeVector: '{range} должен быть одной строкой или одним столбцом ячеек.',

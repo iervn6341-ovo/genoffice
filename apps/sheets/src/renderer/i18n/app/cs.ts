@@ -621,6 +621,8 @@ export const cs = {
   appIndexing: 'Indexuje se {name}: {rows} řádků připraveno.',
   appStreamingRows: 'Načítá se {name}: {rows} řádků k dispozici.',
   appLoadRangeFailed: 'Nelze načíst viditelnou oblast.',
+  appCircularRefs: 'Cyklické odkazy: {cell}',
+  appCircularRefsOther: 'Cyklické odkazy',
   appFullyLoaded: 'Sešit plně načten — vzorce se přepočítávají živě, řádky/sloupce lze upravovat.',
   appRangeMustBeVector: '{range} musí být jediný řádek nebo jediný sloupec buněk.',
   appRangeTooManyCells: '{range} pokrývá více než {max} buněk.',

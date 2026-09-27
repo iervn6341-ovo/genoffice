@@ -616,6 +616,8 @@ export const id = {
   appIndexing: 'Mengindeks {name}: {rows} baris siap.',
   appStreamingRows: 'Memuat {name} secara streaming: {rows} baris tersedia.',
   appLoadRangeFailed: 'Tidak dapat memuat rentang yang terlihat.',
+  appCircularRefs: 'Referensi Melingkar: {cell}',
+  appCircularRefsOther: 'Referensi Melingkar',
   appFullyLoaded:
     'Buku kerja termuat penuh — rumus dihitung ulang secara langsung, baris/kolom dapat diedit.',
   appRangeMustBeVector: '{range} harus berupa satu baris atau satu kolom sel.',

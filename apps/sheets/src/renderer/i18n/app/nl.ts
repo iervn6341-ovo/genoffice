@@ -651,6 +651,8 @@ export const nl = {
   appIndexing: '{name} wordt geïndexeerd: {rows} rijen gereed.',
   appStreamingRows: '{name} wordt streamend geladen: {rows} rijen beschikbaar.',
   appLoadRangeFailed: 'Kan het zichtbare bereik niet laden.',
+  appCircularRefs: 'Kringverwijzingen: {cell}',
+  appCircularRefsOther: 'Kringverwijzingen',
   appFullyLoaded:
     'Werkmap volledig geladen — formules worden live opnieuw berekend, rijen/kolommen bewerkbaar.',
   appRangeMustBeVector: '{range} moet één rij of één kolom cellen zijn.',

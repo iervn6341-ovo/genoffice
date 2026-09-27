@@ -380,6 +380,10 @@ import { getLang, t, aiLangDirective } from './i18n/locale'
 import { planStillMatches } from './lazy-plan'
 import { lastSurvivingScreenLine, netAxisDelta, screenToFile } from './view-transform'
 import { selectionFormatEquals, toSelectionFormat, type SelectionFormat } from './selection-format'
+import { circularCells, formulaDependencyTrees, type FormulaCell } from './circular-refs'
+
+/** formula count above which the circular-reference indicator is not recomputed */
+const CIRCULAR_SCAN_LIMIT = 20_000
 import { ExcelShell } from './ExcelShell'
 import { RecoveryDialog } from './RecoveryDialog'
 import { ToastHost } from './toast'
@@ -593,6 +597,21 @@ export function App(): React.JSX.Element {
   const [fullLoadPrompt, setFullLoadPrompt] = useState<'ask' | 'tooLarge' | null>(null)
   const fullLoadRunning = useRef(false)
   const [message, setMessage] = useState(t('appReadyInitial'))
+  /// Excel's status-bar "Circular References: C3": a cycle cell on the active sheet
+  /// ('' = a cycle elsewhere in the workbook, null = none). The address, not text —
+  /// the label is translated at render.
+  const [circularRef, setCircularRef] = useState<string | null>(null)
+  const circularTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Recalcs and value edits come in bursts; scan once they settle.
+  function scheduleCircularCheck(): void {
+    if (circularTimerRef.current !== undefined) clearTimeout(circularTimerRef.current)
+    circularTimerRef.current = setTimeout(() => {
+      circularTimerRef.current = undefined
+      const runtime = univerRef.current
+      if (runtime) refreshCircularReference(runtime)
+    }, 400)
+  }
+  useEffect(() => () => clearTimeout(circularTimerRef.current), [])
   /// Zoom of the active sheet in percent, echoed by the status-bar slider.
   const [zoomPercent, setZoomPercent] = useState(100)
   const [selectionFormat, setSelectionFormat] = useState<SelectionFormat | null>(null)
@@ -685,6 +704,12 @@ export function App(): React.JSX.Element {
   const mcpSheetHandlersRef = useRef<McpSheetHandlers | null>(null)
   const closeSaveRef = useRef<() => Promise<void>>(() => Promise.resolve())
   const refreshSelectionFormatRef = useRef<() => void>(() => {})
+  /// Streamed cells (values and their styles) land without the mutations the
+  /// ribbon echo listens for, so the Number Format box could keep a stale
+  /// "General" for the selected cell until the selection moved. Re-read the
+  /// echo whenever a stream step settles.
+  const afterStream = (loading: Promise<void>): Promise<void> =>
+    loading.finally(() => refreshSelectionFormatRef.current())
   const chartEditRef = useRef<(chartPath: string, edit: ChartEditData) => void>(() => {})
   const chartVectorRef = useRef<(chartPath: string, range: string) => Promise<ChartVectorRead>>(
     () => Promise.reject(new Error('Workbook not ready.')),
@@ -799,7 +824,7 @@ export function App(): React.JSX.Element {
               if (state.flags.preloadComplete) return true
               const runtime = univerRef.current
               if (runtime && !state.flags.preloadRunning) {
-                void preloadEntireWorkbook(runtime, lazyWorkbookRef, setMessage)
+                void afterStream(preloadEntireWorkbook(runtime, lazyWorkbookRef, setMessage))
               }
               return false
             },
@@ -1780,15 +1805,17 @@ export function App(): React.JSX.Element {
         // The event carries the true post-scroll position; getVisibleRange
         // inside loadVisibleRange lags a frame.
         const eventStart = params as { sheetViewStartRow?: number; sheetViewStartColumn?: number }
-        void loadVisibleRange(
-          runtime,
-          lazyWorkbookRef,
-          worksheet,
-          setMessage,
-          typeof eventStart.sheetViewStartRow === 'number' &&
-            typeof eventStart.sheetViewStartColumn === 'number'
-            ? { row: eventStart.sheetViewStartRow, column: eventStart.sheetViewStartColumn }
-            : undefined,
+        void afterStream(
+          loadVisibleRange(
+            runtime,
+            lazyWorkbookRef,
+            worksheet,
+            setMessage,
+            typeof eventStart.sheetViewStartRow === 'number' &&
+              typeof eventStart.sheetViewStartColumn === 'number'
+              ? { row: eventStart.sheetViewStartRow, column: eventStart.sheetViewStartColumn }
+              : undefined,
+          ),
         )
         let visible: ReturnType<typeof worksheet.getVisibleRange>
         try {
@@ -1841,7 +1868,7 @@ export function App(): React.JSX.Element {
       runtime.univerAPI.Event.ActiveSheetChanged,
       ({ activeSheet }) => {
         setAiSelectionAskAnchor(null)
-        void loadVisibleRange(runtime, lazyWorkbookRef, activeSheet, setMessage)
+        void afterStream(loadVisibleRange(runtime, lazyWorkbookRef, activeSheet, setMessage))
         // formula view is per-sheet (sheetView/@showFormulas)
         applyShowFormulasView(runtime, lazyWorkbookRef.current, activeSheet.getSheetId())
         // zoom is per-sheet state; echo the new sheet's level
@@ -1922,6 +1949,7 @@ export function App(): React.JSX.Element {
     const calcEndDisposable = runtime.univerAPI.getFormula().calculationEnd((executed) => {
       if (executed === FormulaExecutedStateType.SUCCESS) {
         flushPendingChartDataSync(visualSyncContext())
+        scheduleCircularCheck()
       }
     })
     const journalDisposable = runtime.univerAPI.addEvent(
@@ -2005,7 +2033,8 @@ export function App(): React.JSX.Element {
                   setTimeout(() => {
                     if (lazyWorkbookRef.current !== state) return
                     const copy = runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(id)
-                    if (copy) void loadVisibleRange(runtime, lazyWorkbookRef, copy, setMessage)
+                    if (copy)
+                      void afterStream(loadVisibleRange(runtime, lazyWorkbookRef, copy, setMessage))
                   }, 0)
                 }
                 pendingCopySource = undefined
@@ -2326,7 +2355,7 @@ export function App(): React.JSX.Element {
           state.recalc.formulaCells.clear()
           const activeSheet = runtime.univerAPI.getActiveWorkbook()?.getActiveSheet()
           if (activeSheet?.getSheetId() === params.subUnitId) {
-            void loadVisibleRange(runtime, lazyWorkbookRef, activeSheet, setMessage)
+            void afterStream(loadVisibleRange(runtime, lazyWorkbookRef, activeSheet, setMessage))
           }
           setPendingEdits(journalSize(state.editJournal))
           return
@@ -2795,6 +2824,9 @@ export function App(): React.JSX.Element {
         ) {
           refreshSelectionFormatRef.current()
         }
+        // Deleting a formula can end a cycle without any recalculation (no
+        // calculationEnd), so value edits re-check the indicator too.
+        if (id === SET_RANGE_VALUES_MUTATION) scheduleCircularCheck()
       },
     )
     const clickDisposable = runtime.univerAPI.addEvent(
@@ -3704,6 +3736,50 @@ export function App(): React.JSX.Element {
     setSelectionFormat((previous) => (selectionFormatEquals(previous, next) ? previous : next))
   }
 
+  /// Passive: walks the loaded cell matrices for formula text and builds the graph
+  /// itself. (Univer's getAllDependencyTrees dispatches an engine mutation, which
+  /// raced workbook open and sheet focus when run after every recalc.)
+  function refreshCircularReference(runtime: UniverRuntime): void {
+    try {
+      const workbook = runtime.univerAPI.getActiveWorkbook()
+      if (!workbook) return
+      const cells: FormulaCell[] = []
+      const names = new Map<string, string>()
+      for (const fsheet of workbook.getSheets()) {
+        const sheetId = fsheet.getSheetId()
+        names.set(fsheet.getSheetName(), sheetId)
+        let overLimit = false
+        fsheet
+          .getSheet()
+          .getCellMatrix()
+          .forValue((row, column, cell) => {
+            if (overLimit) return false
+            const formula =
+              typeof cell?.f === 'string' && cell.f
+                ? cell.f
+                : cell?.si
+                  ? fsheet.getRange(row, column).getFormula()
+                  : ''
+            if (!formula) return
+            cells.push({ sheetId, row, column, formula })
+            if (cells.length > CIRCULAR_SCAN_LIMIT) overLimit = true
+          })
+        // past this size the indicator is left as it was
+        if (overLimit) return
+      }
+      const found = circularCells(formulaDependencyTrees(cells, names))
+      if (found.length === 0) {
+        setCircularRef(null)
+        return
+      }
+      const activeId = workbook.getActiveSheet()?.getSheetId()
+      const here = found.find((c) => c.subUnitId === activeId)
+      setCircularRef(here ? `${columnLetter(here.column)}${here.row + 1}` : '')
+    } catch {
+      // A disposing workbook can race the read; keep the last indicator.
+    }
+  }
+
   function selectionLinkTarget(
     range: NonNullable<ReturnType<ActiveWorkbook['getActiveRange']>>,
   ): string | null {
@@ -3979,17 +4055,19 @@ export function App(): React.JSX.Element {
         }
         // getVisibleRange lags the jump by a frame (same as name-box goto) —
         // anchor the first stream at the restored cell, not the stale origin.
-        void loadVisibleRange(
-          runtime,
-          lazyWorkbookRef,
-          restoredSheet ?? worksheet,
-          setMessage,
-          restore && restoredSheet
-            ? { row: restore.viewRow, column: restore.viewColumn }
-            : undefined,
+        void afterStream(
+          loadVisibleRange(
+            runtime,
+            lazyWorkbookRef,
+            restoredSheet ?? worksheet,
+            setMessage,
+            restore && restoredSheet
+              ? { row: restore.viewRow, column: restore.viewColumn }
+              : undefined,
+          ),
         )
         if (state.formulaMode) {
-          void preloadEntireWorkbook(runtime, lazyWorkbookRef, setMessage)
+          void afterStream(preloadEntireWorkbook(runtime, lazyWorkbookRef, setMessage))
         } else {
           // Deferred so first paint and initial streaming win the sidecar.
           setTimeout(() => {
@@ -4370,7 +4448,9 @@ export function App(): React.JSX.Element {
                     if (!runtime || fullLoadRunning.current) return
                     fullLoadRunning.current = true
                     setMessage(t('appFullLoadRunning'))
-                    void preloadEntireWorkbook(runtime, lazyWorkbookRef, setMessage).finally(() => {
+                    void afterStream(
+                      preloadEntireWorkbook(runtime, lazyWorkbookRef, setMessage),
+                    ).finally(() => {
                       fullLoadRunning.current = false
                     })
                   }}
@@ -4414,6 +4494,7 @@ export function App(): React.JSX.Element {
         }}
         selectionFormat={selectionFormat}
         statusMessage={message}
+        circularReference={circularRef}
         aiBusy={aiBusy}
         chat={chat}
         historicChat={historicChat}

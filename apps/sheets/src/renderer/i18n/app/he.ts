@@ -567,6 +567,8 @@ export const he = {
   appIndexing: 'יוצר אינדקס עבור {name}: {rows} שורות מוכנות.',
   appStreamingRows: 'מזרים את {name}: {rows} שורות זמינות.',
   appLoadRangeFailed: 'לא ניתן לטעון את הטווח הגלוי.',
+  appCircularRefs: 'הפניות מעגליות: {cell}',
+  appCircularRefsOther: 'הפניות מעגליות',
   appFullyLoaded:
     'חוברת העבודה נטענה במלואה — נוסחאות מחושבות מחדש באופן חי, שורות/עמודות ניתנות לעריכה.',
   appRangeMustBeVector: '{range} חייב להיות שורה בודדת או עמודה בודדת של תאים.',

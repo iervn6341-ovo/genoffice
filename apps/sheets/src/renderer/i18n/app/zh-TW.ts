@@ -539,6 +539,8 @@ export const zhTW = {
   appStreamingRows: '正在串流載入 {name}：{rows} 列可用。',
   appLoadRangeFailed: '無法載入可見範圍。',
   appFullyLoaded: '活頁簿已完整載入——公式即時重新計算，列欄可編輯。',
+  appCircularRefs: '循環參照: {cell}',
+  appCircularRefsOther: '循環參照',
   appRangeMustBeVector: '{range} 必須是單列或單欄的儲存格。',
   appRangeTooManyCells: '{range} 超過 {max} 個儲存格。',
   appCopyLoadingRange: '正在為複製載入 {range}…',

@@ -587,6 +587,8 @@ export const ar = {
   appIndexing: 'جارٍ فهرسة {name}: {rows} صفًا جاهزًا.',
   appStreamingRows: 'جارٍ تحميل {name} بالبث: {rows} صفًا متاحًا.',
   appLoadRangeFailed: 'يتعذر تحميل النطاق المرئي.',
+  appCircularRefs: 'المراجع الدائرية: {cell}',
+  appCircularRefsOther: 'المراجع الدائرية',
   appFullyLoaded:
     'حُمّل المصنف بالكامل — تُعاد الصيغ للحساب مباشرة والصفوف والأعمدة قابلة للتحرير.',
   appRangeMustBeVector: 'يجب أن يكون {range} صفًا واحدًا أو عمودًا واحدًا من الخلايا.',

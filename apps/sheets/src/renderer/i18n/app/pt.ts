@@ -655,6 +655,8 @@ export const pt = {
   appIndexing: 'Indexando {name}: {rows} linhas prontas.',
   appStreamingRows: 'Carregando {name} por streaming: {rows} linhas disponíveis.',
   appLoadRangeFailed: 'Não foi possível carregar o intervalo visível.',
+  appCircularRefs: 'Referências Circulares: {cell}',
+  appCircularRefsOther: 'Referências Circulares',
   appFullyLoaded:
     'Pasta de trabalho totalmente carregada — fórmulas recalculam ao vivo, linhas/colunas editáveis.',
   appRangeMustBeVector: '{range} deve ser uma única linha ou uma única coluna de células.',

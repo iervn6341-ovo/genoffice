@@ -626,6 +626,8 @@ export const ko = {
   appIndexing: '{name}의 인덱스를 만드는 중: {rows}행 준비됨.',
   appStreamingRows: '{name}을(를) 스트리밍하는 중: {rows}행 사용 가능.',
   appLoadRangeFailed: '표시 범위를 로드할 수 없습니다.',
+  appCircularRefs: '순환 참조: {cell}',
+  appCircularRefsOther: '순환 참조',
   appFullyLoaded:
     '통합 문서를 모두 로드했습니다 — 수식이 실시간으로 다시 계산되고 행/열을 편집할 수 있습니다.',
   appRangeMustBeVector: '{range}은(는) 단일 행 또는 단일 열의 셀이어야 합니다.',

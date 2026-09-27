@@ -653,6 +653,8 @@ export const ja = {
   appStreamingRows: '{name} をストリーミング読み込み中：{rows} 行が利用可能です。',
   appLoadRangeFailed: '表示範囲を読み込めません。',
   appFullyLoaded: 'ブックを完全に読み込みました — 数式はライブで再計算され、行列を編集できます。',
+  appCircularRefs: '循環参照: {cell}',
+  appCircularRefsOther: '循環参照',
   appRangeMustBeVector: '{range} は 1 行または 1 列のセルである必要があります。',
   appRangeTooManyCells: '{range} が {max} 個のセルを超えています。',
   appCopyLoadingRange: 'コピーのため {range} を読み込んでいます…',

@@ -550,6 +550,8 @@ export const zh = {
   appStreamingRows: '正在流式加载 {name}：{rows} 行可用。',
   appLoadRangeFailed: '无法加载可见区域。',
   appFullyLoaded: '工作簿已完整加载——公式实时重算，行列可编辑。',
+  appCircularRefs: '循环引用: {cell}',
+  appCircularRefsOther: '循环引用',
   appRangeMustBeVector: '{range} 必须是单行或单列的单元格。',
   appRangeTooManyCells: '{range} 超过 {max} 个单元格。',
   appCopyLoadingRange: '正在为复制加载 {range}…',

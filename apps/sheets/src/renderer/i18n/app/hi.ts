@@ -616,6 +616,8 @@ export const hi = {
   appIndexing: '{name} अनुक्रमित हो रहा है: {rows} पंक्तियाँ तैयार।',
   appStreamingRows: '{name} स्ट्रीम हो रहा है: {rows} पंक्तियाँ उपलब्ध।',
   appLoadRangeFailed: 'दृश्यमान श्रेणी लोड नहीं की जा सकी।',
+  appCircularRefs: 'वृत्तीय संदर्भ: {cell}',
+  appCircularRefsOther: 'वृत्तीय संदर्भ',
   appFullyLoaded:
     'कार्यपुस्तिका पूरी तरह लोड हुई — सूत्र लाइव पुनर्गणित होते हैं, पंक्तियाँ/स्तंभ संपादन-योग्य।',
   appRangeMustBeVector: '{range} सेलों की एक ही पंक्ति या एक ही स्तंभ होना चाहिए।',

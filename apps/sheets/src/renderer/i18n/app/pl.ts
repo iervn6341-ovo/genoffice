@@ -642,6 +642,8 @@ export const pl = {
   appIndexing: 'Indeksowanie {name}: {rows} wierszy gotowych.',
   appStreamingRows: 'Ładowanie strumieniowe {name}: dostępnych {rows} wierszy.',
   appLoadRangeFailed: 'Nie można załadować widocznego zakresu.',
+  appCircularRefs: 'Odwołania cykliczne: {cell}',
+  appCircularRefsOther: 'Odwołania cykliczne',
   appFullyLoaded:
     'Skoroszyt w pełni załadowany — formuły przeliczają się na żywo, wiersze/kolumny można edytować.',
   appRangeMustBeVector: '{range} musi być pojedynczym wierszem lub pojedynczą kolumną komórek.',
