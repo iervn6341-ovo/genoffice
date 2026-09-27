@@ -246,8 +246,8 @@ test('Tab / Backspace at a paragraph start set and clear the indent like Word', 
     }, out)
     const step = await p.evaluate(
       () =>
-        ((window as unknown as DocsWindow).__aidocs!.editor.storage.tabStops
-          .defaultTabStopTwips as number | null) ?? 720,
+        ((window as unknown as DocsWindow).__aidocs!.editor.storage.tabStops.defaultTabStopTwips as
+          number | null) ?? 720,
     )
     await p.keyboard.type('今天我要來講一個故事')
     await p.keyboard.press('Home')

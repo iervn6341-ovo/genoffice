@@ -274,9 +274,9 @@ test('Insert text: the dialog’s font, bold and italic land in the file', async
     await expect(p.locator('.pdf-page .pdf-textinsert-preview')).toHaveCount(1)
     await save(p, f.pdf)
     const { items } = await readPage(f.pdf)
-    // pdf.js splits the run at word boundaries: read the whole baseline
+    // pdf.js may or may not split the run at the space: read the whole baseline
     const added = items.filter(
-      (i) => Math.abs(i.y - (items.find((j) => j.str === 'Added')?.y ?? -1)) < 1,
+      (i) => Math.abs(i.y - (items.find((j) => j.str.startsWith('Added'))?.y ?? -1)) < 1,
     )
     expect(added.map((i) => i.str).join('')).toBe('Added remark')
     for (const run of added) {
