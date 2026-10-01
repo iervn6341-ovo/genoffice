@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const id = {
+  appNotesDefaultColor: 'Default (ikuti tema)',
+  appStatusEquationPreview:
+    'Persamaan ini memakai pratinjau aslinya. Edit persamaan di PowerPoint.',
   appPhPromptTitle: 'Klik untuk menambahkan judul',
   appPhPromptSubtitle: 'Klik untuk menambahkan subjudul',
   appPhPromptBody: 'Klik untuk menambahkan teks',
@@ -223,13 +226,10 @@ export const id = {
   appRehearseDiscard: 'Jangan Simpan',
   appRehearseSave: 'Simpan',
   appSettingsTitle: 'Pengaturan AI',
-  appSettingsAccount: 'Akun Genspark',
   appSettingsChecking: 'Memeriksa…',
   appSettingsLoggedIn: 'Sudah masuk',
   appSettingsLoggedInEmail: 'Sudah masuk: {email}',
-  appSettingsLoggedOut: 'Belum masuk (fitur AI memerlukan akun Genspark)',
   appSettingsLoginPending: 'Menunggu proses masuk di browser…',
-  appSettingsLogin: 'Masuk ke Genspark',
   appSettingsModel: 'Model',
   appSettingsCancel: 'Batal',
   appSettingsSave: 'Simpan',

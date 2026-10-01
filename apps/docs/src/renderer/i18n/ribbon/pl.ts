@@ -140,7 +140,7 @@ export const pl = {
   ribbonGroupStyles: 'Style',
   ribbonAiTools: 'Narzędzia AI',
   ribbonGroupEditing: 'Edytowanie',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Otwórz asystenta AI',
   ribbonRemoveTableStyleTip: 'Usuń styl tabeli',
   ribbonNoStyle: 'Brak stylu',

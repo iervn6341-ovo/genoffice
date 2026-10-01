@@ -213,20 +213,13 @@ describe('providerRequiresApiKey', () => {
   })
 
   it('is true for every hosted vendor, and for unknown ids', () => {
-    for (const id of [
-      'genspark',
-      'anthropic',
-      'openai',
-      'gemini',
-      'deepseek',
-      'openrouter',
-    ] as const) {
+    for (const id of ['anthropic', 'openai', 'gemini', 'deepseek', 'openrouter'] as const) {
       expect(providerRequiresApiKey(id)).toBe(true)
     }
     expect(providerRequiresApiKey('nonsense' as never)).toBe(true)
   })
 
-  it('agrees with activeProvider: a key-less custom setup is selectable, a key-less vendor is not', () => {
+  it('requires keys for vendor requests without changing the selected provider', () => {
     const settings = defaultAiSettings()
     settings.provider = 'custom'
     settings.providers.custom = {
@@ -239,7 +232,7 @@ describe('providerRequiresApiKey', () => {
 
     settings.provider = 'openai'
     settings.providers.openai = { ...settings.providers.openai, apiKey: '' }
-    expect(activeProvider(settings)).toBe('genspark')
+    expect(activeProvider(settings)).toBe('openai')
   })
 })
 

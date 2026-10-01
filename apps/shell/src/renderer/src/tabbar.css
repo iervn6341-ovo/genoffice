@@ -19,6 +19,13 @@
   z-index: 10;
 }
 
+/* A covering WebContentsView does not remove this renderer's native drag region.
+   Hide the strip itself during a show so it cannot swallow the presenter's mouse events. */
+.tab-bar.tab-bar-covered {
+  display: none;
+  -webkit-app-region: no-drag;
+}
+
 /* While a Home popover is open the strip must deliver presses (drag regions
    swallow them), so outside-press dismissal can see presses on the blank band */
 html.genoffice-popover-open .tab-bar {

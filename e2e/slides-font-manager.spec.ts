@@ -1,5 +1,6 @@
+import JSZip from 'jszip'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { test, expect } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -15,9 +16,18 @@ async function buildRubikFixture(): Promise<string> {
     await mkdtemp(join(tmpdir(), 'genoffice-font-manager-')),
     'font-manager-rubik.pptx',
   )
-  execFileSync('zip', ['-X', '-q', '-r', out, '.'], {
-    cwd: resolve(__dirname, 'assets/font-manager-rubik'),
-  })
+  const base = resolve(__dirname, 'assets/font-manager-rubik')
+  const zip = new JSZip()
+  function walk(dir: string, prefix = ''): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const file = join(dir, entry.name)
+      const key = prefix + entry.name
+      if (entry.isDirectory()) walk(file, key + '/')
+      else zip.file(key, readFileSync(file))
+    }
+  }
+  walk(base)
+  writeFileSync(out, await zip.generateAsync({ type: 'nodebuffer' }))
   return out
 }
 

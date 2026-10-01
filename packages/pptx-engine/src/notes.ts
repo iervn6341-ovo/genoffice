@@ -286,9 +286,23 @@ function ensureNotesMaster(archive: PackageArchive): string | null {
     '</p:notesMaster>'
   setEntry(archive, path, xml)
   addContentTypeOverride(archive, path, NOTES_MASTER_CT)
-  // rels: reuse an existing theme part (valid: multiple parts may point to the same theme)
+  // PowerPoint rejects a notes master sharing the slide master's theme part.
+  // Copy the theme (and its relationships) without changing its effective styling.
   const theme = [...archive.entries.keys()].find((p) => /^ppt\/theme\/theme\d+\.xml$/.test(p))
-  if (theme) appendRelationship(archive, path, THEME_REL, `../${theme.slice(4)}`)
+  if (theme) {
+    let themeNum = 1
+    while (archive.has(`ppt/theme/theme${themeNum}.xml`)) themeNum++
+    const notesTheme = `ppt/theme/theme${themeNum}.xml`
+    setEntry(archive, notesTheme, archive.readText(theme)!)
+    const themeRels = archive.readText(relsPathFor(theme))
+    if (themeRels) setEntry(archive, relsPathFor(notesTheme), themeRels)
+    addContentTypeOverride(
+      archive,
+      notesTheme,
+      'application/vnd.openxmlformats-officedocument.theme+xml',
+    )
+    appendRelationship(archive, path, THEME_REL, `../${notesTheme.slice(4)}`)
+  }
   // Register notesMasterIdLst in presentation.xml
   const presPath = 'ppt/presentation.xml'
   const pres = archive.readText(presPath)

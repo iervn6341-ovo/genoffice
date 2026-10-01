@@ -57,6 +57,7 @@ export async function parseFileToText(filePath: string): Promise<ParsedFile> {
       case 'ppt':
         return { ok: true, kind: 'text', text: await pptToText(await readFile(filePath)) }
       case 'pptx':
+      case 'ppsx':
         return { ok: true, kind: 'text', text: await pptxToText(await readFile(filePath)) }
       case 'xlsx':
       case 'xlsm':

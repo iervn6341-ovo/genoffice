@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
@@ -44,7 +45,7 @@ test.describe('slides Home ribbon layout (PowerPoint order)', () => {
         'Text Box',
         'Arrange',
         'Find',
-        'Genspark AI',
+        'AI',
       ]
       const xs: number[] = []
       for (const label of order) {
@@ -56,7 +57,7 @@ test.describe('slides Home ribbon layout (PowerPoint order)', () => {
       // the AI group hugs the right edge of the ribbon
       const gap = await s.evaluate(() => {
         const ai = Array.from(document.querySelectorAll('.ribbon-body button')).find((b) =>
-          /Genspark AI/.test(b.textContent ?? ''),
+          /AI/.test(b.textContent ?? ''),
         )!
         const group = ai.closest('.ribbon-group') as HTMLElement
         const body = document.querySelector('.ribbon-body') as HTMLElement
@@ -64,7 +65,7 @@ test.describe('slides Home ribbon layout (PowerPoint order)', () => {
       })
       expect(gap).toBeLessThan(500) // 4 AI buttons wide, not stranded mid-ribbon
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
@@ -76,7 +77,7 @@ test.describe('slides Home ribbon layout (PowerPoint order)', () => {
       await s.waitForTimeout(300)
       expect(await leftOf(s, /From Current Slide/)).not.toBeNull()
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
@@ -89,7 +90,7 @@ test.describe('slides Home ribbon layout (PowerPoint order)', () => {
       await expect(rows.nth(1)).toContainText('Reset')
       await expect(rows.nth(2)).toContainText('Section')
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
@@ -103,7 +104,7 @@ test.describe('slides Home ribbon layout (PowerPoint order)', () => {
         await s.evaluate(() => document.querySelector('.slide-text-editor')?.textContent),
       ).toBe('Hi')
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
@@ -122,7 +123,7 @@ test.describe('slides Home ribbon layout (PowerPoint order)', () => {
       await s.waitForTimeout(600)
       expect(await count()).toBe(before + 1)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 })
@@ -161,7 +162,7 @@ test.describe('narrow windows fold groups instead of scrolling', () => {
       await s.mouse.up()
       await expect.poll(count).toBe(before + 1)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
@@ -177,7 +178,7 @@ test.describe('narrow windows fold groups instead of scrolling', () => {
         }
       }
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
@@ -188,18 +189,18 @@ test.describe('narrow windows fold groups instead of scrolling', () => {
       await expect(s.locator('[data-rbgroup="aiTools"] .rb-drop-wrap')).toHaveCount(1)
       expect(await overflow(s)).toBeLessThanOrEqual(1)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
-  test('Genspark AI sits inside the AI Tools group', async () => {
+  test('AI sits inside the AI Tools group', async () => {
     const { s, launched } = await openSlides(2200)
     try {
       const group = s.locator('[data-rbgroup="aiTools"]')
-      await expect(group.locator('button.ai-entry', { hasText: 'Genspark AI' })).toHaveCount(1)
+      await expect(group.locator('button.ai-entry', { hasText: 'AI' })).toHaveCount(1)
       expect(await group.locator('button.ai-entry').count()).toBe(4)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 })
@@ -213,6 +214,6 @@ test('widening the window unfolds the groups again', async () => {
     await expect(s.locator('.rb-slides-col')).toHaveCount(1)
     await expect(s.locator('.ribbon-body button', { hasText: 'Shape Fill' }).first()).toBeVisible()
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

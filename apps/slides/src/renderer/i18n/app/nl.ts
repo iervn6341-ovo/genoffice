@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const nl = {
+  appNotesDefaultColor: 'Standaard (thema volgen)',
+  appStatusEquationPreview:
+    'Deze vergelijking gebruikt het oorspronkelijke voorbeeld. Bewerk haar in PowerPoint.',
   appPhPromptTitle: 'Klik om een titel toe te voegen',
   appPhPromptSubtitle: 'Klik om een ondertitel toe te voegen',
   appPhPromptBody: 'Klik om tekst toe te voegen',
@@ -233,13 +236,10 @@ export const nl = {
   appRehearseDiscard: 'Niet opslaan',
   appRehearseSave: 'Opslaan',
   appSettingsTitle: 'AI-instellingen',
-  appSettingsAccount: 'Genspark-account',
   appSettingsChecking: 'Controleren…',
   appSettingsLoggedIn: 'Aangemeld',
   appSettingsLoggedInEmail: 'Aangemeld: {email}',
-  appSettingsLoggedOut: 'Niet aangemeld (AI-functies vereisen een Genspark-account)',
   appSettingsLoginPending: 'Wachten op aanmelding in de browser…',
-  appSettingsLogin: 'Aanmelden bij Genspark',
   appSettingsModel: 'Model',
   appSettingsCancel: 'Annuleren',
   appSettingsSave: 'Opslaan',

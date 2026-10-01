@@ -154,9 +154,8 @@ beforeEach(() => {
   showMessageBox.mockReset()
   showMessageBox.mockImplementation(() => Promise.resolve({ response: 0 }))
   readFileSyncMock.mockReset()
-  readFileSyncMock.mockImplementation(() => {
-    throw new Error('no app-update.yml')
-  })
+  Object.defineProperty(process, 'resourcesPath', { value: '/res', configurable: true })
+  readFileSyncMock.mockReturnValue('url: https://cdn.example.com/releases/\n')
   setPlatform('darwin')
 })
 
@@ -468,26 +467,17 @@ describe('manual download fallback', () => {
     }
   })
 
-  it('rejects a non-HTTPS baked feed URL', async () => {
-    Object.defineProperty(process, 'resourcesPath', { value: '/res', configurable: true })
-    readFileSyncMock.mockReturnValue('url: http://cdn.example.com/mac\n')
-    const actions = await failTwiceIntoManual(macFiles)
-    actions.onOpenDownload()
-    expect(openExternal).toHaveBeenCalledWith(
-      'https://github.com/genspark-ai/genoffice/releases/latest',
-    )
-  })
-
-  it('falls back to the generic download page when the feed base cannot be read', async () => {
-    // readFileSyncMock throws by default (no app-update.yml)
-    const actions = await failTwiceIntoManual([
-      { url: 'https://attacker.example/GenOffice-0.2.0-arm64.dmg' },
-    ])
-    actions.onOpenDownload()
-    expect(openExternal).toHaveBeenCalledWith(
-      'https://github.com/genspark-ai/genoffice/releases/latest',
-    )
-  })
+  for (const feed of ['url: http://cdn.example.com/mac\n', '']) {
+    it('disables updates without a trusted configured feed: ' + feed, async () => {
+      readFileSyncMock.mockReturnValue(feed)
+      const { initAutoUpdater } = await loadUpdater()
+      initAutoUpdater(() => null)
+      vi.advanceTimersByTime(FIRST_CHECK_DELAY_MS)
+      expect(updaterState.listeners.size).toBe(0)
+      expect(checkForUpdates).not.toHaveBeenCalled()
+      expect(openExternal).not.toHaveBeenCalled()
+    })
+  }
 })
 
 describe('initAutoUpdater (fake update preview)', () => {
@@ -532,7 +522,7 @@ describe('checkForUpdatesNow (r148 manual check)', () => {
     return showMessageBox.mock.calls.at(-1)![0] as never
   }
 
-  it('points installs without a self-update mechanism at the download page', async () => {
+  it('does not offer a download link when no distributor URL is configured', async () => {
     appState.isPackaged = false
     const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater()
     initAutoUpdater(() => null)
@@ -541,10 +531,8 @@ describe('checkForUpdatesNow (r148 manual check)', () => {
     await checkForUpdatesNow()
 
     expect(showMessageBox).toHaveBeenCalledTimes(1)
-    expect(lastDialogOpts().buttons.length).toBe(2)
-    expect(openExternal).toHaveBeenCalledWith(
-      'https://github.com/genspark-ai/genoffice/releases/latest',
-    )
+    expect(lastDialogOpts().buttons.length).toBe(1)
+    expect(openExternal).not.toHaveBeenCalled()
     expect(checkForUpdates).not.toHaveBeenCalled()
   })
 

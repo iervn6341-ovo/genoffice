@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { PNG } from 'pngjs'
 import { launchShell, waitForPageWithUrl, type LaunchedApp } from './helpers'
@@ -110,7 +111,7 @@ async function withDeck<T>(text: string, fn: (s: Page, l: LaunchedApp) => Promis
     return await fn(s, launched)
   } finally {
     // closing with editor tabs open waits on a native dialog: end the process instead
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 }
 
@@ -271,7 +272,7 @@ test.describe('slides: PowerPoint editing conventions', () => {
       // centred: run x is relative to the text area, i.e. the shape minus its left/right insets
       expect(Math.abs(n.run!.x + n.run!.w / 2 - (n.box.w - n.insetX) / 2)).toBeLessThan(3)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 })

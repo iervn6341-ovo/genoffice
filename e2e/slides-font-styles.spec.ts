@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
@@ -64,7 +65,7 @@ const btn = (s: Page, tip: string) => s.locator(`.ribbon-body button[data-tip="$
 const pressed = (s: Page, tip: string) =>
   btn(s, tip).evaluate((b) => b.classList.contains('active'))
 
-const kill = (l: LaunchedApp) => l.app.process().kill('SIGKILL')
+const kill = (l: LaunchedApp) => closeAndSaveVideo(l, 'cleanup')
 
 test.describe('font styles on a selected text box (whole box)', () => {
   test('B / I / U / S toggle on and off, light up, and undo', async () => {
@@ -88,7 +89,7 @@ test.describe('font styles on a selected text box (whole box)', () => {
       await s.keyboard.press('ControlOrMeta+z')
       await expect.poll(async () => (await runs(s))[0]!.bold).toBe(false)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -104,7 +105,7 @@ test.describe('font styles on a selected text box (whole box)', () => {
       await s.keyboard.press('ControlOrMeta+b')
       await expect.poll(async () => (await runs(s))[0]!.bold).toBe(false)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -120,7 +121,7 @@ test.describe('font styles on a selected text box (whole box)', () => {
       await btn(s, 'Subscript').click()
       await expect.poll(async () => (await runs(s))[0]!.baseline).toBe(0)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -148,7 +149,7 @@ test.describe('font styles on a selected text box (whole box)', () => {
       await s.keyboard.press('ControlOrMeta+Shift+<')
       await expect.poll(pt).toBe(32)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -176,7 +177,7 @@ test.describe('font styles on a selected text box (whole box)', () => {
       await swatch.click()
       await expect.poll(async () => (await runs(s))[0]!.color).toBe(want)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })
@@ -213,7 +214,7 @@ test.describe('font styles while typing (selection only, kept after commit)', ()
       expect(k).toMatchObject({ bold: false, italic: false, underline: false, strike: false })
       expect(k.baseline).toBe(0)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -231,7 +232,7 @@ test.describe('font styles while typing (selection only, kept after commit)', ()
       expect(await runOf(s, 'world')).toMatchObject({ bold: true, italic: true, underline: true })
       expect((await runOf(s, 'keep')).bold).toBe(false)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -259,7 +260,7 @@ test.describe('font styles while typing (selection only, kept after commit)', ()
       expect(k.family).not.toContain('Georgia')
       expect(w.color).not.toBe(k.color)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -273,7 +274,7 @@ test.describe('font styles while typing (selection only, kept after commit)', ()
       await commit(s)
       expect(await runOf(s, 'world')).toMatchObject({ bold: false, italic: false })
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })

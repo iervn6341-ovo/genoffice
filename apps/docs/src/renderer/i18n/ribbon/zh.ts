@@ -144,7 +144,7 @@ export const zh = {
   ribbonAiTools: 'AI 工具',
   ribbonGroupEditing: '编辑',
   // Home · AI
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: '打开 AI 助手',
   // Table Design
   ribbonRemoveTableStyleTip: '移除表格样式',

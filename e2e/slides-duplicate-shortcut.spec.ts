@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl } from './helpers'
 
@@ -44,6 +45,6 @@ test('⌘⇧D duplicates the selected slide after it; ⌘Z undoes it', async () 
     await expect(thumbs).toHaveCount(2)
     await expect.poll(() => slideNodeCounts(s)).toEqual(before)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

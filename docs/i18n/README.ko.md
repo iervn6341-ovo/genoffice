@@ -47,10 +47,7 @@ GenOffice는 macOS, Windows, Linux에서 사용할 수 있는 무료 오픈소�
   편집되고, 저장되고, 변환됩니다. PDF → Word / Excel / PowerPoint,
   Markdown → Word, HTML → Word 변환 모두 기기 내에서 실행됩니다. 오직
   AI 호출만 사용자가 선택한 공급자로 전송됩니다.
-- **API 키가 있어도, 없어도 됩니다.** Genspark로 로그인하면 키 없이 바로
-  사용할 수 있고, 원한다면 Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM,
-  Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty는 물론 OpenAI
-  호환 엔드포인트(로컬 서버 포함)까지 직접 가져올 수 있습니다.
+- **AI.** AI 기능은 설정에서 선택한 서비스를 사용합니다. 기존 설정은 유지되며 검색과 미디어는 별도로 설정합니다.
 - **스크립트로 다룰 수 있고, 에이전트가 바로 쓸 수 있습니다.** 앱에는
   `genoffice` 명령줄과 Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot,
   OpenCode, Windsurf용 스킬이 함께 제공되어, 코딩 에이전트가 창 하나 열지
@@ -180,7 +177,7 @@ Windsurf가 앱과 동일한 엔진을 통해 창을 열지 않고도 실제 Off
 </tr>
 <tr>
 <td><b>에이전트에게 프롬프트 하나</b> — "태양계에 관한 8장짜리 덱을 만들어줘." 에이전트는 스킬을 읽고 스타일 시트, 개요, 슬라이드마다 하나씩의 페이지 스펙을 작성하고, <code>genoffice image</code>로 사진 두 장을 생성하고, <code>genoffice slides check</code>가 넘치거나 겹치는 요소를 걸러낸 뒤, <code>genoffice create</code>로 <code>.pptx</code>를 조립하고 <code>slides render</code>로 슬라이드마다 PNG 한 장을 받아 확인합니다.</td>
-<td><b>설정 → 연동에서 한 번만 설치</b> — GenOffice가 이 컴퓨터에서 찾은 코딩 에이전트를 나열하고, 선택한 각 에이전트에 스킬을 기록합니다. 스킬을 zip으로 내려받거나 <code>npx skills add genspark-ai/genoffice</code>를 실행해도 됩니다. 명령과 전체 워크플로는 <a href="#command-line-and-agent-skill">명령줄과 에이전트 스킬</a>에 있습니다.</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -215,9 +212,7 @@ Cursor 및 다른 모든 MCP 클라이언트는 스킬을 설치하거나 창을
 - **문서를 직접 편집하는 AI.** Docs에서는 변경 내용 추적, Sheets에서는 실시간으로
   동작하는 수식과 차트, 슬라이드는 캔버스 위에 그려지며, AI가 한 번 작업할 때마다
   되돌릴 수 있는 스냅샷이 남습니다.
-- **내 모델, 내 키.** Genspark로 로그인하거나 Claude, OpenAI, Gemini, DeepSeek
-  등의 키를 사용할 수 있으며, 로컬 서버와 모든 OpenAI 호환 엔드포인트도 지원합니
-  다.
+- **AI.** AI 기능은 설정에서 선택한 서비스를 사용합니다. 기존 설정은 유지되며 검색과 미디어는 별도로 설정합니다.
 - **PDF도 제대로.** 페이지 안에서 텍스트를 직접 편집하고, 기기 내에서 PDF를
   Word, Excel, PowerPoint로 변환하며, 스캔 문서는 시스템 OCR을 사용합니다.
 - **Markdown과 HTML도 지원**하며, 동일한 AI 패널과 로컬 Word 내보내기를 사용합
@@ -229,10 +224,7 @@ Cursor 및 다른 모든 MCP 클라이언트는 스킬을 설치하거나 창을
 
 ## AI 백엔드
 
-**Genspark로 로그인**하면 별도 설정이 전혀 필요 없습니다. 모델 호출은
-Genspark 프록시(Claude, GPT, Gemini 계열)를 거치고, 에이전트는 웹 및
-이미지 검색, 이미지 생성, 이미지/오디오/비디오 분석 기능까지 사용할 수
-있습니다.
+AI 기능은 설정에서 선택한 서비스를 사용합니다. 기존 설정은 유지되며 검색과 미디어는 별도로 설정합니다.
 
 **직접 키를 가져올 수도 있습니다.** 설정 → AI에는 Claude, OpenAI, Gemini,
 DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty,
@@ -265,11 +257,10 @@ OpenCode, Windsurf는 바로 사용할 수 있고, 스킬을 읽을 수 있는 �
 
 ### 스킬 설치
 
-| 방법                                   | 동작                                                                                                                                                                 |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 앱의 **설정 → 연동**                   | 이 컴퓨터에서 찾은 에이전트를 나열하고, 클릭 한 번으로 선택한 각 에이전트에 스킬을 기록합니다. GenOffice 릴리스에 새 스킬이 포함되면 **업데이트** 버튼이 나타납니다. |
-| 같은 페이지의 **zip으로 다운로드**     | claude.ai, Claude 데스크톱 앱, 그 밖의 어시스턴트가 업로드 스킬로 받아들이는 구조입니다.                                                                             |
-| `npx skills add genspark-ai/genoffice` | 이 저장소에서 스킬을 지원하는 모든 에이전트에 설치합니다.                                                                                                            |
+| 방법                               | 동작                                                                                                                                                                 |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 앱의 **설정 → 연동**               | 이 컴퓨터에서 찾은 에이전트를 나열하고, 클릭 한 번으로 선택한 각 에이전트에 스킬을 기록합니다. GenOffice 릴리스에 새 스킬이 포함되면 **업데이트** 버튼이 나타납니다. |
+| 같은 페이지의 **zip으로 다운로드** | claude.ai, Claude 데스크톱 앱, 그 밖의 어시스턴트가 업로드 스킬로 받아들이는 구조입니다.                                                                             |
 
 그런 다음 새 대화를 시작해 문서를 요청하세요. 스킬은 언제 `genoffice`를
 꺼내야 하는지, 편집 전에 파일을 어떻게 읽어야 하는지, 자신의 작업을
@@ -490,10 +481,7 @@ GenOffice는 활발히 개발되고 있으며, 여러분의 피드백이 그 방
 <details>
 <summary><b>GenOffice는 오프라인에서도 동작하나요?</b></summary>
 
-문서 편집은 완전히 로컬에서 이루어집니다 — 파일을 열고, 편집하고,
-저장하고, 변환하는 과정에서 파일이 기기를 벗어나지 않습니다. AI
-기능(에이전트, 검색, 이미지 도구)은 네트워크 연결이 필요하며, Genspark
-로그인 또는 직접 발급받은 모델 API 키가 있어야 합니다.
+AI 기능은 설정에서 선택한 서비스를 사용합니다. 기존 설정은 유지되며 검색과 미디어는 별도로 설정합니다.
 
 </details>
 
@@ -519,12 +507,7 @@ GenOffice는 활발히 개발되고 있으며, 여러분의 피드백이 그 방
 <details>
 <summary><b>제 AI 모델이나 API 키를 직접 사용할 수 있나요?</b></summary>
 
-네. 키가 필요 없는 Genspark 로그인 외에도, GenOffice는 Claude, OpenAI,
-Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral,
-OpenRouter, Requesty, OpenCode Zen/Go를 위한 직접 키 사용을 지원하며, 로컬 모델
-서버를 포함한 모든 OpenAI 호환 엔드포인트도 사용할 수 있습니다. 검색,
-이미지 생성, 이미지/비디오 분석은 설정 → AI 미디어 및 검색에서 별도의
-키를 설정합니다.
+AI 기능은 설정에서 선택한 서비스를 사용합니다. 기존 설정은 유지되며 검색과 미디어는 별도로 설정합니다.
 
 </details>
 

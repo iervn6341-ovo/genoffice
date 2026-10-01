@@ -74,10 +74,10 @@ export const FORMAT_FAMILIES: readonly FormatFamily[] = [
   {
     family: 'pptx',
     label: 'presentation',
-    editorOpen: ['pptx'],
-    editorSave: ['pptx'],
+    editorOpen: ['pptx', 'ppsx'],
+    editorSave: ['pptx', 'ppsx'],
     editorExport: ['pdf'],
-    mcp: { generate: 'pptx', save: ['pptx'] },
+    mcp: { generate: 'pptx', save: ['pptx', 'ppsx'] },
   },
   // editor-only today: no MCP session/reader yet. Add an `mcp` block and a
   // driver to expose them (kept here so the upgrade path is visible in code).

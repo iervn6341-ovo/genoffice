@@ -22,7 +22,7 @@ import {
   BorderThickOuterIcon,
   BorderTopIcon,
   CaretIcon,
-  GensparkMark,
+  AssistantMark,
   RIBBON_GLYPH_ICONS,
   RedoIcon,
   SaveAsIcon,
@@ -3155,12 +3155,11 @@ function Ribbon({
           </div>
         </div>
       </RibbonGroup>
-      {/* Genspark AI + one-click AI tools at the right edge (Microsoft 365's Copilot slot);
-          folds into one "AI Tools" dropdown first on a narrow window */}
+      {}
       <RibbonGroup
         label={t('appGroupAiTools')}
         className="rb-group-end"
-        fold={{ priority: 1, icon: <GensparkMark size={26} /> }}
+        fold={{ priority: 1, icon: <AssistantMark size={26} /> }}
       >
         <button
           className={`ribbon-tool as-button large ai-entry ${aiOpen ? 'active' : ''}`}
@@ -3168,10 +3167,10 @@ function Ribbon({
           onClick={onAiToggle}
         >
           <span className="tool-icon-row">
-            <GensparkMark size={26} />
+            <AssistantMark size={26} />
           </span>
           <span>
-            <strong>Genspark AI</strong>
+            <strong>AI</strong>
           </span>
         </button>
         <button

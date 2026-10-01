@@ -800,7 +800,7 @@ export const TabStopExtension = Extension.create({
     // stops, or the paragraph's custom w:tabs). Lists indent and tables move
     // to the next cell — those handlers live on DocListItem / NativeTableSupport
     // and run after this one returns false. An unhandled Tab would leave the
-    // editor and cycle the ribbon buttons (github.com/genspark-ai/genoffice/issues/101).
+
     const storage = this.storage as TabStopStorage
     // Word AutoFormat "Set left- and first-indent with tabs and backspaces":
     // at the very start of a paragraph that already has text, Tab becomes

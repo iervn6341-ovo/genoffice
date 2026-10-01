@@ -35,7 +35,7 @@ GenOffice は、macOS・Windows・Linux で動作する、Microsoft Office に�
 - **実際のファイル形式、バイト単位で保持。** 編集した部分だけが書き換えられます。それ以外の部分はファイル内でバイト単位そのまま保持されるため、ドキュメントは Word・Excel・PowerPoint でも問題なく動作し続けます。
 - **レビューできる AI。** 編集内容は変更履歴と差分として反映され、ワンクリックで元に戻せます。スプレッドシートには貼り付けの数値ではなく、実際に機能する数式が入ります。デッキやページはキャンバス上に生成され、そのまま自由に編集できます。
 - **設計からローカル動作。** ファイルの開く・編集・保存・変換はすべてお使いのマシン上で行われます。PDF → Word / Excel / PowerPoint、Markdown → Word、HTML → Word の変換もすべてオンデバイスで実行されます。マシンの外に出るのは、選択した AI プロバイダーへの呼び出しだけです。
-- **キーを使うか使わないかはあなた次第。** Genspark でサインインすればキーの用意は不要です。あるいは、Claude、OpenAI、Gemini、DeepSeek、Kimi、GLM、Qwen、Doubao、MiniMax、Grok、Mistral、OpenRouter、Requesty、または任意の OpenAI 互換エンドポイント（ローカルサーバーを含む）向けに、自分の API キーを持ち込むこともできます。
+- **AI.** AI 機能は設定で選択したサービスを使用します。既存の設定は保持され、検索とメディアは個別に設定できます。
 - **スクリプト化でき、エージェントからも使える。** アプリには `genoffice` コマンドラインと、Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot、OpenCode、Windsurf 向けのスキルが同梱されているため、コーディングエージェントはウィンドウを一つも開かずに、お使いのマシン上で本物の Office ファイルを作成・変換・読み取り・編集できます。
 
 **入手方法：** [macOS](https://github.com/genspark-ai/genoffice/releases/latest)（Apple Silicon および Intel）·
@@ -154,7 +154,7 @@ GenOffice には `genoffice` コマンドラインとエージェントスキル
 </tr>
 <tr>
 <td><b>エージェントへのプロンプトは 1 つ</b> — 「太陽系についての 8 枚構成のデッキを作って」。エージェントはスキルを読み、スタイルシート、アウトライン、スライドごとのページ仕様を書き、<code>genoffice image</code> で 2 枚の写真を生成し、<code>genoffice slides check</code> にはみ出しや重なりのある要素を弾かせてから、<code>genoffice create</code> で <code>.pptx</code> を組み立て、<code>slides render</code> でスライドごとの PNG を受け取って確認します。</td>
-<td><b>インストールは設定 → 連携から 1 回だけ</b> — GenOffice がこのコンピューター上で見つかったコーディングエージェントを一覧し、選んだそれぞれにスキルを書き込みます。スキルを zip としてダウンロードするか、<code>npx skills add genspark-ai/genoffice</code> を実行しても構いません。コマンドとワークフローの全体は <a href="#command-line-and-agent-skill">コマンドラインとエージェントスキル</a> にあります。</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -190,9 +190,7 @@ Word ドキュメントを組み立てる様子を見守ることもできます
 - **ドキュメント自体を編集する AI。** Docs では変更履歴、Sheets では実際に機能す
   る数式とグラフ、スライドはキャンバス上に描画され、AI の操作ごとに巻き戻せるス
   ナップショットが残る。
-- **自分のモデル、自分のキー。** Genspark でログイン、または Claude・OpenAI・
-  Gemini・DeepSeek などのキーを持ち込める。ローカルサーバーや任意の OpenAI 互換
-  エンドポイントにも対応。
+- **AI.** AI 機能は設定で選択したサービスを使用します。既存の設定は保持され、検索とメディアは個別に設定できます。
 - **PDF もしっかり対応。** ページ内でテキストをその場で編集し、オンデバイスで
   PDF を Word・Excel・PowerPoint に変換。スキャンにはシステム OCR を使用。
 - **Markdown と HTML にも対応**。同じ AI パネルを使い、ローカルで Word に書き出せ
@@ -204,9 +202,7 @@ Word ドキュメントを組み立てる様子を見守ることもできます
 
 ## AI バックエンド
 
-**Genspark でサインイン**すれば、設定は一切不要です。モデル呼び出しは Genspark のプロキシ
-（Claude、GPT、Gemini 系列）を経由し、エージェントは Web・画像検索、画像生成、画像／音声／
-動画の解析機能も利用できます。
+AI 機能は設定で選択したサービスを使用します。既存の設定は保持され、検索とメディアは個別に設定できます。
 
 **あるいは自分のキーを持ち込む。** 設定 → AI には Claude、OpenAI、Gemini、DeepSeek、Kimi、
 GLM、Qwen、Doubao、MiniMax、Grok、Mistral、OpenRouter、Requesty、OpenCode Zen/Go が並び、さらに任意
@@ -240,7 +236,6 @@ Claude Desktop とあらゆる MCP クライアントでも動作します。
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | アプリの **設定 → 連携**                | このコンピューター上で見つかったエージェントを一覧し、ワンクリックで選んだそれぞれにスキルを書き込みます。GenOffice のリリースに新しいスキルが含まれていると**更新**ボタンが表示されます。 |
 | 同じページの **zip としてダウンロード** | claude.ai、Claude デスクトップアプリ、その他のアシスタントがアップロード用スキルとして受け付ける構成です。                                                                                 |
-| `npx skills add genspark-ai/genoffice`  | このリポジトリから、スキルに対応する任意のエージェントにインストールします。                                                                                                               |
 
 その後、新しいチャットを始めてドキュメントを依頼してください。スキルは、いつ `genoffice` を使うべきか、
 編集前にファイルをどう読むか、自分の成果物をどう確認するかをエージェントに教えます。
@@ -456,10 +451,7 @@ Office でも問題なく動作し続けます。
 <details>
 <summary><b>GenOffice はオフラインで使えますか？</b></summary>
 
-ドキュメントの編集は完全にローカルで行われます — ファイルは開く・編集・保存・変換のどの場面
-でもマシンの外に出ることはありません。AI 機能（エージェント、検索、画像ツール）を使うには
-ネットワーク接続が必要で、Genspark でのサインインか、自分のモデル API キーのいずれかが必要
-です。
+AI 機能は設定で選択したサービスを使用します。既存の設定は保持され、検索とメディアは個別に設定できます。
 
 </details>
 
@@ -484,11 +476,7 @@ Office でも問題なく動作し続けます。
 <details>
 <summary><b>自分の AI モデルや API キーを使えますか？</b></summary>
 
-はい。キー不要の Genspark サインインに加えて、GenOffice は Claude、OpenAI、Gemini、
-DeepSeek、Kimi、GLM、Qwen、Doubao、MiniMax、Grok、Mistral、OpenRouter、Requesty、OpenCode Zen/Go 向け
-に自分のキーを持ち込むことができ、任意の OpenAI 互換エンドポイント（ローカルモデルサーバー
-を含む）にも対応しています。検索、画像生成、画像／動画解析は、設定 → AI メディア＆検索でそ
-れぞれ別のキーを設定します。
+AI 機能は設定で選択したサービスを使用します。既存の設定は保持され、検索とメディアは個別に設定できます。
 
 </details>
 

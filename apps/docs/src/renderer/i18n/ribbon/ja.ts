@@ -147,7 +147,7 @@ export const ja = {
   ribbonAiTools: 'AI ツール',
   ribbonGroupEditing: '編集',
   // Home · AI
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'AI アシスタントを開く',
   // Table Design
   ribbonRemoveTableStyleTip: '表のスタイルを削除',

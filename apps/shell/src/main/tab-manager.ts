@@ -99,7 +99,7 @@ export class TabManager {
     // then once more on the next tick. On Linux/X11, `resize` fires before the
     // window manager applies the new size, so getContentBounds() is still the
     // pre-maximize size inside the handler and a follow-up layout is required.
-    // See https://github.com/genspark-ai/genoffice/issues/15
+
     shellWindow.on('resize', () => {
       this.layout()
       setImmediate(() => this.layout())
@@ -157,6 +157,7 @@ export class TabManager {
     if (on) this.bleedWcIds.add(wc.id)
     else this.bleedWcIds.delete(wc.id)
     this.layout()
+    this.onChanged()
   }
 
   /**
@@ -168,10 +169,12 @@ export class TabManager {
     view.webContents.on('enter-html-full-screen', () => {
       this.htmlFullScreenId = id
       this.layout()
+      this.onChanged()
     })
     view.webContents.on('leave-html-full-screen', () => {
       if (this.htmlFullScreenId === id) this.htmlFullScreenId = null
       this.layout()
+      this.onChanged()
     })
   }
 
@@ -195,6 +198,11 @@ export class TabManager {
       title: t.title,
       closable: t.id !== HOME_ID,
       active: t.id === this.activeId,
+      ...(t.id === this.activeId &&
+      t.view &&
+      (this.htmlFullScreenId === t.id || this.bleedWcIds.has(t.view.webContents.id))
+        ? { coversTabStrip: true }
+        : {}),
       ...(t.filePath ? { filePath: t.filePath } : {}),
     }))
   }
@@ -392,8 +400,8 @@ export class TabManager {
     const target = this.tabs.find((t) => t.id === id)
     if (!target) return
     for (const t of this.tabs) t.view?.setVisible(t.id === id)
-    if (target.view) target.view.setBounds(this.contentBounds())
     this.activeId = id
+    if (target.view) target.view.setBounds(this.contentBounds())
     this.refreshActiveTargets()
     this.onChanged()
   }

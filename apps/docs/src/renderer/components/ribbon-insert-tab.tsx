@@ -327,6 +327,7 @@ export function CrossRefModal({ editor, onClose }: { editor: Editor; onClose: ()
 /** Word's Insert Chart: pick a type + data grid; after inserting, the data table below the chart is still editable in place */
 export function ChartInsertModal({ editor, onClose }: { editor: Editor; onClose: () => void }) {
   const { t } = useI18n()
+  const modalKeys = useModalKeys(onClose)
   const [kind, setKind] = useState<NewChart['kind']>('bar')
   const [title, setTitle] = useState(() => t('ribbonChartTitlePh'))
   const [categories, setCategories] = useState(() =>
@@ -391,10 +392,20 @@ export function ChartInsertModal({ editor, onClose }: { editor: Editor; onClose:
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal-chart">
-        <h2>{t('ribbonChartInsertTitle')}</h2>
-        <div className="modal-row">
+    <div
+      className="modal-backdrop"
+      ref={modalKeys.ref}
+      onKeyDown={modalKeys.onKeyDown}
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="modal modal-chart"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="chart-insert-title"
+      >
+        <h2 id="chart-insert-title">{t('ribbonChartInsertTitle')}</h2>
+        <div className="modal-row chart-kind-options" role="group" aria-label={t('ribbonChart')}>
           {(
             [
               ['bar', t('ribbonChartBar')],
@@ -404,7 +415,8 @@ export function ChartInsertModal({ editor, onClose }: { editor: Editor; onClose:
           ).map(([value, label]) => (
             <button
               key={value}
-              className={kind === value ? 'btn-primary' : ''}
+              className="chart-kind-button"
+              aria-pressed={kind === value}
               onClick={() => setKind(value)}
             >
               {label}
@@ -414,43 +426,57 @@ export function ChartInsertModal({ editor, onClose }: { editor: Editor; onClose:
         <div className="modal-row">
           <input
             value={title}
+            aria-label={t('ribbonChartTitlePh')}
             placeholder={t('ribbonChartTitlePh')}
             onChange={(e) => setTitle(e.target.value)}
           />
         </div>
-        <table className="chart-data-grid">
-          <thead>
-            <tr>
-              <th />
-              {categories.map((c, i) => (
-                <th key={i}>
-                  <input value={c} onChange={(e) => setCat(i, e.target.value)} />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {series.map((s, i) => (
-              <tr key={i}>
-                <th>
-                  <input value={s.name} onChange={(e) => setSerName(i, e.target.value)} />
-                </th>
-                {s.values.map((v, c) => (
-                  <td key={c}>
+        <div className="chart-data-scroll">
+          <table className="chart-data-grid">
+            <thead>
+              <tr>
+                <th />
+                {categories.map((c, i) => (
+                  <th key={i}>
                     <input
-                      value={v}
-                      inputMode="decimal"
-                      onChange={(e) => setSerVal(i, c, e.target.value)}
+                      aria-label={t('ribbonCategoryN', { n: i + 1 })}
+                      value={c}
+                      onChange={(e) => setCat(i, e.target.value)}
                     />
-                  </td>
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {series.map((s, i) => (
+                <tr key={i}>
+                  <th>
+                    <input
+                      aria-label={t('ribbonSeriesN', { n: i + 1 })}
+                      value={s.name}
+                      onChange={(e) => setSerName(i, e.target.value)}
+                    />
+                  </th>
+                  {s.values.map((v, c) => (
+                    <td key={c}>
+                      <input
+                        value={v}
+                        aria-label={`${s.name}, ${categories[c]}`}
+                        inputMode="decimal"
+                        onChange={(e) => setSerVal(i, c, e.target.value)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <div className="modal-row">
-          <button onClick={addCategory}>{t('ribbonChartAddCategory')}</button>
-          <button onClick={addSeries} disabled={kind === 'pie'}>
+          <button className="chart-data-action" onClick={addCategory}>
+            {t('ribbonChartAddCategory')}
+          </button>
+          <button className="chart-data-action" onClick={addSeries} disabled={kind === 'pie'}>
             {t('ribbonChartAddSeries')}
           </button>
         </div>

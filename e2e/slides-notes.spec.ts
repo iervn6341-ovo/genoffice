@@ -1,5 +1,10 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import JSZip from 'jszip'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /**
  * Speaker notes behave like PowerPoint's notes pane: the Home ribbon's Font commands and the
@@ -31,7 +36,7 @@ async function blankDeck(wide = true): Promise<{ s: Page; launched: LaunchedApp 
 
 const notes = (s: Page) => s.locator('.notes-editor')
 const btn = (s: Page, tip: string) => s.locator(`.ribbon-body button[data-tip="${tip}"]`).first()
-const kill = (l: LaunchedApp) => l.app.process().kill('SIGKILL')
+const kill = (l: LaunchedApp) => closeAndSaveVideo(l, 'cleanup')
 
 /** the saved notes run holding `word` (read from the document, not the pane) */
 const runOf = (s: Page, word: string, slide = 0): Promise<NotesRun | undefined> =>
@@ -57,8 +62,139 @@ const leaveNotes = async (s: Page) => {
 }
 
 test.describe('notes pane formatting', () => {
+  test('notes ignore black/white picks and presenter notes stay white on dark in every theme', async () => {
+    const { s, launched } = await blankDeck()
+    let reopened: LaunchedApp | undefined
+    try {
+      await s.evaluate(async () => {
+        await (window as any).slidesApi.setNotes({
+          slideIndex: 0,
+          text: 'Black White Red',
+          paragraphs: [
+            {
+              runs: [
+                { text: 'Black ', color: '#000000', fontSize: 18 },
+                { text: 'White ', color: '#FFFFFF', fontSize: 18 },
+                { text: 'Red', color: '#FF0000', fontSize: 18 },
+                { text: ' Accent', color: '#C00000', fontSize: 18 },
+              ],
+            },
+          ],
+        })
+      })
+      const file = join(await mkdtemp(join(tmpdir(), 'genoffice-notes-colors-')), 'notes.pptx')
+      await launched.app.evaluate(({ dialog }, path) => {
+        dialog.showSaveDialog = (async () => ({ canceled: false, filePath: path })) as never
+      }, file)
+      expect(await s.evaluate(() => (window as any).slidesApi.saveAs('notes.pptx'))).toMatchObject({
+        ok: true,
+      })
+      reopened = await launchShell({
+        onboardingSeen: true,
+        openFile: file,
+        videoDir: 'notes-colors',
+      })
+      const page = await waitForPageWithUrl(reopened.app, '://slides/', 20000)
+      await setEditorLayoutWidth(reopened.app, '://slides/', 2200)
+      await expect(notes(page)).toContainText('Black White Red')
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(
+          (value) => document.documentElement.setAttribute('data-theme', value),
+          theme,
+        )
+        const colors = await notes(page).evaluate((root) => ({
+          foreground: getComputedStyle(root).color,
+          runs: Array.from(root.querySelectorAll('span')).map((span) => ({
+            color: getComputedStyle(span).webkitTextFillColor,
+            authored: span.style.color,
+          })),
+        }))
+        expect(colors.runs[0].color).toBe(colors.foreground)
+        expect(colors.runs[1].color).toBe(colors.foreground)
+        expect(colors.runs[2].color).toBe('rgb(255, 0, 0)')
+        expect(colors.runs[0].authored).toBe('rgb(0, 0, 0)')
+        expect(colors.runs[1].authored).toBe('rgb(255, 255, 255)')
+      }
+      expect(await page.evaluate(() => (window as any).slidesApi.isDirty())).toBe(false)
+      await notes(page).click()
+      await notes(page).evaluate((root) => {
+        const range = document.createRange()
+        range.selectNodeContents(root.querySelectorAll('span')[2])
+        const selection = window.getSelection()!
+        selection.removeAllRanges()
+        selection.addRange(range)
+      })
+      await btn(page, 'Font Color').click()
+      await expect(page.locator('.rb-color-pop button[title="Black"]')).toBeDisabled()
+      await expect(page.locator('.rb-color-pop button[title="White"]')).toBeDisabled()
+      const custom = page.locator('.rb-color-pop input[type="color"]')
+      const beforePick = await notes(page).innerHTML()
+      for (const color of ['#ffffff', '#000000']) {
+        await custom.evaluate((input: HTMLInputElement, value) => {
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+            input,
+            value,
+          )
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        }, color)
+        // The native picker is debounced by 200ms; wait past its apply callback.
+        await page.waitForTimeout(350)
+        expect(await notes(page).innerHTML()).toBe(beforePick)
+        expect(await page.evaluate(() => (window as any).slidesApi.isDirty())).toBe(false)
+        await expect(notes(page).locator('span', { hasText: /^Red$/ })).toHaveCSS(
+          'color',
+          'rgb(255, 0, 0)',
+        )
+      }
+      await page.getByRole('button', { name: 'Default (follow theme)', exact: true }).click()
+      await leaveNotes(page)
+      expect(await runOf(page, 'Black')).toMatchObject({ color: '#000000' })
+      expect(await runOf(page, 'White')).toMatchObject({ color: '#FFFFFF' })
+      expect(await runOf(page, 'Red')).toMatchObject({ color: '#000000' })
+      expect(await page.evaluate(() => (window as any).slidesApi.save())).toMatchObject({
+        ok: true,
+      })
+      const savedZip = await JSZip.loadAsync(await readFile(file))
+      const notesXml = await savedZip.file('ppt/notesSlides/notesSlide1.xml')!.async('string')
+      expect(notesXml).toContain('val="FFFFFF"')
+      expect(notesXml).toContain('val="000000"')
+      expect(notesXml).toContain('val="C00000"')
+      // Force the normal show, then explicitly select presenter view (works on one monitor).
+      await page.keyboard.press('F5')
+      await page.locator('.slideshow, .presenter').first().waitFor()
+      if (!(await page.locator('.pv-notes').count())) {
+        await page.locator('.ss-controls button').last().click({ force: true })
+        await page.getByText('Use Presenter View', { exact: true }).click()
+      }
+      await expect(page.locator('.pv-notes')).toContainText('Black White Red')
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(
+          (value) => document.documentElement.setAttribute('data-theme', value),
+          theme,
+        )
+        const painted = await page.locator('.pv-notes').evaluate((root) => ({
+          ink: getComputedStyle(root).color,
+          paper: getComputedStyle(root).backgroundColor,
+          runs: Array.from(root.querySelectorAll('span')).map(
+            (span) => getComputedStyle(span).color,
+          ),
+        }))
+        expect(painted.ink).toBe('rgb(255, 255, 255)')
+        expect(painted.paper).toBe('rgb(0, 0, 0)')
+        expect(painted.runs.slice(0, -1).every((color) => color === painted.ink)).toBe(true)
+        expect(painted.runs.at(-1)).toBe('rgb(192, 0, 0)')
+        await page.screenshot({ path: test.info().outputPath(`notes-${theme}.png`) })
+      }
+      await page.keyboard.press('Escape')
+    } finally {
+      if (reopened) await kill(reopened)
+      await kill(launched)
+    }
+  })
+
   test('ribbon Bold / size / font / colour act on the notes selection only', async () => {
     const { s, launched } = await blankDeck()
+    let reopened: LaunchedApp | undefined
     try {
       await typeNotes(s, 'keep world', 5)
       // the Font group is live while typing in the notes
@@ -88,14 +224,61 @@ test.describe('notes pane formatting', () => {
         fontExplicit: false,
       })
       expect((await runOf(s, 'keep'))!.color).toBeUndefined()
+      // The editor shows the authored formatting directly, including after a fresh launch.
+      const savedWorld = await runOf(s, 'world')
+      const displayed = await notes(s).evaluate((root) => {
+        const span = Array.from(root.querySelectorAll('span')).find((el) =>
+          el.textContent?.includes('world'),
+        )!
+        const css = getComputedStyle(span)
+        return {
+          color: css.color,
+          inlineColor: span.style.color,
+          size: css.fontSize,
+          font: css.fontFamily,
+        }
+      })
+      expect(displayed.color).toBe(displayed.inlineColor)
+      expect(displayed.size).toBe('32px')
+      expect(displayed.font).toContain('Georgia')
+      await expect(
+        s.getByRole('button', { name: 'Show original formatting', exact: true }),
+      ).toHaveCount(0)
       // the slide itself is untouched
       const slideText = await s.evaluate(async () => {
         const r = await (window as any).slidesApi.getRenderSlides()
         return JSON.stringify(r[0].nodes)
       })
       expect(slideText).not.toContain('world')
+      const output =
+        process.env.E2E_NOTES_OUTPUT ??
+        join(await mkdtemp(join(tmpdir(), 'genoffice-notes-format-')), 'notes.pptx')
+      await launched.app.evaluate(({ dialog }, file) => {
+        dialog.showSaveDialog = (async () => ({ canceled: false, filePath: file })) as never
+      }, output)
+      expect(await s.evaluate(() => (window as any).slidesApi.saveAs('notes.pptx'))).toMatchObject({
+        ok: true,
+      })
+      await writeFile(
+        output + '.expected.json',
+        JSON.stringify({ changed: savedWorld, untouched: await runOf(s, 'keep') }, null, 2),
+      )
+      reopened = await launchShell({
+        onboardingSeen: true,
+        openFile: output,
+        videoDir: 'slides-notes-reopen',
+      })
+      const next = await waitForPageWithUrl(reopened.app, '://slides/', 20000)
+      await expect(notes(next)).toContainText('keep world')
+      expect(await runOf(next, 'world')).toEqual(savedWorld)
+      const world = notes(next).locator('span', { hasText: 'world' })
+      await expect(world).toHaveCSS('font-size', '32px')
+      await expect(world).toHaveCSS('color', displayed.color)
+      await expect(world).toHaveCSS('font-weight', '700')
+      expect(await world.evaluate((el) => getComputedStyle(el).fontFamily)).toContain('Georgia')
     } finally {
-      kill(launched)
+      if (reopened) await kill(reopened)
+      await kill(launched)
     }
   })
 
@@ -123,7 +306,7 @@ test.describe('notes pane formatting', () => {
       const px = parseFloat(await beta.evaluate((e) => getComputedStyle(e).fontSize))
       expect(px).toBeCloseTo((14 * 96) / 72, 2)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })
@@ -208,7 +391,7 @@ test.describe('slide show on two screens', () => {
         .toBe(false)
       await expect(s.locator('.pv-notes')).toHaveCount(0)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })

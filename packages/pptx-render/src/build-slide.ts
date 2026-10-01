@@ -667,6 +667,8 @@ function buildTable(
   for (const w of colPx) colX.push(colX[colX.length - 1]! + w)
   const totalW = colX[colX.length - 1]!
   if (Math.abs(totalW - box.w) > 0.5) box = { ...box, w: totalW }
+  const hasMathPreview = (cell: TableElement['rows'][number][number]) =>
+    cell.mathPreview?.type === 'image' && !!media?.(cell.mathPreview.mediaRef)
 
   // Measure pass: grow any row whose cell content wraps taller than the stored height
   // (rowSpan cells are skipped — their height is ambiguous to attribute to one row).
@@ -675,7 +677,7 @@ function buildTable(
     row.forEach((cell, tcIdx) => {
       const cIdx = gridCols[tcIdx]!
       if (cell.merged || (cell.rowSpan ?? 1) > 1) return
-      if (!cell.text || !cell.text.paragraphs.length) return
+      if (hasMathPreview(cell) || !cell.text || !cell.text.paragraphs.length) return
       const x = colX[cIdx] ?? 0
       const w = (colX[Math.min(cIdx + (cell.gridSpan ?? 1), colX.length - 1)] ?? x) - x
       const probe = layoutText({
@@ -725,7 +727,13 @@ function buildTable(
         ...(rowSpan > 1 ? { rowSpan } : {}),
         // PowerPoint anchors a cell's tiled picture to the table box, not the cell: each
         // cell shows the part of the picture under it (photo-mosaic layout)
-        fill: resolveFill(cell.fill, vp, media, { x: -x, y: -y, w: totalW, h: totalH }),
+        fill: resolveFill(hasMathPreview(cell) ? cell.mathPreview : cell.fill, vp, media, {
+          x: -x,
+          y: -y,
+          w: totalW,
+          h: totalH,
+        }),
+        ...(hasMathPreview(cell) ? { equationPreview: true } : {}),
       }
       const borders: NonNullable<TableCellRender['borders']> = {}
       for (const k of ['l', 'r', 't', 'b'] as const) {
@@ -734,7 +742,7 @@ function buildTable(
         if (s) borders[el.rtl && k === 'l' ? 'r' : el.rtl && k === 'r' ? 'l' : k] = s
       }
       if (Object.keys(borders).length) out.borders = borders
-      if (cell.text && cell.text.paragraphs.length) {
+      if (!hasMathPreview(cell) && cell.text && cell.text.paragraphs.length) {
         out.text = layoutText({
           body: cell.text,
           boxWidthPx: w,

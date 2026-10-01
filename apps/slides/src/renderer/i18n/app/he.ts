@@ -1,6 +1,8 @@
 import type { zh } from './zh'
 
 export const he = {
+  appNotesDefaultColor: 'ברירת מחדל (לפי ערכת הנושא)',
+  appStatusEquationPreview: 'המשוואה מוצגת בתצוגה המקדימה המקורית. יש לערוך אותה ב-PowerPoint.',
   appPhPromptTitle: 'לחץ כדי להוסיף כותרת',
   appPhPromptSubtitle: 'לחץ כדי להוסיף כותרת משנה',
   appPhPromptBody: 'לחץ כדי להוסיף טקסט',
@@ -212,13 +214,10 @@ export const he = {
   appRehearseDiscard: 'אל תשמור',
   appRehearseSave: 'שמור',
   appSettingsTitle: 'הגדרות AI',
-  appSettingsAccount: 'חשבון Genspark',
   appSettingsChecking: 'בודק…',
   appSettingsLoggedIn: 'מחובר',
   appSettingsLoggedInEmail: 'מחובר: {email}',
-  appSettingsLoggedOut: 'לא מחובר (תכונות AI דורשות חשבון Genspark)',
   appSettingsLoginPending: 'ממתין להתחברות בדפדפן…',
-  appSettingsLogin: 'התחבר אל Genspark',
   appSettingsModel: 'מודל',
   appSettingsCancel: 'ביטול',
   appSettingsSave: 'שמור',

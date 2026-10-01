@@ -388,6 +388,8 @@ export interface ChipRenderNode extends RenderNodeBase {
 
 /** A positioned table cell (coordinates relative to the table top-left, px; merged placeholder cells aren't emitted). */
 export interface TableCellRender {
+  /** Read-only equation preview; opening a plain-text editor would destroy OMML. */
+  equationPreview?: boolean
   x: number
   y: number
   w: number

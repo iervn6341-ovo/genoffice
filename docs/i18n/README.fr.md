@@ -50,10 +50,7 @@ modification, et vous montre exactement ce qu'il a touché.
   PDF → Word / Excel / PowerPoint, Markdown → Word et HTML → Word s'exécutent
   toutes en local. Seuls les appels à l'IA quittent la machine, vers le
   fournisseur de votre choix.
-- **Vos clés ou aucune.** Connectez-vous avec Genspark pour vous dispenser de
-  clé, ou utilisez votre propre clé pour Claude, OpenAI, Gemini, DeepSeek,
-  Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty, ou tout point
-  de terminaison compatible OpenAI, y compris les serveurs locaux.
+- **AI.** Les fonctions IA utilisent le fournisseur choisi dans les paramètres. Les réglages existants sont conservés ; la recherche et les médias se configurent séparément.
 - **Scriptable et prêt pour les agents.** L'application embarque une ligne de
   commande `genoffice` et un skill pour Claude Code, Codex, Cursor, Gemini
   CLI, GitHub Copilot, OpenCode et Windsurf, si bien qu'un agent de codage
@@ -185,7 +182,7 @@ fenêtre.
 </tr>
 <tr>
 <td><b>Un seul prompt à votre agent</b> — « Construis un deck de huit diapositives sur le Système solaire. » L'agent lit le skill, écrit une feuille de style, un plan et une spécification de page par diapositive, génère les deux photos avec <code>genoffice image</code>, et laisse <code>genoffice slides check</code> rejeter tout ce qui déborde ou se chevauche avant que <code>genoffice create</code> n'assemble le <code>.pptx</code> et que <code>slides render</code> ne renvoie un PNG par diapositive à examiner.</td>
-<td><b>Installez une fois, depuis Réglages → Intégrations</b> — GenOffice liste les agents de codage qu'il trouve sur cet ordinateur et écrit le skill dans chacun de ceux que vous choisissez. Ou téléchargez le skill en zip, ou lancez <code>npx skills add genspark-ai/genoffice</code>. Les commandes et le flux de travail complet sont dans <a href="#command-line-and-agent-skill">Ligne de commande et skill d'agent</a>.</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -224,9 +221,7 @@ document Word dans un onglet d'éditeur visible pendant que vous regardez.
   Docs, formules et graphiques vivants dans Sheets, diapositives dessinées
   directement sur le canevas, chaque étape de l'IA laissant un instantané que
   vous pouvez restaurer.
-- **Votre modèle, votre clé.** Connectez-vous avec Genspark, ou apportez une
-  clé pour Claude, OpenAI, Gemini, DeepSeek et d'autres, serveurs locaux et
-  tout point de terminaison compatible OpenAI inclus.
+- **AI.** Les fonctions IA utilisent le fournisseur choisi dans les paramètres. Les réglages existants sont conservés ; la recherche et les médias se configurent séparément.
 - **Le PDF fait sérieusement.** Modifiez le texte directement dans la page,
   et convertissez le PDF en Word, Excel ou PowerPoint en local, avec OCR
   système pour les scans.
@@ -239,10 +234,7 @@ document Word dans un onglet d'éditeur visible pendant que vous regardez.
 
 ## Moteurs IA
 
-**Connectez-vous avec Genspark** et il n'y a rien à configurer : les appels
-aux modèles passent par le proxy Genspark (familles Claude, GPT et Gemini) et
-les agents ont accès à la recherche web et d'images, à la génération
-d'images, et à l'analyse d'images, d'audio et de vidéo.
+Les fonctions IA utilisent le fournisseur choisi dans les paramètres. Les réglages existants sont conservés ; la recherche et les médias se configurent séparément.
 
 **Ou utilisez votre propre clé.** Paramètres → IA propose Claude, OpenAI,
 Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty
@@ -283,7 +275,6 @@ MCP.
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Réglages → Intégrations** dans l'application | Liste les agents trouvés sur cet ordinateur ; un clic écrit le skill dans chacun de ceux que vous choisissez. Un bouton **Mettre à jour** apparaît lorsqu'une version de GenOffice embarque un skill plus récent. |
 | **Télécharger en zip** sur la même page        | Le format que claude.ai, les applications de bureau Claude et d'autres assistants acceptent comme skill téléversé.                                                                                                |
-| `npx skills add genspark-ai/genoffice`         | Installe depuis ce dépôt dans tout agent compatible avec les skills.                                                                                                                                              |
 
 Ouvrez ensuite une nouvelle conversation et demandez un document. Le skill
 apprend à l'agent quand recourir à `genoffice`, comment lire un fichier avant
@@ -519,11 +510,7 @@ documents continuent de fonctionner dans Microsoft Office.
 <details>
 <summary><b>GenOffice fonctionne-t-il hors ligne ?</b></summary>
 
-L'édition de documents est entièrement locale — les fichiers ne quittent
-jamais votre machine pour être ouverts, modifiés, enregistrés ou convertis.
-Les fonctionnalités IA (agents, recherche, outils d'image) nécessitent une
-connexion réseau, avec soit une connexion Genspark, soit votre propre clé
-d'API de modèle.
+Les fonctions IA utilisent le fournisseur choisi dans les paramètres. Les réglages existants sont conservés ; la recherche et les médias se configurent séparément.
 
 </details>
 
@@ -550,13 +537,7 @@ en texte modifiable plutôt qu'en image de page.
 <details>
 <summary><b>Puis-je utiliser mon propre modèle IA ou ma propre clé d'API ?</b></summary>
 
-Oui. Outre la connexion Genspark sans clé, GenOffice prend en charge
-l'utilisation de votre propre clé pour Claude, OpenAI, Gemini, DeepSeek,
-Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty et OpenCode
-Zen/Go, ainsi que tout point de terminaison compatible OpenAI — y compris les
-serveurs de modèles locaux. La recherche, la génération d'images et
-l'analyse d'images/vidéos utilisent leurs propres clés sous Paramètres → IA
-Médias et Recherche.
+Les fonctions IA utilisent le fournisseur choisi dans les paramètres. Les réglages existants sont conservés ; la recherche et les médias se configurent séparément.
 
 </details>
 

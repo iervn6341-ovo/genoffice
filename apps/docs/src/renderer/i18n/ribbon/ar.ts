@@ -137,7 +137,7 @@ export const ar = {
   ribbonGroupStyles: 'أنماط',
   ribbonAiTools: 'أدوات الذكاء الاصطناعي',
   ribbonGroupEditing: 'التحرير',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'فتح مساعد الذكاء الاصطناعي',
   ribbonRemoveTableStyleTip: 'إزالة نمط الجدول',
   ribbonNoStyle: 'بلا نمط',

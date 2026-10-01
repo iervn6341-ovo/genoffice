@@ -794,6 +794,7 @@ export async function planCellEditsToXlsx(
 
   const sheetNames = new Set([
     ...edits.map((edit) => edit.sheetName),
+    ...formulaValues.map((sheet) => sheet.sheetName),
     ...bulkConstantFills.map((fill) => fill.sheetName),
     ...structuralOps.map((sheet) => sheet.sheetName),
     ...filterStates.map((state) => state.sheetName),

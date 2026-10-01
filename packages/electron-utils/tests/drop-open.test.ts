@@ -125,8 +125,8 @@ describe('partitionDropPayload', () => {
   })
 
   it('classifies openable extensions case-insensitively', () => {
-    const result = partitionDropPayload(['REPORT.DOCX', 'data.CSV', 'notes.MarkDown'])
-    expect(result.supported).toEqual(['REPORT.DOCX', 'data.CSV', 'notes.MarkDown'])
+    const result = partitionDropPayload(['REPORT.DOCX', 'data.CSV', 'notes.MarkDown', 'show.PPSX'])
+    expect(result.supported).toEqual(['REPORT.DOCX', 'data.CSV', 'notes.MarkDown', 'show.PPSX'])
   })
 
   it('collects known-unsupported extensions uniquely, first-seen order', () => {

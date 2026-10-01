@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -47,7 +48,7 @@ test('Number Format box names a reopened currency cell without moving the select
     await s.locator('button[aria-label^="Save As"]').first().click()
     await expect.poll(() => existsSync(out), { timeout: 20_000 }).toBe(true)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 
   const re = await launchShell({
@@ -66,6 +67,6 @@ test('Number Format box names a reopened currency cell without moving the select
     await api(q, `sh.getRange(4, 1).activate(); return 1`)
     await expect.poll(() => numberFormatBox(q), { timeout: 8_000 }).toBe('Currency')
   } finally {
-    re.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(re, 'cleanup')
   }
 })

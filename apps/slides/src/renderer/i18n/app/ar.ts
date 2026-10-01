@@ -1,6 +1,8 @@
 import type { zh } from './zh'
 
 export const ar = {
+  appNotesDefaultColor: 'افتراضي (حسب السمة)',
+  appStatusEquationPreview: 'تُعرض هذه المعادلة بمعاينتها الأصلية. حرّر المعادلة في PowerPoint.',
   appPhPromptTitle: 'انقر لإضافة عنوان',
   appPhPromptSubtitle: 'انقر لإضافة عنوان فرعي',
   appPhPromptBody: 'انقر لإضافة نص',
@@ -217,13 +219,10 @@ export const ar = {
   appRehearseDiscard: 'عدم الحفظ',
   appRehearseSave: 'حفظ',
   appSettingsTitle: 'إعدادات الذكاء الاصطناعي',
-  appSettingsAccount: 'حساب Genspark',
   appSettingsChecking: 'جارٍ التحقق…',
   appSettingsLoggedIn: 'تم تسجيل الدخول',
   appSettingsLoggedInEmail: 'تم تسجيل الدخول: {email}',
-  appSettingsLoggedOut: 'لم يتم تسجيل الدخول (تتطلب ميزات الذكاء الاصطناعي حساب Genspark)',
   appSettingsLoginPending: 'في انتظار تسجيل الدخول عبر المتصفح…',
-  appSettingsLogin: 'تسجيل الدخول إلى Genspark',
   appSettingsModel: 'النموذج',
   appSettingsCancel: 'إلغاء',
   appSettingsSave: 'حفظ',

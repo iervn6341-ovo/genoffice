@@ -10,6 +10,8 @@ export interface TabSummary {
   title: string
   closable: boolean
   active: boolean
+  /** The active editor covers the shell strip during a show/fullscreen presentation. */
+  coversTabStrip?: boolean
   /** absolute path behind the tab; absent while the document is untitled */
   filePath?: string
 }

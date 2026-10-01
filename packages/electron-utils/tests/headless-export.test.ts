@@ -87,6 +87,7 @@ describe('headlessModuleFor', () => {
     ['/x/a.xls', 'sheets'],
     ['/x/a.csv', 'sheets'],
     ['/x/a.pptx', 'slides'],
+    ['/x/a.PPSX', 'slides'],
     ['/x/a.md', 'markdown'],
     ['/x/a.markdown', 'markdown'],
     ['/x/a.html', 'html'],

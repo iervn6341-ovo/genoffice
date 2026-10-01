@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
@@ -130,7 +131,7 @@ test.describe('presenter view controls (two screens)', () => {
         .poll(() => launched.app.windows().some((w) => w.url().includes('mode=audience')))
         .toBe(false)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 
@@ -201,7 +202,7 @@ test.describe('presenter view controls (two screens)', () => {
       await s.keyboard.press('Escape')
       await expect(s.locator('.presenter')).toHaveCount(0)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 })
@@ -251,7 +252,7 @@ test('full-screen show: bottom-left control bar, pen, zoom and Esc order', async
     await s.keyboard.press('Escape')
     await expect(s.locator('.slideshow')).toHaveCount(0)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -325,6 +326,6 @@ test('audience screen: picked Monitor, mouse laser and pen mirror back, camera o
     await s.keyboard.press('Escape')
     await expect(s.locator('.presenter')).toHaveCount(0)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

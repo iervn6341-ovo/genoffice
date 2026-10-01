@@ -1,2 +1,2 @@
-/** the public open-source repository; also the target of every in-app star CTA */
-export const GITHUB_REPO_URL = 'https://github.com/genspark-ai/genoffice'
+/** Optional source link supplied by the distributor. No upstream promotion by default. */
+export const GITHUB_REPO_URL = process.env.GENOFFICE_SOURCE_URL ?? ''

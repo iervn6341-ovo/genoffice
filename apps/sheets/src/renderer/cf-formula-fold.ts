@@ -1,35 +1,3 @@
-/**
- * Expression ("use a formula to determine cells to format") conditional
- * formatting registers one dependency tree per covered cell in Univer's
- * formula engine, and the engine rebuilds that whole graph on every
- * recalculation — every viewport stream-in patch. A single whole-column rule
- * covers millions of cells, freezing the renderer for 10s+ per scroll and
- * growing the heap until the tab dies (genspark-ai/genoffice#158).
- *
- * This module shrinks what gets REGISTERED with the engine without touching
- * the rule data, the painted ranges, or the save format:
- *
- * 1. Axis folding. Almost all real-world expression rules pin the column and
- *    let the row float (`=$L2="done"` whole-row tints), so every cell of a
- *    row evaluates to the same value. When every reference in the formula is
- *    column-absolute (and no COLUMN()-style call makes the result depend on
- *    the evaluated cell's column), registering one cell per row is enough —
- *    the engine's W×H virtual trees collapse to H. Row-absolute formulas
- *    fold the other axis symmetrically.
- * 2. Row windowing. Streamed workbooks evict cell data outside the loaded
- *    viewport window, so conditional formatting outside that window has
- *    nothing to paint on (and would evaluate against evicted, blank data
- *    anyway). Rules whose registration is still huge after folding register
- *    only the loaded row window (plus margin) and lazily re-register when
- *    the stream window moves.
- *
- * Both transforms only narrow the ranges handed to
- * ConditionalFormattingFormulaService.registerFormulaWithRange; result
- * lookups (getFormulaResultWithCoords / getFormulaMatrix) are remapped so
- * every painted cell reads the value of its row's (or column's) registered
- * representative. Rule model, undo, save, and the CF panel see the original
- * ranges throughout.
- */
 import type { IRange } from '@univerjs/core'
 import { ConditionalFormattingFormulaService } from '@univerjs/preset-sheets-conditional-formatting'
 

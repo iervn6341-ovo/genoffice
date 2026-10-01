@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, waitForPageWithUrl } from './helpers'
 
@@ -136,6 +137,6 @@ test('paragraph dialog: hanging / first-line indent in characters, ⌘T uses the
         '<w:ind w:left="480" w:hanging="480"/>',
       ])
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

@@ -123,6 +123,8 @@ export interface ColorPickerProps {
   recentColors?: readonly string[] | undefined
   /** Named/shade/custom pick emits "#RRGGBB" (uppercase); the auto button emits null. */
   onPick: (hex: string | null) => void
+  /** Restrict colors for a particular editing surface; other callers remain unrestricted. */
+  isColorDisabled?: ((hex: string) => boolean) | undefined
   /** Merged onto the hidden native input; lets callers override onChange (debounce,
       selection restore) or hook onPointerDown (e.g. arming the input). */
   moreInputProps?: InputHTMLAttributes<HTMLInputElement> | undefined
@@ -139,6 +141,7 @@ export function ColorPicker({
   className,
   recentColors,
   onPick,
+  isColorDisabled,
   moreInputProps,
 }: ColorPickerProps): ReactElement {
   const current = value ? normalizeHex(value) : null
@@ -150,6 +153,7 @@ export function ColorPicker({
       type="button"
       className={`gcp-swatch ${isSelected(hex) ? 'selected' : ''}`}
       title={title}
+      disabled={isColorDisabled?.(`#${hex}`)}
       style={{ background: `#${hex}` }}
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => onPick(`#${hex}`)}

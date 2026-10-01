@@ -1,5 +1,7 @@
 /** app strings, zh: defines the key set every other locale shard must match. */
 export const zh = {
+  appNotesDefaultColor: '默认（跟随主题）',
+  appStatusEquationPreview: '此公式以原始预览显示，请在 PowerPoint 中编辑公式。',
   appPhPromptTitle: '单击此处添加标题',
   appPhPromptSubtitle: '单击此处添加副标题',
   appPhPromptBody: '单击此处添加文本',
@@ -205,13 +207,10 @@ export const zh = {
   appRehearseDiscard: '不保存',
   appRehearseSave: '保存',
   appSettingsTitle: 'AI 设置',
-  appSettingsAccount: 'Genspark 账号',
   appSettingsChecking: '检测中…',
   appSettingsLoggedIn: '已登录',
   appSettingsLoggedInEmail: '已登录：{email}',
-  appSettingsLoggedOut: '未登录（AI 功能需要登录 Genspark 账号）',
   appSettingsLoginPending: '等待浏览器登录…',
-  appSettingsLogin: '登录 Genspark',
   appSettingsModel: '模型',
   appSettingsCancel: '取消',
   appSettingsSave: '保存',

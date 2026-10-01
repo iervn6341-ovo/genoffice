@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, waitForPageWithUrl } from './helpers'
 
@@ -79,6 +80,6 @@ test('AutoSum, number-format shortcuts and the default font echo match Excel', a
     await p.keyboard.press('Control+Shift+`')
     await expect.poll(() => cell(p, 'A2').then((c) => c.display)).toBe('1.5')
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

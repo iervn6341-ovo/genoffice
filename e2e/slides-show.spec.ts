@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
@@ -92,7 +93,7 @@ test.describe('slide show keys', () => {
       await s.keyboard.press('Escape')
       await expect(s.locator('.slideshow')).toHaveCount(0)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 })
@@ -127,7 +128,7 @@ test.describe('presenter view mirrors the keys onto the audience window', () => 
       await audience.keyboard.press('p')
       await expect.poll(pos).toMatch(/2/)
     } finally {
-      launched.app.process().kill('SIGKILL')
+      await closeAndSaveVideo(launched, 'cleanup')
     }
   })
 })

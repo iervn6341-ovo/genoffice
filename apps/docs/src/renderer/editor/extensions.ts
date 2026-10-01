@@ -2276,11 +2276,28 @@ export const ListNumberingExtension = Extension.create<object, ListNumberingStor
           // area (or one with no hanging area at all) pushes first-line text to
           // the next tab stop, not right up against the marker
           const tabSuff = level.suff === undefined || level.suff === 'tab'
+          const tabStops = paragraphTabStops(nodeAttrs, storage)
+          // Ordinary decimal lists with no explicit tab/alignment use a natural
+          // hanging box in the editor. A size change must not suddenly jump the
+          // text to the next half-inch stop when "1." barely outgrows its indent.
+          // Authored tab stops, suffixes and non-decimal/custom labels retain
+          // their document geometry.
+          const flowingMarker =
+            !stray &&
+            level.numFmt === 'decimal' &&
+            /^%[1-9][.)]?$/.test(level.lvlText ?? '') &&
+            level.suff === undefined &&
+            !level.lvlJc &&
+            firstTw !== null &&
+            firstTw < 0 &&
+            tabStops.length === 0
+          if (flowingMarker) attrs['data-marker-flow'] = ''
           let widthTw: number | null = null
           if (
             text &&
             firstTw != null &&
-            (level.lvlJc !== undefined || (tabSuff && (firstTw >= 0 || leftTw > 0)))
+            (level.lvlJc !== undefined ||
+              (!flowingMarker && tabSuff && (firstTw >= 0 || leftTw > 0)))
           ) {
             // no level/run size -> the marker renders at the li's 1em; family
             // inherits from the li unless the level declares a text font
@@ -2316,7 +2333,7 @@ export const ListNumberingExtension = Extension.create<object, ListNumberingStor
               widthTw,
               firstTw < 0 ? leftTw : boxStart,
               720,
-              paragraphTabStops(nodeAttrs, storage),
+              tabStops,
             )
             if (adv !== null) styles.push(`--li-tab:${adv / 20}pt`)
           }

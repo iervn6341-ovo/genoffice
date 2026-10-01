@@ -19,10 +19,10 @@ export const MINIMAX_BASE_URL = 'https://api.minimax.io/v1'
 // models in step with the chat catalog in providers.ts.
 export const AI_MEDIA_PROVIDERS: AiMediaProviderMeta[] = [
   {
-    id: 'genspark',
-    label: 'Genspark',
-    description: 'Image generation, media analysis and search through your Genspark sign-in',
-    keyPlaceholder: 'Not required - sign in to Genspark',
+    id: 'none',
+    label: 'Not configured',
+    description: 'Select and configure a media provider to enable this tool',
+    keyPlaceholder: '',
     defaultBaseUrl: '',
     imageProtocol: 'openai-images',
     imageModels: [],
@@ -183,9 +183,9 @@ export function defaultAiMediaSettings(): AiMediaSettings {
     }
   }
   return {
-    imageProvider: 'genspark',
-    analysisProvider: 'genspark',
-    videoAnalysisProvider: 'genspark',
+    imageProvider: 'none',
+    analysisProvider: 'none',
+    videoAnalysisProvider: 'none',
     providers,
   }
 }
@@ -202,7 +202,8 @@ export function resolveAiMediaSettings(
   if (!stored) return defaults
   const providers = { ...defaults.providers }
   for (const [id, config] of Object.entries(stored.providers ?? {})) {
-    if (!config || typeof config !== 'object') continue
+    if (!config || typeof config !== 'object' || !AI_MEDIA_PROVIDERS.some((m) => m.id === id))
+      continue
     const base = providers[id as AiMediaProviderId]
     providers[id as AiMediaProviderId] = {
       apiKey: (config.apiKey ?? base?.apiKey ?? '').trim(),
@@ -215,13 +216,15 @@ export function resolveAiMediaSettings(
           : {}),
     }
   }
-  const legacy = stored.provider
-  const analysisProvider = stored.analysisProvider ?? legacy ?? defaults.analysisProvider
+  const known = (id: AiMediaProviderId | undefined) =>
+    AI_MEDIA_PROVIDERS.some((m) => m.id === id) ? id : undefined
+  const legacy = known(stored.provider)
+  const analysisProvider = known(stored.analysisProvider) ?? legacy ?? defaults.analysisProvider
   return {
-    imageProvider: stored.imageProvider ?? legacy ?? defaults.imageProvider,
+    imageProvider: known(stored.imageProvider) ?? legacy ?? defaults.imageProvider,
     analysisProvider,
     // a pre-split file used one vendor for all media analysis
-    videoAnalysisProvider: stored.videoAnalysisProvider ?? analysisProvider,
+    videoAnalysisProvider: known(stored.videoAnalysisProvider) ?? analysisProvider,
     providers,
   }
 }
@@ -238,37 +241,31 @@ export function mediaConfigUsable(
   return !!config.apiKey?.trim()
 }
 
-/**
- * The stored provider for one capability, honored only when it exists, has
- * that capability and is usable; anything else falls back to genspark so a
- * half-filled setup degrades to the signed-in default.
- */
 export function activeMediaProvider(
   settings: Pick<AiSettings, 'media'>,
   capability: MediaCapability,
 ): AiMediaProviderId {
   const media = settings.media
-  if (!media) return 'genspark'
+  if (!media) return 'none'
   const id =
     capability === 'image'
       ? media.imageProvider
       : capability === 'video'
         ? media.videoAnalysisProvider
         : media.analysisProvider
-  if (!id || id === 'genspark') return 'genspark'
+  if (!id || id === 'none') return 'none'
   const meta = getMediaProviderMeta(id)
-  if (!meta || !providerHasCapability(meta, capability)) return 'genspark'
-  if (!mediaConfigUsable(meta, media.providers?.[id])) return 'genspark'
+  if (!meta || !providerHasCapability(meta, capability)) return 'none'
+  if (!mediaConfigUsable(meta, media.providers?.[id])) return 'none'
   return id
 }
 
-/** the active BYOK config for one capability, or null when it runs through Genspark */
 export function activeMediaConfig(
   settings: Pick<AiSettings, 'media'>,
   capability: MediaCapability,
-): { provider: Exclude<AiMediaProviderId, 'genspark'>; config: AiMediaProviderConfig } | null {
+): { provider: Exclude<AiMediaProviderId, 'none'>; config: AiMediaProviderConfig } | null {
   const provider = activeMediaProvider(settings, capability)
-  if (provider === 'genspark') return null
+  if (provider === 'none') return null
   return { provider, config: settings.media!.providers[provider] }
 }
 
@@ -285,38 +282,37 @@ function byokModel(
 }
 
 function capabilityAvailable(
-  settings: Pick<AiSettings, 'media' | 'gskToolsEnabled'> | null | undefined,
-  gskLoggedIn: boolean,
+  settings: Pick<AiSettings, 'media'> | null | undefined,
+  _legacyAccountState = false,
   capability: MediaCapability,
 ): boolean {
-  if (!settings) return gskLoggedIn
+  if (!settings) return false
   const model = byokModel(settings, capability)
   if (model !== null) return model !== ''
-  return gskLoggedIn && settings.gskToolsEnabled !== false
+  return false
 }
 
-/** live predicate for the generate_image tool: BYOK image model configured, or gsk login + cloud tools on */
 export function imageGenerationAvailable(
-  settings: Pick<AiSettings, 'media' | 'gskToolsEnabled'> | null | undefined,
-  gskLoggedIn: boolean,
+  settings: Pick<AiSettings, 'media'> | null | undefined,
+  _legacyAccountState = false,
 ): boolean {
-  return capabilityAvailable(settings, gskLoggedIn, 'image')
+  return capabilityAvailable(settings, _legacyAccountState, 'image')
 }
 
 /** live predicate for the analyze_media tool: image analysis or video analysis reachable */
 export function mediaAnalysisAvailable(
-  settings: Pick<AiSettings, 'media' | 'gskToolsEnabled'> | null | undefined,
-  gskLoggedIn: boolean,
+  settings: Pick<AiSettings, 'media'> | null | undefined,
+  _legacyAccountState = false,
 ): boolean {
   return (
-    capabilityAvailable(settings, gskLoggedIn, 'analysis') ||
-    capabilityAvailable(settings, gskLoggedIn, 'video')
+    capabilityAvailable(settings, _legacyAccountState, 'analysis') ||
+    capabilityAvailable(settings, _legacyAccountState, 'video')
   )
 }
 
 export function videoAnalysisAvailable(
-  settings: Pick<AiSettings, 'media' | 'gskToolsEnabled'> | null | undefined,
-  gskLoggedIn: boolean,
+  settings: Pick<AiSettings, 'media'> | null | undefined,
+  _legacyAccountState = false,
 ): boolean {
-  return capabilityAvailable(settings, gskLoggedIn, 'video')
+  return capabilityAvailable(settings, _legacyAccountState, 'video')
 }

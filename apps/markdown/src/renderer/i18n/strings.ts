@@ -150,7 +150,7 @@ export const strings = {
     aiTimeoutError: 'AI 响应超时',
     aiOverloadedError: 'AI 服务当前繁忙，请稍后重试',
     aiNetworkError: '网络有问题，无法连接 AI 服务。请检查网络后重试',
-    aiCreditsExhausted: '积分不足，请前往 genspark.ai 充值',
+    aiCreditsExhausted: 'AI 服务额度不足，请检查所选服务的账户。',
     aiOpenAssistant: '打开 AI 助手',
     aiSummarizeBtn: 'AI 总结',
     aiToolsGroup: 'AI 工具',
@@ -354,7 +354,7 @@ export const strings = {
     aiOverloadedError: 'The AI service is busy right now — please try again in a moment',
     aiNetworkError:
       'Network problem: could not reach the AI service. Check your connection and try again',
-    aiCreditsExhausted: 'Out of credits — top up at genspark.ai',
+    aiCreditsExhausted: 'The AI service quota is exhausted. Check your provider account.',
     aiOpenAssistant: 'Open AI assistant',
     aiSummarizeBtn: 'AI Summarize',
     aiToolsGroup: 'AI Tools',
@@ -557,7 +557,8 @@ export const strings = {
     aiOverloadedError: 'AI サービスが混み合っています。しばらくしてからもう一度お試しください',
     aiNetworkError:
       'ネットワークに問題があり、AI サービスに接続できません。接続を確認して再試行してください',
-    aiCreditsExhausted: 'クレジット不足です。genspark.ai でチャージしてください',
+    aiCreditsExhausted:
+      'AI サービスの利用枠を使い切りました。プロバイダーのアカウントを確認してください。',
     aiOpenAssistant: 'AI アシスタントを開く',
     aiSummarizeBtn: 'AI 要約',
     aiToolsGroup: 'AI ツール',
@@ -761,7 +762,7 @@ export const strings = {
     aiOverloadedError: 'AI 서비스가 혼잡합니다. 잠시 후 다시 시도해 주세요',
     aiNetworkError:
       '네트워크에 문제가 있어 AI 서비스에 연결할 수 없습니다. 연결을 확인한 후 다시 시도해 주세요',
-    aiCreditsExhausted: '크레딧이 부족합니다. genspark.ai에서 충전하세요',
+    aiCreditsExhausted: 'AI 서비스 할당량이 소진되었습니다. 제공업체 계정을 확인하세요.',
     aiOpenAssistant: 'AI 어시스턴트 열기',
     aiSummarizeBtn: 'AI 요약',
     aiToolsGroup: 'AI 도구',
@@ -968,7 +969,7 @@ export const strings = {
     aiOverloadedError: "Le service d'IA est actuellement surchargé — réessayez dans un instant",
     aiNetworkError:
       'Problème réseau : impossible de joindre le service IA. Vérifiez votre connexion et réessayez',
-    aiCreditsExhausted: 'Crédits épuisés — rechargez sur genspark.ai',
+    aiCreditsExhausted: 'Quota du service IA épuisé. Vérifiez votre compte fournisseur.',
     aiOpenAssistant: "Ouvrir l'assistant IA",
     aiSummarizeBtn: 'Résumé IA',
     aiToolsGroup: 'Outils IA',
@@ -1177,7 +1178,7 @@ export const strings = {
     aiOverloadedError: 'Der KI-Dienst ist derzeit überlastet — bitte gleich erneut versuchen',
     aiNetworkError:
       'Netzwerkproblem: Der KI-Dienst ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut',
-    aiCreditsExhausted: 'Guthaben aufgebraucht — bei genspark.ai aufladen',
+    aiCreditsExhausted: 'Das KI-Kontingent ist aufgebraucht. Prüfe dein Anbieterkonto.',
     aiOpenAssistant: 'KI-Assistent öffnen',
     aiSummarizeBtn: 'KI-Zusammenfassung',
     aiToolsGroup: 'KI-Tools',
@@ -1385,7 +1386,7 @@ export const strings = {
       'El servicio de IA está saturado en este momento; inténtalo de nuevo en unos instantes',
     aiNetworkError:
       'Problema de red: no se pudo conectar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo',
-    aiCreditsExhausted: 'Sin créditos — recarga en genspark.ai',
+    aiCreditsExhausted: 'Se agotó la cuota del servicio de IA. Revisa tu cuenta del proveedor.',
     aiOpenAssistant: 'Abrir asistente de IA',
     aiSummarizeBtn: 'Resumen IA',
     aiToolsGroup: 'Herramientas de IA',
@@ -1588,7 +1589,7 @@ export const strings = {
     aiOverloadedError: 'บริการ AI มีผู้ใช้งานจำนวนมากในขณะนี้ โปรดลองอีกครั้งในอีกสักครู่',
     aiNetworkError:
       'เครือข่ายมีปัญหา ไม่สามารถเชื่อมต่อบริการ AI ได้ โปรดตรวจสอบการเชื่อมต่อแล้วลองใหม่',
-    aiCreditsExhausted: 'เครดิตหมด — เติมได้ที่ genspark.ai',
+    aiCreditsExhausted: 'โควตาบริการ AI หมดแล้ว โปรดตรวจสอบบัญชีผู้ให้บริการ',
     aiOpenAssistant: 'เปิดผู้ช่วย AI',
     aiSummarizeBtn: 'สรุปด้วย AI',
     aiToolsGroup: 'เครื่องมือ AI',
@@ -1792,7 +1793,7 @@ export const strings = {
     aiOverloadedError: 'Layanan AI sedang sibuk — silakan coba lagi sebentar lagi',
     aiNetworkError:
       'Masalah jaringan: tidak dapat terhubung ke layanan AI. Periksa koneksi Anda lalu coba lagi',
-    aiCreditsExhausted: 'Kredit habis — isi ulang di genspark.ai',
+    aiCreditsExhausted: 'Kuota layanan AI habis. Periksa akun penyedia Anda.',
     aiOpenAssistant: 'Buka asisten AI',
     aiSummarizeBtn: 'Ringkasan AI',
     aiToolsGroup: 'Alat AI',
@@ -1997,7 +1998,7 @@ export const strings = {
     aiOverloadedError: 'Сервис ИИ сейчас перегружен — повторите попытку чуть позже',
     aiNetworkError:
       'Проблема с сетью: не удалось подключиться к сервису ИИ. Проверьте подключение и повторите попытку',
-    aiCreditsExhausted: 'Кредиты закончились — пополните на genspark.ai',
+    aiCreditsExhausted: 'Квота сервиса ИИ исчерпана. Проверьте аккаунт провайдера.',
     aiOpenAssistant: 'Открыть ИИ-ассистента',
     aiSummarizeBtn: 'ИИ-резюме',
     aiToolsGroup: 'Инструменты ИИ',
@@ -2198,7 +2199,7 @@ export const strings = {
     aiOverloadedError: 'خدمة الذكاء الاصطناعي مشغولة حاليًا — يرجى المحاولة مرة أخرى بعد قليل',
     aiNetworkError:
       'مشكلة في الشبكة: تعذّر الوصول إلى خدمة الذكاء الاصطناعي. تحقق من الاتصال وحاول مجددًا',
-    aiCreditsExhausted: 'نفدت الأرصدة — أعد الشحن على genspark.ai',
+    aiCreditsExhausted: 'نفدت حصة خدمة الذكاء الاصطناعي. تحقق من حساب مزود الخدمة.',
     aiOpenAssistant: 'فتح مساعد الذكاء الاصطناعي',
     aiSummarizeBtn: 'تلخيص AI',
     aiToolsGroup: 'أدوات الذكاء الاصطناعي',
@@ -2405,7 +2406,7 @@ export const strings = {
       'O serviço de IA está sobrecarregado no momento — tente novamente em instantes',
     aiNetworkError:
       'Problema de rede: não foi possível conectar ao serviço de IA. Verifique sua conexão e tente novamente',
-    aiCreditsExhausted: 'Créditos esgotados — recarregue em genspark.ai',
+    aiCreditsExhausted: 'A quota do serviço de IA esgotou-se. Verifique a conta do fornecedor.',
     aiOpenAssistant: 'Abrir assistente de IA',
     aiSummarizeBtn: 'Resumo IA',
     aiToolsGroup: 'Ferramentas de IA',
@@ -2611,7 +2612,7 @@ export const strings = {
     aiOverloadedError: 'Il servizio IA è momentaneamente sovraccarico — riprova tra poco',
     aiNetworkError:
       'Problema di rete: impossibile raggiungere il servizio IA. Controlla la connessione e riprova',
-    aiCreditsExhausted: 'Crediti esauriti — ricarica su genspark.ai',
+    aiCreditsExhausted: 'Quota del servizio IA esaurita. Controlla il tuo account del fornitore.',
     aiOpenAssistant: 'Apri assistente IA',
     aiSummarizeBtn: 'Riassunto IA',
     aiToolsGroup: 'Strumenti IA',
@@ -2817,7 +2818,7 @@ export const strings = {
     aiOverloadedError: 'Usługa AI jest obecnie przeciążona — spróbuj ponownie za chwilę',
     aiNetworkError:
       'Problem z siecią: nie można połączyć się z usługą AI. Sprawdź połączenie i spróbuj ponownie',
-    aiCreditsExhausted: 'Brak kredytów — doładuj na genspark.ai',
+    aiCreditsExhausted: 'Limit usługi AI został wyczerpany. Sprawdź konto dostawcy.',
     aiOpenAssistant: 'Otwórz asystenta AI',
     aiSummarizeBtn: 'Podsumowanie AI',
     aiToolsGroup: 'Narzędzia AI',
@@ -3007,7 +3008,7 @@ export const strings = {
     aiOverloadedError: 'Služba AI je právě zaneprázdněna – zkuste to za chvíli znovu',
     aiNetworkError:
       'Problém se sítí: službu AI se nepodařilo kontaktovat. Zkontrolujte připojení a zkuste to znovu',
-    aiCreditsExhausted: 'Došly kredity – dobijte je na genspark.ai',
+    aiCreditsExhausted: 'Kvóta služby AI je vyčerpána. Zkontrolujte účet poskytovatele.',
     aiOpenAssistant: 'Otevřít asistenta AI',
     aiSummarizeBtn: 'Shrnout pomocí AI',
     aiToolsGroup: 'Nástroje AI',
@@ -3227,7 +3228,7 @@ export const strings = {
     aiOverloadedError: 'De AI-service is momenteel overbelast — probeer het zo opnieuw',
     aiNetworkError:
       'Netwerkprobleem: kan de AI-service niet bereiken. Controleer je verbinding en probeer het opnieuw',
-    aiCreditsExhausted: 'Credits op — waardeer op via genspark.ai',
+    aiCreditsExhausted: 'Het quotum van de AI-dienst is op. Controleer je provideraccount.',
     aiOpenAssistant: 'AI-assistent openen',
     aiSummarizeBtn: 'AI-samenvatting',
     aiToolsGroup: 'AI-hulpmiddelen',
@@ -3431,7 +3432,7 @@ export const strings = {
     aiOverloadedError: 'Perkhidmatan AI sedang sibuk — sila cuba lagi sebentar lagi',
     aiNetworkError:
       'Masalah rangkaian: tidak dapat menghubungi perkhidmatan AI. Semak sambungan anda dan cuba lagi',
-    aiCreditsExhausted: 'Kredit habis — tambah nilai di genspark.ai',
+    aiCreditsExhausted: 'Kuota perkhidmatan AI habis. Semak akaun penyedia anda.',
     aiOpenAssistant: 'Buka pembantu AI',
     aiSummarizeBtn: 'Ringkasan AI',
     aiToolsGroup: 'Alat AI',
@@ -3631,7 +3632,7 @@ export const strings = {
     aiTimeoutError: 'תגובת ה-AI חרגה מהזמן',
     aiOverloadedError: 'שירות ה-AI עמוס כרגע — נסו שוב בעוד רגע',
     aiNetworkError: 'בעיית רשת: לא ניתן להתחבר לשירות ה-AI. בדוק את החיבור ונסה שוב',
-    aiCreditsExhausted: 'נגמרו הקרדיטים — טענו ב-genspark.ai',
+    aiCreditsExhausted: 'מכסת שירות ה-AI נוצלה. בדוק את חשבון הספק שלך.',
     aiOpenAssistant: 'פתחו את עוזר ה-AI',
     aiSummarizeBtn: 'סיכום AI',
     aiToolsGroup: 'כלי AI',
@@ -3835,7 +3836,7 @@ export const strings = {
     aiOverloadedError: 'AI सेवा अभी व्यस्त है — कृपया थोड़ी देर बाद फिर से प्रयास करें',
     aiNetworkError:
       'नेटवर्क समस्या: AI सेवा से कनेक्ट नहीं हो सका। कनेक्शन जांचें और फिर से प्रयास करें',
-    aiCreditsExhausted: 'क्रेडिट समाप्त — genspark.ai पर रिचार्ज करें',
+    aiCreditsExhausted: 'AI सेवा का कोटा समाप्त हो गया है। अपना प्रदाता खाता जाँचें।',
     aiOpenAssistant: 'AI सहायक खोलें',
     aiSummarizeBtn: 'AI सारांश',
     aiToolsGroup: 'AI टूल',
@@ -4035,7 +4036,7 @@ export const strings = {
     aiTimeoutError: 'AI 回應逾時',
     aiOverloadedError: 'AI 服務目前繁忙，請稍後重試',
     aiNetworkError: '網路有問題，無法連接 AI 服務。請檢查網路後重試',
-    aiCreditsExhausted: '點數不足，請前往 genspark.ai 儲值',
+    aiCreditsExhausted: 'AI 服務額度不足，請檢查所選服務的帳戶。',
     aiOpenAssistant: '開啟 AI 助手',
     aiSummarizeBtn: 'AI 總結',
     aiToolsGroup: 'AI 工具',

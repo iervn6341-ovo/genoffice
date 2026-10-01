@@ -140,7 +140,7 @@ export const ru = {
   ribbonGroupStyles: 'Стили',
   ribbonAiTools: 'Инструменты ИИ',
   ribbonGroupEditing: 'Редактирование',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Открыть помощника ИИ',
   ribbonRemoveTableStyleTip: 'Удалить стиль таблицы',
   ribbonNoStyle: 'Без стиля',

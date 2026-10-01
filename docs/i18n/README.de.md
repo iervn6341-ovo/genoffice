@@ -49,11 +49,7 @@ er verändert hat.
   bearbeitet, gespeichert und konvertiert. PDF → Word / Excel / PowerPoint,
   Markdown → Word und HTML → Word laufen vollständig auf dem Gerät. Nur die
   KI-Aufrufe verlassen den Rechner – zu dem Anbieter, den du wählst.
-- **Deine Schlüssel oder keine.** Melde dich mit Genspark an und du brauchst
-  keine Schlüssel, oder bring deinen eigenen Schlüssel für Claude, OpenAI,
-  Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral,
-  OpenRouter, Requesty oder jeden OpenAI-kompatiblen Endpunkt mit – auch lokale Server
-  werden unterstützt.
+- **AI.** KI-Funktionen verwenden den in den Einstellungen ausgewählten Anbieter. Vorhandene Einstellungen bleiben erhalten; Suche und Medien werden separat konfiguriert.
 - **Skriptbar und bereit für Agenten.** Die App bringt eine
   `genoffice`-Befehlszeile und einen Skill für Claude Code, Codex, Cursor,
   Gemini CLI, GitHub Copilot, OpenCode und Windsurf mit, sodass ein
@@ -185,7 +181,7 @@ Fenster zu öffnen.
 </tr>
 <tr>
 <td><b>Ein Prompt an deinen Agenten</b> — „Erstelle eine Präsentation mit acht Folien über das Sonnensystem.“ Der Agent liest den Skill, schreibt ein Stylesheet, eine Gliederung und eine Seitenspezifikation pro Folie, generiert die beiden Fotos mit <code>genoffice image</code> und lässt <code>genoffice slides check</code> alles zurückweisen, was überläuft oder sich überlappt, bevor <code>genoffice create</code> die <code>.pptx</code> zusammensetzt und <code>slides render</code> pro Folie ein PNG zum Anschauen zurückgibt.</td>
-<td><b>Einmal installieren, unter Einstellungen → Integrationen</b> — GenOffice listet die Coding-Agenten auf, die es auf diesem Rechner findet, und schreibt den Skill in jeden, den du auswählst. Oder lade den Skill als Zip herunter oder führe <code>npx skills add genspark-ai/genoffice</code> aus. Befehle und der vollständige Workflow stehen unter <a href="#command-line-and-agent-skill">Befehlszeile und Agent-Skill</a>.</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -223,9 +219,7 @@ aufbauen, während du zusiehst.
   Docs, echte Formeln und Diagramme in Sheets, Folien werden direkt auf die
   Arbeitsfläche gezeichnet, und jeder KI-Schritt hinterlässt einen Snapshot,
   den du zurückrollen kannst.
-- **Dein Modell, dein Schlüssel.** Melde dich mit Genspark an oder bring einen
-  eigenen Schlüssel für Claude, OpenAI, Gemini, DeepSeek und mehr mit – lokale
-  Server und jeder OpenAI-kompatible Endpunkt sind ebenfalls möglich.
+- **AI.** KI-Funktionen verwenden den in den Einstellungen ausgewählten Anbieter. Vorhandene Einstellungen bleiben erhalten; Suche und Medien werden separat konfiguriert.
 - **PDF richtig gemacht.** Text direkt auf der Seite bearbeiten und PDF lokal
   in Word, Excel oder PowerPoint konvertieren, mit System-OCR für Scans.
 - **Auch Markdown und HTML**, mit demselben KI-Panel und lokalem Export nach
@@ -237,10 +231,7 @@ aufbauen, während du zusiehst.
 
 ## KI-Backends
 
-**Mit Genspark anmelden**, und es gibt nichts zu konfigurieren:
-Modellaufrufe laufen über den Genspark-Proxy (die Modellfamilien Claude, GPT
-und Gemini), und die Agenten erhalten Web- und Bildsuche, Bildgenerierung
-sowie Bild-/Audio-/Videoanalyse.
+KI-Funktionen verwenden den in den Einstellungen ausgewählten Anbieter. Vorhandene Einstellungen bleiben erhalten; Suche und Medien werden separat konfiguriert.
 
 **Oder bring deinen eigenen Schlüssel mit.** Unter Einstellungen → KI stehen
 Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok,
@@ -280,7 +271,6 @@ MCP-Client.
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Einstellungen → Integrationen** in der App  | Listet die auf diesem Rechner gefundenen Agenten auf; ein Klick schreibt den Skill in jeden, den du auswählst. Eine **Aktualisieren**-Schaltfläche erscheint, wenn eine GenOffice-Version einen neueren Skill mitbringt. |
 | **Als Zip herunterladen** auf derselben Seite | Das Layout, das claude.ai, die Claude-Desktop-Apps und andere Assistenten als hochgeladenen Skill akzeptieren.                                                                                                           |
-| `npx skills add genspark-ai/genoffice`        | Installiert aus diesem Repository in jeden Skills-kompatiblen Agenten.                                                                                                                                                   |
 
 Starte dann einen neuen Chat und bitte um ein Dokument. Der Skill bringt dem
 Agenten bei, wann er zu `genoffice` greifen soll, wie er eine Datei vor dem
@@ -513,11 +503,7 @@ Dokumente in Microsoft Office weiter funktionieren.
 <details>
 <summary><b>Funktioniert GenOffice offline?</b></summary>
 
-Die Dokumentbearbeitung ist vollständig lokal – Dateien verlassen deinen
-Rechner nie, um geöffnet, bearbeitet, gespeichert oder konvertiert zu
-werden. Die KI-Funktionen (Agenten, Suche, Bildwerkzeuge) benötigen eine
-Netzwerkverbindung, entweder über eine Genspark-Anmeldung oder deinen
-eigenen Modell-API-Schlüssel.
+KI-Funktionen verwenden den in den Einstellungen ausgewählten Anbieter. Vorhandene Einstellungen bleiben erhalten; Suche und Medien werden separat konfiguriert.
 
 </details>
 
@@ -543,12 +529,7 @@ Seitenbild konvertiert werden.
 <details>
 <summary><b>Kann ich mein eigenes KI-Modell oder meinen eigenen API-Schlüssel verwenden?</b></summary>
 
-Ja. Neben der schlüssellosen Genspark-Anmeldung unterstützt GenOffice das
-Mitbringen eigener Schlüssel für Claude, OpenAI, Gemini, DeepSeek, Kimi,
-GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty und OpenCode Zen/Go,
-plus jeden OpenAI-kompatiblen Endpunkt – einschließlich lokaler
-Modell-Server. Suche, Bildgenerierung und Bild-/Videoanalyse benötigen
-eigene Schlüssel unter Einstellungen → KI-Medien & Suche.
+KI-Funktionen verwenden den in den Einstellungen ausgewählten Anbieter. Vorhandene Einstellungen bleiben erhalten; Suche und Medien werden separat konfiguriert.
 
 </details>
 

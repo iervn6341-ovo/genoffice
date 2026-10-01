@@ -137,7 +137,7 @@ export const he = {
   ribbonGroupStyles: 'סגנונות',
   ribbonAiTools: 'כלי AI',
   ribbonGroupEditing: 'עריכה',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'פתח את עוזר ה-AI',
   ribbonRemoveTableStyleTip: 'הסר סגנון טבלה',
   ribbonNoStyle: 'ללא סגנון',

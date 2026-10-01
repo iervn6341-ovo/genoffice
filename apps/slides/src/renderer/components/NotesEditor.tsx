@@ -1,6 +1,6 @@
 /**
- * Notes pane editor (PowerPoint Normal view): the notes body as formatted, directly editable
- * text. Each paragraph is a block carrying its source index and each run a span carrying its
+ * Notes pane editor: authored formatting with paint-only theme colors for neutral text.
+ * Each paragraph carries its source index and each run a span carrying its
  * own, so extractParagraphs returns traced EditParagraphs and the setNotes op keeps every
  * untouched run's bytes. While the caret is here the Home ribbon's Font / alignment commands
  * act on this selection through the same helpers slide text editing uses.
@@ -9,6 +9,7 @@ import React, { useEffect, useLayoutEffect, useRef } from 'react'
 import type { EditParagraph, NotesParagraphView } from '../../shared/ipc'
 import { displayFontFamily } from '../konva-adapter'
 import { extractParagraphs, firstFontFamily } from '../TextEditOverlay'
+import { isNotesDefaultColor, syncNotesDisplayColors } from '../notes-color'
 
 /** The notes pane shows notes at their real point size (100% zoom): 1pt = 96/72 px */
 const PX_PER_PT = 96 / 72
@@ -85,6 +86,7 @@ export function NotesEditor({
     const root = editorRef.current
     if (!root || !paragraphs) return
     populate(root, paragraphs)
+    syncNotesDisplayColors(root)
     root.classList.toggle('notes-empty', !root.textContent)
     // the rebuild is not an edit
     observerRef.current?.takeRecords()
@@ -95,6 +97,7 @@ export function NotesEditor({
     if (!root) return
     // ribbon helpers restyle spans without an input event: watch the DOM itself
     const mo = new MutationObserver(() => {
+      syncNotesDisplayColors(root)
       root.classList.toggle('notes-empty', !root.textContent)
       onEditRef.current()
     })
@@ -140,8 +143,7 @@ export function NotesEditor({
 }
 
 /**
- * Read-only formatted notes (presenter view): sizes are relative to the 12pt notes default, so
- * the presenter's A⁺ / A⁻ scale every run together, as in PowerPoint's presenter view.
+ * Read-only formatted notes. The presenter's A⁺ / A⁻ scales the authored sizes together.
  */
 export function NotesView({ paragraphs }: { paragraphs: NotesParagraphView[] }): React.JSX.Element {
   return (
@@ -173,7 +175,7 @@ export function NotesView({ paragraphs }: { paragraphs: NotesParagraphView[] }):
                       }
                     : {}),
                   ...(r.baseline ? { verticalAlign: r.baseline > 0 ? 'super' : 'sub' } : {}),
-                  ...(r.color ? { color: r.color } : {}),
+                  ...(r.color && !isNotesDefaultColor(r.color) ? { color: r.color } : {}),
                   ...(r.highlight ? { backgroundColor: r.highlight } : {}),
                 }}
               >

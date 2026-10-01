@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const ja = {
+  appNotesDefaultColor: '既定（テーマに合わせる）',
+  appStatusEquationPreview:
+    'この数式は元のプレビューで表示されます。編集は PowerPoint で行ってください。',
   appPhPromptTitle: 'クリックしてタイトルを追加',
   appPhPromptSubtitle: 'クリックしてサブタイトルを追加',
   appPhPromptBody: 'クリックしてテキストを追加',
@@ -219,13 +222,10 @@ export const ja = {
   appRehearseDiscard: '保存しない',
   appRehearseSave: '保存',
   appSettingsTitle: 'AI 設定',
-  appSettingsAccount: 'Genspark アカウント',
   appSettingsChecking: '確認中…',
   appSettingsLoggedIn: 'サインイン済み',
   appSettingsLoggedInEmail: 'サインイン済み：{email}',
-  appSettingsLoggedOut: '未サインイン（AI 機能には Genspark アカウントへのサインインが必要）',
   appSettingsLoginPending: 'ブラウザーでのサインインを待機中…',
-  appSettingsLogin: 'Genspark にサインイン',
   appSettingsModel: 'モデル',
   appSettingsCancel: 'キャンセル',
   appSettingsSave: '保存',

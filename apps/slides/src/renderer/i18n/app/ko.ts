@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const ko = {
+  appNotesDefaultColor: '기본값(테마 따름)',
+  appStatusEquationPreview:
+    '이 수식은 원본 미리 보기로 표시됩니다. PowerPoint에서 수식을 편집하세요.',
   appPhPromptTitle: '제목을 추가하려면 클릭',
   appPhPromptSubtitle: '부제목을 추가하려면 클릭',
   appPhPromptBody: '텍스트를 추가하려면 클릭',
@@ -215,13 +218,10 @@ export const ko = {
   appRehearseDiscard: '저장 안 함',
   appRehearseSave: '저장',
   appSettingsTitle: 'AI 설정',
-  appSettingsAccount: 'Genspark 계정',
   appSettingsChecking: '확인 중…',
   appSettingsLoggedIn: '로그인됨',
   appSettingsLoggedInEmail: '로그인됨: {email}',
-  appSettingsLoggedOut: '로그인되지 않음(AI 기능을 사용하려면 Genspark 계정으로 로그인해야 합니다)',
   appSettingsLoginPending: '브라우저 로그인을 기다리는 중…',
-  appSettingsLogin: 'Genspark 로그인',
   appSettingsModel: '모델',
   appSettingsCancel: '취소',
   appSettingsSave: '저장',

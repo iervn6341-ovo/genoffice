@@ -1,4 +1,5 @@
 import { mkdtempSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -15,8 +16,15 @@ const PPTX = join(REPO, 'packages/pptx-engine/tests/fixtures/01_standard_busines
 const DOCX = join(REPO, 'apps/docs/tests/pagination-corpus/docx/01-simple-english.docx')
 
 const servers: Server[] = []
-afterEach(() => {
-  while (servers.length) servers.pop()!.close()
+afterEach(async () => {
+  await Promise.all(
+    servers.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()))
+        }),
+    ),
+  )
 })
 
 /** A stand-in shell: publishes control.json into `dir` and answers with `reply`. */
@@ -27,7 +35,7 @@ async function fakeShell(
   const requests: unknown[] = []
   const endpoint =
     process.platform === 'win32'
-      ? `\\\\.\\pipe\\genoffice-test-${process.pid}-${servers.length}`
+      ? `\\\\.\\pipe\\genoffice-test-${process.pid}-${randomUUID()}`
       : join(dir, 'control.sock')
   const server = createServer((socket) => {
     let buffer = ''
@@ -42,7 +50,13 @@ async function fakeShell(
     })
   })
   servers.push(server)
-  await new Promise<void>((r) => server.listen(endpoint, r))
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(endpoint, () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
   writeFileSync(
     join(dir, 'control.json'),
     JSON.stringify({ protocol: 1, pid: process.pid, endpoint, token: 'secret' }),

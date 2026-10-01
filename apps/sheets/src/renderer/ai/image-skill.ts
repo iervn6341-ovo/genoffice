@@ -19,11 +19,6 @@ const IMAGES_SYSTEM_PROMPT_NO_GEN = `## Images
 - image_search finds real web images (returns direct imageUrl entries).
 ${PLACEMENT_PROMPT}`
 
-/**
- * `imageGen` is a live predicate (Genspark login + cloud-tools toggle, or a
- * BYOK media key); the loop re-reads tools and systemPrompt before every
- * request, so generate_image appears and disappears without rebuilding the loop.
- */
 export function createImageSkill(imageGen: () => boolean = () => true): AgentSkill {
   const allTools = [
     {

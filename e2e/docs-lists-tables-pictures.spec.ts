@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -100,7 +101,7 @@ test('Continue Numbering skips a bullet list in between', async () => {
     await expect.poll(() => lists(p).then((l) => Object.fromEntries(l).three)).toBe(before.one)
     expect(Object.fromEntries(await lists(p)).dot).toBe(before.dot)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -144,7 +145,7 @@ test('a table selected with its move handle keeps the Table tabs, and Insert Bel
       .click()
     await expect.poll(rows).toBeGreaterThan(grown)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -186,7 +187,7 @@ test('a dragged picture keeps its place through save and reopen', async () => {
       })
       .toMatch(/<wp:positionH relativeFrom="column"><wp:posOffset>\d+<\/wp:posOffset>/)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
   const re = await launchShell({
     onboardingSeen: true,
@@ -202,6 +203,6 @@ test('a dragged picture keeps its place through save and reopen', async () => {
     expect(at.x - anchor.x).toBeCloseTo(offset.dx, 0)
     expect(at.y - anchor.y).toBeCloseTo(offset.dy, 0)
   } finally {
-    re.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(re, 'cleanup')
   }
 })

@@ -174,8 +174,9 @@ export function createSlidesControl(deps: SlidesBridgeDeps): SlidesControl {
     saveDeck: async (wcId: number, filePath: string, overwrite: boolean) => {
       if (!isAbsolute(filePath)) throw new Error('path must be absolute')
       const ext = extname(filePath).toLowerCase()
-      const targetPath = ext === '' ? `${filePath}.pptx` : ext === '.pptx' ? filePath : null
-      if (!targetPath) throw new Error('path must point to a .pptx file')
+      const targetPath =
+        ext === '' ? `${filePath}.pptx` : ['.pptx', '.ppsx'].includes(ext) ? filePath : null
+      if (!targetPath) throw new Error('path must point to a .pptx or .ppsx file')
       if (existsSync(targetPath) && !overwrite) {
         throw new Error(`file already exists: ${targetPath} (pass overwrite:true to replace it)`)
       }

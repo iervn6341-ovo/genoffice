@@ -58,6 +58,7 @@ const ATTACHMENT_EXTS = new Set([
   'docx',
   'pdf',
   'pptx',
+  'ppsx',
   'ppt',
   'xlsx',
   'xlsm',

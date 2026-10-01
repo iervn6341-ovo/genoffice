@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { InsertGalleryKey } from './components/RibbonGalleryPane'
 import type {
   GroupRenderNode,
   RenderFill,
@@ -93,9 +94,10 @@ import { EquationDialog, HeaderFooterDialog, LinkDialog } from './components/Ins
 import { CutoutDialog } from './components/CutoutDialog'
 import { useAutoSavePref, type AiScopeQuoteData, type WordArtPreset } from '@genoffice/ui'
 import type { ChartPresetDef, IconDef, SmartArtDef } from './insert-presets'
-import { GensparkMark, IconAiBeautify, IconAiFactCheck, IconAiImage } from './components/icons'
+import { AssistantMark, IconAiBeautify, IconAiFactCheck, IconAiImage } from './components/icons'
 import { ToastHost } from './components/toast'
 import { showToast } from './components/toast-bus'
+import { isNotesDefaultColor } from './notes-color'
 import { t, useI18n } from './i18n/locale'
 import { AiPanel } from './ai/AiPanel'
 import { ChartDataDialog } from './components/ChartDataDialog'
@@ -599,6 +601,29 @@ export function App() {
   // ── Review tab: comments ────────────────────────────────────────────────
   const [comments, setComments] = useState<SlideComment[]>([])
   const [showComments, setShowComments] = useState(false)
+  const [insertGallery, setInsertGallery] = useState<InsertGalleryKey | null>(null)
+  const [insertGalleryTarget, setInsertGalleryTarget] = useState<HTMLDivElement | null>(null)
+  const galleryTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const changeInsertGallery = useCallback(
+    (key: InsertGalleryKey | null, trigger?: HTMLButtonElement) => {
+      if (trigger) galleryTriggerRef.current = trigger
+      if (key) {
+        setViewMode((mode) => (mode === 'sorter' || mode === 'reading' ? 'normal' : mode))
+        setShowFormat(false)
+        setShowBgFormat(false)
+        setShowAnimPane(false)
+        setShowComments(false)
+      }
+      setInsertGallery(key)
+    },
+    [],
+  )
+  const closeInsertGallery = useCallback(() => {
+    setInsertGallery(null)
+    const trigger = galleryTriggerRef.current
+    if (trigger?.isConnected && trigger.getClientRects().length) trigger.focus()
+    else document.querySelector<HTMLButtonElement>('.ribbon-tab.active')?.focus()
+  }, [])
   const [commentsFocusNonce, setCommentsFocusNonce] = useState(0)
   /** Notes/comments must be re-fetched after undo/redo (they're not in RenderSlide) */
   const [annotationsNonce, setAnnotationsNonce] = useState(0)
@@ -845,6 +870,7 @@ export function App() {
       setDirty(false)
       setInkTool('select')
       setAiPanelKey((k) => k + 1)
+      setInsertGallery(null)
       // Queue anchors belong to the deck that was open; another file invalidates them all
       setEditQueue([])
       setAskState(null)
@@ -1246,11 +1272,17 @@ export function App() {
   }, [slides.length])
 
   const toggleAi = useCallback(() => {
+    if (insertGallery) {
+      setInsertGallery(null)
+      setShowAi(true)
+      localStorage.setItem('ai-slides-show-ai', '1')
+      return
+    }
     setShowAi((v) => {
       localStorage.setItem('ai-slides-show-ai', v ? '0' : '1')
       return !v
     })
-  }, [])
+  }, [insertGallery])
 
   const pushAiPreset = useCallback(
     (
@@ -1265,6 +1297,7 @@ export function App() {
         localStorage.setItem('ai-slides-show-ai', '1')
         return true
       })
+      setInsertGallery(null)
       setAiPreset({
         text,
         nonce: Date.now(),
@@ -1401,6 +1434,7 @@ export function App() {
         return [...prev, item]
       })
       // The queue lives in the panel; annotating with it collapsed would look like nothing happened
+      setInsertGallery(null)
       setShowAi(() => {
         localStorage.setItem('ai-slides-show-ai', '1')
         return true
@@ -1774,6 +1808,7 @@ export function App() {
   }, [selectedIds, animations])
 
   const toggleAnimPane = useCallback(() => {
+    setInsertGallery(null)
     setShowAnimPane((v) => {
       if (!v) {
         setShowFormat(false)
@@ -1786,6 +1821,7 @@ export function App() {
 
   /** Open the format-background pane (Design tab button / canvas context menu) */
   const openBgFormat = useCallback(() => {
+    setInsertGallery(null)
     setShowBgFormat(true)
     setShowFormat(false)
     setShowAnimPane(false)
@@ -1794,6 +1830,7 @@ export function App() {
 
   /** Open the format pane (Home ribbon toggle / element context menu); never auto-opens on selection */
   const openFormat = useCallback(() => {
+    setInsertGallery(null)
     setShowFormat(true)
     setShowBgFormat(false)
     setShowAnimPane(false)
@@ -1982,6 +2019,7 @@ export function App() {
   )
 
   const openComments = useCallback((focus: boolean) => {
+    setInsertGallery(null)
     setShowComments(true)
     setShowFormat(false)
     setShowBgFormat(false)
@@ -1991,6 +2029,7 @@ export function App() {
 
   // ── View modes ──────────────────────────────────────────────────────────
   const onViewMode = useCallback((mode: SlidesViewMode) => {
+    setInsertGallery(null)
     setViewMode(mode)
     setEditing(null)
     setSelectedIds([])
@@ -2359,10 +2398,21 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [mediaPlay])
 
-  const startEditCell = useCallback((sourceId: string, row: number, col: number) => {
-    setEditing(null)
-    setEditingCell({ sourceId, row, col })
-  }, [])
+  const startEditCell = useCallback(
+    (sourceId: string, row: number, col: number) => {
+      const table = slide?.nodes.find((node) => node.sourceId === sourceId)
+      if (
+        table?.type === 'table' &&
+        table.cells.some((cell) => cell.row === row && cell.col === col && cell.equationPreview)
+      ) {
+        setStatus(t('appStatusEquationPreview'))
+        return
+      }
+      setEditing(null)
+      setEditingCell({ sourceId, row, col })
+    },
+    [slide],
+  )
 
   /** Pseudo-node for the cell edit overlay: table box + cell local box → absolute page box */
   const cellEditNode = useMemo(() => {
@@ -2602,8 +2652,17 @@ export function App() {
   }, [inTextEdit])
 
   const onTextColor = useCallback((hex: string) => {
+    if (ctxRef.current.editingNotes && isNotesDefaultColor(hex)) {
+      return
+    }
     document.execCommand('styleWithCSS', false, 'true')
     document.execCommand('foreColor', false, hex)
+  }, [])
+
+  const onNotesDefaultColor = useCallback(() => {
+    // Portable document default; the notes UI remaps it to the active theme.
+    document.execCommand('styleWithCSS', false, 'true')
+    document.execCommand('foreColor', false, '#000000')
   }, [])
 
   const onAlign = useCallback((align: ParaAlign) => {
@@ -3076,7 +3135,7 @@ export function App() {
         onZoom={previewZoom}
         showThumbs={showThumbs}
         onToggleThumbs={() => setShowThumbs((v) => !v)}
-        aiOpen={showAi}
+        aiOpen={showAi && !insertGallery}
         onToggleAi={toggleAi}
         onAiPreset={(text, opts) => pushAiPreset(text, true, undefined, undefined, opts?.slideShot)}
         onInsert={(kind) => void insertElement(kind)}
@@ -3090,9 +3149,14 @@ export function App() {
         layouts={layoutsResult?.layouts ?? null}
         layoutSize={layoutsResult?.size ?? null}
         formatOpen={showFormat}
+        insertGallery={insertGallery}
+        insertGalleryTarget={insertGalleryTarget}
+        onInsertGalleryChange={changeInsertGallery}
+        onCloseInsertGallery={closeInsertGallery}
         onToggleFormat={() =>
           setShowFormat((v) => {
             if (!v) {
+              setInsertGallery(null)
               setShowAnimPane(false)
               setShowBgFormat(false)
             }
@@ -3110,6 +3174,7 @@ export function App() {
         onFormatBrushClick={onFormatBrushClick}
         onFormatBrushDoubleClick={onFormatBrushDoubleClick}
         onTextColor={onTextColor}
+        onNotesDefaultColor={notesActive ? onNotesDefaultColor : undefined}
         onAlign={onAlign}
         onStrike={onStrike}
         onTextToggle={onTextToggle}
@@ -3395,7 +3460,7 @@ export function App() {
 
       <div className="app-main">
         {slide && viewMode !== 'reading' && viewMode !== 'sorter' && (
-          <div className={`ai-dock${showAi && aiSettings ? '' : ' collapsed'}`}>
+          <div className={`ai-dock${showAi && aiSettings && !insertGallery ? '' : ' collapsed'}`}>
             {/* always mounted once settings load: collapse must not drop state or in-flight runs */}
             {aiSettings ? (
               <AiPanel
@@ -3410,7 +3475,7 @@ export function App() {
                 fitWidthPx={FIT_WIDTH}
                 settings={aiSettings}
                 preset={aiPreset}
-                open={showAi}
+                open={showAi && !insertGallery}
                 onExpand={toggleAi}
                 onCollapse={toggleAi}
                 onUndo={() => void undo()}
@@ -3440,7 +3505,7 @@ export function App() {
                 data-tip={t('appAiRailExpand')}
                 aria-label={t('appAiRailExpand')}
               >
-                <GensparkMark size={22} />
+                <AssistantMark size={22} />
               </button>
             )}
           </div>
@@ -3807,8 +3872,8 @@ export function App() {
                               data-tip={t('aiOpenAssistant')}
                               onClick={toggleAi}
                             >
-                              <GensparkMark size={14} />
-                              <span>Genspark AI</span>
+                              <AssistantMark size={14} />
+                              <span>AI</span>
                             </button>
                             {/* Same one-click presets as the Home tab; hidden instead of
                         disabled while the deck has no real content */}
@@ -4185,7 +4250,14 @@ export function App() {
                     </div>
                   )}
                 </div>
-                {showBgFormat ? (
+                {insertGallery ? (
+                  <div
+                    id="slides-insert-gallery"
+                    className="ribbon-gallery-host"
+                    ref={setInsertGalleryTarget}
+                    data-gallery={insertGallery}
+                  />
+                ) : showBgFormat ? (
                   <FormatBackgroundPane
                     key={current}
                     slide={slide}

@@ -9,6 +9,7 @@ import {
 import { columnLabel, parseAddress } from '@genoffice/xlsx-gateway/domain/cell-address'
 import {
   assembleWithJsZip,
+  applyCellEditsToXlsx,
   createBufferEntrySource,
   planCellEditsToXlsx,
   toA1Address,
@@ -17,7 +18,12 @@ import {
   type SheetStructuralOps,
   type XlsxMutation,
 } from '@genoffice/xlsx-gateway/gateway/xlsx-gateway'
-import type { SheetEditPlan } from '@genoffice/xlsx-gateway/gateway/xlsx-sheets'
+import {
+  parseRelationships,
+  parseSheetElements,
+  type SheetEditPlan,
+} from '@genoffice/xlsx-gateway/gateway/xlsx-sheets'
+import { resolveRelTarget } from '@genoffice/xlsx-gateway/gateway/xlsx-drawing-add'
 import { EMPTY_PAYLOADS, type GatewayPayloads } from './xlsx-gateway-ops'
 import type { WorkbookStyleEdit } from '@genoffice/xlsx-gateway/shared/edit-schemas'
 import {
@@ -1089,7 +1095,7 @@ export function cellEditsFromInputs(inputs: CellInput[], defaultSheet: string): 
 export interface WriteOutcome {
   cells: number
   formulas: number
-  /** false when formulas were written but the engine could not fill their cached values */
+  /** false when any refreshed formula lacks a usable cached result */
   cachedValues: boolean
   /** `Sheet!A1` of formulas left without a cached value on purpose */
   uncached?: string[]
@@ -1099,8 +1105,8 @@ export interface WriteOutcome {
 }
 
 /**
- * Writes the edits, then evaluates the formulas on the written file and
- * re-applies the same edits with the results as cached values, so readers
+ * Writes the edits, then evaluates all formulas on the written file and
+ * refreshes their cached values without replaying edits, so readers
  * that trust <v> (openpyxl, pandas, quick previews) see numbers too. The
  * file is complete after the first write; the cached-value pass is best
  * effort and never turns a finished write into a failure.
@@ -1118,7 +1124,7 @@ export async function writeWorkbook(
     gateway?: GatewayPayloads
   } = {},
 ): Promise<WriteOutcome> {
-  const { plan, structuralOps = [], renames = {}, gateway = EMPTY_PAYLOADS } = opts
+  const { plan, structuralOps = [], gateway = EMPTY_PAYLOADS } = opts
   const notes: { code: string; message: string }[] = []
   if (edits.some((e) => e.style && styleHasThemeColor(e.style)) && !(await hasThemePart(source))) {
     // without xl/theme/theme1.xml Excel has no palette to resolve a slot against
@@ -1167,13 +1173,24 @@ export async function writeWorkbook(
       { reason: 'op_rejected' },
     )
   }
-  await atomicWriteFile(outputPath, first.buffer)
-  const formulaCells = edits.filter((e) => e.cell.formula)
   const base = {
     cells: edits.length,
-    formulas: formulaCells.length,
+    formulas: edits.filter((e) => e.cell.formula).length,
     ...(notes.length ? { notes } : {}),
   }
+  const affectsCalculation =
+    edits.some((e) => e.writeValue !== false) ||
+    structuralOps.some((sheet) => sheet.ops.length > 0) ||
+    plan !== undefined ||
+    gateway.definedNamesState !== null
+  const formulaCells = affectsCalculation ? await workbookFormulaCells(first.buffer) : []
+  if (formulaCells.length) {
+    // Invalidate before publishing the file: a missing/failed engine must never
+    // leave old dependent results looking current to CSV and other cache readers.
+    const emptyValues = formulaValuesBySheet(formulaCells)
+    first = await refreshFormulaCaches(first.buffer, emptyValues)
+  }
+  await atomicWriteFile(outputPath, first.buffer)
   if (formulaCells.length === 0) return { ...base, cachedValues: true }
   if (!xlsxSidecarPath()) {
     return {
@@ -1183,17 +1200,17 @@ export async function writeWorkbook(
     }
   }
   try {
-    const { values, uncached } = await evaluateFormulas(outputPath, formulaCells, renames)
+    const { values, uncached } = await evaluateFormulas(outputPath, formulaCells)
     if (values.length) {
-      const second = await save(values)
+      const second = await refreshFormulaCaches(first.buffer, values)
       await atomicWriteFile(outputPath, second.buffer)
       if (uncached.length === 0) return { ...base, cachedValues: true }
       const shown = uncached.slice(0, 3).join(', ') + (uncached.length > 3 ? ', …' : '')
       return {
         ...base,
-        cachedValues: uncached.length < formulaCells.length,
+        cachedValues: false,
         uncached,
-        warning: `${uncached.length} formula(s) use functions the local engine does not evaluate (${shown}); they have no cached value and recalculate on open`,
+        warning: `${uncached.length} formula(s) could not be evaluated by the local engine (${shown}); they have no cached value and recalculate on open`,
       }
     }
     return {
@@ -1219,39 +1236,97 @@ export async function writeWorkbook(
  * <v>, and Excel computes it on open (fullCalcOnLoad).
  */
 const UNCACHED_RESULTS = new Set(['#NAME?', '#ERROR!'])
+type FormulaCell = Pick<CellEdit, 'sheetName' | 'row' | 'column'>
+
+async function workbookFormulaCells(buffer: Buffer): Promise<FormulaCell[]> {
+  const source = await createBufferEntrySource(buffer)
+  const sheets = parseSheetElements(await source.readText('xl/workbook.xml'))
+  const relationships = parseRelationships(await source.readText('xl/_rels/workbook.xml.rels'))
+  const cells: FormulaCell[] = []
+  for (const sheet of sheets) {
+    const rel = relationships.find(
+      (r) => r.id === sheet.relationshipId && !r.external && r.type.endsWith('/worksheet'),
+    )
+    if (!rel) continue
+    const part = rel.target.startsWith('/')
+      ? rel.target.slice(1)
+      : resolveRelTarget('xl/workbook.xml', rel.target)
+    const xml = await source.readText(part)
+    for (const match of xml.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      if (!/<f[\s/>]/.test(match[2] ?? '')) continue
+      const address = /\br=["']([A-Z]+[1-9][0-9]*)["']/.exec(match[1] ?? '')?.[1]
+      if (address) cells.push({ sheetName: sheet.name, ...parseAddressChecked(address) })
+    }
+  }
+  return cells
+}
+
+function formulaValuesBySheet(cells: readonly FormulaCell[]): SheetFormulaValues[] {
+  const bySheet = new Map<string, SheetFormulaValues['cells'][number][]>()
+  for (const cell of cells) {
+    const group = bySheet.get(cell.sheetName) ?? []
+    group.push({ row: cell.row, column: cell.column, value: null })
+    bySheet.set(cell.sheetName, group)
+  }
+  return [...bySheet].map(([sheetName, cells]) => ({ sheetName, cells }))
+}
+
+function refreshFormulaCaches(
+  source: Buffer,
+  values: readonly SheetFormulaValues[],
+): Promise<XlsxMutation> {
+  return applyCellEditsToXlsx(
+    source,
+    [],
+    [],
+    [],
+    undefined,
+    [],
+    [],
+    [],
+    [],
+    [],
+    null,
+    [],
+    [],
+    values,
+  )
+}
+
 async function evaluateFormulas(
   path: string,
-  formulaCells: readonly CellEdit[],
-  renames: Record<string, string>,
+  formulaCells: readonly FormulaCell[],
 ): Promise<{ values: SheetFormulaValues[]; uncached: string[] }> {
-  const bySheet = new Map<string, CellEdit[]>()
-  for (const e of formulaCells) bySheet.set(e.sheetName, [...(bySheet.get(e.sheetName) ?? []), e])
-  // edits carry the file's original sheet names; the written file has the renamed ones
-  const wanted = new Set(formulaCells.map((c) => `${c.sheetName} ${c.row} ${c.column}`))
-  const originalName = (written: string) =>
-    Object.entries(renames).find(([, after]) => after === written)?.[0] ?? written
+  const bySheet = new Map<string, FormulaCell[]>()
+  for (const e of formulaCells) {
+    const group = bySheet.get(e.sheetName) ?? []
+    group.push(e)
+    bySheet.set(e.sheetName, group)
+  }
   return withSidecar(async (client) => {
     const out: SheetFormulaValues[] = []
     const uncached: string[] = []
     for (const [sheet, cells] of bySheet) {
-      const evaluated = await recalcRange(client, path, renames[sheet] ?? sheet, boundingBox(cells))
-      const values = evaluated
-        .filter((cell) => wanted.has(`${originalName(cell.sheet)} ${cell.row} ${cell.column}`))
-        .map((cell) => {
-          if (UNCACHED_RESULTS.has(cell.formatted)) {
-            uncached.push(`${sheet}!${toA1Address(cell.row, cell.column)}`)
-            return { row: cell.row, column: cell.column, value: null }
-          }
-          if (cell.isError) {
-            return { row: cell.row, column: cell.column, value: { error: cell.formatted } }
-          }
-          return {
-            row: cell.row,
-            column: cell.column,
-            value: (cell.number ?? (cell.formatted === '' ? null : cell.formatted)) as Scalar,
-          }
-        })
-      // the refresh is keyed like the edits, by the file's original sheet name
+      const evaluated: RecalcResult['cells'] = []
+      for (const range of formulaReadRanges(cells))
+        evaluated.push(...(await recalcRange(client, path, sheet, range)))
+      const results = new Map(evaluated.map((cell) => [`${cell.row}:${cell.column}`, cell]))
+      const values = cells.map((position) => {
+        const cell = results.get(`${position.row}:${position.column}`)
+        if (!cell || UNCACHED_RESULTS.has(cell.formatted)) {
+          uncached.push(`${sheet}!${toA1Address(position.row, position.column)}`)
+          return { row: position.row, column: position.column, value: null }
+        }
+        if (cell.isError) {
+          return { row: cell.row, column: cell.column, value: { error: cell.formatted } }
+        }
+        return {
+          row: cell.row,
+          column: cell.column,
+          value: (cell.number ?? (cell.formatted === '' ? null : cell.formatted)) as Scalar,
+        }
+      })
+      // Coordinates and names come from the final file, after structural edits.
       if (values.length) out.push({ sheetName: sheet, cells: values })
     }
     return { values: out, uncached }
@@ -1279,6 +1354,35 @@ function boundingBox(cells: readonly { row: number; column: number }[]): Bounds 
 
 /** The sidecar rejects a recalc read above this many cells per request (recalc.rs MAX_RECALC_READ_CELLS). */
 export const RECALC_CELL_CAP = 20_000
+
+/** Bound sparse formula reads too: distant cells must not scan millions of empty rows. */
+export function formulaReadRanges(cells: readonly { row: number; column: number }[]): Bounds[] {
+  const sorted = [...cells].sort((a, b) => a.row - b.row || a.column - b.column)
+  const ranges: Bounds[] = []
+  let current: Bounds | undefined
+  let count = 0
+  for (const cell of sorted) {
+    const next = current
+      ? {
+          startRow: current.startRow,
+          endRow: cell.row,
+          startColumn: Math.min(current.startColumn, cell.column),
+          endColumn: Math.max(current.endColumn, cell.column),
+        }
+      : boundingBox([cell])
+    const area = (next.endRow - next.startRow + 1) * (next.endColumn - next.startColumn + 1)
+    if (current && (area > RECALC_CELL_CAP || area > Math.max(64, (count + 1) * 4))) {
+      ranges.push(current)
+      current = boundingBox([cell])
+      count = 1
+    } else {
+      current = next
+      count++
+    }
+  }
+  if (current) ranges.push(current)
+  return ranges
+}
 
 /** Splits a rectangle into row (and, for very wide ranges, column) bands that each fit the cap. */
 export function recalcBands(bounds: Bounds, cap = RECALC_CELL_CAP): Bounds[] {

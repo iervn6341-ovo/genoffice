@@ -704,7 +704,29 @@ export async function savePptx(opened: OpenedPptx): Promise<Uint8Array> {
 export async function savePptxToFile(opened: OpenedPptx, filePath: string): Promise<void> {
   const { createWriteStream } = await import('node:fs')
   const { pipeline } = await import('node:stream/promises')
-  const source = buildZip(opened).generateNodeStream({
+  const zip = buildZip(opened)
+  // The package type must agree with the extension: renaming a PPTX is not a
+  // PowerPoint Show conversion. Patch only the output so a failed Save As
+  // leaves the current document's package type unchanged.
+  const format = /\.ppsx$/i.test(filePath)
+    ? 'slideshow'
+    : /\.pptx$/i.test(filePath)
+      ? 'presentation'
+      : null
+  if (format) {
+    const part = zip.file('[Content_Types].xml')
+    if (part) {
+      const xml = await part.async('string')
+      zip.file(
+        '[Content_Types].xml',
+        xml.replace(
+          /application\/vnd\.openxmlformats-officedocument\.presentationml\.(?:presentation|slideshow)\.main\+xml/g,
+          `application/vnd.openxmlformats-officedocument.presentationml.${format}.main+xml`,
+        ),
+      )
+    }
+  }
+  const source = zip.generateNodeStream({
     type: 'nodebuffer',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 },
@@ -3293,6 +3315,7 @@ export function applyParagraphFormat(
         }
         if (patch.bulletColor) {
           p.bullet.color = patch.bulletColor
+          delete p.bullet.colorFollowsText
           // a user color replaces the captured theme node, else generate re-emits the old schemeClr
           delete p.bullet.colorNodeXml
         }

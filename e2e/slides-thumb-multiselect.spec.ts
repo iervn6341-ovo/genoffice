@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl } from './helpers'
 
@@ -46,10 +47,10 @@ test('Shift/⌘-click select thumbnails; Delete removes them in one undo step', 
     await thumbs.nth(2).click()
     await s.keyboard.up('Shift')
     await expect(s.locator('.slide-list .thumb.selected')).toHaveCount(2)
-    await s.keyboard.down('Meta')
+    await s.keyboard.down(process.platform === 'darwin' ? 'Meta' : 'Control')
     await thumbs.nth(3).click() // add S4
     await thumbs.nth(2).click() // drop S3
-    await s.keyboard.up('Meta')
+    await s.keyboard.up(process.platform === 'darwin' ? 'Meta' : 'Control')
     await expect(s.locator('.slide-list .thumb.selected')).toHaveCount(2)
     await expect(thumbs.nth(1)).toHaveClass(/selected/)
     await expect(thumbs.nth(3)).toHaveClass(/selected/)
@@ -76,6 +77,6 @@ test('Shift/⌘-click select thumbnails; Delete removes them in one undo step', 
     await s.keyboard.press('Delete')
     await expect.poll(() => slideTexts(s)).toEqual(['S1', 'S2', 'S4'])
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

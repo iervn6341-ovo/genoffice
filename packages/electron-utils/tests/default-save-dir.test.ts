@@ -1,8 +1,14 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual, accessSync: vi.fn(actual.accessSync) }
+})
+const actualAccess = vi.mocked(accessSync).getMockImplementation()!
 
 import {
   configuredDefaultSaveDir,
@@ -17,6 +23,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.mocked(accessSync).mockImplementation(actualAccess)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -61,13 +68,12 @@ describe('resolveDefaultSaveDir', () => {
   it('degrades to the fallback when the configured folder is not writable', () => {
     const readOnly = join(root, 'read-only')
     mkdirSync(readOnly)
-    chmodSync(readOnly, 0o500)
+    vi.mocked(accessSync).mockImplementation((path, mode) => {
+      if (path === readOnly) throw Object.assign(new Error('Access denied'), { code: 'EACCES' })
+      actualAccess(path, mode)
+    })
     const fallback = join(root, 'fallback')
-    try {
-      expect(resolveDefaultSaveDir(readOnly, fallback)).toBe(fallback)
-    } finally {
-      chmodSync(readOnly, 0o700)
-    }
+    expect(resolveDefaultSaveDir(readOnly, fallback)).toBe(fallback)
   })
 
   it('throws a descriptive error when the fallback itself is unusable', () => {

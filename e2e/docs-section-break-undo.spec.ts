@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect } from '@playwright/test'
 import { statSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -65,6 +66,6 @@ test('section break: no silent save, undo/redo intact', async () => {
     await p.keyboard.press('ControlOrMeta+s')
     await expect.poll(() => statSync(file).mtimeMs).toBeGreaterThan(savedAt)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

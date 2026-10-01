@@ -1,6 +1,8 @@
 import type { zh } from './zh'
 
 export const th = {
+  appNotesDefaultColor: 'ค่าเริ่มต้น (ตามธีม)',
+  appStatusEquationPreview: 'สมการนี้แสดงตัวอย่างต้นฉบับ โปรดแก้ไขสมการใน PowerPoint',
   appPhPromptTitle: 'คลิกเพื่อเพิ่มชื่อเรื่อง',
   appPhPromptSubtitle: 'คลิกเพื่อเพิ่มชื่อเรื่องรอง',
   appPhPromptBody: 'คลิกเพื่อเพิ่มข้อความ',
@@ -214,13 +216,10 @@ export const th = {
   appRehearseDiscard: 'ไม่บันทึก',
   appRehearseSave: 'บันทึก',
   appSettingsTitle: 'การตั้งค่า AI',
-  appSettingsAccount: 'บัญชี Genspark',
   appSettingsChecking: 'กำลังตรวจสอบ…',
   appSettingsLoggedIn: 'ลงชื่อเข้าใช้แล้ว',
   appSettingsLoggedInEmail: 'ลงชื่อเข้าใช้แล้ว: {email}',
-  appSettingsLoggedOut: 'ยังไม่ได้ลงชื่อเข้าใช้ (ฟีเจอร์ AI ต้องใช้บัญชี Genspark)',
   appSettingsLoginPending: 'กำลังรอการลงชื่อเข้าใช้ในเบราว์เซอร์…',
-  appSettingsLogin: 'ลงชื่อเข้าใช้ Genspark',
   appSettingsModel: 'โมเดล',
   appSettingsCancel: 'ยกเลิก',
   appSettingsSave: 'บันทึก',

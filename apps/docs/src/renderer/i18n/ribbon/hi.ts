@@ -140,7 +140,7 @@ export const hi = {
   ribbonGroupStyles: 'शैलियाँ',
   ribbonAiTools: 'AI टूल',
   ribbonGroupEditing: 'संपादन',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'AI सहायक खोलें',
   ribbonRemoveTableStyleTip: 'तालिका शैली हटाएँ',
   ribbonNoStyle: 'कोई शैली नहीं',

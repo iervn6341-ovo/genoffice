@@ -139,7 +139,7 @@ export const id = {
   ribbonGroupStyles: 'Gaya',
   ribbonAiTools: 'Alat AI',
   ribbonGroupEditing: 'Pengeditan',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Buka asisten AI',
   ribbonRemoveTableStyleTip: 'Hapus gaya tabel',
   ribbonNoStyle: 'Tanpa Gaya',

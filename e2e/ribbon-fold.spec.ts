@@ -1,8 +1,9 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
 /**
- * Every editor's ribbon behaves like Microsoft 365's: Genspark AI and the one-click AI tools
+ * Every editor's ribbon behaves like Microsoft 365's: AI and the one-click AI tools
  * form one group at the right edge; on a narrower window whole groups fold into dropdown
  * buttons (AI first, Paragraph late) instead of the ribbon scrolling, and a folded group's
  * commands still work from its dropdown.
@@ -38,9 +39,9 @@ const overflow = (p: Page, body: string) =>
     return b.scrollWidth - b.clientWidth
   }, body)
 
-/** the group holding the Genspark AI entry */
+/** the group holding the AI entry */
 const aiGroup = (p: Page) =>
-  p.locator('.rb-fold-group', { has: p.locator('button.ai-entry', { hasText: 'Genspark AI' }) })
+  p.locator('.rb-fold-group', { has: p.locator('button.ai-entry', { hasText: 'AI' }) })
 
 for (const app of APPS) {
   test.describe(`${app.name} ribbon`, () => {
@@ -50,7 +51,7 @@ for (const app of APPS) {
         await setEditorLayoutWidth(launched.app, app.url, app.wide)
         const group = aiGroup(p)
         await expect(group).toHaveCount(1)
-        // Genspark AI and the one-click tools share the group
+        // AI and the one-click tools share the group
         expect(await group.locator('button.ai-entry').count()).toBeGreaterThan(1)
         const gap = await group.evaluate((g) => {
           const body = g.parentElement!
@@ -62,9 +63,9 @@ for (const app of APPS) {
         await setEditorLayoutWidth(launched.app, app.url, app.narrow)
         await expect(group).toHaveAttribute('data-folded', '')
         expect(await overflow(p, app.body)).toBeLessThanOrEqual(1)
-        // the folded dropdown still reaches Genspark AI
+        // the folded dropdown still reaches AI
         await group.locator('.rb-fold-btn').click()
-        const entry = group.locator('.rb-fold-items button.ai-entry', { hasText: 'Genspark AI' })
+        const entry = group.locator('.rb-fold-items button.ai-entry', { hasText: 'AI' })
         await expect(entry).toBeVisible()
         await entry.click()
         await expect(group).not.toHaveClass(/rb-fold-open/) // picking a command closes the panel
@@ -76,7 +77,7 @@ for (const app of APPS) {
         await setEditorLayoutWidth(launched.app, app.url, app.wide)
         await expect(group).not.toHaveAttribute('data-folded', '')
       } finally {
-        launched.app.process().kill('SIGKILL')
+        await closeAndSaveVideo(launched, 'cleanup')
       }
     })
 
@@ -86,7 +87,7 @@ for (const app of APPS) {
         await setEditorLayoutWidth(launched.app, app.url, 1280)
         await expect.poll(() => overflow(p, app.body)).toBeLessThanOrEqual(1)
       } finally {
-        launched.app.process().kill('SIGKILL')
+        await closeAndSaveVideo(launched, 'cleanup')
       }
     })
   })
@@ -103,7 +104,7 @@ test('docs keeps the Paragraph group expanded while Styles and Editing fold', as
     expect(await folded('Paragraph')).toBeNull()
     expect(await overflow(p, '.ribbon-body')).toBeLessThanOrEqual(1)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -122,6 +123,6 @@ test('sheets: a folded group still runs its commands (Editing → AutoSum menu)'
     await p.keyboard.press('Escape')
     await expect(editing.locator('.rb-fold-items')).toBeHidden()
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

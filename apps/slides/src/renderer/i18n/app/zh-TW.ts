@@ -1,6 +1,8 @@
 import type { zh } from './zh'
 
 export const zhTW = {
+  appNotesDefaultColor: '預設（跟隨主題）',
+  appStatusEquationPreview: '此公式以原始預覽顯示，請在 PowerPoint 中編輯公式。',
   appPhPromptTitle: '按一下此處新增標題',
   appPhPromptSubtitle: '按一下此處新增副標題',
   appPhPromptBody: '按一下此處新增文字',
@@ -206,13 +208,10 @@ export const zhTW = {
   appRehearseDiscard: '不儲存',
   appRehearseSave: '儲存',
   appSettingsTitle: 'AI 設定',
-  appSettingsAccount: 'Genspark 帳號',
   appSettingsChecking: '偵測中…',
   appSettingsLoggedIn: '已登入',
   appSettingsLoggedInEmail: '已登入：{email}',
-  appSettingsLoggedOut: '未登入（AI 功能需要登入 Genspark 帳號）',
   appSettingsLoginPending: '等待瀏覽器登入…',
-  appSettingsLogin: '登入 Genspark',
   appSettingsModel: '模型',
   appSettingsCancel: '取消',
   appSettingsSave: '儲存',

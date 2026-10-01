@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const pl = {
+  appNotesDefaultColor: 'Domyślny (zgodny z motywem)',
+  appStatusEquationPreview:
+    'Równanie używa oryginalnego podglądu. Edytuj je w programie PowerPoint.',
   appPhPromptTitle: 'Kliknij, aby dodać tytuł',
   appPhPromptSubtitle: 'Kliknij, aby dodać podtytuł',
   appPhPromptBody: 'Kliknij, aby dodać tekst',
@@ -229,13 +232,10 @@ export const pl = {
   appRehearseDiscard: 'Nie zapisuj',
   appRehearseSave: 'Zapisz',
   appSettingsTitle: 'Ustawienia AI',
-  appSettingsAccount: 'Konto Genspark',
   appSettingsChecking: 'Sprawdzanie…',
   appSettingsLoggedIn: 'Zalogowano',
   appSettingsLoggedInEmail: 'Zalogowano: {email}',
-  appSettingsLoggedOut: 'Nie zalogowano (funkcje AI wymagają konta Genspark)',
   appSettingsLoginPending: 'Oczekiwanie na logowanie w przeglądarce…',
-  appSettingsLogin: 'Zaloguj się do Genspark',
   appSettingsModel: 'Model',
   appSettingsCancel: 'Anuluj',
   appSettingsSave: 'Zapisz',

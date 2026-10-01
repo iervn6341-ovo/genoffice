@@ -47,10 +47,7 @@ provede požadovanou úpravu a přesně vám ukáže, čeho se dotkl.
   i převádějí přímo na vašem počítači. PDF → Word / Excel / PowerPoint
   a Markdown → Word i HTML → Word běží celé na zařízení. Zařízení opouštějí
   jen volání AI, a to k poskytovateli, kterého si sami vyberete.
-- **Vaše klíče, nebo žádné.** Přihlaste se přes Genspark a klíče nepotřebujete,
-  nebo použijte vlastní klíč pro Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM,
-  Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty nebo jakýkoli OpenAI
-  kompatibilní endpoint, včetně lokálních serverů.
+- **AI.** Funkce AI používají poskytovatele vybraného v nastavení. Stávající nastavení zůstává zachováno; hledání a média se nastavují samostatně.
 - **Skriptovatelný a připravený pro agenty.** Aplikace obsahuje příkazový
   řádek `genoffice` a skill pro Claude Code, Codex, Cursor, Gemini CLI,
   GitHub Copilot, OpenCode a Windsurf, takže kódovací agent může na vašem
@@ -180,7 +177,7 @@ přes stejné enginy jako aplikace, aniž by otevřely jediné okno.
 </tr>
 <tr>
 <td><b>Jeden prompt vašemu agentovi</b> — „Vytvoř osmisnímkovou prezentaci o sluneční soustavě.“ Agent si přečte skill, napíše stylový list, osnovu a jednu specifikaci stránky na snímek, vygeneruje obě fotografie pomocí <code>genoffice image</code> a nechá <code>genoffice slides check</code> odmítnout vše, co přetéká nebo se překrývá, než <code>genoffice create</code> sestaví soubor <code>.pptx</code> a <code>slides render</code> vrátí ke kontrole jeden PNG na snímek.</td>
-<td><b>Nainstalujte jednou, v Nastavení → Integrace</b> — GenOffice vypíše kódovací agenty, které na tomto počítači najde, a zapíše skill do každého, který vyberete. Nebo si skill stáhněte jako zip, případně spusťte <code>npx skills add genspark-ai/genoffice</code>. Příkazy a celý pracovní postup najdete v sekci <a href="#command-line-and-agent-skill">Příkazový řádek a agentní skill</a>.</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -218,9 +215,7 @@ ve viditelné záložce editoru, zatímco se díváte.
 - **AI, která upravuje dokument přímo.** Sledované změny v Docs, živé vzorce
   a grafy v Sheets, prezentace kreslené přímo na plochu, každý krok AI je
   snapshot, ke kterému se lze vrátit.
-- **Vlastní model, vlastní klíč.** Přihlaste se přes Genspark, nebo použijte
-  klíč pro Claude, OpenAI, Gemini, DeepSeek a další, včetně lokálních serverů
-  a jakéhokoli OpenAI kompatibilního endpointu.
+- **AI.** Funkce AI používají poskytovatele vybraného v nastavení. Stávající nastavení zůstává zachováno; hledání a média se nastavují samostatně.
 - **PDF udělané správně.** Upravujte text přímo na stránce a převádějte PDF
   do Word, Excel nebo PowerPoint na zařízení, se systémovým OCR pro skeny.
 - **Také Markdown a HTML**, se stejným panelem AI a místním exportem do Word.
@@ -231,10 +226,7 @@ ve viditelné záložce editoru, zatímco se díváte.
 
 ## AI backendy
 
-**Přihlaste se přes Genspark** a nemusíte nic nastavovat: volání modelů
-prochází přes proxy Genspark (rodiny Claude, GPT a Gemini) a agenti získávají
-webové a obrázkové vyhledávání, generování obrázků a analýzu
-obrázků/zvuku/videa.
+Funkce AI používají poskytovatele vybraného v nastavení. Stávající nastavení zůstává zachováno; hledání a média se nastavují samostatně.
 
 **Nebo použijte vlastní klíč.** Nastavení → AI nabízí Claude, OpenAI, Gemini,
 DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty
@@ -268,11 +260,10 @@ MCP klientem.
 
 ### Instalace skillu
 
-| Jak                                    | Co se stane                                                                                                                                                                                |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Nastavení → Integrace** v aplikaci   | Vypíše agenty nalezené na tomto počítači; jedním kliknutím zapíše skill do každého, který vyberete. Když nové vydání GenOffice přinese novější skill, objeví se tlačítko **Aktualizovat**. |
-| **Stáhnout jako zip** na téže stránce  | Rozložení, které claude.ai, desktopové aplikace Claude a další asistenti přijímají jako nahraný skill.                                                                                     |
-| `npx skills add genspark-ai/genoffice` | Nainstaluje z tohoto repozitáře do jakéhokoli agenta podporujícího skilly.                                                                                                                 |
+| Jak                                   | Co se stane                                                                                                                                                                                |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Nastavení → Integrace** v aplikaci  | Vypíše agenty nalezené na tomto počítači; jedním kliknutím zapíše skill do každého, který vyberete. Když nové vydání GenOffice přinese novější skill, objeví se tlačítko **Aktualizovat**. |
+| **Stáhnout jako zip** na téže stránce | Rozložení, které claude.ai, desktopové aplikace Claude a další asistenti přijímají jako nahraný skill.                                                                                     |
 
 Pak začněte nový chat a požádejte o dokument. Skill agenta naučí, kdy sáhnout
 po `genoffice`, jak si soubor přečíst před úpravou a jak zkontrolovat vlastní
@@ -496,10 +487,7 @@ zpět beze změny, takže dokumenty dál fungují v Microsoft Office.
 <details>
 <summary><b>Funguje GenOffice offline?</b></summary>
 
-Úprava dokumentů je zcela lokální — soubory neopustí váš počítač při
-otevírání, úpravách, ukládání ani konverzi. AI funkce (agenti, vyhledávání,
-nástroje pro obrázky) potřebují síťové připojení, buď s přihlášením přes
-Genspark, nebo s vlastním API klíčem k modelu.
+Funkce AI používají poskytovatele vybraného v nastavení. Stávající nastavení zůstává zachováno; hledání a média se nastavují samostatně.
 
 </details>
 
@@ -524,11 +512,7 @@ OCR, takže se převedou na editovatelný text, ne na obrázek stránky.
 <details>
 <summary><b>Můžu použít vlastní AI model nebo API klíč?</b></summary>
 
-Ano. Kromě bezklíčového přihlášení Genspark GenOffice podporuje vlastní klíč
-pro Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok,
-Mistral, OpenRouter, Requesty a OpenCode Zen/Go, plus jakýkoli OpenAI kompatibilní
-endpoint — včetně lokálních serverů s modely. Vyhledávání, generování obrázků
-a analýza obrázků/videa mají vlastní klíče pod Nastavení → AI Media & Search.
+Funkce AI používají poskytovatele vybraného v nastavení. Stávající nastavení zůstává zachováno; hledání a média se nastavují samostatně.
 
 </details>
 

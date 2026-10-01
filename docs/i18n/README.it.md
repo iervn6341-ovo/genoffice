@@ -47,10 +47,7 @@ applica la modifica e ti mostra esattamente cosa ha toccato.
   si convertono sul tuo computer. Le conversioni PDF → Word / Excel /
   PowerPoint, Markdown → Word e HTML → Word avvengono tutte in locale. Solo
   le chiamate AI lasciano la macchina, verso il provider che scegli.
-- **Le tue chiavi, o nessuna.** Accedi con Genspark e non dovrai configurare
-  nulla, oppure usa la tua chiave per Claude, OpenAI, Gemini, DeepSeek, Kimi,
-  GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty o qualsiasi endpoint
-  compatibile con OpenAI, inclusi i server locali.
+- **AI.** Le funzioni IA usano il fornitore scelto nelle impostazioni. Le impostazioni esistenti vengono conservate; ricerca e media si configurano separatamente.
 - **Scriptabile e pronto per gli agenti.** L'app include una riga di comando
   `genoffice` e uno skill per Claude Code, Codex, Cursor, Gemini CLI, GitHub
   Copilot, OpenCode e Windsurf, così un agente di coding può creare,
@@ -180,7 +177,7 @@ Office reali con gli stessi motori delle app, senza aprire una finestra.
 </tr>
 <tr>
 <td><b>Un solo prompt al tuo agente</b> — "Crea una presentazione di otto slide sul Sistema Solare." L'agente legge lo skill, scrive un foglio di stile, una scaletta e una specifica di pagina per ogni slide, genera le due foto con <code>genoffice image</code> e lascia che <code>genoffice slides check</code> respinga tutto ciò che sborda o si sovrappone prima che <code>genoffice create</code> assembli il <code>.pptx</code> e <code>slides render</code> restituisca un PNG per slide da controllare.</td>
-<td><b>Installa una volta sola, da Impostazioni → Integrazioni</b> — GenOffice elenca gli agenti di coding che trova su questo computer e scrive lo skill in ognuno di quelli che scegli. Oppure scarica lo skill come zip, o esegui <code>npx skills add genspark-ai/genoffice</code>. I comandi e il flusso di lavoro completo sono in <a href="#command-line-and-agent-skill">Riga di comando e skill per agenti</a>.</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -218,9 +215,7 @@ Word in una scheda dell'editor visibile mentre osservi.
 - **Un'AI che modifica direttamente il documento.** Revisioni tracciate in
   Docs, formule e grafici live in Sheets, slide disegnate sulla canvas, ogni
   intervento dell'AI genera uno snapshot da cui puoi tornare indietro.
-- **Il tuo modello, la tua chiave.** Accedi con Genspark, oppure usa una
-  chiave per Claude, OpenAI, Gemini, DeepSeek e altri, con server locali e
-  qualsiasi endpoint compatibile con OpenAI incluso.
+- **AI.** Le funzioni IA usano il fornitore scelto nelle impostazioni. Le impostazioni esistenti vengono conservate; ricerca e media si configurano separatamente.
 - **PDF fatto bene.** Modifica il testo direttamente nella pagina e converti
   PDF in Word, Excel o PowerPoint in locale, con OCR di sistema per le
   scansioni.
@@ -233,10 +228,7 @@ Word in una scheda dell'editor visibile mentre osservi.
 
 ## Backend AI
 
-**Accedi con Genspark** e non c'è nulla da configurare: le chiamate ai
-modelli passano attraverso il proxy Genspark (famiglie Claude, GPT e Gemini)
-e gli agenti hanno accesso a ricerca web e per immagini, generazione di
-immagini e analisi di immagini/audio/video.
+Le funzioni IA usano il fornitore scelto nelle impostazioni. Le impostazioni esistenti vengono conservate; ricerca e media si configurano separatamente.
 
 **Oppure usa la tua chiave.** In Settings → AI trovi Claude, OpenAI, Gemini,
 DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty e
@@ -276,7 +268,6 @@ qualsiasi client MCP.
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Impostazioni → Integrazioni** nell'app | Elenca gli agenti trovati su questo computer; un clic scrive lo skill in ognuno di quelli che scegli. Un pulsante **Aggiorna** compare quando una release di GenOffice porta uno skill più recente. |
 | **Scarica come zip** nella stessa pagina | Il formato che claude.ai, le app desktop di Claude e altri assistenti accettano come skill caricato.                                                                                                |
-| `npx skills add genspark-ai/genoffice`   | Installa da questo repository in qualsiasi agente compatibile con gli skill.                                                                                                                        |
 
 Poi apri una nuova chat e chiedi un documento. Lo skill insegna all'agente
 quando ricorrere a `genoffice`, come leggere un file prima di modificarlo e
@@ -510,11 +501,7 @@ Microsoft Office.
 <details>
 <summary><b>GenOffice funziona offline?</b></summary>
 
-La modifica dei documenti è completamente locale — i file non lasciano mai
-il tuo computer per essere aperti, modificati, salvati o convertiti. Le
-funzionalità AI (agenti, ricerca, strumenti per le immagini) richiedono una
-connessione di rete, con l'accesso Genspark oppure con una tua chiave API
-per il modello.
+Le funzioni IA usano il fornitore scelto nelle impostazioni. Le impostazioni esistenti vengono conservate; ricerca e media si configurano separatamente.
 
 </details>
 
@@ -541,12 +528,7 @@ invece che in un'immagine di pagina.
 <details>
 <summary><b>Posso usare un mio modello AI o una mia chiave API?</b></summary>
 
-Sì. Oltre all'accesso Genspark senza chiavi, GenOffice supporta l'uso della
-tua chiave per Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao,
-MiniMax, Grok, Mistral, OpenRouter, Requesty e OpenCode Zen/Go, più qualsiasi endpoint
-compatibile con OpenAI — inclusi i server con modelli locali. Ricerca,
-generazione di immagini e analisi di immagini/video richiedono le proprie
-chiavi in Settings → AI Media & Search.
+Le funzioni IA usano il fornitore scelto nelle impostazioni. Le impostazioni esistenti vengono conservate; ricerca e media si configurano separatamente.
 
 </details>
 

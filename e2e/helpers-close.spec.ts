@@ -5,7 +5,7 @@ import { closeAndSaveVideo, type LaunchedApp } from './helpers'
 
 for (const ignoreTerminate of [false, true]) {
   test(`app cleanup waits for process exit (ignores SIGTERM: ${ignoreTerminate})`, async () => {
-    test.skip(process.platform === 'win32', 'Requires POSIX signal handling')
+    test.skip(process.platform === 'win32' && ignoreTerminate, 'Requires a POSIX SIGTERM handler')
     const child = spawn(process.execPath, [
       '-e',
       `${ignoreTerminate ? "process.on('SIGTERM', () => {});" : ''}

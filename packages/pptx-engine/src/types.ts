@@ -324,6 +324,8 @@ export interface Paragraph {
     /** <a:buBlip><a:blip r:embed>: kept so a rebuild re-emits the same relationship */
     blipEmbedId?: string
     color?: ResolvedColor
+    /** Explicit buClrTx, retained on rebuild so a master colour cannot reappear. */
+    colorFollowsText?: boolean
     /** Raw <a:buClr> child captured verbatim (schemeClr/prstClr/srgbClr+mods) so a rebuild
      *  keeps the theme link instead of baking the computed srgbClr. */
     colorNodeXml?: string
@@ -624,6 +626,9 @@ export interface TableCellBorders {
 }
 
 export interface TableCell {
+  /** Display-only equation bitmap supplied by PowerPoint's mc:Fallback.
+   * The original OMML remains in text runs; this preview is never serialized. */
+  mathPreview?: Fill
   /** Cell text (reuses the TextBody model; anchor/insets already overridden per tcPr) */
   text?: TextBody
   /** Cell fill (explicit tcPr fill; table-style inheritance not yet supported) */

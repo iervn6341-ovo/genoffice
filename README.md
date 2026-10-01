@@ -45,7 +45,7 @@ file, makes the change, and shows you exactly what it touched.
 - **Local by design.** Files open, edit, save and convert on your machine.
   PDF → Word / Excel / PowerPoint, Markdown → Word and HTML → Word all run
   on-device. Only the AI calls leave the machine, to the provider you choose.
-- **Your keys or none.** Sign in with Genspark and skip keys, or bring your own
+- **Your keys or none.** Use a local endpoint, or bring your own
   key for Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax,
   Grok, Mistral, OpenRouter, Requesty, Opper, or any OpenAI-compatible endpoint, local
   servers included.
@@ -177,7 +177,7 @@ same engines as the apps, without opening a window.
 </tr>
 <tr>
 <td><b>One prompt to your agent</b> — "Build an eight-slide deck about the Solar System." The agent reads the skill, writes a style sheet, an outline and one page spec per slide, generates the two photos with <code>genoffice image</code>, and lets <code>genoffice slides check</code> reject anything that overflows or overlaps before <code>genoffice create</code> assembles the <code>.pptx</code> and <code>slides render</code> hands back a PNG per slide to look at.</td>
-<td><b>Install once, from Settings → Integrations</b> — GenOffice lists the coding agents it finds on this computer and writes the skill into each one you pick. Or download the skill as a zip, or run <code>npx skills add genspark-ai/genoffice</code>. Commands and the full workflow are in <a href="#command-line-and-agent-skill">Command line and agent skill</a>.</td>
+<td><b>Install once, from Settings → Integrations</b> — GenOffice lists the coding agents it finds on this computer and writes the skill into each one you pick. Or download the skill as a zip, use the bundled installer. Commands and the full workflow are in <a href="#command-line-and-agent-skill">Command line and agent skill</a>.</td>
 </tr>
 </table>
 
@@ -212,7 +212,7 @@ document in a visible editor tab while you watch.
 - **An AI that edits the document itself.** Tracked changes in Docs, live
   formulas and charts in Sheets, slides drawn onto the canvas, every AI turn a
   snapshot you can roll back.
-- **Your model, your key.** Sign in with Genspark, or bring a key for Claude,
+- **Your model, your key.** Bring a key for Claude,
   OpenAI, Gemini, DeepSeek and more, local servers and any OpenAI-compatible
   endpoint included.
 - **PDF done properly.** Edit text inside the page, and convert PDF to Word,
@@ -225,11 +225,10 @@ document in a visible editor tab while you watch.
 
 ## AI backends
 
-**Sign in with Genspark** and there is nothing to configure: model calls route
-through the Genspark proxy (Claude, GPT and Gemini families) and the agents get
-web and image search, image generation, and image/audio/video analysis.
+AI requests use the service selected in Settings → AI Model. Existing provider
+settings are preserved. Search and media tools use their own configured services.
 
-**Or bring your own key.** Settings → AI lists Claude, OpenAI, Gemini,
+**Choose your provider.** Settings → AI lists Claude, OpenAI, Gemini,
 DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty, Opper
 and OpenCode Zen/Go, plus a custom slot for any OpenAI-compatible endpoint (base
 URL + key), including local model servers. Search and media have their own
@@ -262,7 +261,6 @@ through the [MCP server](#mcp-server), Claude Desktop and every MCP client.
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Settings → Integrations** in the app | Lists the agents found on this computer; one click writes the skill into each one you choose. An **Update** button appears when a GenOffice release ships a newer skill. |
 | **Download as zip** on the same page   | The layout claude.ai, the Claude desktop apps and other assistants accept as an uploaded skill.                                                                          |
-| `npx skills add genspark-ai/genoffice` | Installs from this repository into any skills-compatible agent.                                                                                                          |
 
 Then start a new chat and ask for a document. The skill teaches the agent when
 to reach for `genoffice`, how to read a file before editing it, and how to
@@ -501,7 +499,7 @@ back byte-for-byte, so documents keep working in Microsoft Office.
 
 Document editing is fully local — files never leave your machine to be
 opened, edited, saved or converted. The AI features (agents, search, image
-tools) need a network connection, with either a Genspark sign-in or your own
+tools) need a network connection, with your configured provider and, if required, its
 model API key.
 
 </details>
@@ -527,7 +525,7 @@ convert to editable text rather than a page image.
 <details>
 <summary><b>Can I use my own AI model or API key?</b></summary>
 
-Yes. Besides the keyless Genspark sign-in, GenOffice supports bring your own
+Yes. GenOffice supports bring your own
 key for Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax,
 Grok, Mistral, OpenRouter, Requesty, Opper and OpenCode Zen/Go, plus any OpenAI-compatible
 endpoint — including local model servers. Search, image generation and

@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const en = {
+  appNotesDefaultColor: 'Default (follow theme)',
+  appStatusEquationPreview:
+    'This equation uses its original preview. Edit the equation in PowerPoint.',
   appPhPromptTitle: 'Click to add title',
   appPhPromptSubtitle: 'Click to add subtitle',
   appPhPromptBody: 'Click to add text',
@@ -218,13 +221,10 @@ export const en = {
   appRehearseDiscard: "Don't Save",
   appRehearseSave: 'Save',
   appSettingsTitle: 'AI Settings',
-  appSettingsAccount: 'Genspark Account',
   appSettingsChecking: 'Checking…',
   appSettingsLoggedIn: 'Signed in',
   appSettingsLoggedInEmail: 'Signed in: {email}',
-  appSettingsLoggedOut: 'Not signed in (AI features require a Genspark account)',
   appSettingsLoginPending: 'Waiting for browser sign-in…',
-  appSettingsLogin: 'Sign in to Genspark',
   appSettingsModel: 'Model',
   appSettingsCancel: 'Cancel',
   appSettingsSave: 'Save',

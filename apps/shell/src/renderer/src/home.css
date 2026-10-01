@@ -1,7 +1,6 @@
 /* Shared chrome/AI-panel tokens come from @genoffice/ui/tokens.css (imported
  * before this file in main.tsx); only shell-specific tokens live here. */
 :root {
-  /* Genspark DS v4.1: guide/onboarding accent is the brand blue */
   --accent: #0f7fff;
   --accent-hover: #0e72e5;
   /* selected-option tint for the shared dropdown (gs-dd) */
@@ -172,7 +171,6 @@ body.vib .home {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- bottom-left account entry (today = Genspark login, later = signup/account system) ---- */
 /* clicking it opens the settings modal (settings.css) directly, which hosts
    login/logout plus preferences (language / theme / save location / update channel) */
 
@@ -532,9 +530,7 @@ body.vib .home {
 }
 
 /* segmented control: gray track, active segment = white card */
-/* segmented filter control: gray track, active segment = white card.
-   One shared 40px rail for the recents page and the Genspark Projects
-   toolbar (where it lines up with the 40px refresh button and search box). */
+
 .filter-pills,
 .cloud-seg {
   display: flex;
@@ -1552,8 +1548,6 @@ body.vib .home {
   padding-top: 1px;
 }
 
-/* ── Cloud (Genspark web) projects ── */
-
 /* fixed header: the content column never scrolls; only .cloud-scroll does */
 /* whole page scrolls (same as the recents page) so the wheel works anywhere;
    no bottom padding: the list runs flush to the window edge */
@@ -1701,8 +1695,6 @@ body.vib .home {
   margin-top: 0;
 }
 
-/* Genspark Projects list styled like the recent-files table: bordered
-   rounded container, column header, grid rows with hairline dividers */
 .cloud-table {
   border: 1px solid var(--border);
   border-radius: 12px;

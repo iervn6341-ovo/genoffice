@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { launchShell, closeAndSaveVideo, screenshotPath } from './helpers'
 
 /**
@@ -44,7 +44,7 @@ test.describe('home folders panel', () => {
       const tree = page.locator('.folder-panel .tree')
       await expect(page.locator('.folder-panel-title')).toHaveText('Folders')
       const rootRow = tree.locator('.tree-row').first()
-      await expect(rootRow).toContainText(root.split('/').pop()!)
+      await expect(rootRow).toContainText(basename(root))
       // root is expanded by default: its first-level folders are listed
       await expect(tree.locator('.tree-name', { hasText: 'Clients' })).toBeVisible()
       await expect(tree.locator('.tree-name', { hasText: 'Personal' })).toBeVisible()

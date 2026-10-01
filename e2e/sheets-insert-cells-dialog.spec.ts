@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { mkdtemp } from 'node:fs/promises'
@@ -103,6 +104,6 @@ test('Insert Cells dialog: shift down, undo, redo, Esc; Delete Cells: shift up',
     await sheets.keyboard.press('Enter')
     await expect.poll(() => valueAt(sheets, 1, 1)).toBe('moved')
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

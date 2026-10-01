@@ -138,7 +138,7 @@ export const th = {
   ribbonGroupStyles: 'สไตล์',
   ribbonAiTools: 'เครื่องมือ AI',
   ribbonGroupEditing: 'การแก้ไข',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'เปิดผู้ช่วย AI',
   ribbonRemoveTableStyleTip: 'เอาสไตล์ตารางออก',
   ribbonNoStyle: 'ไม่มีสไตล์',

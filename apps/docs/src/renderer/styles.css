@@ -499,7 +499,9 @@ html.genoffice-popover-open .ribbon-tabs {
 }
 
 .ribbon-tab-file:hover,
-.ribbon-tab-file.open {
+.ribbon-tab-file.open,
+.ribbon-tab-file:focus-visible {
+  color: var(--docs-on-accent);
   background: var(--word-blue-dark);
 }
 
@@ -588,15 +590,14 @@ html.genoffice-popover-open .ribbon-tabs {
   box-shadow: var(--docs-shadow-badge);
 }
 
-/* Genspark brand logo (Ribbon AI button and AI panel title) */
-.genspark-badge {
+.assistant-badge {
   display: block;
   width: 22px;
   height: 22px;
   border-radius: 50%;
 }
 
-.ai-panel-title .genspark-badge {
+.ai-panel-title .assistant-badge {
   width: 18px;
   height: 18px;
 }
@@ -626,8 +627,6 @@ html.genoffice-popover-open .ribbon-tabs {
   overflow-y: hidden;
 }
 
-/* Slim visible scrollbar so mouse users can reach overflowed groups
-   (genspark-ai/genoffice#55 precedent from the sheets ribbon). */
 .ribbon-body::-webkit-scrollbar {
   height: 5px;
 }
@@ -778,7 +777,6 @@ html.genoffice-popover-open .ribbon-tabs {
   background: var(--active-bg);
 }
 
-/* The Genspark AI entry keeps a black label even while the panel is open. */
 .rb-big.ai-entry.active {
   color: var(--text);
 }
@@ -1225,8 +1223,7 @@ html.genoffice-popover-open .ribbon-tabs {
 }
 
 /* line spacing dropdown */
-/* Home-tab Genspark AI entry: black circular "+" badge with a dropdown caret,
-   brand label below (mirrors the sheets Home ribbon). */
+
 /* AI feature buttons next to the entry: purple glyphs, label below */
 .ai-feature-icon {
   display: grid;
@@ -4379,6 +4376,16 @@ th.cell-rev-del {
   content: attr(data-marker);
 }
 
+/* Unpositioned decimal markers keep the hanging indent while they fit, then
+   grow naturally with a small gap instead of jumping a whole default tab stop.
+   Use actual glyph layout, so font fallback/loading and multi-digit numbers
+   cannot make a canvas-width estimate choose the wrong stop. */
+.doc-page .doc-li[data-marker-flow]::before {
+  box-sizing: content-box;
+  min-width: max(0px, calc(var(--li-hang, var(--style-li-hang, 0.25in)) - 6pt));
+  padding-inline-end: 6pt;
+}
+
 /* Word clips cell content at the cell's text area: a marker hanging left of it never shows
    (ListNumberingExtension flags the item); the box still holds the text position */
 .doc-page .doc-li[data-marker-clip]::before {
@@ -6051,13 +6058,77 @@ body.docs-crop-active .doc-protected[data-doc-protected='image'] .doc-img-wrap {
 }
 
 /* data grid of the Insert Chart dialog */
-.modal-chart {
-  min-width: 460px;
+.modal.modal-chart {
+  display: flex;
+  flex-direction: column;
+  width: 560px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+}
+
+.chart-kind-options > button {
+  flex: 1;
+}
+
+.modal-chart .chart-kind-button,
+.modal-chart .chart-data-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-12);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.modal-chart .chart-kind-button:hover,
+.modal-chart .chart-data-action:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.modal-chart .chart-kind-button[aria-pressed='true'] {
+  background: var(--word-blue);
+  border-color: var(--word-blue);
+  color: var(--docs-on-accent);
+}
+
+.modal-chart .chart-kind-button[aria-pressed='true']:hover {
+  background: var(--word-blue-dark);
+  border-color: var(--word-blue-dark);
+}
+
+.modal-chart .chart-kind-button:focus-visible,
+.modal-chart .chart-data-action:focus-visible {
+  outline: 2px solid var(--word-blue);
+  outline-offset: 2px;
+}
+
+.modal-chart .chart-data-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chart-data-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+}
+
+.modal-chart > :not(.chart-data-scroll) {
+  flex-shrink: 0;
 }
 
 .chart-data-grid {
   border-collapse: collapse;
-  margin-bottom: 8px;
   width: 100%;
 }
 
@@ -6067,12 +6138,25 @@ body.docs-crop-active .doc-protected[data-doc-protected='image'] .doc-img-wrap {
   padding: 0;
 }
 
-.chart-data-grid input {
+.modal-chart .chart-data-grid input {
   border: none;
+  border-radius: 0;
+  margin: 0;
   background: transparent;
-  width: 90px;
-  padding: 4px 6px;
+  color: var(--text);
+  width: 100%;
+  min-width: 90px;
+  padding: 6px 8px;
   font-size: 12px;
+}
+
+.modal-chart .chart-data-grid input:focus {
+  outline: 2px solid var(--word-blue);
+  outline-offset: -2px;
+}
+
+.chart-data-grid th {
+  background: var(--color-bg-subtle);
 }
 
 .chart-data-grid thead input {
@@ -6750,6 +6834,7 @@ body.docs-crop-active
   line-height: 1.5;
   color: var(--color-text-tertiary);
   transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
 }
 
 .ai-work-group-summary:hover {
@@ -6759,7 +6844,6 @@ body.docs-crop-active
 .ai-work-group-summary:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--docs-focus-ring);
-  border-radius: 4px;
 }
 
 .ai-work-group-summary.running {
@@ -6888,6 +6972,7 @@ body.docs-crop-active
 .ai-step-title.clickable {
   cursor: pointer;
   transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
 }
 
 .ai-step-title.clickable:hover {
@@ -6897,7 +6982,6 @@ body.docs-crop-active
 .ai-step-title.clickable:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--docs-focus-ring);
-  border-radius: 4px;
 }
 
 /* Step detail opens instantly, no animation */
@@ -7901,11 +7985,7 @@ body.docs-crop-active
 .ai-attachments {
   display: flex;
   gap: 8px;
-  /* single row inside the prompt box, above the textarea (Genspark composer style):
-     extra images run past the box edge and scroll horizontally.
-     scroll (not auto) + zero bottom padding: the always-present 4px scrollbar lane
-     doubles as the bottom padding, so overflowing never grows the strip and
-     shifts its content up */
+
   overflow-x: scroll;
   /* side insets are transparent borders, not padding: overflow clips at the
      padding edge, so side padding would let scrolled items slide flush against
@@ -8009,7 +8089,6 @@ body.docs-crop-active
   background: var(--bg-content);
 }
 
-/* the type icon sits in its own bordered white tile, like the Genspark card */
 .ai-attachment-card-icon {
   display: flex;
   flex-shrink: 0;
@@ -8333,7 +8412,6 @@ body.docs-crop-active
   background: var(--surface);
 }
 
-/* Genspark DS modal footer buttons: secondary = bg-subtle, primary = black (#232425) */
 .modal-actions button {
   display: inline-flex;
   align-items: center;
@@ -8466,8 +8544,6 @@ body.docs-crop-active
   gap: 8px;
   margin-top: 18px;
 }
-
-/* ---- Genspark DS form dialogs (password prompts + Protect Document) ---- */
 
 .modal.gs-form {
   padding: 24px;
@@ -8668,8 +8744,6 @@ body.docs-crop-active
   border-top: none;
 }
 
-/* checkbox / radio rows: the native input is visually replaced by the .ctl
-   box (18px, black checked state per the Genspark DS palette) */
 .protect-dialog label.protect-check {
   position: relative;
   display: flex;

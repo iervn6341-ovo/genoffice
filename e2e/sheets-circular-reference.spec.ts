@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, waitForPageWithUrl } from './helpers'
 
@@ -48,6 +49,6 @@ test('status bar names a circular reference and clears it when fixed', async () 
     await api(s, `await sh.getRange(2, 2).setValue(''); return 1`)
     await expect(indicator(s)).toHaveCount(0)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

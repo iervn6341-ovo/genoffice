@@ -142,7 +142,7 @@ export const nl = {
   ribbonGroupStyles: 'Stijlen',
   ribbonAiTools: 'AI-hulpmiddelen',
   ribbonGroupEditing: 'Bewerken',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'De AI-assistent openen',
   ribbonRemoveTableStyleTip: 'Tabelstijl verwijderen',
   ribbonNoStyle: 'Geen stijl',

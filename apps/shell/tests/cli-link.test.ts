@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -10,7 +10,7 @@ import { isEphemeralInstall, launcherFilePath, writeLauncherFile } from '../src/
 
 describe('genoffice launcher file', () => {
   it('lives in the genoffice auth directory, overridable like auth.json', () => {
-    expect(launcherFilePath({})).toBe(join(process.env.HOME ?? '', '.genoffice', 'launcher'))
+    expect(launcherFilePath({})).toBe(join(homedir(), '.genoffice', 'launcher'))
     expect(launcherFilePath({ GENOFFICE_AUTH_DIR: '/tmp/x' })).toBe(join('/tmp/x', 'launcher'))
   })
 

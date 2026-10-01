@@ -74,7 +74,7 @@ export type HeadlessExportOutcome =
 const MODULE_BY_EXTENSION: ReadonlyArray<readonly [RegExp, HeadlessExportModule]> = [
   [/\.docx$/i, 'docs'],
   [/\.(xlsx|xlsm|xls|csv)$/i, 'sheets'],
-  [/\.pptx$/i, 'slides'],
+  [/\.(pptx|ppsx)$/i, 'slides'],
   [/\.(md|markdown)$/i, 'markdown'],
   [/\.(html|htm)$/i, 'html'],
 ]
@@ -87,7 +87,7 @@ export function headlessModuleFor(inputPath: string): HeadlessExportModule | nul
 
 /** Extensions the headless entry accepts, for error messages. */
 export const HEADLESS_SUPPORTED_EXTENSIONS =
-  '.docx, .xlsx, .xlsm, .xls, .csv, .pptx, .md, .markdown, .html, .htm'
+  '.docx, .xlsx, .xlsm, .xls, .csv, .pptx, .ppsx, .md, .markdown, .html, .htm'
 
 /** `--flag value` and `--flag=value` both read the same. */
 function readOption(argv: readonly string[], index: number, flag: string): string | null {

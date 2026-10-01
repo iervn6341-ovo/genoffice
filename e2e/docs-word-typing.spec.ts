@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, waitForPageWithUrl } from './helpers'
 
@@ -77,7 +78,7 @@ test('Home / End move by line, ⇧ extends, ⌘ goes to the document ends', asyn
       .poll(() => blocks(p).then((b) => b.map((x) => x.text)))
       .toEqual(['SXHello worldY', 'second lineE'])
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -136,7 +137,7 @@ test('list AutoFormat: markers start lists, Enter on an empty item ends one, ⌘
     await p.keyboard.type('x * y')
     expect((await blocks(p)).at(-1)).toEqual({ type: 'docParagraph', text: 'x * y' })
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -175,7 +176,7 @@ test('Clear Formatting at the caret types plain; a reopened heading restyled sav
     await expect.poll(() => existsSync(out), { timeout: 20_000 }).toBe(true)
     await expect.poll(pStyles).toEqual(['<w:pStyle w:val="Heading2"'])
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
   // reopened, the heading carries styleId Heading2 — restyling must replace it
   const re = await launchShell({
@@ -202,7 +203,7 @@ test('Clear Formatting at the caret types plain; a reopened heading restyled sav
       .toBe(true)
     expect(pStyles()).toBeNull()
   } finally {
-    re.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(re, 'cleanup')
   }
 })
 
@@ -220,7 +221,7 @@ test('a double-click right of a line never swallows the paragraph break', async 
       .poll(() => blocks(p).then((b) => b.map((x) => x.text)))
       .toEqual(['SecondX', 'Third line'])
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -292,6 +293,6 @@ test('Tab / Backspace at a paragraph start set and clear the indent like Word', 
       )
       .toEqual([`<w:ind w:firstLine="${step}"/>`])
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

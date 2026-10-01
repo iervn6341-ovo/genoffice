@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
@@ -48,7 +49,7 @@ const drop = async (s: Page, tip: string, item: string) => {
   await s.waitForTimeout(500)
 }
 
-const kill = (l: LaunchedApp) => l.app.process().kill('SIGKILL')
+const kill = (l: LaunchedApp) => closeAndSaveVideo(l, 'cleanup')
 
 test.describe('Home → Font extras on a selected text box', () => {
   test('Change Case, then undo restores the text', async () => {
@@ -63,7 +64,7 @@ test.describe('Home → Font extras on a selected text box', () => {
       await s.keyboard.press('Meta+z')
       await expect.poll(async () => (await box(s)).text).toBe('Hello world. Again')
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -75,7 +76,7 @@ test.describe('Home → Font extras on a selected text box', () => {
       await drop(s, 'Character Spacing', 'Normal')
       await expect.poll(async () => (await box(s)).runs[0]!.spacing).toBe(0)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -96,7 +97,7 @@ test.describe('Home → Font extras on a selected text box', () => {
         .poll(async () => (await box(s)).runs[0]!.highlight?.toUpperCase())
         .toBe('#00FF00')
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })
@@ -123,7 +124,7 @@ test.describe('Home → Font extras while typing', () => {
       expect(hello.highlight).toBeNull()
       expect(hello.spacing).toBe(0)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -138,7 +139,7 @@ test.describe('Home → Font extras while typing', () => {
       await s.keyboard.press('Escape')
       await expect.poll(async () => (await box(s)).text).toBe('hello WORLD')
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })
@@ -154,7 +155,7 @@ test.describe('Home → Paragraph extras', () => {
       await drop(s, 'Text Direction', 'Horizontal')
       await expect.poll(async () => (await box(s)).vert).toBe('horz')
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 
@@ -170,7 +171,7 @@ test.describe('Home → Paragraph extras', () => {
       await drop(s, 'Line Spacing', '2.0')
       await expect.poll(lineH).toBeGreaterThan(before * 1.6)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })
@@ -181,6 +182,8 @@ test.describe('Home → Drawing extras', () => {
     try {
       await s.locator('.ribbon-body button', { hasText: 'Shapes' }).first().click()
       await s.locator('.rb-shape-cell[data-tip="Rectangle"]').click()
+      // Dock changes re-fit the canvas; wait for a stable hit area before measuring drag coordinates.
+      await s.locator('.stage-wrap').click({ trial: true })
       // draw in the slide's top-left quarter, clear of the text box in the middle
       const stage = await s.evaluate(() => {
         const c = Array.from(document.querySelectorAll('canvas')).sort(
@@ -213,7 +216,7 @@ test.describe('Home → Drawing extras', () => {
       await s.locator('.ctx-style-cell').nth(3).click()
       await expect.poll(fillOf).not.toBe(fillBefore)
     } finally {
-      kill(launched)
+      await kill(launched)
     }
   })
 })

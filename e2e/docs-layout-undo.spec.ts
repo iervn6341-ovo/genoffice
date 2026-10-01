@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect } from '@playwright/test'
 import { launchShell, waitForPageWithUrl } from './helpers'
 
@@ -46,6 +47,6 @@ test('orientation change is undone before the typed word', async () => {
     await p.keyboard.press('ControlOrMeta+z')
     await expect(p.locator('.doc-page').first()).not.toContainText('word')
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

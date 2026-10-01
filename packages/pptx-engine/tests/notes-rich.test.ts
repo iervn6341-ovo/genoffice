@@ -53,6 +53,24 @@ async function deckWithAuthoredNotes(): Promise<OpenedPptx> {
 }
 
 describe('formatted speaker notes', () => {
+  it('keeps blank paragraph marks and untouched XML when another paragraph is edited', async () => {
+    const opened = await deckWithAuthoredNotes()
+    const path = notesPathForSlide(opened.archive, opened.deck.slides[0]!.path)!
+    const mark =
+      '<a:p><a:pPr eaLnBrk="1"/><a:endParaRPr lang="zh-TW" sz="1400"><a:solidFill><a:srgbClr val="FF9900"/></a:solidFill><a:latin typeface="Georgia"/></a:endParaRPr></a:p>'
+    const before = opened.archive.readText(path)!.replace('</a:p>', '</a:p>' + mark)
+    opened.archive.entries.set(path, Buffer.from(before))
+    const paras = getSlideNotesParagraphs(opened.archive, opened.deck.slides[0]!.path)
+    setSlideNotesParagraphs(opened, 0, paras)
+    expect(opened.archive.readText(path)).toBe(before)
+    paras[0]!.runs[0]!.text = 'Edited point'
+    setSlideNotesParagraphs(opened, 0, paras)
+    expect(opened.archive.readText(path)).toBe(before.replace('Key point', 'Edited point'))
+    // Formatting an empty paragraph still updates its mark rather than creating a fake run.
+    paras[1]!.runs[0]!.color = '#008000'
+    setSlideNotesParagraphs(opened, 0, paras)
+    expect(opened.archive.readText(path)).toContain(mark.replace('FF9900', '008000'))
+  })
   it('reads run formatting and the notes-master size', async () => {
     const opened = await deckWithAuthoredNotes()
     const paras = getSlideNotesParagraphs(opened.archive, opened.deck.slides[0]!.path)

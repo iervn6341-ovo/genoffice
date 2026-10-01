@@ -11,6 +11,9 @@ import React, {
   useState,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
+import { isNotesDefaultColor } from '../notes-color'
+import { isInsertGallery, RibbonGalleryPane } from './RibbonGalleryPane'
 import type { AnimEffectKind, GradientFillSpec, TransitionKind } from '../../shared/ipc'
 import type { ChartStyleInfo } from '@genoffice/pptx-render'
 import {
@@ -1134,6 +1137,7 @@ export function Ribbon({
   onFormatBrushClick,
   onFormatBrushDoubleClick,
   onTextColor,
+  onNotesDefaultColor,
   curBulletChar,
   curAlign,
   curRtl,
@@ -1212,6 +1216,10 @@ export function Ribbon({
   onInsertIcon,
   onInsertChart,
   onInsertSmartArt,
+  insertGallery,
+  insertGalleryTarget,
+  onInsertGalleryChange,
+  onCloseInsertGallery,
   onInsertWordArt,
   onInsertField,
   onOpenLink,
@@ -1315,6 +1323,9 @@ export function Ribbon({
   const [slideShowFromStart, setSlideShowFromStart] = useState(false)
   // Insert tab dropdown galleries (at most one open at a time)
   const [insertDrop, setInsertDrop] = useState<InsertDropKey | null>(null)
+  useEffect(() => {
+    onInsertGalleryChange?.(null)
+  }, [tab, onInsertGalleryChange])
   // Chart design: dropdown panels (add chart element / change colors, at most one open at a time)
   const [chartDrop, setChartDrop] = useState<'elements' | 'colors' | null>(null)
   // Draw tab pen gallery: per-preset customisations live for the session;
@@ -1494,7 +1505,7 @@ export function Ribbon({
     prevContextTab.current = contextTab
   }, [contextTab, autoContextTab])
 
-  /** Insert tab dropdown big button (click toggles, content stopPropagation) */
+  /** Large galleries dock in the workspace; short menus stay beside their trigger. */
   const dropBig = (
     key: NonNullable<typeof insertDrop>,
     icon: ReactNode,
@@ -1502,31 +1513,55 @@ export function Ribbon({
     title: string,
     content: ReactNode,
     disabled = !hasDoc,
-  ) => (
-    <div className="rb-drop-wrap">
-      <button
-        className={`rb-big ${insertDrop === key ? 'active' : ''}`}
-        disabled={disabled}
-        data-tip={title}
-        onMouseDown={(e) => {
-          e.stopPropagation()
-          closeSiblingPanels(e, closePanels, 'insert')
-        }}
-        onClick={() => setInsertDrop((v) => (v === key ? null : key))}
-      >
-        <span className="rb-big-icon">
-          {icon}
-          <RbCaret />
-        </span>
-        <span>{label}</span>
-      </button>
-      {insertDrop === key && (
-        <div className="rb-drop" onMouseDown={(e) => e.stopPropagation()}>
-          {content}
-        </div>
-      )}
-    </div>
-  )
+  ) => {
+    const docked = isInsertGallery(key) && !!onInsertGalleryChange
+    const open = docked ? insertGallery === key : insertDrop === key
+    return (
+      <div className="rb-drop-wrap">
+        <button
+          className={`rb-big ${open ? 'active' : ''}`}
+          disabled={disabled}
+          data-tip={title}
+          aria-label={label}
+          aria-expanded={open}
+          aria-controls={docked && open ? 'slides-insert-gallery' : undefined}
+          data-gallery-trigger={docked ? key : undefined}
+          onMouseDown={(e) => {
+            e.stopPropagation()
+            closeSiblingPanels(e, closePanels, 'insert')
+          }}
+          onClick={(e) => {
+            if (docked && isInsertGallery(key)) {
+              setInsertDrop(null)
+              setCollapseOpen(null)
+              if (open) onCloseInsertGallery?.()
+              else onInsertGalleryChange?.(key, e.currentTarget)
+            } else setInsertDrop((v) => (v === key ? null : key))
+          }}
+        >
+          <span className="rb-big-icon">
+            {icon}
+            <RbCaret />
+          </span>
+          <span>{label}</span>
+        </button>
+        {open &&
+          docked &&
+          insertGalleryTarget &&
+          createPortal(
+            <RibbonGalleryPane key={key} title={label} onClose={() => onCloseInsertGallery?.()}>
+              {content}
+            </RibbonGalleryPane>,
+            insertGalleryTarget,
+          )}
+        {open && !docked && (
+          <div className="rb-drop" onMouseDown={(e) => e.stopPropagation()}>
+            {content}
+          </div>
+        )}
+      </div>
+    )
+  }
   const dropIcon = (
     key: NonNullable<typeof insertDrop>,
     icon: ReactNode,
@@ -1582,7 +1617,7 @@ export function Ribbon({
   const customColorTimer = useRef<number | null>(null)
   const onCustomTextColor = (value: string) => {
     const hex = value.toUpperCase()
-    setLastColor(hex)
+    if (!onNotesDefaultColor || !isNotesDefaultColor(hex)) setLastColor(hex)
     if (customColorTimer.current) window.clearTimeout(customColorTimer.current)
     customColorTimer.current = window.setTimeout(() => {
       if (editing) {
@@ -1915,6 +1950,7 @@ export function Ribbon({
     onSlideShow,
     onStrike,
     onTextColor,
+    onNotesDefaultColor,
     onTextToggle,
     onToggleAi,
     onToggleFormat,
@@ -1953,7 +1989,10 @@ export function Ribbon({
     setColorOpen,
     setFontOpen,
     setIconColor,
-    setInsertDrop,
+    setInsertDrop: (next) => {
+      setInsertDrop(next)
+      if (next === null) onInsertGalleryChange?.(null)
+    },
     setLastColor,
     setLayoutOpen,
     setLayoutPickOpen,
@@ -1980,7 +2019,10 @@ export function Ribbon({
     <div
       className={`ribbon ${collapse.rootClass}`}
       ref={collapse.rootRef}
-      onMouseDownCapture={keepEditorFocusOnRibbonPress}
+      onMouseDownCapture={(e) => {
+        // Portalled task-pane buttons need normal keyboard/mouse focus.
+        if (!(e.target as Element).closest('.ribbon-gallery-pane')) keepEditorFocusOnRibbonPress(e)
+      }}
     >
       <div
         className={`ribbon-tabs ${IN_TAB ? '' : IS_MAC ? 'ribbon-tabs-mac' : 'ribbon-tabs-win'}${

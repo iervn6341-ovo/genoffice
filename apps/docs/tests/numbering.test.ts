@@ -653,6 +653,17 @@ describe('list marker decorations', () => {
     destroy()
   })
 
+  it('ordinary decimal markers grow naturally, while explicit suffixes keep their layout', async () => {
+    const level =
+      '<w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/>' +
+      '<w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>'
+    for (const suffix of ['', 'tab', 'space', 'nothing']) {
+      const { el, destroy } = await renderLi(level + (suffix ? `<w:suff w:val="${suffix}"/>` : ''))
+      expect(el.hasAttribute('data-marker-flow')).toBe(suffix === '')
+      destroy()
+    }
+  })
+
   it('level positive firstLine shifts the marker right of the text indent', async () => {
     const { el, destroy } = await renderLi(
       '<w:start w:val="1"/><w:numFmt w:val="upperLetter"/><w:lvlText w:val="%1"/>' +
@@ -783,6 +794,7 @@ describe('list marker decorations', () => {
     const styles = Array.from(editor.view.dom.querySelectorAll('.doc-li')).map(
       (el) => el.getAttribute('style') ?? '',
     )
+    expect(editor.view.dom.querySelector('[data-marker-flow]')).toBeNull()
     // marker at 720 ends 960: the 4320 stop, not 1440
     expect(styles[0]).toContain('--li-tab: 180pt')
     // marker at 360 ends 600: the 1080 stop replaces the cleared 720 default

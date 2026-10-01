@@ -15,7 +15,7 @@
  * Read-only: layout/master geometry is used only for render inheritance, never
  * written back to the original pptx.
  */
-import { XMLParser } from 'fast-xml-parser'
+import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 import type { Transform, TextAlign } from './types'
 import { type EaScript, type Theme, eaScriptOfLang, resolveFontRef } from './theme'
 import { resolveColorNode } from './color'
@@ -33,6 +33,9 @@ export type StyleSourceField =
   'fontSize' | 'bold' | 'italic' | 'color' | 'latinFont' | 'eaFont' | 'csFont' | 'align'
 
 export interface LevelTextStyle {
+  /** Bullet colour inherits independently of the glyph. null explicitly follows text. */
+  bulletColor?: string | null
+  bulletColorNodeXml?: string
   /** Which chain layer supplied each field (only set by mergeTextStyleChain) */
   src?: Partial<Record<StyleSourceField, string>>
   /** The level's unresolved latin theme ref (+mj-lt / +mn-lt), kept beside the resolved name */
@@ -280,6 +283,15 @@ function parseLvlPPr(
   const pPr = asXmlNode(pPrRaw)
   const out: LevelTextStyle = {}
   const algn = String(pPr['@_algn'] ?? '')
+  if (pPr['a:buClrTx'] !== undefined) out.bulletColor = null
+  else if (pPr['a:buClr']) {
+    out.bulletColor = resolveColorNode(pPr['a:buClr'], theme)
+    out.bulletColorNodeXml = new XMLBuilder({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      suppressEmptyNode: true,
+    }).build(pPr['a:buClr'])
+  }
   if (algn && ALIGN_MAP[algn]) out.align = ALIGN_MAP[algn]
   const lineHeight = spcPctVal(pPr['a:lnSpc'])
   const lineExact = spcPtsVal(pPr['a:lnSpc'])
@@ -633,6 +645,10 @@ export function mergeTextStyleChain(
       src.align = from
     }
     if (out.bullet == null && lvl.bullet != null) out.bullet = lvl.bullet
+    if (out.bulletColor === undefined && lvl.bulletColor !== undefined) {
+      out.bulletColor = lvl.bulletColor
+      out.bulletColorNodeXml = lvl.bulletColorNodeXml
+    }
     if (out.marL == null && lvl.marL != null) out.marL = lvl.marL
     if (out.indent == null && lvl.indent != null) out.indent = lvl.indent
     // Line/paragraph spacing inherit as attribute pairs (pct and pts are two value forms of the same lnSpc/spcBef/spcAft node)

@@ -35,13 +35,11 @@ export const imageCommand: CommandDef = {
       value: 'ratio',
       description: '1:1 | 4:3 | 16:9 | 9:16 | 3:4 | 2:3 | 3:2 | auto',
     },
-    { name: 'size', value: 'size', description: 'auto | 0.5k | 1k | 2k | 3k | 4k (Genspark only)' },
     {
       name: 'ref',
       value: 'images',
       description: 'reference or edit-target images (paths or URLs), comma-separated',
     },
-    { name: 'model', value: 'name', description: 'Genspark model override (e.g. fal-bria-rmbg)' },
     { name: 'force', description: 'overwrite an existing output file' },
   ],
   async run(args, ctx) {
@@ -136,7 +134,6 @@ export function siblingExtensions(outExt: string): string[] {
     .map(([, exts]) => exts[0]!)
 }
 
-/** Genspark returns an https URL, BYOK providers a file:// in the app's generated-image store; fetchRemoteImage serves both. */
 async function loadImage(url: string): Promise<{ bytes: Uint8Array; mime: string }> {
   const response = await fetchRemoteImage(url)
   if (!response?.ok) throw new CliError(EXIT.app, `could not download the generated image: ${url}`)

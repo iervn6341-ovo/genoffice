@@ -136,7 +136,7 @@ export const zhTW = {
   ribbonGroupStyles: '樣式',
   ribbonAiTools: 'AI 工具',
   ribbonGroupEditing: '編輯',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: '開啟 AI 助理',
   ribbonRemoveTableStyleTip: '移除表格樣式',
   ribbonNoStyle: '無樣式',

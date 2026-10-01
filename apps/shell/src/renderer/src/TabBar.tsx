@@ -235,7 +235,9 @@ export function TabBar() {
   }, [activeId])
 
   return (
-    <div className="tab-bar">
+    <div
+      className={`tab-bar${tabs.some((tab) => tab.active && tab.coversTabStrip) ? ' tab-bar-covered' : ''}`}
+    >
       <div className="tab-bar-drag-spacer" />
       {!IS_MAC && (
         <button

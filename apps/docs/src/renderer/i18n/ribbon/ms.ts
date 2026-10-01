@@ -140,7 +140,7 @@ export const ms = {
   ribbonGroupStyles: 'Gaya',
   ribbonAiTools: 'Alat AI',
   ribbonGroupEditing: 'Penyuntingan',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Buka pembantu AI',
   ribbonRemoveTableStyleTip: 'Alih keluar gaya jadual',
   ribbonNoStyle: 'Tiada Gaya',

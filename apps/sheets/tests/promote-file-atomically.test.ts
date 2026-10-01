@@ -11,6 +11,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   stat,
   truncate,
@@ -23,12 +24,15 @@ import { promoteFileAtomically } from '@genoffice/xlsx-gateway/gateway/xlsx-pack
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
-  return { ...actual, copyFile: vi.fn(actual.copyFile) }
+  return { ...actual, copyFile: vi.fn(actual.copyFile), rename: vi.fn(actual.rename) }
 })
 const copyFileMock = vi.mocked(copyFile)
 
 const scratches: string[] = []
 const actualCopyFile = copyFileMock.getMockImplementation()!
+const renameMock = vi.mocked(rename)
+const actualRename = renameMock.getMockImplementation()!
+const busy = () => Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
 
 async function scratchDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'genoffice-promote-test-'))
@@ -37,6 +41,7 @@ async function scratchDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  renameMock.mockReset().mockImplementation(actualRename)
   copyFileMock.mockReset()
   copyFileMock.mockImplementation(actualCopyFile)
   for (const dir of scratches.splice(0)) {
@@ -66,9 +71,8 @@ describe('promoteFileAtomically', () => {
     const target = join(locked, 'book.xlsx')
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
-    // a read-only directory rejects the rename with the same retryable
-    // EACCES a Windows lock produces, while the target file stays writable
-    await chmod(locked, 0o555)
+    // Inject a transient-style lock on every OS while keeping the copy real.
+    renameMock.mockRejectedValue(busy())
     await promoteFileAtomically(temporary, target)
     await chmod(locked, 0o755)
     expect(await readFile(target, 'utf8')).toBe('new-bytes')
@@ -83,8 +87,11 @@ describe('promoteFileAtomically', () => {
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
     // rename AND in-place copy both refused — the Excel-holds-the-file case
-    await chmod(target, 0o444)
-    await chmod(locked, 0o555)
+    copyFileMock.mockImplementation(async (src, dest, mode) => {
+      if (String(dest) === target) throw busy()
+      return actualCopyFile(src, dest, mode)
+    })
+    renameMock.mockRejectedValue(busy())
     await expect(promoteFileAtomically(temporary, target)).rejects.toThrow(
       'The save target is locked by another program',
     )
@@ -103,7 +110,7 @@ describe('promoteFileAtomically', () => {
     const target = join(locked, 'book.xlsx')
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
-    await chmod(locked, 0o555)
+    renameMock.mockRejectedValue(busy())
     // the backup copy runs for real; the copy over the target truncates it
     // and then fails the way a lock acquired mid-write does
     copyFileMock.mockImplementation(async (src, dest, mode) => {
@@ -127,21 +134,20 @@ describe('promoteFileAtomically', () => {
     const target = join(locked, 'book.xlsx')
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
-    await chmod(locked, 0o555)
-    const busy = () => Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
+    renameMock.mockRejectedValue(busy())
     copyFileMock.mockImplementation(async (src, dest, mode) => {
       if (String(src) === temporary) {
         await truncate(String(dest))
         throw busy()
       }
-      if (String(dest) === target) throw busy()
+      if (String(dest).startsWith(locked)) throw busy()
       return actualCopyFile(src, dest, mode)
     })
     const failure = await promoteFileAtomically(temporary, target).catch((error: Error) => error)
     await chmod(locked, 0o755)
     expect(failure?.message).toContain('preserved at: ')
     const survivor = failure!.message.split('preserved at: ')[1] ?? ''
-    // the read-only directory refuses the recovered copy, so the tmp backup stays
+    // the injected lock also refuses the recovered copy, so the tmp backup stays
     expect(survivor.startsWith(tmpdir())).toBe(true)
     expect(basename(survivor)).toMatch(/^book\.recovered-[0-9a-f-]+\.xlsx$/)
     expect(await readFile(survivor, 'utf8')).toBe('old-bytes')

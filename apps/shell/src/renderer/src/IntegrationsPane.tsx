@@ -27,8 +27,6 @@ interface Pending {
   agentId?: AgentId
 }
 
-export const NPX_INSTALL_COMMAND = 'npx skills add genspark-ai/genoffice'
-
 /** some detected assistant holds an older copy of the skill than the bundled one */
 export const skillUpdateDue = (s: IntegrationsStatus): boolean =>
   s.agents.some((a) => a.state.older === true)
@@ -331,20 +329,6 @@ export function IntegrationsPane({
             <button className="set-btn" onClick={() => void downloadZip()}>
               {t('intgDownloadZip')}
             </button>
-          </div>
-
-          <div className="set-intg-option">
-            <span className="set-intg-option-letter">C</span>
-            <div className="set-field-stack">
-              <div className="set-field-label">{t('intgOtherNpxTitle')}</div>
-              <div className="set-field-desc">{t('intgOtherNpxDesc')}</div>
-              <div className="set-intg-code">
-                <code>{NPX_INSTALL_COMMAND}</code>
-                <button className="set-btn" onClick={() => copy(NPX_INSTALL_COMMAND, 'npx')}>
-                  {copied === 'npx' ? t('intgCopied') : t('intgCopy')}
-                </button>
-              </div>
-            </div>
           </div>
 
           {pending && !pending.agentId && confirmBlock(pending)}

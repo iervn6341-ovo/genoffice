@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
@@ -66,7 +67,7 @@ test('Heading 1: turn off Bold, type, undo/redo, save/reopen', async () => {
       })
       .toMatch(/<w:b w:val="0"\/>/)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 
   const re = await launchShell({ onboardingSeen: true, videoDir: 'docs-style-bold', openFile: out })
@@ -81,6 +82,6 @@ test('Heading 1: turn off Bold, type, undo/redo, save/reopen', async () => {
     await p2.keyboard.press('ControlOrMeta+b')
     await expect(boldBtn(p2)).toHaveClass(/active/)
   } finally {
-    re.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(re, 'cleanup')
   }
 })

@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { aiSettingsPath, proxyUrlFromEnv } from '../src/cloud'
 import { analysisText } from '../src/commands/media'
@@ -72,7 +73,7 @@ describe('cloud command plumbing', () => {
         'image',
         'a cat',
         '--ref',
-        'file://' + join(outside, 'ref.png'),
+        pathToFileURL(join(outside, 'ref.png')).href,
         '--out',
         join(inside, 'x.png'),
         '--json',
@@ -91,11 +92,12 @@ describe('cloud command plumbing', () => {
     expect((await run(['search', '--json'])).code).toBe(1)
     expect((await run(['image', '--json'])).code).toBe(1)
     expect((await run(['media', '--json'])).code).toBe(1)
-    const missing = await run(['media', '/nonexistent/photo.jpg', '--json'])
+    const missingPath = join((await import('./helpers')).tempDir(), 'photo.jpg')
+    const missing = await run(['media', missingPath, '--json'])
     expect(missing.code).toBe(2)
-    const missingUrl = await run(['media', 'file:///nonexistent/photo.jpg', '--json'])
+    const missingUrl = await run(['media', pathToFileURL(missingPath).href, '--json'])
     expect(missingUrl.code).toBe(2)
-    expect(missingUrl.json().message).toContain('/nonexistent/photo.jpg')
+    expect(missingUrl.json().message).toContain(missingPath)
   })
 
   it('unwraps the Genspark per-file analysis map and leaves prose alone', () => {

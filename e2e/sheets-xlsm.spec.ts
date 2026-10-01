@@ -1,5 +1,7 @@
+import JSZip from 'jszip'
+import { readFileSync } from 'node:fs'
 import { test, expect } from '@playwright/test'
-import { execFileSync, execSync } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import { copyFile, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -10,9 +12,10 @@ const FIXTURE = resolve(__dirname, '../apps/sheets/fixtures/generated/compatibil
 
 const canReadClipboard = process.platform === 'darwin'
 
-/** the leading backslashes stop unzip from reading [] as a match pattern */
-function zipEntry(archive: string, name: string): Buffer {
-  return execFileSync('unzip', ['-p', archive, name.replace(/([[\]])/g, '\\$1')])
+/** Read the exact entry name without platform-specific unzip glob escaping. */
+async function zipEntry(archive: string, name: string): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(readFileSync(archive))
+  return zip.file(name)!.async('nodebuffer')
 }
 
 async function waitForWorkbook(page: Page): Promise<void> {
@@ -46,7 +49,7 @@ test.describe('sheets: macro-enabled workbook (.xlsm)', () => {
     const scratch = await mkdtemp(join(tmpdir(), 'genoffice-xlsm-e2e-'))
     const workbook = join(scratch, 'macro.xlsm')
     await copyFile(FIXTURE, workbook)
-    const vbaBefore = zipEntry(workbook, 'xl/vbaProject.bin')
+    const vbaBefore = await zipEntry(workbook, 'xl/vbaProject.bin')
 
     // ── session 1: open, edit A1, save in place (stays .xlsm) ──
     const first = await launchShell({
@@ -70,16 +73,18 @@ test.describe('sheets: macro-enabled workbook (.xlsm)', () => {
         const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('://sheets/'))
         wc?.send('menu:action', 'save')
       })
-      await expect(() => {
-        expect(zipEntry(workbook, 'xl/worksheets/sheet1.xml').toString()).toContain('MacroSafe')
+      await expect(async () => {
+        expect((await zipEntry(workbook, 'xl/worksheets/sheet1.xml')).toString()).toContain(
+          'MacroSafe',
+        )
       }).toPass({ timeout: 15_000 })
 
       // macros are never executed, but they must survive the save byte-for-byte
-      expect(zipEntry(workbook, 'xl/vbaProject.bin').equals(vbaBefore)).toBe(true)
-      const contentTypes = zipEntry(workbook, '[Content_Types].xml').toString()
+      expect((await zipEntry(workbook, 'xl/vbaProject.bin')).equals(vbaBefore)).toBe(true)
+      const contentTypes = (await zipEntry(workbook, '[Content_Types].xml')).toString()
       expect(contentTypes).toContain('application/vnd.ms-excel.sheet.macroEnabled.main+xml')
       expect(contentTypes).toContain('application/vnd.ms-office.vbaProject')
-      const rels = zipEntry(workbook, 'xl/_rels/workbook.xml.rels').toString()
+      const rels = (await zipEntry(workbook, 'xl/_rels/workbook.xml.rels')).toString()
       expect(rels).toContain('vbaProject.bin')
     } finally {
       await closeAndSaveVideo(first, 'sheets-xlsm')

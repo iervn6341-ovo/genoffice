@@ -141,7 +141,7 @@ export const de = {
   ribbonGroupStyles: 'Formatvorlagen',
   ribbonAiTools: 'KI-Tools',
   ribbonGroupEditing: 'Bearbeiten',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'KI-Assistenten öffnen',
   ribbonRemoveTableStyleTip: 'Tabellenformatvorlage entfernen',
   ribbonNoStyle: 'Keine Formatvorlage',

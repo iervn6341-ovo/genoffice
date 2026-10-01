@@ -1,6 +1,8 @@
 import type { zh } from './zh'
 
 export const ru = {
+  appNotesDefaultColor: 'По умолчанию (по теме)',
+  appStatusEquationPreview: 'Уравнение показано в исходном виде. Редактируйте его в PowerPoint.',
   appPhPromptTitle: 'Щелкните, чтобы добавить заголовок',
   appPhPromptSubtitle: 'Щелкните, чтобы добавить подзаголовок',
   appPhPromptBody: 'Щелкните, чтобы добавить текст',
@@ -225,13 +227,10 @@ export const ru = {
   appRehearseDiscard: 'Не сохранять',
   appRehearseSave: 'Сохранить',
   appSettingsTitle: 'Настройки ИИ',
-  appSettingsAccount: 'Учетная запись Genspark',
   appSettingsChecking: 'Проверка…',
   appSettingsLoggedIn: 'Выполнен вход',
   appSettingsLoggedInEmail: 'Выполнен вход: {email}',
-  appSettingsLoggedOut: 'Вход не выполнен (для функций ИИ требуется учетная запись Genspark)',
   appSettingsLoginPending: 'Ожидание входа в браузере…',
-  appSettingsLogin: 'Войти в Genspark',
   appSettingsModel: 'Модель',
   appSettingsCancel: 'Отмена',
   appSettingsSave: 'Сохранить',

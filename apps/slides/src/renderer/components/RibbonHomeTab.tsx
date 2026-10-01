@@ -6,11 +6,12 @@ import type { StringKey } from '../i18n/locale'
 import { ColorPicker, isSymbolFontFamily, labelFromTip } from '@genoffice/ui'
 import { saveEditSelection } from '../TextEditOverlay'
 import { armColorInput } from '../color-input'
+import { isNotesDefaultColor } from '../notes-color'
 import { displayFontFamily } from '../konva-adapter'
 import { useSystemFontFamilies } from '../system-fonts'
 import { useFontCatalog } from '../font-manager'
 import {
-  GensparkMark,
+  AssistantMark,
   IconAiBeautify,
   IconAiFactCheck,
   IconAiImage,
@@ -194,6 +195,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
     onSetLayout,
     onStrike,
     onTextColor,
+    onNotesDefaultColor,
     onTextToggle,
     onToggleAi,
     onToggleFormat,
@@ -1018,13 +1020,19 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
                 >
                   <ColorPicker
                     value={lastColor}
+                    isColorDisabled={onNotesDefaultColor ? isNotesDefaultColor : undefined}
                     strings={{
+                      auto: onNotesDefaultColor ? t('appNotesDefaultColor') : undefined,
                       themeColors: t('ribbonThemeColorsSection'),
                       standardColors: t('ribbonStandardColors'),
                       moreColors: t('ribbonMoreColors'),
                     }}
                     onPick={(hex) => {
-                      if (!hex) return
+                      if (!hex) {
+                        onNotesDefaultColor?.()
+                        setColorOpen(false)
+                        return
+                      }
                       setLastColor(hex)
                       if (editing) onTextColor(hex)
                       else onElementTextColor(hex)
@@ -1489,6 +1497,8 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
         label={t('ribbonGroupDrawing')}
         groupId="drawing"
         collapse={{
+          // Keep the docked Shapes portal alive after the folded toolbar menu closes.
+          keepMounted: true,
           collapsed: autoFold && collapsedGroups.includes('drawing'),
           open: collapseOpen === 'drawing',
           onToggle: () => {
@@ -1671,8 +1681,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
           <span>{t('ribbonFindReplace')}</span>
         </button>
       </Group>
-      {/* Genspark AI + one-click AI tools at the right edge (Microsoft 365's Copilot slot); the
-          whole group folds into one "AI Tools" dropdown before anything else narrows */}
+      {}
       <Group
         label={t('ribbonAiTools')}
         groupId="aiTools"
@@ -1684,7 +1693,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
             closePanels(['collapse'])
             setCollapseOpen((v) => (v === 'aiTools' ? null : 'aiTools'))
           },
-          icon: <GensparkMark size={26} />,
+          icon: <AssistantMark size={26} />,
         }}
       >
         <button
@@ -1693,9 +1702,9 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
           onClick={onToggleAi}
         >
           <span className="rb-big-icon">
-            <GensparkMark size={26} />
+            <AssistantMark size={26} />
           </span>
-          <span>Genspark AI</span>
+          <span>AI</span>
         </button>
         <button
           className="rb-big ai-entry"

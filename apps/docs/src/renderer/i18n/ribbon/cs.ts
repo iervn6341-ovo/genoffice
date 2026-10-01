@@ -139,7 +139,7 @@ export const cs = {
   ribbonGroupStyles: 'Styly',
   ribbonAiTools: 'Nástroje AI',
   ribbonGroupEditing: 'Úpravy',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Otevřít asistenta AI',
   ribbonRemoveTableStyleTip: 'Odebrat styl tabulky',
   ribbonNoStyle: 'Bez stylu',

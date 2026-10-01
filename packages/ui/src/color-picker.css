@@ -82,6 +82,11 @@
   cursor: pointer;
 }
 
+.gcp-palette.gcp-palette .gcp-swatch:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .gcp-palette.gcp-palette .gcp-swatch:hover,
 .gcp-palette.gcp-palette .gcp-swatch.selected {
   position: relative;

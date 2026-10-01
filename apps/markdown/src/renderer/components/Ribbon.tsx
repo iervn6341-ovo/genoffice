@@ -13,7 +13,7 @@ import {
 } from '@genoffice/ui'
 import { useI18n } from '../i18n/locale'
 import type { StringKey } from '../i18n/locale'
-import { GensparkMark } from '../ai/AiPanel'
+import { AssistantMark } from '../ai/AiPanel'
 import { uiOp, type BlockType, type ListKind, type StylableMark } from '../editor/ops'
 import {
   IconBullets,
@@ -500,11 +500,10 @@ export function Ribbon({
           </div>
         </div>
 
-        {/* Genspark AI + one-click AI tools at the right edge (Microsoft 365's Copilot slot);
-            folds into one "AI Tools" dropdown when the window is narrow */}
+        {}
         <RibbonFoldGroup
           label={t('aiToolsGroup')}
-          icon={<GensparkMark size={26} />}
+          icon={<AssistantMark size={26} />}
           priority={1}
           className="rb-group-end"
         >
@@ -517,9 +516,9 @@ export function Ribbon({
             onClick={onToggleAi}
           >
             <span className="rb-big-icon">
-              <GensparkMark size={26} />
+              <AssistantMark size={26} />
             </span>
-            <span>Genspark AI</span>
+            <span>AI</span>
           </button>
           {aiPresets.map(({ kind, btn, prompt }) => (
             <button

@@ -48,11 +48,7 @@ perubahan, dan menunjukkan dengan tepat bagian mana yang diubah.
   perangkat Anda sendiri. Konversi PDF → Word / Excel / PowerPoint, Markdown →
   Word, dan HTML → Word semuanya berjalan on-device. Hanya panggilan AI yang
   meninggalkan perangkat, menuju penyedia yang Anda pilih.
-- **Kunci API Anda sendiri, atau tanpa kunci sama sekali.** Masuk dengan
-  Genspark dan lewati urusan kunci API, atau gunakan kunci Anda sendiri untuk
-  Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok,
-  Mistral, OpenRouter, Requesty, atau endpoint apa pun yang kompatibel dengan OpenAI,
-  termasuk server lokal.
+- **AI.** Fitur AI menggunakan penyedia yang dipilih di Pengaturan. Pengaturan yang ada dipertahankan; pencarian dan media dikonfigurasi secara terpisah.
 - **Dapat dijalankan lewat skrip dan siap untuk agen.** Aplikasi ini
   menyertakan baris perintah `genoffice` dan sebuah skill untuk Claude Code,
   Codex, Cursor, Gemini CLI, GitHub Copilot, OpenCode, dan Windsurf, sehingga
@@ -182,7 +178,7 @@ lewat engine yang sama dengan aplikasinya, tanpa membuka satu jendela pun.
 </tr>
 <tr>
 <td><b>Satu prompt ke agen Anda</b> — "Buat deck delapan slide tentang Tata Surya." Agen membaca skill, menulis style sheet, outline, dan satu spesifikasi halaman per slide, menghasilkan dua foto dengan <code>genoffice image</code>, dan membiarkan <code>genoffice slides check</code> menolak apa pun yang meluap atau tumpang tindih sebelum <code>genoffice create</code> merakit <code>.pptx</code> dan <code>slides render</code> mengembalikan satu PNG per slide untuk dilihat.</td>
-<td><b>Pasang sekali, dari Pengaturan → Integrasi</b> — GenOffice menampilkan coding agent yang ditemukannya di komputer ini dan menulis skill ke setiap agen yang Anda pilih. Atau unduh skill sebagai zip, atau jalankan <code>npx skills add genspark-ai/genoffice</code>. Perintah dan alur kerja lengkapnya ada di <a href="#command-line-and-agent-skill">Baris perintah dan skill agen</a>.</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -219,9 +215,7 @@ terlihat sambil Anda menyaksikannya.
 - **AI yang mengedit dokumen itu sendiri.** Tracked changes di Docs, rumus dan
   grafik langsung di Sheets, slide yang digambar langsung di kanvas, setiap
   giliran AI adalah snapshot yang bisa Anda kembalikan.
-- **Model Anda, kunci Anda.** Masuk dengan Genspark, atau bawa kunci untuk
-  Claude, OpenAI, Gemini, DeepSeek dan lainnya, termasuk server lokal dan
-  endpoint apa pun yang kompatibel dengan OpenAI.
+- **AI.** Fitur AI menggunakan penyedia yang dipilih di Pengaturan. Pengaturan yang ada dipertahankan; pencarian dan media dikonfigurasi secara terpisah.
 - **PDF yang ditangani dengan benar.** Edit teks langsung di halaman, dan
   konversi PDF ke Word, Excel, atau PowerPoint secara on-device, dengan OCR
   sistem untuk hasil pindaian.
@@ -234,10 +228,7 @@ terlihat sambil Anda menyaksikannya.
 
 ## Backend AI
 
-**Masuk dengan Genspark** dan tidak ada yang perlu dikonfigurasi: panggilan
-model diarahkan lewat proxy Genspark (keluarga Claude, GPT, dan Gemini) dan
-agen mendapatkan akses pencarian web dan gambar, generasi gambar, serta
-analisis gambar/audio/video.
+Fitur AI menggunakan penyedia yang dipilih di Pengaturan. Pengaturan yang ada dipertahankan; pencarian dan media dikonfigurasi secara terpisah.
 
 **Atau bawa kunci Anda sendiri.** Settings → AI menampilkan Claude, OpenAI,
 Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty,
@@ -276,7 +267,6 @@ semua MCP client.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Pengaturan → Integrasi** di aplikasi     | Menampilkan agen yang ditemukan di komputer ini; satu klik menulis skill ke setiap agen yang Anda pilih. Tombol **Update** muncul saat rilis GenOffice membawa skill yang lebih baru. |
 | **Unduh sebagai zip** di halaman yang sama | Tata letak yang diterima claude.ai, aplikasi desktop Claude, dan asisten lain sebagai skill yang diunggah.                                                                            |
-| `npx skills add genspark-ai/genoffice`     | Memasang dari repositori ini ke agen mana pun yang kompatibel dengan skill.                                                                                                           |
 
 Lalu mulai chat baru dan minta sebuah dokumen. Skill ini mengajari agen kapan
 harus menggunakan `genoffice`, bagaimana membaca file sebelum mengeditnya,
@@ -505,10 +495,7 @@ Microsoft Office.
 <details>
 <summary><b>Apakah GenOffice bisa digunakan secara offline?</b></summary>
 
-Pengeditan dokumen sepenuhnya lokal — file tidak pernah meninggalkan
-perangkat Anda untuk dibuka, diedit, disimpan, atau dikonversi. Fitur AI
-(agen, pencarian, alat gambar) membutuhkan koneksi jaringan, baik dengan
-masuk lewat Genspark atau dengan kunci API model Anda sendiri.
+Fitur AI menggunakan penyedia yang dipilih di Pengaturan. Pengaturan yang ada dipertahankan; pencarian dan media dikonfigurasi secara terpisah.
 
 </details>
 
@@ -535,12 +522,7 @@ gambar halaman.
 <details>
 <summary><b>Bisakah saya menggunakan model AI atau kunci API saya sendiri?</b></summary>
 
-Ya. Selain masuk lewat Genspark tanpa kunci API, GenOffice mendukung
-penggunaan kunci Anda sendiri untuk Claude, OpenAI, Gemini, DeepSeek, Kimi,
-GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty, dan OpenCode Zen/Go,
-plus endpoint apa pun yang kompatibel dengan OpenAI — termasuk server model
-lokal. Pencarian, generasi gambar, dan analisis gambar/video menggunakan
-kunci tersendiri di Settings → AI Media & Search.
+Fitur AI menggunakan penyedia yang dipilih di Pengaturan. Pengaturan yang ada dipertahankan; pencarian dan media dikonfigurasi secara terpisah.
 
 </details>
 

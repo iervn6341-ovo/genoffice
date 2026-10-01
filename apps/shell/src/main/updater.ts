@@ -391,7 +391,7 @@ const MANUAL_FALLBACK_AFTER = 2
 // and signing track, so a stable/legacy-track user could land on the wrong
 // build. Preferred is the CDN installer derived from the user's own update
 // feed (see manualDownloadUrlFor), which matches channel, track, and arch.
-const DOWNLOAD_PAGE_URL = 'https://github.com/genspark-ai/genoffice/releases/latest'
+const DOWNLOAD_PAGE_URL = process.env.GENOFFICE_DOWNLOAD_URL ?? ''
 
 /// Trusted HTTPS base URL baked into resources/app-update.yml. Manual download
 /// links are always rebuilt from this base rather than trusting URLs supplied
@@ -529,11 +529,11 @@ export async function checkForUpdatesNow(): Promise<void> {
         type: 'info',
         title: tUpd(lang, 'updTitle'),
         message: tUpd(lang, 'updManual'),
-        buttons: ['OK', tUpd(lang, 'updOpenDownload')],
+        buttons: DOWNLOAD_PAGE_URL ? ['OK', tUpd(lang, 'updOpenDownload')] : ['OK'],
         defaultId: 0,
         cancelId: 0,
       })
-      if (response === 1) void shell.openExternal(DOWNLOAD_PAGE_URL)
+      if (response === 1 && DOWNLOAD_PAGE_URL) void shell.openExternal(DOWNLOAD_PAGE_URL)
       return
     }
     dismissedVersion = null
@@ -591,6 +591,7 @@ export function initAutoUpdater(
   const isLinuxAppImage = process.platform === 'linux' && Boolean(process.env.APPIMAGE)
   if (process.platform !== 'win32' && process.platform !== 'darwin' && !isLinuxAppImage) return
 
+  if (!updateFeedBaseUrl()) return
   updaterActive = true
   autoUpdater.channel = CHANNEL_FEED[initialChannel]
   // the channel setter unconditionally flips allowDowngrade to true; force it
@@ -652,7 +653,8 @@ export function initAutoUpdater(
       closeUpdateWindow()
     },
     onOpenDownload: () => {
-      void shell.openExternal(manualDownloadUrl ?? DOWNLOAD_PAGE_URL)
+      const target = manualDownloadUrl ?? DOWNLOAD_PAGE_URL
+      if (target) void shell.openExternal(target)
     },
   }
 

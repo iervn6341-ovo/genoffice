@@ -3,29 +3,6 @@ import { defaultAiSearchSettings, resolveAiSearchSettings } from './search-setti
 import type { AiProviderId, AiProviderMeta, AiSettings, LegacyAiSettings } from './types'
 
 /**
- * Genspark server-side LLM proxy endpoints. All three protocols share the
- * api_key from the gsk login; model ids follow the proxy's own naming scheme,
- * which differs from the official vendor ids.
- */
-export const GENSPARK_LLM_BASE_URLS = {
-  anthropic: 'https://www.genspark.ai/api/anthropic',
-  openai: 'https://www.genspark.ai/api/llm_proxy/v1',
-} as const
-
-/**
- * Splits GenOffice usage out of the proxy's default "Claw" billing bucket
- * (the backend attributes gsk-key traffic by X-Agent-Type). Only sent to the
- * Genspark proxy — never to direct vendor APIs.
- */
-export const GENSPARK_AGENT_TYPE = 'genoffice'
-
-export function gensparkAttributionHeaders(baseUrl?: string): Record<string, string> {
-  return baseUrl?.startsWith('https://www.genspark.ai')
-    ? { 'X-Agent-Type': GENSPARK_AGENT_TYPE }
-    : {}
-}
-
-/**
  * OpenCode Zen / Go route and cache per conversation and answer 400
  * MissingSessionID without this header (genoffice#331). The renderer's
  * transport id is stable for a chat; a one-shot call is its own conversation.
@@ -40,26 +17,6 @@ export function opencodeSessionHeaders(
 }
 
 export const AI_PROVIDERS: AiProviderMeta[] = [
-  {
-    id: 'genspark',
-    label: 'Genspark',
-    // must stay within the proxy's served set (GET /api/llm_proxy/v1/models);
-    // bare gpt-5.6 and the gemini family dropped off it (verified 2026-08-31).
-    // DeepSeek goes by the proxy's hyphenated pool id; V4.1 Flash takes images
-    // (live-verified 2026-09-15). gpt-6-astra: chat, tool call and image
-    // input all live-verified through the proxy 2026-09-17
-    models: [
-      'claude-opus-4-7',
-      'claude-opus-4-8',
-      'claude-sonnet-4-6',
-      'gpt-6-astra',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
-      'deep-seek-v4.1-flash',
-    ],
-    defaultModel: 'claude-opus-4-7',
-    keyPlaceholder: 'Not required - sign in to Genspark',
-  },
   {
     id: 'codex',
     label: 'Codex CLI',
@@ -314,17 +271,11 @@ export function defaultAiSettings(
     }
   }
   return {
-    provider: 'genspark',
+    provider: 'custom',
     providers,
-    gskToolsEnabled: true,
     media: defaultAiMediaSettings(),
     search: defaultAiSearchSettings(),
   }
-}
-
-/** false only on an explicit opt-out; absent (pre-toggle settings files) means on */
-export function cloudToolsEnabled(settings: Pick<AiSettings, 'gskToolsEnabled'>): boolean {
-  return settings.gskToolsEnabled !== false
 }
 
 /**
@@ -341,34 +292,6 @@ export function providerRequiresApiKey(provider: AiProviderId): boolean {
 }
 
 /**
- * The stored provider selection is honored only when its config is usable
- * (api-key providers need a key and a model id; custom also needs a base URL).
- * Codex can auto-discover its executable. Anything else — including unknown
- * ids from a hand-edited
- * settings file — falls back to genspark, so a half-filled setup degrades
- * to the signed-in default instead of silently disabling AI.
- */
-export function activeProvider(settings: AiSettings): AiProviderId {
-  const provider = settings.provider
-  if (provider === 'genspark') return 'genspark'
-  const meta = AI_PROVIDERS.find((m) => m.id === provider)
-  const config = settings.providers?.[provider]
-  if (!meta || !config) return 'genspark'
-  if (meta.needsCliPath) return provider
-  // Trim-aware: in-memory settings bypass the trimConfigs applied to
-  // persisted files, and a whitespace-only key/URL/model is a 401, not a config.
-  if (!config.model?.trim()) return 'genspark'
-  if (meta.needsBaseUrl) {
-    // Custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) accept
-    // anonymous requests: base URL + model suffice, the key stays optional.
-    if (!config.baseUrl?.trim()) return 'genspark'
-    return provider
-  }
-  if (!config.apiKey?.trim()) return 'genspark'
-  return provider
-}
-
-/**
  * Model ids a vendor has stopped serving, mapped to their replacement. A
  * stored selection outlives the provider list, so without this remap an old
  * settings file keeps sending an id the API now rejects.
@@ -376,7 +299,7 @@ export function activeProvider(settings: AiSettings): AiProviderId {
 const RETIRED_MODELS: Partial<Record<AiProviderId, Record<string, string>>> = {
   // chat/reasoner retired 2026-07-24 (thinking became a request parameter);
   // V4 Flash and V4 Flash Vision Exp retired 2026-09-10 in favour of V4.1
-  // Flash, which carries vision natively. The Genspark pool spelling is
+
   // accepted too: the vendor API 400s on it (verified 2026-09-16)
   deepseek: {
     'deepseek-chat': 'deepseek-flash',
@@ -384,15 +307,6 @@ const RETIRED_MODELS: Partial<Record<AiProviderId, Record<string, string>>> = {
     'deepseek-v4-flash': 'deepseek-flash',
     'deepseek-v4-flash-vision-exp': 'deepseek-flash',
     'deep-seek-v4.1-flash': 'deepseek-flash',
-  },
-  // proxy stopped serving bare gpt-5.6 (400) and removed the gemini route
-  // entirely (405), verified 2026-08-31; gemini selections fall back to the
-  // provider default since no gemini id is served at all
-  genspark: {
-    'gpt-5.6': 'gpt-5.6-terra',
-    'gemini-3.1-pro-preview': 'claude-opus-4-7',
-    'gemini-3-flash-preview': 'claude-opus-4-7',
-    'gemini-3.7-flash': 'claude-opus-4-7',
   },
 }
 
@@ -459,30 +373,47 @@ export function resolveAiSettings(
   stored: Partial<AiSettings> & LegacyAiSettings,
   defaults: AiSettings,
 ): AiSettings {
-  if (!stored.providers) {
-    if (stored.apiKey) {
-      defaults.providers.custom = {
-        apiKey: stored.apiKey.trim(),
-        model: stored.model?.trim() ?? '',
-        baseUrl: (stored.baseUrl ?? 'https://api.openai.com/v1').trim(),
-      }
-    }
-    return defaults
+  const providers = { ...defaults.providers }
+  for (const meta of AI_PROVIDERS) {
+    const config = stored.providers?.[meta.id]
+    if (config) providers[meta.id] = { ...providers[meta.id], ...config }
   }
+  let selected = stored.provider
+  if (!stored.providers && (stored.baseUrl || stored.apiKey)) {
+    providers.custom = {
+      apiKey: stored.apiKey ?? '',
+      model: stored.model ?? '',
+      baseUrl: stored.baseUrl ?? 'https://api.openai.com/v1',
+    }
+    selected = 'custom'
+  }
+  const normalized = migrateRetiredModels(trimConfigs(providers))
+  // Unknown/removed providers migrate to a configured service; valid choices
+  // remain selected even when incomplete, so validation never switches vendors.
+  const provider = AI_PROVIDERS.some((m) => m.id === selected)
+    ? selected!
+    : (AI_PROVIDERS.find((m) =>
+        m.needsCliPath
+          ? !!normalized[m.id].cliPath
+          : !!normalized[m.id].model &&
+            (m.needsBaseUrl ? !!normalized[m.id].baseUrl : !!normalized[m.id].apiKey),
+      )?.id ?? defaults.provider)
   return {
-    provider: stored.provider ?? defaults.provider,
-    // Trim before migrating: a pasted " deepseek-reasoner " must still hit
-    // the retired-id remap instead of being sent to the API verbatim.
-    providers: migrateRetiredModels(trimConfigs({ ...defaults.providers, ...stored.providers })),
-    gskToolsEnabled: stored.gskToolsEnabled ?? defaults.gskToolsEnabled ?? true,
+    provider,
+    providers: normalized,
     media: resolveAiMediaSettings(stored.media ?? defaults.media),
     search: resolveAiSearchSettings(stored.search ?? defaults.search),
-    // clamped on read: a hand-edited settings file with an absurd cap must not be
-    // forwarded to the endpoint verbatim
     ...(stored.maxOutputTokens !== undefined || defaults.maxOutputTokens !== undefined
       ? {
           maxOutputTokens: clampMaxOutputTokens(stored.maxOutputTokens ?? defaults.maxOutputTokens),
         }
       : {}),
   }
+}
+
+/** Preserve a selected service rather than silently sending requests elsewhere. */
+export function activeProvider(settings: AiSettings): AiProviderId {
+  return AI_PROVIDERS.some((meta) => meta.id === settings.provider)
+    ? settings.provider
+    : resolveAiSettings(settings, defaultAiSettings()).provider
 }

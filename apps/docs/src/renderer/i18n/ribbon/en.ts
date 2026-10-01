@@ -138,7 +138,7 @@ export const en = {
   ribbonGroupStyles: 'Styles',
   ribbonAiTools: 'AI Tools',
   ribbonGroupEditing: 'Editing',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Open the AI assistant',
   ribbonRemoveTableStyleTip: 'Remove table style',
   ribbonNoStyle: 'No Style',

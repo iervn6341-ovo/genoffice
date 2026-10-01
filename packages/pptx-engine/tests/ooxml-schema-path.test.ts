@@ -7,6 +7,20 @@ import { pathToFileURL } from 'node:url'
 import { createBlankPptx } from '../src/index'
 import { xmllintAvailable } from '../../../tools/ooxml-validate/validate-pptx.mjs'
 
+function removeScratchDirectory(tmp: string): void {
+  // Detach the external dependency tree before recursively removing the
+  // scratch directory. Never let cleanup traverse a workspace junction.
+  const modulesLink = path.join(tmp, 'node_modules')
+  const linkStat = fs.lstatSync(modulesLink, { throwIfNoEntry: false })
+  if (linkStat) {
+    if (!linkStat.isSymbolicLink()) {
+      throw new Error(`Refusing to clean up a non-link dependency directory: ${modulesLink}`)
+    }
+    fs.unlinkSync(modulesLink)
+  }
+  fs.rmSync(tmp, { recursive: true, force: true })
+}
+
 // Exercise the real validator from a path with spaces even in a space-free CI checkout.
 describe.skipIf(!xmllintAvailable() && !process.env.CI)('schema validator paths', () => {
   it('validates a clean deck when the schema directory contains spaces', async () => {
@@ -35,7 +49,7 @@ describe.skipIf(!xmllintAvailable() && !process.env.CI)('schema validator paths'
       expect(result.status, result.stderr).toBe(0)
       expect(JSON.parse(result.stdout)).toEqual([])
     } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
+      removeScratchDirectory(tmp)
     }
   })
 })

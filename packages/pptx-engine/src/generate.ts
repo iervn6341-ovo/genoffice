@@ -57,13 +57,21 @@ export function patchTextElementXml(el: TextElement, originalXml: string): strin
   // Collect all model runs (flattened across paragraphs, incl. "\n" soft-break sentinels),
   // one-to-one with the original XML's <a:r>/<a:br> sequence (parse rewrites <a:br/>
   // as a sentinel run, order preserved)
-  const modelRuns: TextRun[] = el.text.paragraphs.flatMap((p) => p.runs)
+  const paragraphXmls = [...originalXml.matchAll(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g)]
+  const paragraphRuns = el.text.paragraphs.map((p, i) => {
+    // An empty paragraph mark is modelled as a run but lives in endParaRPr,
+    // not a:r. It must not force all the other paragraphs to be rebuilt.
+    const noXmlRuns = paragraphXmls[i] && findRunSpans(paragraphXmls[i]![0]).length === 0
+    return noXmlRuns ? p.runs.filter((r) => !r.paraMark || r.text) : p.runs
+  })
+  const modelRuns: TextRun[] = paragraphRuns.flat()
   const runSpans = findRunSpans(originalXml)
 
   // Count and kind aligned position by position (sentinel ⇔ <a:br>) → lossless in-place patch of each run, br bytes untouched
   const aligned =
+    paragraphXmls.length === el.text.paragraphs.length &&
+    paragraphXmls.every((p, i) => findRunSpans(p[0]).length === paragraphRuns[i]!.length) &&
     runSpans.length === modelRuns.length &&
-    runSpans.length > 0 &&
     runSpans.every((s, i) => (s.kind === 'br' || !!s.newlineOnly) === isSoftBreakRun(modelRuns[i]!))
   if (aligned) {
     let out = ''
@@ -81,7 +89,19 @@ export function patchTextElementXml(el: TextElement, originalXml: string): strin
       cursor = span.end
     }
     out += originalXml.slice(cursor)
-    return out
+    let paragraphIndex = 0
+    return out.replace(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g, (xml) => {
+      const mark = el.text!.paragraphs[paragraphIndex++]!.runs.find((r) => r.paraMark && !r.text)
+      if (!mark) return xml
+      return xml.replace(/<a:endParaRPr\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/a:endParaRPr>)/, (endPr) => {
+        // Reuse the surgical rPr writer, retaining language / theme references
+        // and any unsupported attributes on the original paragraph mark.
+        const rPr = endPr.replaceAll('a:endParaRPr', 'a:rPr')
+        return patchRunProps(`<a:r>${rPr}</a:r>`, mark)
+          .slice('<a:r>'.length, -'</a:r>'.length)
+          .replaceAll('a:rPr', 'a:endParaRPr')
+      })
+    })
   }
 
   // Structural change → rebuild the <p:txBody> content, keeping the txBody wrapper and bodyPr
@@ -117,7 +137,8 @@ function buildPPrGroup(p: Paragraph, group: 'lnSpc' | 'spcBef' | 'spcAft' | 'bul
       if (!b) return ''
       if (b.type === 'none') return '<a:buNone/>'
       let s = ''
-      if (b.colorNodeXml) s += `<a:buClr>${b.colorNodeXml}</a:buClr>`
+      if (b.colorFollowsText) s += '<a:buClrTx/>'
+      else if (b.colorNodeXml) s += `<a:buClr>${b.colorNodeXml}</a:buClr>`
       else if (b.color) s += `<a:buClr><a:srgbClr val="${hex6(b.color)}"/></a:buClr>`
       s += bulletSizeXml(b)
       if (b.font) s += `<a:buFont typeface="${escapeXmlAttr(b.font)}"/>`
@@ -254,10 +275,20 @@ interface Span {
 /** Locate all top-level <a:r>…</a:r> and <a:br/> (incl. paired form) spans in document order. */
 function findRunSpans(xml: string): Span[] {
   const spans: Span[] = []
-  const re = /<a:r>|<a:r\s[^>]*>|<a:br\b[^>]*\/>|<a:br\b[^>]*>|<mc:AlternateContent\b[^>]*>/g
+  const re =
+    /<a:r>|<a:r\s[^>]*>|<a:br\b[^>]*\/>|<a:br\b[^>]*>|<mc:AlternateContent\b[^>]*>|<a14:m\b[^>]*>/g
   let m: RegExpExecArray | null
   while ((m = re.exec(xml)) !== null) {
     const start = m.index
+    if (m[0].startsWith('<a14:m')) {
+      if (m[0].endsWith('/>')) continue
+      const close = xml.indexOf('</a14:m>', re.lastIndex)
+      if (close < 0) break
+      const end = close + '</a14:m>'.length
+      spans.push({ start, end, kind: 'r', raw: true })
+      re.lastIndex = end
+      continue
+    }
     if (m[0].startsWith('<mc:AlternateContent')) {
       // Only a paragraph-level math block is a run; a shape-level AC anchor is scanned through
       const head = xml.slice(re.lastIndex, re.lastIndex + 400)
@@ -871,7 +902,8 @@ export function generateParagraphXml(p: Paragraph): string {
     const b = p.bullet
     if (b.type === 'none') kids += '<a:buNone/>'
     else {
-      if (b.colorNodeXml) kids += `<a:buClr>${b.colorNodeXml}</a:buClr>`
+      if (b.colorFollowsText) kids += '<a:buClrTx/>'
+      else if (b.colorNodeXml) kids += `<a:buClr>${b.colorNodeXml}</a:buClr>`
       else if (b.color) kids += `<a:buClr><a:srgbClr val="${hex6(b.color)}"/></a:buClr>`
       kids += bulletSizeXml(b)
       if (b.font) kids += `<a:buFont typeface="${escapeXmlAttr(b.font)}"/>`

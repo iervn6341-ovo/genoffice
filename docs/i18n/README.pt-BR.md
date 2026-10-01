@@ -47,10 +47,7 @@ lê o arquivo, faz a alteração e mostra exatamente o que foi tocado.
   convertidos na sua máquina. PDF → Word / Excel / PowerPoint, Markdown →
   Word e HTML → Word rodam localmente. Somente as chamadas de IA saem da
   máquina, para o provedor que você escolher.
-- **Suas chaves, ou nenhuma.** Faça login com o Genspark e pule as chaves, ou
-  use sua própria chave para Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM,
-  Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty, ou qualquer endpoint
-  compatível com OpenAI, incluindo servidores locais.
+- **AI.** Os recursos de IA usam o provedor escolhido nas configurações. Os ajustes existentes são preservados; pesquisa e mídia são configuradas separadamente.
 - **Automatizável e pronto para agentes.** O app inclui uma linha de comando
   `genoffice` e um skill para Claude Code, Codex, Cursor, Gemini CLI, GitHub
   Copilot, OpenCode e Windsurf, para que um agente de programação possa criar,
@@ -181,7 +178,7 @@ Office com os mesmos mecanismos dos aplicativos, sem abrir uma janela.
 </tr>
 <tr>
 <td><b>Um prompt para o seu agente</b> — "Crie uma apresentação de oito slides sobre o Sistema Solar." O agente lê o skill, escreve uma folha de estilos, um esboço e uma especificação de página por slide, gera as duas fotos com <code>genoffice image</code> e deixa o <code>genoffice slides check</code> rejeitar qualquer coisa que transborde ou se sobreponha antes que o <code>genoffice create</code> monte o <code>.pptx</code> e o <code>slides render</code> devolva um PNG por slide para conferir.</td>
-<td><b>Instale uma vez, em Configurações → Integrações</b> — o GenOffice lista os agentes de programação que encontra neste computador e grava o skill em cada um que você escolher. Ou baixe o skill como zip, ou execute <code>npx skills add genspark-ai/genoffice</code>. Os comandos e o fluxo de trabalho completo estão em <a href="#command-line-and-agent-skill">Linha de comando e skill de agente</a>.</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -220,9 +217,7 @@ observa.
 - **Uma IA que edita o próprio documento.** Alterações rastreadas no Docs,
   fórmulas e gráficos ao vivo no Sheets, slides desenhados diretamente no
   canvas, cada interação da IA gera um snapshot que você pode desfazer.
-- **Seu modelo, sua chave.** Entre com o Genspark ou traga uma chave para
-  Claude, OpenAI, Gemini, DeepSeek e outros, com servidores locais e qualquer
-  endpoint compatível com OpenAI incluídos.
+- **AI.** Os recursos de IA usam o provedor escolhido nas configurações. Os ajustes existentes são preservados; pesquisa e mídia são configuradas separadamente.
 - **PDF feito como deve ser.** Edite o texto dentro da página e converta PDF
   para Word, Excel ou PowerPoint no dispositivo, com OCR do sistema para
   digitalizações.
@@ -235,10 +230,7 @@ observa.
 
 ## Backends de IA
 
-**Faça login com o Genspark** e não há nada para configurar: as chamadas de
-modelo passam pelo proxy do Genspark (famílias Claude, GPT e Gemini) e os
-agentes ganham busca na web e de imagens, geração de imagens e análise de
-imagem/áudio/vídeo.
+Os recursos de IA usam o provedor escolhido nas configurações. Os ajustes existentes são preservados; pesquisa e mídia são configuradas separadamente.
 
 **Ou traga sua própria chave.** Configurações → IA lista Claude, OpenAI,
 Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty
@@ -277,7 +269,6 @@ cliente MCP.
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Configurações → Integrações** no app | Lista os agentes encontrados neste computador; um clique grava o skill em cada um que você escolher. Um botão **Atualizar** aparece quando uma versão do GenOffice traz um skill mais novo. |
 | **Baixar como zip** na mesma página    | O formato que o claude.ai, os aplicativos desktop do Claude e outros assistentes aceitam como skill enviado.                                                                                |
-| `npx skills add genspark-ai/genoffice` | Instala a partir deste repositório em qualquer agente compatível com skills.                                                                                                                |
 
 Depois, abra um novo chat e peça um documento. O skill ensina ao agente
 quando recorrer ao `genoffice`, como ler um arquivo antes de editá-lo e como
@@ -507,10 +498,7 @@ Microsoft Office.
 <details>
 <summary><b>O GenOffice funciona offline?</b></summary>
 
-A edição de documentos é totalmente local — os arquivos nunca saem da sua
-máquina para serem abertos, editados, salvos ou convertidos. Os recursos de
-IA (agentes, busca, ferramentas de imagem) precisam de conexão de rede, com
-login no Genspark ou sua própria chave de API de modelo.
+Os recursos de IA usam o provedor escolhido nas configurações. Os ajustes existentes são preservados; pesquisa e mídia são configuradas separadamente.
 
 </details>
 
@@ -537,12 +525,7 @@ imagem da página.
 <details>
 <summary><b>Posso usar meu próprio modelo de IA ou chave de API?</b></summary>
 
-Sim. Além do login sem chave pelo Genspark, o GenOffice permite trazer sua
-própria chave para Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen,
-Doubao, MiniMax, Grok, Mistral, OpenRouter, Requesty e OpenCode Zen/Go, além de
-qualquer endpoint compatível com OpenAI — incluindo servidores de modelo
-locais. Busca, geração de imagens e análise de imagem/vídeo usam suas
-próprias chaves em Configurações → IA de Mídia e Busca.
+Os recursos de IA usam o provedor escolhido nas configurações. Os ajustes existentes são preservados; pesquisa e mídia são configuradas separadamente.
 
 </details>
 

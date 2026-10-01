@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const de = {
+  appNotesDefaultColor: 'Standard (dem Design folgen)',
+  appStatusEquationPreview:
+    'Diese Formel wird als Originalvorschau angezeigt. Bearbeiten Sie sie in PowerPoint.',
   appPhPromptTitle: 'Titel durch Klicken hinzufügen',
   appPhPromptSubtitle: 'Untertitel durch Klicken hinzufügen',
   appPhPromptBody: 'Text durch Klicken hinzufügen',
@@ -234,13 +237,10 @@ export const de = {
   appRehearseDiscard: 'Nicht speichern',
   appRehearseSave: 'Speichern',
   appSettingsTitle: 'KI-Einstellungen',
-  appSettingsAccount: 'Genspark-Konto',
   appSettingsChecking: 'Wird überprüft…',
   appSettingsLoggedIn: 'Angemeldet',
   appSettingsLoggedInEmail: 'Angemeldet: {email}',
-  appSettingsLoggedOut: 'Nicht angemeldet (KI-Funktionen erfordern ein Genspark-Konto)',
   appSettingsLoginPending: 'Warten auf Anmeldung im Browser…',
-  appSettingsLogin: 'Bei Genspark anmelden',
   appSettingsModel: 'Modell',
   appSettingsCancel: 'Abbrechen',
   appSettingsSave: 'Speichern',

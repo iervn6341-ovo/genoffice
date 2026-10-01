@@ -2,7 +2,8 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { ChainedCommands, Editor } from '@tiptap/core'
 import { NodeSelection, type Command } from '@tiptap/pm/state'
-import type { Mark, Node as PMNode, ResolvedPos } from '@tiptap/pm/model'
+import type { Mark, ResolvedPos } from '@tiptap/pm/model'
+import { createFontSizeStepper } from './font-size-step'
 import {
   CellSelection,
   TableMap,
@@ -91,7 +92,7 @@ import {
 import { WRAP_OPTIONS } from './ContextMenu'
 import { CropDialog, CutoutDialog } from './PictureDialogs'
 import {
-  GensparkMark,
+  AssistantMark,
   IconAlignCenter,
   IconAlignJustify,
   IconAlignLeft,
@@ -433,11 +434,6 @@ const FONT_SIZES = [
   5, 5.5, 6.5, 7.5, 8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72,
 ]
 
-// A+/A- clicks closer together than this coalesce into one trailing apply;
-// must sit above burst-click spacing (~100-200ms) yet stay short enough that
-// the deferred re-layout still feels attached to the click.
-const FONT_STEP_COALESCE_MS = 300
-
 const THEME_COLORS: Array<{ nameKey: StringKey; hex: string }> = [
   { nameKey: 'ribbonColorWhite', hex: 'FFFFFF' },
   { nameKey: 'ribbonColorBlack', hex: '000000' },
@@ -720,15 +716,8 @@ function RibbonInner({
   const [penColor, setPenColor] = useState<string | null>('C00000')
   const [penHighlight, setPenHighlight] = useState('yellow')
   const [painter, setPainter] = useState<PainterState | null>(null)
-  const fontStepRef = useRef<{
-    pending: number | null
-    applied: number | null
-    timer: number | null
-    // editor snapshot the deferred apply validates against (stale-apply guard)
-    anchor: number
-    head: number
-    doc: PMNode | null
-  }>({ pending: null, applied: null, timer: null, anchor: -1, head: -1, doc: null })
+  const fontStepperRef = useRef<ReturnType<typeof createFontSizeStepper> | null>(null)
+  if (fontStepperRef.current === null) fontStepperRef.current = createFontSizeStepper()
   /** Enter pressed in a font combobox: the coming blur is an explicit commit,
    *  which applies even an unchanged value (normalizes mixed selections, r121) */
   const fontCommitRef = useRef(false)
@@ -776,6 +765,7 @@ function RibbonInner({
   // of the main editor (Word: ribbon acts on the shape's text while inside it)
   const sub = fs.sub
   const ed = sub ?? editor
+  useEffect(() => () => fontStepperRef.current?.cancel(), [ed])
   // read-only (Restrict Editing / Read Mode): every edit command is fenced here,
   // button disabled states are only the visual layer on top
   const canEdit = hasDoc && fs.editable
@@ -1503,48 +1493,10 @@ function RibbonInner({
   }
 
   const applyFontStep = (step: (base: number) => number) => {
-    // Every applied size change re-paginates the whole document synchronously —
-    // ~700ms per click on table-heavy documents — so clicking A+/A- in a burst
-    // froze the UI for seconds. Apply the first click immediately (a single
-    // click keeps instant feedback); clicks landing inside the coalesce window
-    // only advance the pending size, and one trailing apply lays out the final
-    // size. `pending` also covers fs.fontSizePt lagging the last apply within
-    // the window.
-    const st = fontStepRef.current
-    const next = step(st.pending ?? currentSize)
-    st.pending = next
-    if (st.timer === null) {
-      st.applied = next
-      setTextStyle({ sizeHalfPoints: Math.round(next * 2) })
-    } else {
-      window.clearTimeout(st.timer)
-    }
-    // Snapshot after the (possible) leading apply: the deferred apply is only
-    // valid while nothing else has touched the editor. A selection move, an
-    // undo, or a size set another way each shows up as a selection or document
-    // change and must invalidate the pending step instead of being overwritten.
-    const target = ed
-    st.anchor = target.state.selection.anchor
-    st.head = target.state.selection.head
-    st.doc = target.state.doc
-    st.timer = window.setTimeout(() => {
-      st.timer = null
-      const pending = st.pending
-      st.pending = null
-      if (pending === null || pending === st.applied || !canEdit) return
-      if (
-        target.state.selection.anchor !== st.anchor ||
-        target.state.selection.head !== st.head ||
-        target.state.doc !== st.doc
-      )
-        return
-      st.applied = pending
-      // deliberately no focus(): a deferred apply must never pull focus back
-      target
-        .chain()
-        .setMark('docTextStyle', { sizeHalfPoints: Math.round(pending * 2) })
-        .run()
-    }, FONT_STEP_COALESCE_MS)
+    if (!canEdit) return
+    ed.view.focus()
+    setDropdown(null)
+    fontStepperRef.current?.step(ed, currentSize, step)
   }
 
   /** A+/A- and ⇧⌘. / ⇧⌘,: walk Word's preset size list */
@@ -3733,11 +3685,10 @@ function RibbonInner({
               </div>
             </RibbonFoldGroup>
 
-            {/* ---- Genspark AI + one-click AI tools: right edge, where Microsoft 365 puts Copilot;
-                 folds into one "AI Tools" dropdown first on a narrow window ---- */}
+            {}
             <RibbonFoldGroup
               label={t('ribbonAiTools')}
-              icon={<GensparkMark size={26} />}
+              icon={<AssistantMark size={26} />}
               caret={<IconCaret />}
               priority={1}
               className="rb-group-end"
@@ -3748,9 +3699,9 @@ function RibbonInner({
                 onClick={onToggleAi}
               >
                 <span className="rb-big-icon">
-                  <GensparkMark size={26} />
+                  <AssistantMark size={26} />
                 </span>
-                <span>Genspark AI</span>
+                <span>AI</span>
               </button>
               <button
                 className="rb-big ai-entry"

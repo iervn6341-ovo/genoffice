@@ -3,6 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { TAB_STRIP_HEIGHT, tabStripOverlay } from '../src/main/title-bar-overlay'
 
 describe('tabStripOverlay', () => {
+  it('keeps the show black with white controls regardless of the editor theme', () => {
+    for (const dark of [false, true]) {
+      expect(tabStripOverlay(dark, true)).toEqual({
+        color: '#000000',
+        symbolColor: '#ffffff',
+        height: TAB_STRIP_HEIGHT,
+      })
+    }
+  })
   it('matches the tab strip band in both themes and its 40px height', () => {
     expect(tabStripOverlay(false)).toEqual({
       color: '#ebebeb',

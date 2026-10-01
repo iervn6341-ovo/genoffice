@@ -538,7 +538,9 @@ button {
 }
 
 .ribbon-tab-file:hover,
-.ribbon-tab-file.open {
+.ribbon-tab-file.open,
+.ribbon-tab-file:focus-visible {
+  color: var(--slides-on-accent);
   background: var(--accent-dark);
 }
 
@@ -637,15 +639,14 @@ button {
   box-shadow: var(--slides-shadow-badge-soft);
 }
 
-/* Genspark brand logo (Ribbon AI button / AI panel title / collapsed entry) */
-.genspark-badge {
+.assistant-badge {
   display: block;
   width: 22px;
   height: 22px;
   border-radius: 50%;
 }
 
-.ai-panel-title .genspark-badge {
+.ai-panel-title .assistant-badge {
   width: 18px;
   height: 18px;
 }
@@ -674,10 +675,7 @@ button {
      vertical layout jump (same reasoning as .ai-attachments). */
   overflow-x: scroll;
   overflow-y: hidden;
-  /* Slim visible scrollbar so mouse users can reach overflowed groups
-     (genspark-ai/genoffice#55). Its 5px lane is carved out of the bottom
-     padding, keeping the 80px band and the content area unchanged; Chromium
-     paints a thumb only while the row actually overflows. */
+
   padding-bottom: 1px;
 }
 
@@ -761,8 +759,6 @@ button {
   color: var(--text-primary);
 }
 
-/* Home-tab Genspark AI entry: black circular "+" badge with a dropdown caret,
-   brand label below (mirrors the sheets Home ribbon). */
 /* AI feature buttons next to the entry: purple glyphs, label below */
 .ai-feature-icon {
   display: grid;
@@ -807,7 +803,6 @@ button {
   background: var(--active-bg);
 }
 
-/* The Genspark AI entry keeps a black label even while the panel is open. */
 .rb-big.ai-entry.active {
   color: var(--text);
 }
@@ -824,7 +819,6 @@ button {
 }
 
 .rb-big.ai-entry.active {
-  /* neutral gray, shared with the docs/sheets Genspark entries */
   background: var(--active-bg);
 }
 
@@ -1842,6 +1836,7 @@ body.vib .slide-list {
   line-height: 1.5;
   color: var(--color-text-tertiary);
   transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
 }
 
 .ai-work-group-summary:hover {
@@ -1851,7 +1846,6 @@ body.vib .slide-list {
 .ai-work-group-summary:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--slides-focus-ring);
-  border-radius: 4px;
 }
 
 .ai-work-group-summary.running {
@@ -1980,6 +1974,7 @@ body.vib .slide-list {
 .ai-step-title.clickable {
   cursor: pointer;
   transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
 }
 
 .ai-step-title.clickable:hover {
@@ -1989,7 +1984,6 @@ body.vib .slide-list {
 .ai-step-title.clickable:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--slides-focus-ring);
-  border-radius: 4px;
 }
 
 /* Step detail opens instantly, no animation */
@@ -2561,11 +2555,7 @@ body.vib .slide-list {
 .ai-attachments {
   display: flex;
   gap: 8px;
-  /* single row inside the prompt box, above the textarea (Genspark composer style):
-     extra images run past the box edge and scroll horizontally.
-     scroll (not auto) + zero bottom padding: the always-present 4px scrollbar lane
-     doubles as the bottom padding, so overflowing never grows the strip and
-     shifts its content up */
+
   overflow-x: scroll;
   /* side insets are transparent borders, not padding: overflow clips at the
      padding edge, so side padding would let scrolled items slide flush against
@@ -2669,7 +2659,6 @@ body.vib .slide-list {
   background: var(--slides-att-bg);
 }
 
-/* the type icon sits in its own bordered white tile, like the Genspark card */
 .ai-attachment-card-icon {
   display: flex;
   flex-shrink: 0;
@@ -3254,7 +3243,6 @@ body.vib .slide-list {
   margin-top: 18px;
 }
 
-/* Genspark DS modal footer buttons: secondary = bg-subtle, primary = black (#232425) */
 .modal-actions button {
   display: inline-flex;
   align-items: center;
@@ -3386,8 +3374,6 @@ body.vib .slide-list {
   margin-top: 5.6px;
 }
 
-/* 形状选项 / 文本选项 primary tabs under the pane header (Genspark style:
-   left-aligned text tabs, active = bold + text-colored underline) */
 .fp-tabs {
   display: flex;
   flex-shrink: 0;
@@ -3420,10 +3406,6 @@ body.vib .slide-list {
   border-bottom-color: var(--accent);
 }
 
-/* Second-level tabs (填充与线条 / 效果 / 大小与属性 …): Genspark segmented pill track —
-   pills sit in one rounded gray track; active = accent-filled pill. Long locales
-   (fr/de/es labels exceed the 260px pane) wrap onto a second row instead of
-   clipping at the pane edge; 16px ≈ the stadium radius at single-row height. */
 .fp-subtabs {
   display: flex;
   flex-shrink: 0;
@@ -5566,14 +5548,6 @@ body.vib .slide-list {
   flex: 1;
 }
 
-/* AI quick actions anchored right above the slide card (mirrors the Home-tab
-   Genspark AI group); absolute so it doesn't distort the zoom-box extent.
-   z-index lifts it over the Konva stage's transparent 160px bleed, which
-   otherwise swallows the clicks */
-/* Genspark SAS floating toolbar, matched to the reference stage-toolbar:
-   white bar (padding 3px 5px, ~35px tall); 24px borderless tool buttons
-   with 12px #374151 labels; thin span dividers separate the groups; the
-   assistant toggle shows a gray selected state while the panel is open */
 .stage-ai-bar {
   position: absolute;
   bottom: 100%;
@@ -5642,7 +5616,7 @@ body.vib .slide-list {
 }
 
 /* the brand mark uses currentColor and keeps the button's ink, not the blue */
-.stage-ai-btn svg.genspark-mark {
+.stage-ai-btn svg.assistant-mark {
   color: var(--slides-stagebar-ink);
 }
 
@@ -5667,9 +5641,6 @@ body.vib .slide-list {
   margin: 0 -14px 4px;
 }
 
-/* The notes body, formatted like PowerPoint's notes pane: runs carry their own font / size /
- * colour inline (document data); unstyled text uses the chrome text colour so default notes
- * stay readable in both themes */
 .notes-editor {
   flex: 1;
   min-height: 0;
@@ -6788,14 +6759,16 @@ body.show-curtain::after {
 }
 
 .presenter .pv-top {
-  height: 50px;
+  height: 60px;
   flex: none;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px;
+  padding: 5px 10px;
   border-bottom: 1px solid var(--slides-show-line-10);
+  /* The editor's draggable ribbon sits behind the fullscreen presenter. */
+  -webkit-app-region: no-drag;
 }
 
 .presenter .pv-top-btn {
@@ -6803,14 +6776,21 @@ body.show-curtain::after {
   color: var(--slides-show-ink-85);
   border: none;
   border-radius: 4px;
-  font-size: 11px;
-  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 16px;
+  box-sizing: border-box;
+  min-width: 88px;
+  min-height: 48px;
+  flex: 0 0 auto;
+  padding: 4px 12px;
   cursor: pointer;
+  -webkit-app-region: no-drag;
   /* PowerPoint's presenter bar: icon over a small label */
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 4px;
   white-space: nowrap;
 }
 
@@ -6821,6 +6801,11 @@ body.show-curtain::after {
 
 .presenter .pv-top-btn:hover:not(:disabled) {
   background: var(--slides-show-fill-12);
+}
+
+.presenter .pv-top-btn:focus-visible {
+  outline: 2px solid var(--slides-show-ink);
+  outline-offset: 1px;
 }
 
 .presenter .pv-top-btn:disabled {
@@ -6839,6 +6824,10 @@ body.show-curtain::after {
 .presenter .pv-top-hint {
   font-size: 12px;
   color: var(--slides-show-ink-40);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .presenter .pv-body {
@@ -7327,9 +7316,21 @@ body.show-curtain::after {
   overflow-y: auto;
   margin-top: 2px;
   line-height: 1.6;
-  color: var(--slides-show-ink-88);
+  color: var(--slides-show-ink);
+  background: var(--slides-show-black);
+  padding: 12px;
+  border-radius: 8px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Paint remapping never replaces the authored inline color read by the editor. */
+.notes-editor * {
+  -webkit-text-fill-color: currentColor;
+}
+
+.notes-editor [data-notes-default-color] {
+  -webkit-text-fill-color: var(--text);
 }
 
 .presenter .pv-notes .notes-view-para[data-glyph]::before {
@@ -7530,6 +7531,173 @@ body.show-curtain::after {
 }
 
 /* ── Insert dialogs: hyperlink / header & footer / equation ────────────── */
+
+/* Large insertion galleries reserve workspace width instead of covering the slide. */
+.ribbon-gallery-host {
+  width: 300px;
+  max-width: 42%;
+  min-width: 0;
+  flex-shrink: 0;
+  display: flex;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.ribbon-gallery-pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text);
+  font-family: 'Segoe UI', var(--ui-cjk), sans-serif;
+}
+
+.ribbon-gallery-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ribbon-gallery-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ribbon-gallery-header button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.ribbon-gallery-header button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.ribbon-gallery-body {
+  flex: 1;
+  min-height: 0;
+  padding: 14px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.ribbon-gallery-pane button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ribbon-gallery-body .rb-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+}
+
+.ribbon-gallery-body .rb-menu button {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 100px;
+  padding: 12px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.ribbon-gallery-body .rb-menu button:hover {
+  border-color: var(--accent);
+  background: var(--hover);
+}
+
+.ribbon-gallery-body .rb-menu-thumb {
+  width: 64px;
+  height: 38px;
+  top: 0;
+}
+
+.ribbon-gallery-body .rb-menu-thumb svg {
+  width: 64px;
+  height: 38px;
+}
+
+.ribbon-gallery-body .rb-shape-gallery,
+.ribbon-gallery-body .rb-icon-gallery {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+}
+
+.ribbon-gallery-body .rb-shape-grid,
+.ribbon-gallery-body .rb-icon-grid {
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 6px;
+  max-height: none;
+  overflow: visible;
+}
+
+.ribbon-gallery-body .rb-shape-grid {
+  margin-bottom: 16px;
+}
+
+.ribbon-gallery-body .rb-shape-cell,
+.ribbon-gallery-body .rb-icon-cell {
+  width: 100%;
+  height: 38px;
+}
+
+.ribbon-gallery-body .rb-icon-colors {
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+/* Authored icon/WordArt colors preview on paper, including in dark chrome. */
+.ribbon-gallery-body .rb-icon-cell,
+.ribbon-gallery-body .rb-wordart-cell {
+  background: var(--slides-paper);
+}
+
+.ribbon-gallery-body .rb-wordart-grid {
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
+}
+
+.ribbon-gallery-body .rb-wordart-cell {
+  width: 100%;
+  height: 70px;
+  font-size: 32px;
+  border-radius: 8px;
+}
+
+@media (max-width: 900px) {
+  .ribbon-gallery-host {
+    width: 260px;
+  }
+}
 
 .modal.modal-wide {
   width: 460px;
@@ -8178,12 +8346,12 @@ body.show-curtain::after {
   font-size: 14px;
   text-align: left;
   color: inherit;
+  border-radius: 4px;
 }
 
 .deck-progress-head:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--slides-focus-ring);
-  border-radius: 4px;
 }
 
 .deck-progress-body {
@@ -9337,7 +9505,6 @@ body.show-curtain::after {
   gap: 2px;
 }
 
-/* Far-right group (Genspark AI sits where Microsoft 365 puts Copilot) */
 .ribbon-group.rb-group-end {
   margin-left: auto;
 }

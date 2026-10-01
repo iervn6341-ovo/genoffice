@@ -44,7 +44,7 @@ Windows 與 Linux。它能開啟並儲存原生的 `.docx`、`.xlsx` 與 `.pptx`
 - **本機優先的設計。** 檔案的開啟、編輯、儲存與轉換都在你的裝置上完成。
   PDF → Word / Excel / PowerPoint、Markdown → Word、HTML → Word 全部
   在本機執行。只有 AI 呼叫會離開這台裝置，且僅送往你選擇的服務商。
-- **用你自己的金鑰，或完全不用。** 用 Genspark 登入即可省去金鑰設定，
+- **用你自己的金鑰，或完全不用。** 使用本機端點，
   或自行帶入 Claude、OpenAI、Gemini、DeepSeek、Kimi、GLM、Qwen、
   Doubao、MiniMax、Grok、Mistral、OpenRouter、Requesty，或任何相容 OpenAI 介面
   的服務端點，也支援本機伺服器。
@@ -212,7 +212,7 @@ Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot、OpenCode 或 Windsu
 供你檢視。</td>
 <td><b>在設定 → 整合中一次安裝</b>——GenOffice 會列出在這台電腦上找到的
 程式開發代理，並把 skill 寫入你勾選的每一個。也可以把 skill 下載成 zip
-壓縮檔，或執行 <code>npx skills add genspark-ai/genoffice</code>。命令與完整
+壓縮檔，使用內建安裝器。命令與完整
 工作流程請見<a href="#command-line-and-agent-skill">命令列與 agent skill</a>。</td>
 </tr>
 </table>
@@ -247,7 +247,7 @@ Cursor 及任何其他 MCP 用戶端都能自行啟動 `genoffice mcp`，不必�
   的部分會原樣複製。
 - **AI 直接編輯文件本身。** Docs 中的追蹤修訂、Sheets 中即時運算的公式與圖表、
   直接在畫布上生成的投影片，每一次 AI 操作都會留下可回復的快照。
-- **自帶模型，自帶金鑰。** 使用 Genspark 登入，或帶上 Claude、OpenAI、Gemini、
+- **自帶模型，自帶金鑰。** 設定所需服務並帶上 Claude、OpenAI、Gemini、
   DeepSeek 等服務的金鑰，同時支援本機伺服器與任何相容 OpenAI 的服務端點。
 - **認真做好 PDF。** 直接在頁面內編輯文字，並在本機將 PDF 轉換為 Word、Excel 或
   PowerPoint，掃描檔案支援系統 OCR。
@@ -259,9 +259,8 @@ Cursor 及任何其他 MCP 用戶端都能自行啟動 `genoffice mcp`，不必�
 
 ## AI 後端
 
-**用 Genspark 登入**就完全不用設定：模型呼叫會透過 Genspark 代理路由
-（涵蓋 Claude、GPT 與 Gemini 家族），代理也能使用網頁與圖片搜尋、
-圖片生成，以及圖片／音訊／影片分析。
+AI 問答會使用「設定 → AI 模型」中選擇的服務，並保留既有設定。
+搜尋與媒體工具使用各自設定的服務。
 
 **或自帶金鑰。**「設定 → AI」列出了 Claude、OpenAI、Gemini、DeepSeek、
 Kimi、GLM、Qwen、Doubao、MiniMax、Grok、Mistral、OpenRouter、Requesty 與
@@ -291,11 +290,10 @@ HTML，用的是同一套引擎，且無需介面。它隨 GenOffice 一起安�
 
 ### 安裝 skill
 
-| 方式                                   | 效果                                                                                                                          |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 應用程式內的 **設定 → 整合**           | 列出在這台電腦上找到的代理；按一下就把 skill 寫入你選擇的每一個。當 GenOffice 新版本附帶更新的 skill 時，會出現**更新**按鈕。 |
-| 同一頁面上的 **下載為 zip**            | claude.ai、Claude 桌面版應用程式與其他助理可作為上傳 skill 接受的目錄結構。                                                   |
-| `npx skills add genspark-ai/genoffice` | 從本儲存庫安裝到任何相容 skills 的代理。                                                                                      |
+| 方式                         | 效果                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 應用程式內的 **設定 → 整合** | 列出在這台電腦上找到的代理；按一下就把 skill 寫入你選擇的每一個。當 GenOffice 新版本附帶更新的 skill 時，會出現**更新**按鈕。 |
+| 同一頁面上的 **下載為 zip**  | claude.ai、Claude 桌面版應用程式與其他助理可作為上傳 skill 接受的目錄結構。                                                   |
 
 接著開一個新的對話，請它幫你做一份文件。這份 skill 會教代理何時該使用
 `genoffice`、編輯前如何先讀取檔案，以及如何檢查自己的成果。
@@ -511,7 +509,7 @@ Office 中依然能正常使用。
 
 文件編輯完全在本機執行——檔案在開啟、編輯、儲存或轉換的過程中
 都不會離開你的裝置。AI 功能（代理、搜尋、圖片工具）需要網路連線，
-可透過 Genspark 登入或使用你自己的模型 API 金鑰。
+使用設定中已選取的 AI 服務，並依服務需求提供 API 金鑰。
 
 </details>
 
@@ -536,7 +534,7 @@ Office 中依然能正常使用。
 <details>
 <summary><b>我可以使用自己的 AI 模型或 API 金鑰嗎？</b></summary>
 
-可以。除了免金鑰的 Genspark 登入之外，GenOffice 也支援自帶金鑰，
+可以。GenOffice 支援自帶金鑰，
 涵蓋 Claude、OpenAI、Gemini、DeepSeek、Kimi、GLM、Qwen、Doubao、
 MiniMax、Grok、Mistral、OpenRouter、Requesty 與 OpenCode Zen/Go，以及任何相容
 OpenAI 的服務端點——包括本機模型伺服器。搜尋、圖片生成與圖片／影片

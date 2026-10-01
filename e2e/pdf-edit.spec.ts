@@ -1,3 +1,4 @@
+import { closeAndSaveVideo } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -205,7 +206,7 @@ test('edit text: picked size, bold, font and colour save as shown; the thumbnail
     expect(fills).toContain('#ff0000')
     expect(items.find((i) => i.str === 'Body line stays put')?.size).toBeCloseTo(12, 1)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -214,6 +215,8 @@ test('images: a moved picture stays selected and resizes; Insert image places a 
   const { p, launched } = await openPdf(f.pdf)
   try {
     await p.locator('button', { hasText: 'Edit images' }).first().click()
+    // Image hit targets arrive asynchronously after entering edit mode.
+    await expect(p.locator('.pdf-imgedit-hit').first()).toBeVisible()
     const pb = await pageBox(p)
     // the picture: x 100..340, y 330..510 of a 612×792 page
     const k = pb.width / 612
@@ -251,7 +254,7 @@ test('images: a moved picture stays selected and resizes; Insert image places a 
     const inserted = images.find((i) => i !== moved)!
     expect(inserted.w / inserted.h).toBeCloseTo(2, 1)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -274,7 +277,7 @@ test('Insert text: the dialog’s font, bold and italic land in the file', async
     await expect(p.locator('.pdf-page .pdf-textinsert-preview')).toHaveCount(1)
     await save(p, f.pdf)
     const { items } = await readPage(f.pdf)
-    // pdf.js may or may not split the run at the space: read the whole baseline
+    // Font metrics may split the pdf.js run at spaces; read the whole baseline.
     const added = items.filter(
       (i) => Math.abs(i.y - (items.find((j) => j.str.startsWith('Added'))?.y ?? -1)) < 1,
     )
@@ -285,7 +288,7 @@ test('Insert text: the dialog’s font, bold and italic land in the file', async
       expect(run.size).toBeCloseTo(14, 1)
     }
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -340,7 +343,7 @@ test('Import pages after a deleted page lands behind the page that was right-cli
       .poll(() => pageTexts(f.pdf), { timeout: 15_000 })
       .toEqual(['Page 2', 'Imported page', 'Page 3', 'Page 4', 'Page 5', 'Page 6'])
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -370,7 +373,7 @@ test('redaction marks and Clear marks go through undo / redo', async () => {
     await p.keyboard.press('ControlOrMeta+z')
     await expect(marks).toHaveCount(2)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })
 
@@ -402,6 +405,6 @@ test('Crop pages: the dialog fits the window under the ribbon and crops the page
     expect(crop.width).toBeCloseTo(306, -1)
     expect(crop.height).toBeCloseTo(396, -1)
   } finally {
-    launched.app.process().kill('SIGKILL')
+    await closeAndSaveVideo(launched, 'cleanup')
   }
 })

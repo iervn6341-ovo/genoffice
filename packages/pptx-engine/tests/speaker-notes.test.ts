@@ -22,6 +22,26 @@ const here = dirname(fileURLToPath(import.meta.url))
 const fx = (name: string) => readFileSync(join(here, 'fixtures', name))
 
 describe('speaker notes', () => {
+  it('creates an independent notes theme for PowerPoint without modifying the slide theme', async () => {
+    const opened = await openPptx(await createBlankPptx())
+    const theme = opened.archive.readText('ppt/theme/theme1.xml')
+    const rels =
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/theme.png"/></Relationships>'
+    opened.archive.entries.set('ppt/theme/_rels/theme1.xml.rels', Buffer.from(rels))
+    opened.archive.entries.set('ppt/media/theme.png', Buffer.from('theme image'))
+    setSlideNotes(opened, 0, 'Formatted notes')
+    const reopened = await openPptx(await savePptx(opened))
+    expect(reopened.archive.readText('ppt/theme/theme1.xml')).toBe(theme)
+    expect(reopened.archive.readText('ppt/theme/theme2.xml')).toBe(theme)
+    expect(reopened.archive.readText('ppt/theme/_rels/theme2.xml.rels')).toBe(rels)
+    expect(reopened.archive.readText('ppt/notesMasters/_rels/notesMaster1.xml.rels')).toContain(
+      'theme2.xml',
+    )
+    expect(reopened.archive.readText('[Content_Types].xml')).toContain('/ppt/theme/theme2.xml')
+    setSlideNotes(reopened, 0, 'Updated notes')
+    expect(reopened.archive.has('ppt/theme/theme3.xml')).toBe(false)
+  })
+
   it('getSlideNotes returns empty string on a fresh deck without notes', async () => {
     const opened = await openPptx(await createBlankPptx())
     expect(getSlideNotes(opened.archive, opened.deck.slides[0]!.path)).toBe('')
@@ -30,7 +50,9 @@ describe('speaker notes', () => {
   it('getSlideNotes reads back immediately after setSlideNotes', async () => {
     const opened = await openPptx(await createBlankPptx())
     expect(setSlideNotes(opened, 0, 'first line\nsecond line')).toBe(true)
-    expect(getSlideNotes(opened.archive, opened.deck.slides[0]!.path)).toBe('first line\nsecond line')
+    expect(getSlideNotes(opened.archive, opened.deck.slides[0]!.path)).toBe(
+      'first line\nsecond line',
+    )
   })
 
   it('save → reopen persists notes (notesSlide part auto-created)', async () => {
@@ -112,7 +134,9 @@ describe('speaker notes', () => {
     }
 
     // Slide 0 notes were written correctly
-    expect(getSlideNotes(reopened.archive, reopened.deck.slides[0]!.path)).toBe('only slide 0 changed')
+    expect(getSlideNotes(reopened.archive, reopened.deck.slides[0]!.path)).toBe(
+      'only slide 0 changed',
+    )
   })
 
   it('multiple slides: per-slide notes do not interfere', async () => {

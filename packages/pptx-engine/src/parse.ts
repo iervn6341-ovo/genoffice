@@ -328,6 +328,7 @@ function parseShapeFragment(
   // fields in document order instead of being appended after all plain runs.
   const semanticXml = fragXml
     .replace(MATH_AC_RE, mathBlockAsRun)
+    .replace(/<a14:m\b[^>]*>[\s\S]*?<\/a14:m>/g, mathBlockAsRun)
     .replace(/<a:br\b[^>]*\/>|<a:br\b[\s\S]*?<\/a:br>/g, '<a:r><a:t>\n</a:t></a:r>')
     .replace(/<a:fld\b/g, '<a:r')
     .replace(/<\/a:fld>/g, '</a:r>')
@@ -368,6 +369,29 @@ function parseShapeFragment(
         const gf = Array.isArray(gfRaw) ? gfRaw[0] : gfRaw
         if (!gf) continue
         const el = graphicFramePassthrough(gf, anchor, ctx)
+        if (el?.type === 'table') {
+          // PowerPoint puts OMML in the Choice and a cropped equation bitmap in
+          // each corresponding Fallback cell. Keep the editable Choice model
+          // and original XML, using that bitmap only as a display preview.
+          const fallbackRaw = node['mc:Fallback']?.['p:graphicFrame']
+          const fallbackGf = Array.isArray(fallbackRaw) ? fallbackRaw[0] : fallbackRaw
+          const fallback = fallbackGf && graphicFramePassthrough(fallbackGf, anchor, ctx)
+          if (
+            fallback?.type === 'table' &&
+            fallback.rows.length === el.rows.length &&
+            fallback.colWidths.length === el.colWidths.length
+          ) {
+            el.rows.forEach((row, r) =>
+              row.forEach((cell, c) => {
+                const hasMath = cell.text?.paragraphs.some((p) =>
+                  p.runs.some((run) => run.rawXml?.includes('<a14:m')),
+                )
+                const preview = fallback.rows[r]?.[c]?.fill
+                if (hasMath && preview?.type === 'image') cell.mathPreview = preview
+              }),
+            )
+          }
+        }
         if (el && el.type !== 'passthrough') return el
       }
       const fb = node['mc:Fallback']
@@ -3523,9 +3547,9 @@ function parseParagraph(
     .sort((a: { pos: number }, b: { pos: number }) => a.pos - b.pos)
   // Inheritance fallback: explicit pPr wins, level defaults from the placeholder/lstStyle chain fill gaps
   // (the master bodyStyle's buChar/marL/indent is where classic-template body bullets come from).
-  // No field-wise merge: a paragraph redefining its bullet resets unspecified buClr/buSzPct/buFont
-  // to follow the text (buClrTx/buSzTx/buFontTx semantics), not the chain's values.
-  let effBullet = bullet ?? dflt?.bullet
+  // Glyph selection does not reset inherited colour. PowerPoint resolves buClr
+  // independently, including when the paragraph declares its own buChar.
+  let effBullet: Paragraph['bullet'] = bullet ?? dflt?.bullet
   // buFontTx/buSzTx/buClrTx on a paragraph that inherits its glyph: the glyph stays, but
   // font/size/color follow the text instead of the chain's values
   if (!bullet && effBullet && effBullet.type !== 'none') {
@@ -3538,6 +3562,24 @@ function parseParagraph(
         delete effBullet.sizePt
       }
       if (tx('a:buClrTx')) delete effBullet.color
+    }
+  }
+  if (effBullet && effBullet.type !== 'none') {
+    effBullet = { ...effBullet }
+    const followsText =
+      pPr['a:buClrTx'] !== undefined || (!pPr['a:buClr'] && dflt?.bulletColor === null)
+    if (followsText) {
+      delete effBullet.color
+      delete effBullet.colorNodeXml
+      effBullet.colorFollowsText = true
+    } else if (pPr['a:buClr']) {
+      effBullet.color = resolveColorNode(pPr['a:buClr'], ctx)
+      effBullet.colorNodeXml = nonPlainColorNode(pPr['a:buClr'])
+      delete effBullet.colorFollowsText
+    } else if (dflt?.bulletColor) {
+      effBullet.color = dflt.bulletColor
+      effBullet.colorNodeXml = dflt.bulletColorNodeXml
+      delete effBullet.colorFollowsText
     }
   }
   const hasMarL = marLRaw != null && !Number.isNaN(marLRaw)
@@ -3563,7 +3605,7 @@ function parseParagraph(
     ...(lnSpcNode ? { lnSpc: true } : {}),
     ...(befNode ? { spcBef: true } : {}),
     ...(aftNode ? { spcAft: true } : {}),
-    ...(bullet ? { bullet: true } : {}),
+    ...(bullet || Object.keys(pPr).some((key) => key.startsWith('a:bu')) ? { bullet: true } : {}),
     ...(hasMarL ? { marL: true } : {}),
     ...(hasMarR ? { marR: true } : {}),
     ...(hasIndent ? { indent: true } : {}),

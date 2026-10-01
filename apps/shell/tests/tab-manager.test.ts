@@ -340,6 +340,7 @@ describe('activation', () => {
     manager.openSlidesTab()
     const view = lastCreatedView(createSlidesView)
     view.webContents.listeners.get('enter-html-full-screen')!()
+    expect(manager.list().find((tab) => tab.active)?.coversTabStrip).toBe(true)
     expect(view.setBounds).toHaveBeenLastCalledWith({
       x: 0,
       y: 0,
@@ -347,6 +348,38 @@ describe('activation', () => {
       height: WINDOW_HEIGHT,
     })
     view.webContents.listeners.get('leave-html-full-screen')!()
+    expect(manager.list().find((tab) => tab.active)?.coversTabStrip).toBeUndefined()
+    expect(view.setBounds).toHaveBeenLastCalledWith({
+      x: 0,
+      y: TAB_STRIP_HEIGHT,
+      width: WINDOW_WIDTH,
+      height: WINDOW_HEIGHT - TAB_STRIP_HEIGHT,
+    })
+  })
+
+  it('removes the shell drag strip only for the active covering tab and restores it on exit', () => {
+    const id = manager.openSlidesTab()
+    const view = lastCreatedView(createSlidesView)
+    onChanged.mockClear()
+    manager.setContentBleed(view.webContents as never, true)
+    expect(onChanged).toHaveBeenCalled()
+    expect(manager.list().find((tab) => tab.active)?.coversTabStrip).toBe(true)
+    manager.openHomeTab()
+    expect(manager.list().some((tab) => tab.coversTabStrip)).toBe(false)
+    manager.activateTab(id)
+    expect(view.setBounds).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 0,
+      width: WINDOW_WIDTH,
+      height: WINDOW_HEIGHT,
+    })
+    expect(manager.list().find((tab) => tab.active)?.coversTabStrip).toBe(true)
+    // HTML fullscreen and native show bleed can overlap; neither may restore chrome early.
+    view.webContents.listeners.get('enter-html-full-screen')!()
+    manager.setContentBleed(view.webContents as never, false)
+    expect(manager.list().find((tab) => tab.active)?.coversTabStrip).toBe(true)
+    view.webContents.listeners.get('leave-html-full-screen')!()
+    expect(manager.list().some((tab) => tab.coversTabStrip)).toBe(false)
     expect(view.setBounds).toHaveBeenLastCalledWith({
       x: 0,
       y: TAB_STRIP_HEIGHT,

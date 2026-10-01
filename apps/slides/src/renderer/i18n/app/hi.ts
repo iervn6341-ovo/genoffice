@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const hi = {
+  appNotesDefaultColor: 'डिफ़ॉल्ट (थीम के अनुसार)',
+  appStatusEquationPreview:
+    'यह समीकरण अपने मूल प्रीव्यू में दिखता है। इसे PowerPoint में संपादित करें।',
   appPhPromptTitle: 'शीर्षक जोड़ने के लिए क्लिक करें',
   appPhPromptSubtitle: 'उपशीर्षक जोड़ने के लिए क्लिक करें',
   appPhPromptBody: 'टेक्स्ट जोड़ने के लिए क्लिक करें',
@@ -228,13 +231,10 @@ export const hi = {
   appRehearseDiscard: 'न सहेजें',
   appRehearseSave: 'सहेजें',
   appSettingsTitle: 'AI सेटिंग्स',
-  appSettingsAccount: 'Genspark खाता',
   appSettingsChecking: 'जाँच हो रही है…',
   appSettingsLoggedIn: 'साइन इन किया गया',
   appSettingsLoggedInEmail: 'साइन इन किया गया: {email}',
-  appSettingsLoggedOut: 'साइन इन नहीं किया गया (AI सुविधाओं के लिए Genspark खाता आवश्यक है)',
   appSettingsLoginPending: 'ब्राउज़र साइन-इन की प्रतीक्षा हो रही है…',
-  appSettingsLogin: 'Genspark में साइन इन करें',
   appSettingsModel: 'मॉडल',
   appSettingsCancel: 'रद्द करें',
   appSettingsSave: 'सहेजें',

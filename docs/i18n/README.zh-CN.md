@@ -43,9 +43,7 @@ PDF、Markdown 和 HTML，并在每份文档旁边配备一个 AI 智能体 —�
 - **本地优先的设计。** 文件的打开、编辑、保存和转换都在你的电脑上完成。
   PDF → Word / Excel / PowerPoint、Markdown → Word、HTML → Word 全部在本机运行。
   只有 AI 调用会发送到你选择的服务商。
-- **用自己的密钥，或者不用密钥。** 登录 Genspark 即可免配置使用；也可以自带
-  Claude、OpenAI、Gemini、DeepSeek、Kimi、GLM、Qwen、Doubao、MiniMax、Grok、
-  Mistral、OpenRouter、Requesty 的密钥，或任何 OpenAI 兼容端点，包括本地模型服务。
+- **AI.** AI 功能使用设置中选择的服务，并保留已有配置。搜索和媒体工具使用各自设置的服务。
 - **可脚本化，随时可供智能体调用。** 应用自带 `genoffice` 命令行和一份面向
   Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot、OpenCode 和 Windsurf
   的 agent skill，让编程智能体无需打开任何窗口，就能在你的电脑上创建、转换、
@@ -172,7 +170,7 @@ Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot、OpenCode 或 Windsu
 </tr>
 <tr>
 <td><b>给智能体一句提示词</b> —— “制作一份关于太阳系的八页演示文稿。”智能体读取 skill，依次写出样式表、大纲和每页一份的页面规格，用 <code>genoffice image</code> 生成两张图片，再由 <code>genoffice slides check</code> 拦下所有溢出或重叠的内容，最后由 <code>genoffice create</code> 组装出 <code>.pptx</code>，并用 <code>slides render</code> 为每一页交回一张 PNG 供查看。</td>
-<td><b>在设置 → 集成中一次安装</b> —— GenOffice 会列出在这台电脑上找到的编程智能体，并把 skill 写入你选中的每一个。也可以把 skill 下载为 zip 压缩包，或运行 <code>npx skills add genspark-ai/genoffice</code>。命令和完整工作流见<a href="#command-line-and-agent-skill">命令行与 agent skill</a>。</td>
+<td>Install the bundled skill through Settings → Integrations, or download its ZIP from the same page.</td>
 </tr>
 </table>
 
@@ -206,8 +204,7 @@ Word 文档，供你实时查看。
   的部分原样复制。
 - **直接编辑文档的 AI。** Docs 中的修订痕迹、Sheets 中实时生效的公式和图表、直接
   在画布上生成的幻灯片，每一次 AI 操作都会留下可回滚的快照。
-- **自带模型，自带密钥。** 使用 Genspark 登录，或带上 Claude、OpenAI、Gemini、
-  DeepSeek 等的密钥，同样支持本地服务器和任意 OpenAI 兼容端点。
+- **AI.** AI 功能使用设置中选择的服务，并保留已有配置。搜索和媒体工具使用各自设置的服务。
 - **认真做好 PDF。** 在页面内直接编辑文字，本机将 PDF 转换为 Word、Excel 或
   PowerPoint，扫描件支持系统 OCR。
 - **同样支持 Markdown 和 HTML**，共用同一个 AI 面板，并可本机导出为 Word。
@@ -218,9 +215,7 @@ Word 文档，供你实时查看。
 
 ## AI 后端
 
-**登录 Genspark**，无需任何配置：模型调用通过 Genspark 代理路由（Claude、GPT
-和 Gemini 系列），智能体同时获得网页与图片搜索、图片生成，以及图片/音频/视频
-解析能力。
+AI 功能使用设置中选择的服务，并保留已有配置。搜索和媒体工具使用各自设置的服务。
 
 **或者自带密钥。** 设置 → AI 中列出了 Claude、OpenAI、Gemini、DeepSeek、Kimi、
 GLM、Qwen、Doubao、MiniMax、Grok、Mistral、OpenRouter、Requesty 和 OpenCode Zen/Go，另有
@@ -248,11 +243,10 @@ Grok、Qwen、MiniMax 或任何 OpenAI 兼容的图片端点。
 
 ### 安装 skill
 
-| 方式                                   | 效果                                                                                                                            |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 应用内的 **设置 → 集成**               | 列出在这台电脑上找到的智能体；一键即可把 skill 写入你选中的每一个。当 GenOffice 新版本附带更新的 skill 时，会出现**更新**按钮。 |
-| 同一页面上的 **下载为 zip**            | claude.ai、Claude 桌面应用及其他助手可作为上传 skill 接受的目录结构。                                                           |
-| `npx skills add genspark-ai/genoffice` | 从本仓库安装到任何兼容 skills 的智能体。                                                                                        |
+| 方式                        | 效果                                                                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 应用内的 **设置 → 集成**    | 列出在这台电脑上找到的智能体；一键即可把 skill 写入你选中的每一个。当 GenOffice 新版本附带更新的 skill 时，会出现**更新**按钮。 |
+| 同一页面上的 **下载为 zip** | claude.ai、Claude 桌面应用及其他助手可作为上传 skill 接受的目录结构。                                                           |
 
 然后开启一个新对话，让它帮你做一份文档。这份 skill 会教智能体何时该用
 `genoffice`、编辑前如何先读取文件，以及如何检查自己的成果。
@@ -460,9 +454,7 @@ GenOffice 正在积极开发中，你的反馈决定它的走向。
 <details>
 <summary><b>GenOffice 可以离线使用吗？</b></summary>
 
-文档编辑完全在本地进行 —— 打开、编辑、保存和转换文件都不需要把文件发送到任何
-地方。AI 功能（智能体、搜索、图片工具）需要网络连接，并且需要登录 Genspark 或
-提供你自己的模型 API 密钥。
+AI 功能使用设置中选择的服务，并保留已有配置。搜索和媒体工具使用各自设置的服务。
 
 </details>
 
@@ -486,10 +478,7 @@ GenOffice 正在积极开发中，你的反馈决定它的走向。
 <details>
 <summary><b>我可以使用自己的 AI 模型或 API 密钥吗？</b></summary>
 
-可以。除了免密钥的 Genspark 登录，GenOffice 还支持自带 Claude、OpenAI、Gemini、
-DeepSeek、Kimi、GLM、Qwen、Doubao、MiniMax、Grok、Mistral、OpenRouter、Requesty 和
-OpenCode Zen/Go 的密钥，以及任何 OpenAI 兼容端点 —— 包括本地模型服务。搜索、
-图片生成和图片/视频解析在 设置 → AI 媒体与搜索 下使用各自的密钥。
+AI 功能使用设置中选择的服务，并保留已有配置。搜索和媒体工具使用各自设置的服务。
 
 </details>
 

@@ -145,7 +145,7 @@ export const ko = {
   ribbonAiTools: 'AI 도구',
   ribbonGroupEditing: '편집',
   // Home · AI
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'AI 도우미 열기',
   // Table Design
   ribbonRemoveTableStyleTip: '표 스타일 제거',

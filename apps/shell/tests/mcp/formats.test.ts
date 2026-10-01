@@ -18,7 +18,7 @@ describe('format registry', () => {
   it('mirrors the shell open routing for the mcp-driven families', () => {
     expect(formatFamily('docx').editorOpen).toEqual(['docx'])
     expect(formatFamily('xlsx').editorOpen).toEqual(['xlsx', 'xlsm', 'xls', 'csv'])
-    expect(formatFamily('pptx').editorOpen).toEqual(['pptx'])
+    expect(formatFamily('pptx').editorOpen).toEqual(['pptx', 'ppsx'])
   })
 
   it('keeps the editor-only families (md/html) without an mcp block', () => {
@@ -69,6 +69,7 @@ describe('withSaveExtension', () => {
     expect(withSaveExtension('docx', 'C:/x/Report.DOCX')).toBe('C:/x/Report.DOCX')
     expect(withSaveExtension('xlsx', '/tmp/books.xlsx')).toBe('/tmp/books.xlsx')
     expect(withSaveExtension('pptx', '/tmp/deck.pptx')).toBe('/tmp/deck.pptx')
+    expect(withSaveExtension('pptx', '/tmp/deck.PPSX')).toBe('/tmp/deck.PPSX')
   })
 
   it('appends the family extension when the path has none', () => {

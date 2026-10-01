@@ -30,6 +30,7 @@ import { ShapePreview } from './gallery-previews'
 import type { SlideThemePreset } from '../themes'
 import type { ChartStyleInfo } from '@genoffice/pptx-render'
 import { useI18n, type StringKey } from '../i18n/locale'
+import type { InsertGalleryKey } from './RibbonGalleryPane'
 
 export type InsertDropKey =
   | 'shapes'
@@ -333,7 +334,13 @@ export function Group({
   /** identity for width measurement + collapse bookkeeping */
   groupId?: string
   /** present on collapsible groups; `collapsed` switches to the dropdown form */
-  collapse?: { collapsed: boolean; open: boolean; onToggle: () => void; icon: ReactNode }
+  collapse?: {
+    collapsed: boolean
+    open: boolean
+    onToggle: () => void
+    icon: ReactNode
+    keepMounted?: boolean
+  }
 }) {
   if (collapse?.collapsed) {
     return (
@@ -352,8 +359,12 @@ export function Group({
               </span>
               <span>{label}</span>
             </button>
-            {collapse.open && (
-              <div className="rb-drop rb-collapse-panel" onMouseDown={(e) => e.stopPropagation()}>
+            {(collapse.open || collapse.keepMounted) && (
+              <div
+                className="rb-drop rb-collapse-panel"
+                style={collapse.open ? undefined : { display: 'none' }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 {children}
               </div>
             )}
@@ -442,6 +453,7 @@ export interface Props {
   onFormatBrushDoubleClick: () => void
   /** Editing: selection font color (execCommand) */
   onTextColor: (hex: string) => void
+  onNotesDefaultColor?: (() => void) | undefined
   /** Font group display: font/size of the current selection (editing) or aggregated from selected elements' text (null with no document) */
   curFontFamily: string | null
   curFontSizePt: number | null
@@ -588,6 +600,11 @@ export interface Props {
   /** Current page's comment count (button badge) */
   commentCount: number
   // ── Insert tab extensions ────────────────────────────────────────────────
+  /** Large insertion galleries use the workspace's right dock. */
+  insertGallery?: InsertGalleryKey | null
+  insertGalleryTarget?: HTMLElement | null
+  onInsertGalleryChange?: (key: InsertGalleryKey | null, trigger?: HTMLButtonElement) => void
+  onCloseInsertGallery?: () => void
   /** Insert an icon (rasterized to a PNG image) */
   onInsertIcon: (def: IconDef, color: string) => void
   /** Insert a chart (sample data, writes a chart part) */
@@ -751,6 +768,7 @@ export interface RibbonTabCtx extends Pick<
   | 'onStrike'
   | 'onTextAnchor'
   | 'onTextColor'
+  | 'onNotesDefaultColor'
   | 'onTextDirection'
   | 'onTextToggle'
   | 'onToggleAi'

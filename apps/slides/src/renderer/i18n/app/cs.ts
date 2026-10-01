@@ -1,6 +1,8 @@
 import type { zh } from './zh'
 
 export const cs = {
+  appNotesDefaultColor: 'Výchozí (podle motivu)',
+  appStatusEquationPreview: 'Rovnice používá původní náhled. Upravte ji v PowerPointu.',
   appPhPromptTitle: 'Klikněte a přidejte nadpis',
   appPhPromptSubtitle: 'Klikněte a přidejte podnadpis',
   appPhPromptBody: 'Klikněte a přidejte text',
@@ -221,13 +223,10 @@ export const cs = {
   appRehearseDiscard: 'Neukládat',
   appRehearseSave: 'Uložit',
   appSettingsTitle: 'Nastavení AI',
-  appSettingsAccount: 'Účet Genspark',
   appSettingsChecking: 'Kontroluje se…',
   appSettingsLoggedIn: 'Přihlášeno',
   appSettingsLoggedInEmail: 'Přihlášeno: {email}',
-  appSettingsLoggedOut: 'Nepřihlášeno (funkce AI vyžadují účet Genspark)',
   appSettingsLoginPending: 'Čeká se na přihlášení v prohlížeči…',
-  appSettingsLogin: 'Přihlásit se ke Gensparku',
   appSettingsModel: 'Model',
   appSettingsCancel: 'Zrušit',
   appSettingsSave: 'Uložit',

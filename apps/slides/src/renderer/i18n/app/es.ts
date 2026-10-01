@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const es = {
+  appNotesDefaultColor: 'Predeterminado (según el tema)',
+  appStatusEquationPreview:
+    'Esta ecuación muestra su vista previa original. Edítala en PowerPoint.',
   appPhPromptTitle: 'Haga clic para agregar título',
   appPhPromptSubtitle: 'Haga clic para agregar subtítulo',
   appPhPromptBody: 'Haga clic para agregar texto',
@@ -229,13 +232,10 @@ export const es = {
   appRehearseDiscard: 'No guardar',
   appRehearseSave: 'Guardar',
   appSettingsTitle: 'Configuración de IA',
-  appSettingsAccount: 'Cuenta de Genspark',
   appSettingsChecking: 'Comprobando…',
   appSettingsLoggedIn: 'Sesión iniciada',
   appSettingsLoggedInEmail: 'Sesión iniciada: {email}',
-  appSettingsLoggedOut: 'Sesión no iniciada (las funciones de IA requieren una cuenta de Genspark)',
   appSettingsLoginPending: 'Esperando el inicio de sesión en el navegador…',
-  appSettingsLogin: 'Iniciar sesión en Genspark',
   appSettingsModel: 'Modelo',
   appSettingsCancel: 'Cancelar',
   appSettingsSave: 'Guardar',

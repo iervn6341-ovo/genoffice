@@ -667,15 +667,14 @@ html.genoffice-popover-open .ribbon-tabs {
   white-space: nowrap;
 }
 
-/* Genspark brand logo (shared by the collapsed entry and the AI panel title) */
-.genspark-badge {
+.assistant-badge {
   display: block;
   width: 22px;
   height: 22px;
   border-radius: 50%;
 }
 
-.ai-panel-title .genspark-badge {
+.ai-panel-title .assistant-badge {
   width: 18px;
   height: 18px;
 }
@@ -891,6 +890,7 @@ html.genoffice-popover-open .ribbon-tabs {
   line-height: 1.5;
   color: var(--color-text-tertiary);
   transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
 }
 
 .ai-work-group-summary:hover {
@@ -900,7 +900,6 @@ html.genoffice-popover-open .ribbon-tabs {
 .ai-work-group-summary:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--hx-focus-ring);
-  border-radius: 4px;
 }
 
 .ai-work-group-summary.running {
@@ -1004,6 +1003,7 @@ html.genoffice-popover-open .ribbon-tabs {
 .ai-step-title.clickable {
   cursor: pointer;
   transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
 }
 
 .ai-step-title.clickable:hover {
@@ -1013,7 +1013,6 @@ html.genoffice-popover-open .ribbon-tabs {
 .ai-step-title.clickable:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--hx-focus-ring);
-  border-radius: 4px;
 }
 
 /* Step detail opens instantly, no animation */

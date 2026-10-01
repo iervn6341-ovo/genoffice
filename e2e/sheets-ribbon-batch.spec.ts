@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { execSync } from 'node:child_process'
-import { copyFile, mkdtemp } from 'node:fs/promises'
+import JSZip from 'jszip'
+import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -203,10 +204,9 @@ test.describe('sheets: ribbon batch-3 features', () => {
     const workbook = join(scratch, 'ribbon-batch3.xlsx')
     await copyFile(FIXTURE, workbook)
     // The generated fixture ships no theme part; the theme engine needs one.
-    execSync(
-      `mkdir -p "${scratch}/xl/theme" && printf '%s' '${MINIMAL_THEME}' > "${scratch}/xl/theme/theme1.xml" ` +
-        `&& cd "${scratch}" && zip -q "${workbook}" xl/theme/theme1.xml`,
-    )
+    const fixtureZip = await JSZip.loadAsync(await readFile(workbook))
+    fixtureZip.file('xl/theme/theme1.xml', MINIMAL_THEME)
+    await writeFile(workbook, await fixtureZip.generateAsync({ type: 'nodebuffer' }))
 
     const launched = await launchShell({
       onboardingSeen: true,

@@ -141,7 +141,7 @@ export const it = {
   ribbonGroupStyles: 'Stili',
   ribbonAiTools: 'Strumenti IA',
   ribbonGroupEditing: 'Modifica',
-  ribbonAiAssistant: 'Genspark',
+  ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: "Apri l'assistente IA",
   ribbonRemoveTableStyleTip: 'Rimuovi stile tabella',
   ribbonNoStyle: 'Nessuno stile',
