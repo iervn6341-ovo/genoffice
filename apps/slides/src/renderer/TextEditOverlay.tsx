@@ -951,6 +951,17 @@ export function TextEditOverlay({
                 : (selNow?.anchorNode?.parentElement ?? null)
             while (blk && blk !== ref.current && blk.tagName !== 'DIV') blk = blk.parentElement
             if (blk && blk !== ref.current) shiftBlockLevel(blk, e.shiftKey ? -1 : 1)
+          } else if (
+            e.key === 'Backspace' &&
+            !e.shiftKey &&
+            !e.altKey &&
+            !e.metaKey &&
+            !e.ctrlKey &&
+            removeBulletAtParagraphStart(ref.current)
+          ) {
+            // Word/PowerPoint: Backspace at the start of a bulleted paragraph takes
+            // the bullet off first; only the next one joins the previous paragraph
+            e.preventDefault()
           } else if (e.key === 'Enter' && e.shiftKey) {
             // Shift+Enter = in-paragraph soft break (<a:br/>). The default behavior inserts <br>,
             // and execCommand('insertText','\n') splits the div in Chromium — both become paragraph splits,
@@ -1338,6 +1349,31 @@ export function applySelectionLink(target: LinkTargetOp | null): boolean {
   if (target) document.execCommand('createLink', false, encodeLinkTarget(target))
   else document.execCommand('unlink')
   return true
+}
+
+/**
+ * Backspace with a collapsed caret at the very start of a bulleted/numbered
+ * paragraph div: mark the paragraph bullet-less (committed as buNone, like the
+ * ribbon toggle) instead of letting the browser join it into the previous
+ * paragraph. False = not at a bulleted paragraph start; the default runs.
+ */
+function removeBulletAtParagraphStart(root: HTMLElement | null): boolean {
+  const sel = window.getSelection()
+  if (!root || !sel?.rangeCount || !sel.isCollapsed) return false
+  const range = sel.getRangeAt(0)
+  let blk: HTMLElement | null =
+    range.startContainer instanceof HTMLElement
+      ? range.startContainer
+      : range.startContainer.parentElement
+  while (blk && blk.parentElement !== root) blk = blk.parentElement
+  if (!blk || blk.tagName !== 'DIV') return false
+  const kind = blk.dataset.bullet ?? blk.dataset.hadBullet
+  if (!kind || kind === 'none') return false
+  const before = document.createRange()
+  before.setStart(blk, 0)
+  before.setEnd(range.startContainer, range.startOffset)
+  if (before.toString() !== '') return false
+  return applySelectionParagraphFormat({ bullet: 'none' })
 }
 
 /**

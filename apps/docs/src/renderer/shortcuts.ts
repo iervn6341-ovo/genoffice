@@ -127,8 +127,8 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: 'style-h2', group: 'para', labelKey: 'ribbonStyleHeading2', keys: '⌥⌘2' },
   { id: 'style-h3', group: 'para', labelKey: 'ribbonStyleHeading3', keys: '⌥⌘3' },
   { id: 'paragraph-dialog', group: 'para', labelKey: 'appParagraph', keys: '⌥⌘M' },
-  { id: 'move-up', group: 'para', labelKey: 'appScMoveUp', keys: '⌥⇧↑' },
-  { id: 'move-down', group: 'para', labelKey: 'appScMoveDown', keys: '⌥⇧↓' },
+  { id: 'move-up', group: 'para', labelKey: 'appScMoveUp', keys: '⌃⇧↑', win: 'Alt+Shift+↑' },
+  { id: 'move-down', group: 'para', labelKey: 'appScMoveDown', keys: '⌃⇧↓', win: 'Alt+Shift+↓' },
   { id: 'list-demote', group: 'para', labelKey: 'appScListDemote', keys: 'Tab' },
   {
     id: 'list-promote',

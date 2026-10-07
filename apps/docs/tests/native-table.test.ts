@@ -208,6 +208,7 @@ describe('native editable tables', () => {
           textOutline: null,
           textEffect: null,
           dstrike: null,
+          eaInherited: null,
           glow: null,
           positionHalfPoints: null,
           bdr: null,

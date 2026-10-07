@@ -285,6 +285,11 @@ export function lineHeightFactor(fontFamily: string): number {
   ) {
     return 1.775
   }
+  // 標楷體 with DFKai-SB installed renders real at the SimSun-class pitch
+  // (Word probe 2026-10-01, kaiu.ttf: 13.1pt @10pt, a 10pt footer line ends
+  // 4.7pt lower than at 1.775); a missing face substitutes into the PingFang
+  // TC class with the sans faces below
+  if (/標楷|biaukai|dfkai|kaiu/.test(f) && dfkaiInstalled()) return 1.3029
   // Traditional Chinese sans/kai faces use the PingFang TC class.
   if (/jhenghei|正黑|標楷|biaukai|dfkai|kaiu/.test(f)) return 1.775
   // Traditional/Simplified Arabic are M365 cloud fonts Word downloads and
@@ -655,6 +660,11 @@ export function isFontAvailable(font: string): boolean {
   return available
 }
 
+/** Whether the real 標楷體 face (DFKai-SB, kaiu.ttf) resolves on this machine. */
+function dfkaiInstalled(): boolean {
+  return isFontAvailable('DFKai-SB') || isFontAvailable('標楷體')
+}
+
 /**
  * Ascent/descent of a family chain's primary face, as percentages of the em
  * (canvas fontBoundingBox at 1000px for 0.1% granularity). Fuels the typed-grid
@@ -889,7 +899,13 @@ export function cssFontFamily(font: string, followAltName = true): string {
   const KO_SERIF = ['GenOffice Batang', 'GenOffice Serif KR', 'GenOffice Myungjo', 'Noto Serif KR']
   const TC_SANS = ['Microsoft JhengHei', 'PingFang TC', 'GenOffice Heiti TC', 'Noto Sans TC']
   // 'GenOffice Fullwidth TC' (fonts.css): fullwidth U+FF0D/FF0F/FF3C/FF3F/FF5E whose Songti TC glyphs look half-width
-  const TC_SERIF = ['GenOffice MingLiU', 'GenOffice Fullwidth TC', 'Songti TC', 'Noto Serif TC']
+  const TC_SERIF = [
+    'GenOffice MingLiU',
+    'GenOffice Fullwidth TC',
+    'GenOffice Songti TC',
+    'Songti TC',
+    'Noto Serif TC',
+  ]
   const SC_SANS = ['PingFang SC', 'Microsoft YaHei', CJK_SANS]
   const SC_SERIF = ['GenOffice Songti SC', 'STSong', 'SimSun', CJK_SERIF]
   const nfkc = font.normalize('NFKC')
@@ -1066,7 +1082,11 @@ export function cssFontFamily(font: string, followAltName = true): string {
       nfkc,
     )
   ) {
-    const serif = /mingliu|細明|標楷|biaukai|dfkai|kaiu|songti|kaiti|宋/i.test(nfkc)
+    // 標楷體 is a Kai (brush) face, not a Ming one: the installed DFKai-SB
+    // (Office) or Apple's BiauKai renders it; the Ming chain is only the tail
+    if (/標楷|biaukai|dfkai|kaiu|kaiti tc/i.test(nfkc))
+      return `${chain(font, 'DFKai-SB', 'BiauKaiTC', 'Kaiti TC', ...TC_SERIF)},serif`
+    const serif = /mingliu|細明|songti|kaiti|宋/i.test(nfkc)
     return `${chain(font, ...(serif ? TC_SERIF : TC_SANS))},${serif ? 'serif' : 'sans-serif'}`
   }
   // Ethiopic faces (Nyala/Ebrima/Abyssinica) are missing on macOS; the size-adjusted
@@ -1174,6 +1194,17 @@ export function cssEaOnlyFontFamily(ea: string): string {
   const eaChain = cssFontFamily(ea)
   const backstop = eaChain.endsWith('sans-serif') ? "'Latin Sans GO'" : "'Latin Serif GO'"
   return `var(--doc-latin-chain,${backstop}),${eaChain}`
+}
+
+/**
+ * Chain for a run declaring only a Latin face (w:ascii/w:hAnsi, no w:eastAsia):
+ * Word merges rFonts per slot, so CJK keeps the style-inherited East Asian face
+ * (a Times New Roman title under a 標楷體 Normal renders its Han in 標楷體).
+ * --doc-ea-chain carries that inherited chain (doc-style-css, document and
+ * paragraph-style level); without it the Latin face's own chain is the backstop.
+ */
+export function cssLatinOnlyFontFamily(ascii: string): string {
+  return `${latinChainHead(ascii).join(',')},var(--doc-ea-chain,${cssFontFamily(ascii)})`
 }
 
 /** font-family for a run's declared slots (dual / Latin-only / EA-only) */

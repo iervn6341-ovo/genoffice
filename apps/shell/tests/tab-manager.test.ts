@@ -639,3 +639,20 @@ describe('dirty-tab queries (shell close guard)', () => {
     expect(manager.docsTabs().map((t) => t.id)).toEqual(['t1', 't3'])
   })
 })
+
+describe('content bleed (show fullscreen)', () => {
+  it('a release that lands after the shell window closed is a no-op, not a throw', () => {
+    manager.openDocsTab()
+    onChanged.mockClear()
+    shellWindow.isDestroyed.mockReturnValue(true)
+    const wc = { id: 99 } as never
+    expect(() => manager.setContentBleed(wc, false)).not.toThrow()
+    expect(onChanged).not.toHaveBeenCalled()
+  })
+
+  it('notifies listeners while the window is alive', () => {
+    onChanged.mockClear()
+    manager.setContentBleed({ id: 99 } as never, true)
+    expect(onChanged).toHaveBeenCalledTimes(1)
+  })
+})

@@ -5,7 +5,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { isInTable } from '@tiptap/pm/tables'
 import { closeHistory } from '@tiptap/pm/history'
 import { t } from '../i18n/locale'
-import { type TabStop } from '@genoffice/docx-engine'
+import { type StyleInfo, type TabStop } from '@genoffice/docx-engine'
 
 /**
  * Custom schema mirroring the docx-engine Block model 1:1.
@@ -813,12 +813,16 @@ export const TabStopExtension = Extension.create({
       const grid = storage.defaultTabStopTwips
       return grid != null && grid > 0 ? grid : DEFAULT_TAB_TWIPS
     }
-    const indentTarget = () => {
+    // Backspace also walks an empty paragraph's indent back (the line a list
+    // marker was just removed from, Word probe 2026-10-06); Tab there stays a
+    // literal tab
+    const indentTarget = (allowEmpty = false) => {
       const { selection } = this.editor.state
       if (!selection.empty) return null
       const { $from } = selection
       const para = $from.parent
-      if (!para.isTextblock || $from.parentOffset !== 0 || para.content.size === 0) return null
+      if (!para.isTextblock || $from.parentOffset !== 0) return null
+      if (para.content.size === 0 && !allowEmpty) return null
       if (!('indentFirstLine' in para.attrs) || !('indentLeft' in para.attrs)) return null
       return { pos: $from.before(), para }
     }
@@ -845,7 +849,9 @@ export const TabStopExtension = Extension.create({
         if (firstLine >= 0) {
           setIndent(
             target.pos,
-            firstLine < step ? { indentFirstLine: step } : { indentLeft: left + step },
+            firstLine < step
+              ? { indentFirstLine: step, listMarkerLeft: null }
+              : { indentLeft: left + step, listMarkerLeft: null },
           )
           return true
         }
@@ -857,17 +863,63 @@ export const TabStopExtension = Extension.create({
       if (!this.editor.isEditable) return false
       if (this.editor.isActive('docListItem')) return false
       if (isInTable(this.editor.state)) return false
-      const target = indentTarget()
+      // Word (probed 2026-10-07): Backspace at the very start of a CENTERED paragraph, empty or
+      // not, first takes the centering off instead of merging; later presses behave as usual
+      const { selection } = this.editor.state
+      if (
+        selection.empty &&
+        selection.$from.parentOffset === 0 &&
+        selection.$from.parent.isTextblock &&
+        selection.$from.parent.attrs.align === 'center'
+      ) {
+        setIndent(selection.$from.before(), { align: null })
+        return true
+      }
+      const target = indentTarget(true)
       if (!target) return false
       const firstLine = Number(target.para.attrs.indentFirstLine ?? 0)
-      const left = Number(target.para.attrs.indentLeft ?? 0)
+      // the paragraph style's own left indent counts too (a list item that just
+      // lost its bullet sits at the ListParagraph indent): clearing the direct
+      // value would hand the line straight back to the style's indent
+      const styles = this.editor.storage.listNumbering?.styles as Map<string, StyleInfo> | undefined
+      const styleLeft = Number(
+        styles?.get(String(target.para.attrs.styleId ?? ''))?.display?.indentLeftTwips ?? 0,
+      )
+      const left = Number(target.para.attrs.indentLeft ?? styleLeft)
+      if (firstLine < 0) {
+        // hanging indent (Word probe 2026-10-07: left 720 / hanging 360 clears in one press): one
+        // tab stop comes off the first-line position (left + firstLine), clearing both at the margin
+        const first = left + firstLine
+        const nextFirst = Math.max(0, first - tabStepTwips())
+        setIndent(
+          target.pos,
+          nextFirst === 0
+            ? { indentLeft: styleLeft ? 0 : null, indentFirstLine: null, listMarkerLeft: null }
+            : { indentLeft: nextFirst - firstLine, listMarkerLeft: null },
+        )
+        return true
+      }
       if (firstLine > 0) {
         setIndent(target.pos, { indentFirstLine: null })
         return true
       }
       if (firstLine === 0 && left > 0) {
-        const next = Math.max(0, left - tabStepTwips())
-        setIndent(target.pos, { indentLeft: next === 0 ? null : next })
+        // a line that just lost its list marker steps back to where the marker
+        // stood (Word: text indent minus hanging), and from there straight to
+        // the margin; any other indent walks back one default tab stop
+        const markerLeft = target.para.attrs.listMarkerLeft
+        const next =
+          markerLeft == null
+            ? Math.max(0, left - tabStepTwips())
+            : Number(markerLeft) < left
+              ? Number(markerLeft)
+              : 0
+        // an explicit 0 keeps overriding a style indent; no style indent: plain unset
+        setIndent(target.pos, {
+          indentLeft: next === 0 && !styleLeft ? null : next,
+          // stays set while the marker stop is still ahead of the margin
+          listMarkerLeft: next > 0 ? markerLeft : null,
+        })
         return true
       }
       return false

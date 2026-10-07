@@ -197,7 +197,7 @@ test.describe('narrow windows fold groups instead of scrolling', () => {
     const { s, launched } = await openSlides(2200)
     try {
       const group = s.locator('[data-rbgroup="aiTools"]')
-      await expect(group.locator('button.ai-entry', { hasText: 'AI' })).toHaveCount(1)
+      await expect(group.locator('button.ai-entry[data-tip="Open AI assistant"]')).toHaveCount(1)
       expect(await group.locator('button.ai-entry').count()).toBe(4)
     } finally {
       await closeAndSaveVideo(launched, 'cleanup')

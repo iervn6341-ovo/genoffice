@@ -389,7 +389,9 @@ function HfContent({
                 ...margins(i),
                 ...(para.runs.length === 0 && para.emptyRunSizeHalfPoints
                   ? { fontSize: `${para.emptyRunSizeHalfPoints / 2}pt` }
-                  : {}),
+                  : para.styleSizeHalfPoints
+                    ? { fontSize: `${para.styleSizeHalfPoints / 2}pt` }
+                    : {}),
               }}
             >
               {para.runs.length === 0 ? ' ' : null}

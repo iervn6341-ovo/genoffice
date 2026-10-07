@@ -1,4 +1,5 @@
-import { Editor, Extension, Node } from '@tiptap/core'
+import { closeHistory } from '@tiptap/pm/history'
+import { Editor, Extension, Node, getSplittedAttributes } from '@tiptap/core'
 import type { ChainedCommands, RawCommands } from '@tiptap/core'
 import { Gapcursor, UndoRedo } from '@tiptap/extensions'
 import { DOMSerializer } from '@tiptap/pm/model'
@@ -14,6 +15,7 @@ import {
 } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { ListAutoFormat } from './list-autoformat'
+import { WordEnterStyle, WordNavigation, WordSelectionDelete } from './word-keys'
 import { DoubleClickLineEnd } from './double-click-line-end'
 import { appendsAtEnd, touchedTopLevelBlocks } from './touched-blocks'
 import { installProseMirrorPerf } from './prosemirror-perf'
@@ -228,6 +230,10 @@ const anchorAttrs = {
   indentLeft: { default: null as number | null },
   indentRight: { default: null as number | null },
   indentFirstLine: { default: null as number | null },
+  // Display-only: where a list marker stood before Backspace took it off (text
+  // indent minus hanging, twips). The next Backspace walks the line back there
+  // first, like Word; never written to the file.
+  listMarkerLeft: { default: null as number | null, rendered: false },
   spaceBefore: { default: null as number | null },
   spaceAfter: { default: null as number | null },
   /** w:beforeAutospacing / w:afterAutospacing: Word's HTML auto spacing (14pt) replaces
@@ -1410,8 +1416,17 @@ export const WordEditorShortcuts = Extension.create({
       // U+00A0 and U+2011: the characters Word inserts for these two chords
       'Mod-Shift-Space': () => this.editor.commands.insertContent('\u00a0'),
       'Mod-Shift--': () => this.editor.commands.insertContent('\u2011'),
-      'Alt-Shift-ArrowUp': () => moveBlocks(this.editor, -1),
-      'Alt-Shift-ArrowDown': () => moveBlocks(this.editor, 1),
+      // Word moves paragraphs with Ctrl+Shift+Up/Down on the Mac, Alt+Shift+Up/Down elsewhere
+      // (on the Mac Option+Shift+Up/Down extends the selection by paragraph: WordNavigation)
+      ...(typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+        ? {
+            'Ctrl-Shift-ArrowUp': () => moveBlocks(this.editor, -1),
+            'Ctrl-Shift-ArrowDown': () => moveBlocks(this.editor, 1),
+          }
+        : {
+            'Alt-Shift-ArrowUp': () => moveBlocks(this.editor, -1),
+            'Alt-Shift-ArrowDown': () => moveBlocks(this.editor, 1),
+          }),
     }
   },
 })
@@ -1469,6 +1484,9 @@ export const DocListItem = Node.create({
       kind: { default: 'bullet' as 'bullet' | 'ordered' },
       numId: { default: null as string | null },
       ilvl: { default: 0 },
+      // numbering came from the pStyle chain (display only: the style's w:ind
+      // then beats the level's, see styleOverLevelIndent)
+      listFromStyle: { default: null as true | null, rendered: false },
     }
   },
   parseHTML() {
@@ -1530,14 +1548,59 @@ export const DocListItem = Node.create({
        */
       continueDocList:
         () =>
-        ({ state, chain }: { state: EditorState; chain: () => ChainedCommands }) => {
+        ({
+          state,
+          chain,
+          editor,
+        }: {
+          state: EditorState
+          chain: () => ChainedCommands
+          editor: Editor
+        }) => {
           const { $from, empty } = state.selection
           if (!empty) return false
           const node = $from.parent
           if (node.type.name !== 'docListItem') return false
           if (node.content.size === 0) {
+            // Word: Enter on an empty nested item first moves it back one level ...
+            const ilvl = Number(node.attrs.ilvl) || 0
+            if (ilvl > 0)
+              return chain()
+                .updateAttributes('docListItem', { ilvl: ilvl - 1 })
+                .run()
+            // ... then leaves the list, and the List Paragraph style that numbering
+            // applied goes with the marker (Word probe 2026-10-07)
+            const styles = (editor.storage.listNumbering as ListNumberingStorage | undefined)
+              ?.styles
+            const styleId = typeof node.attrs.styleId === 'string' ? node.attrs.styleId : null
+            const info = styleId ? styles?.get(styleId) : undefined
+            const listStyle =
+              !!info &&
+              (/^list paragraph$/i.test(info.name) || (!!info.numPr && info.numPr !== 'none'))
             return chain()
-              .setNode('docParagraph', { ...node.attrs, docxIndex: null })
+              .setNode('docParagraph', {
+                ...node.attrs,
+                docxIndex: null,
+                ...(listStyle ? { styleId: null } : {}),
+              })
+              .run()
+          }
+          if ($from.parentOffset === 0) {
+            // Enter at the start of an item leaves an empty ITEM above it (TipTap would turn
+            // that first half into a plain paragraph)
+            const attrs = getSplittedAttributes(
+              editor.extensionManager.attributes,
+              'docListItem',
+              node.attrs,
+            )
+            return chain()
+              .command(({ tr, dispatch }) => {
+                if (dispatch) {
+                  tr.split(tr.selection.from, 1, [{ type: node.type, attrs }])
+                  dispatch(tr.scrollIntoView())
+                }
+                return true
+              })
               .run()
           }
           return chain()
@@ -1571,10 +1634,73 @@ export const DocListItem = Node.create({
       if (next === ilvl) return true
       return this.editor.commands.updateAttributes('docListItem', { ilvl: next })
     }
+    // Word: Backspace at the very start of a list item (empty or not) removes
+    // its bullet/number and keeps the paragraph (style included) with its text
+    // where it was — at the level's text indent. Only later Backspaces walk
+    // the indent back and finally join the previous paragraph (Word probe
+    // 2026-10-06; the indent steps are TabStops' backspaceIndent).
+    const removeMarker = () => {
+      const { state } = this.editor
+      const { $from, empty } = state.selection
+      if (!empty || !this.editor.isEditable) return false
+      const node = $from.parent
+      if (node.type.name !== 'docListItem' || $from.parentOffset !== 0) return false
+      const storage = this.editor.storage.listNumbering as ListNumberingStorage | undefined
+      const def = node.attrs.numId ? storage?.defs.get(String(node.attrs.numId)) : undefined
+      const level = def?.levels[Math.max(0, Number(node.attrs.ilvl) || 0)]
+      const effective =
+        level && storage ? styleOverLevelIndent(level, node.attrs, storage) : undefined
+      const textLeft =
+        node.attrs.indentLeft != null ? Number(node.attrs.indentLeft) : effective?.indentLeft
+      // where the marker stood: the text indent minus the hanging part (Word's
+      // next Backspace stops there before reaching the margin)
+      const hanging =
+        node.attrs.indentFirstLine != null
+          ? Math.max(0, -Number(node.attrs.indentFirstLine))
+          : (effective?.hanging ?? 0)
+      const markerLeft = Math.max(0, Number(textLeft ?? 0) - hanging)
+      return (
+        this.editor
+          .chain()
+          // its own undo step: ⌘Z brings the bullet back, not the typing before it
+          .command(({ tr }) => {
+            closeHistory(tr)
+            return true
+          })
+          .setNode('docParagraph', {
+            ...node.attrs,
+            docxIndex: null,
+            // the style's own indent is not written again (Word leaves w:ind off)
+            indentLeft:
+              textLeft && textLeft !== styleOwnLeft(node.attrs.styleId, storage) ? textLeft : null,
+            indentFirstLine: null,
+            listMarkerLeft: textLeft ? markerLeft : null,
+          })
+          .run()
+      )
+    }
+    // Word: Tab demotes an item only at its very start (or with the whole item / several
+    // items selected); inside the text it types a tab character
+    const tabInItem = () => {
+      if (!this.editor.isActive('docListItem')) return false
+      const { state } = this.editor
+      const { selection } = state
+      const { $from, $to } = selection
+      const wholeItem = selection.empty
+        ? $from.parentOffset === 0
+        : !$from.sameParent($to) ||
+          ($from.parentOffset === 0 && $to.parentOffset === $to.parent.content.size)
+      if (!wholeItem) {
+        this.editor.view.dispatch(state.tr.insertText('\t').scrollIntoView())
+        return true
+      }
+      return changeLevel(1)()
+    }
     return {
-      Tab: changeLevel(1),
+      Tab: tabInItem,
       'Shift-Tab': changeLevel(-1),
       Enter: () => (this.editor.commands as unknown as DocListCommands).continueDocList(),
+      Backspace: removeMarker,
     }
   },
 })
@@ -1994,6 +2120,47 @@ function markerClippedByCell(
  * explicit firstLine="0" included) replaces the level's special indent.
  * null = the level carries no indent at all and the CSS default hang applies.
  */
+/**
+ * Word lays a style-borne list level's indent beneath the style's own w:ind:
+ * when the numbering comes from the paragraph style chain (no direct
+ * w:numPr), the chain's left / first-line indents win over the level's. A
+ * direct w:numPr keeps the level on top (Word probe 2026-10-01: ECM L2
+ * w:left=1390 over level left=1106 hanging=539 puts the text at 1390 and the
+ * marker at 851; the same paragraph with a direct numPr sits at 1106). The
+ * node must still carry the style's own numId/ilvl — a list the user re-levels
+ * or re-numbers is no longer the style's.
+ */
+function styleOverLevelIndent(
+  level: NumberingLevel,
+  attrs: Record<string, unknown>,
+  storage: ListNumberingStorage,
+): NumberingLevel {
+  if (attrs.listFromStyle !== true || typeof attrs.styleId !== 'string') return level
+  const info = storage.styles?.get(attrs.styleId)
+  const num = info?.numPr
+  if (!num || num === 'none' || num.numId !== attrs.numId || num.ilvl !== Number(attrs.ilvl ?? 0))
+    return level
+  const d = info?.display
+  if (d?.indentLeftTwips == null && d?.indentFirstLineTwips == null) return level
+  const out = { ...level }
+  if (d.indentLeftTwips != null) out.indentLeft = d.indentLeftTwips
+  if (d.indentFirstLineTwips != null) {
+    out.hanging = d.indentFirstLineTwips < 0 ? -d.indentFirstLineTwips : undefined
+    out.firstLine = d.indentFirstLineTwips > 0 ? d.indentFirstLineTwips : undefined
+  }
+  return out
+}
+
+/** the paragraph style's own left indent in twips (basedOn resolved), when it declares one */
+function styleOwnLeft(
+  styleId: unknown,
+  storage: ListNumberingStorage | undefined,
+): number | undefined {
+  return typeof styleId === 'string'
+    ? storage?.styles?.get(styleId)?.display?.indentLeftTwips
+    : undefined
+}
+
 function specialIndentTw(attrs: Record<string, unknown>, level: NumberingLevel): number | null {
   if (attrs.indentFirstLine != null) return Number(attrs.indentFirstLine)
   if (level.hanging) return -level.hanging
@@ -2216,9 +2383,10 @@ export const ListNumberingExtension = Extension.create<object, ListNumberingStor
         // geometry fallback: when the paragraph has no w:ind of its own, use the numbering.xml level's indent;
         // marker font size comes from the level's rPr, else follows the item's first text run (Word rule)
         const def = refs[i].numId !== null ? storage.defs.get(refs[i].numId as string) : undefined
-        const level = def?.levels[Math.max(0, refs[i].ilvl)]
-        if (level) {
+        const defLevel = def?.levels[Math.max(0, refs[i].ilvl)]
+        if (defLevel) {
           const nodeAttrs = stray ? strayGeometryAttrs(nodes[i].node) : nodes[i].node.attrs
+          const level = styleOverLevelIndent(defLevel, nodeAttrs, storage)
           // an explicit w:ind left (0 included) beats the numbering level's indent
           const leftTw =
             nodeAttrs.indentLeft != null ? Number(nodeAttrs.indentLeft) : (level.indentLeft ?? 0)
@@ -6035,6 +6203,9 @@ export const editorExtensions = [
   Gapcursor,
   ImageCopyExtension,
   EnterReplacesSelection,
+  WordEnterStyle,
+  WordSelectionDelete,
+  WordNavigation,
   WordSelectAllDelete,
   AutoLinkOnDelimiter,
   ListAutoFormat,

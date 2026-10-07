@@ -71,8 +71,10 @@ describe('Tab key inserts a tab stop', () => {
     editor.destroy()
   })
 
-  it('still indents a list item', () => {
-    const editor = new Editor({
+  // Word (probed 2026-10-07): Tab demotes a list item only from the start of its text; inside
+  // the text it types a tab character
+  const listItem = () =>
+    new Editor({
       element: document.createElement('div'),
       extensions: editorExtensions,
       content: {
@@ -86,10 +88,22 @@ describe('Tab key inserts a tab stop', () => {
         ],
       } as never,
     })
-    editor.commands.setTextSelection(2)
+
+  it('indents a list item when the caret is at its start', () => {
+    const editor = listItem()
+    editor.commands.setTextSelection(1)
     pressKey(editor, 'Tab')
     expect(editor.state.doc.child(0).attrs.ilvl).toBe(1)
     expect(editor.state.doc.textContent).toBe('item')
+    editor.destroy()
+  })
+
+  it('types a tab inside a list item instead of indenting it', () => {
+    const editor = listItem()
+    editor.commands.setTextSelection(3)
+    pressKey(editor, 'Tab')
+    expect(editor.state.doc.child(0).attrs.ilvl).toBe(0)
+    expect(editor.state.doc.textContent).toBe('it\tem')
     editor.destroy()
   })
 

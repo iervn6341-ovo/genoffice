@@ -10,7 +10,6 @@ import type { CommandDef } from '../registry'
 import { CliError, EXIT } from '../result'
 
 const ASPECTS = ['1:1', '4:3', '16:9', '9:16', '3:4', '2:3', '3:2', 'auto']
-const SIZES = ['auto', '0.5k', '1k', '2k', '3k', '4k']
 
 const EXTS_BY_MIME: Record<string, readonly string[]> = {
   'image/png': ['png'],
@@ -23,7 +22,7 @@ export const imageCommand: CommandDef = {
   name: 'image',
   summary:
     'Generate an image from a prompt with the configured image provider and save it as a file.',
-  usage: 'image <prompt> [--out <file>] [--aspect 16:9] [--size 1k] [--ref <image>]... [--force]',
+  usage: 'image <prompt> [--out <file>] [--aspect 16:9] [--ref <image>]... [--force]',
   options: [
     {
       name: 'out',
@@ -49,12 +48,6 @@ export const imageCommand: CommandDef = {
     const aspect = flagString(args, 'aspect')
     if (aspect && !ASPECTS.includes(aspect)) {
       throw new CliError(EXIT.usage, `--aspect must be one of ${ASPECTS.join(', ')}`, undefined, {
-        reason: 'invalid_argument',
-      })
-    }
-    const size = flagString(args, 'size')
-    if (size && !SIZES.includes(size)) {
-      throw new CliError(EXIT.usage, `--size must be one of ${SIZES.join(', ')}`, undefined, {
         reason: 'invalid_argument',
       })
     }
@@ -87,8 +80,6 @@ export const imageCommand: CommandDef = {
     const r = await generateImageTool(aiSettingsPath(ctx.env), {
       prompt,
       aspectRatio: aspect,
-      imageSize: size,
-      model: flagString(args, 'model'),
       ...(refs.length ? { referenceImageUrls: refs } : {}),
     })
     if (!r.url) throw new CliError(EXIT.app, r.error ?? 'image generation failed')

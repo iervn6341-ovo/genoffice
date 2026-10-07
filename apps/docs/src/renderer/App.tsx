@@ -2462,7 +2462,11 @@ export function App() {
         setStatus(t('appExportPdfFailed', { error: 'pagination preview produced no pages' }))
         return
       }
-      void exportPdf(pending.outPath).then(pending.resolve, () => pending.resolve(false))
+      const settle = (ok: boolean) => {
+        if (pending.closePreviewAfter) setShowPagePreview(false)
+        pending.resolve(ok)
+      }
+      void exportPdf(pending.outPath).then(settle, () => settle(false))
     }, 1200)
     return () => window.clearTimeout(timer)
   }, [showPagePreview, pendingExportTick, exportPdf])

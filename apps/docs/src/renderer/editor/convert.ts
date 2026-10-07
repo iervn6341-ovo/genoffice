@@ -61,6 +61,7 @@ import { borderDrawnPx, borderTotalPt } from './border-metrics'
 import { parseRunBorderAttr } from './run-border'
 import { parseTextOutlineAttr } from './text-outline'
 import { charScaleXAttr, parseGlowAttr, parseTextEffectAttr } from './text-effects'
+import { isEastAsianFontName } from '../font-list'
 
 /** minimal ProseMirror JSON shapes */
 export interface PmMark {
@@ -634,6 +635,7 @@ function blockToPmNode(
           kind: block.list?.kind ?? 'bullet',
           numId: block.list?.numId ?? null,
           ilvl: block.list?.ilvl ?? 0,
+          listFromStyle: block.list?.fromStyle ?? null,
           bookmarks: block.bookmarks ?? null,
           hiddenBookmarks: block.hiddenBookmarks ?? null,
           commentStarts: block.commentStarts ?? null,
@@ -1518,6 +1520,15 @@ function runMarks(run: Run): PmMark[] {
         font: run.font ?? null,
         eaSlotEmpty: run.eaSlotEmpty ?? null,
         fontAscii: run.fontAscii ?? null,
+        // Latin-only w:rFonts (parse fills font from ascii): Word keeps the
+        // style-inherited East Asian face for CJK, so the run must not pin it
+        eaInherited:
+          !run.eastAsiaFont &&
+          !!run.fontAscii &&
+          run.font === run.fontAscii &&
+          !isEastAsianFontName(run.fontAscii)
+            ? true
+            : null,
         // cs chain only kicks in for complex-script text (Word's w:cs semantics)
         csFont: run.csFont && textHasComplexScript(run.text) ? run.csFont : null,
         charSpacingTwips: run.charSpacingTwips ?? null,

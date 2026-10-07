@@ -15,6 +15,7 @@ import {
   cssLineHeight,
   cssRunFontFamily,
   estimateHfHeight,
+  paraLineFactorCss,
   runLetterSpacingCss,
 } from '../line-metrics'
 import { borderCssStyle, borderDrawnPx, isDrawnBorder } from './border-metrics'
@@ -1136,8 +1137,20 @@ export function makeGapHfEl(opts: {
     const p = document.createElement('div')
     paraEls[index] = p
     p.className = 'page-hf-para'
+    // runs without their own w:sz take the paragraph style's size (Footer 10pt
+    // under a 12pt Normal: the strip line, and the body push-down, follow it)
+    if (para.styleSizeHalfPoints) p.style.fontSize = `${para.styleSizeHalfPoints / 2}pt`
     const lh = hfParaLineHeightCss(para)
     if (lh) p.style.lineHeight = lh
+    // Word sizes a strip line by the fonts its text uses, like a body line: a
+    // page-number-only footer line under an Arial/標楷體 Normal takes Arial's
+    // height, not the East Asian face's (Word probe 2026-10-01: 1.8pt per
+    // line, a body line per page on a two-paragraph footer). Table rows keep
+    // the strip factor; the doc CSS re-resolves the strip line-height per para.
+    if (!para.cells) {
+      const text = para.runs.map((r) => r.text ?? '').join('')
+      p.style.setProperty('--doc-line-factor', paraLineFactorCss(text))
+    }
     // floating-box content: displayed in the strip, but the push-down probe
     // excludes it (Word draws it at the anchor, off the strip flow)
     if (para.boxAnchored) p.classList.add('page-hf-box-anchored')

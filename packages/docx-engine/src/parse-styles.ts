@@ -196,6 +196,7 @@ export async function parseStyles(
     }
     const basedOn = attrsOf(findChild(styleNode, 'w:basedOn') ?? {})['w:val']
     if (basedOn) basedOnIds.set(styleId, basedOn)
+    const nextStyle = attrsOf(findChild(styleNode, 'w:next') ?? {})['w:val']
     const link = attrsOf(findChild(styleNode, 'w:link') ?? {})['w:val']
     if (link) linkedIds.set(styleId, link)
     const onFlag = (tag: string): boolean | undefined => {
@@ -224,6 +225,7 @@ export async function parseStyles(
       headingLevel,
       headingOutlineOff: outlineOffIds.has(styleId) ? true : undefined,
       basedOn,
+      ...(type === 'paragraph' && nextStyle ? { next: nextStyle } : {}),
       semiHidden: onFlag('w:semiHidden'),
       qFormat: onFlag('w:qFormat'),
       display: type === 'table' ? undefined : styleDisplayOf(styleNode, theme, themeFonts),

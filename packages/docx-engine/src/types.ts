@@ -681,6 +681,9 @@ export interface HfParagraph extends ParaFormat {
   box?: HfTextBox
   /** w:ptab alignments indexed by overall tab order (regular w:tab slots are undefined); margin-relative, ignores tab stops */
   ptabAligns?: Array<'left' | 'center' | 'right' | undefined>
+  /** the paragraph style's run size (basedOn resolved): runs without their own
+   *  w:sz take it — a Footer style at 10pt under a 12pt Normal. Display only */
+  styleSizeHalfPoints?: number
   runs: Run[]
   /** layout-table row: one entry per cell, rendered as columns. Display-only —
    *  saving keeps the part's original w:tbl bytes and never serializes cells. */
@@ -1438,8 +1441,10 @@ export interface Block {
   outlineOnly?: boolean
   /** original w:pStyle val, if any */
   styleId?: string
-  /** list info (type === 'listItem') */
-  list?: { kind: 'bullet' | 'ordered'; numId: string; ilvl: number }
+  /** list info (type === 'listItem'); fromStyle = the numbering comes from the
+   *  pStyle chain, not a direct w:numPr (the style's own w:ind then beats the
+   *  level's — display only, never written back) */
+  list?: { kind: 'bullet' | 'ordered'; numId: string; ilvl: number; fromStyle?: true }
   /** paragraph-level formatting (paragraph / heading / listItem) */
   format?: ParaFormat
   /** user bookmarks starting in this paragraph (w:bookmarkStart, _internal names excluded) */
@@ -1972,6 +1977,8 @@ export interface StyleInfo {
   headingOutlineOff?: true
   /** w:basedOn (the parent's own id, unresolved) */
   basedOn?: string
+  /** w:next: the style Enter at the end of a paragraph in this style continues with (own, not inherited) */
+  next?: string
   /** w:semiHidden — Word itself hides it from the style gallery (e.g. DefaultParagraphFont) */
   semiHidden?: boolean
   /** w:qFormat — candidate for Word's quick style gallery */

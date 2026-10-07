@@ -41,7 +41,7 @@ const overflow = (p: Page, body: string) =>
 
 /** the group holding the AI entry */
 const aiGroup = (p: Page) =>
-  p.locator('.rb-fold-group', { has: p.locator('button.ai-entry', { hasText: 'AI' }) })
+  p.locator('.rb-fold-group', { has: p.locator('button.ai-entry[data-tip="Open AI assistant"]') })
 
 for (const app of APPS) {
   test.describe(`${app.name} ribbon`, () => {
@@ -65,7 +65,7 @@ for (const app of APPS) {
         expect(await overflow(p, app.body)).toBeLessThanOrEqual(1)
         // the folded dropdown still reaches AI
         await group.locator('.rb-fold-btn').click()
-        const entry = group.locator('.rb-fold-items button.ai-entry', { hasText: 'AI' })
+        const entry = group.locator('.rb-fold-items button.ai-entry[data-tip="Open AI assistant"]')
         await expect(entry).toBeVisible()
         await entry.click()
         await expect(group).not.toHaveClass(/rb-fold-open/) // picking a command closes the panel

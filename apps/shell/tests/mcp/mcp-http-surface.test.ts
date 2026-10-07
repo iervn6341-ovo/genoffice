@@ -255,8 +255,9 @@ describe('MCP surface over Streamable HTTP (/mcp)', () => {
       })
       // the slides and sheets families follow the same rule: only `generate` is
       // hidden
+      // PPSX (slide show) shares the pptx family since the PPSX support landed
       expect(infoJson.families.find((f) => f.family === 'pptx')!.mcp).toEqual({
-        save: ['pptx'],
+        save: ['pptx', 'ppsx'],
       })
       expect(infoJson.families.find((f) => f.family === 'xlsx')!.mcp).toEqual({
         save: ['xlsx'],

@@ -3,7 +3,7 @@ import type { Mark as PmMark } from '@tiptap/pm/model'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import {} from '@tiptap/pm/tables'
-import { cssCsFontFamily, cssRunFontFamily } from '../line-metrics'
+import { cssCsFontFamily, cssLatinOnlyFontFamily, cssRunFontFamily } from '../line-metrics'
 import { isEastAsianFontName } from '../font-list'
 import { t } from '../i18n/locale'
 import { dkBackground } from './dark-page'
@@ -575,6 +575,9 @@ export const TextStyleMark = Mark.create({
       eaSlotEmpty: { default: null as boolean | null },
       // Latin slot (w:ascii/w:hAnsi) when it differs from the primary/eastAsia font
       fontAscii: { default: null as string | null },
+      // the run declared only a Latin face (no w:eastAsia): CJK keeps the
+      // inherited East Asian chain (display only; save reads the raw rFonts)
+      eaInherited: { default: null as boolean | null, rendered: false },
       // complex-script slot (w:cs); convert sets it only when the run text needs it
       csFont: { default: null as string | null },
       charSpacingTwips: { default: null as number | null },
@@ -659,7 +662,9 @@ export const TextStyleMark = Mark.create({
         `font-family:${
           cs
             ? cssCsFontFamily(cs, ascii ?? undefined, ea ?? undefined)
-            : cssRunFontFamily(ascii, ea)
+            : mark.attrs.eaInherited && ascii
+              ? cssLatinOnlyFontFamily(ascii)
+              : cssRunFontFamily(ascii, ea)
         }`,
       )
     }

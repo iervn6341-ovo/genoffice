@@ -139,9 +139,8 @@ describe('cloud guard rails', () => {
     expect(siblingExtensions('bmp')).toEqual(['png', 'jpg', 'webp', 'gif'])
   })
 
-  it('validates --aspect and --size before any network call', async () => {
+  it('validates --aspect before any network call', async () => {
     expect((await run(['image', 'a cat', '--aspect', '5:7', '--json'])).code).toBe(1)
-    expect((await run(['image', 'a cat', '--size', '9k', '--json'])).code).toBe(1)
   })
 
   it('recognises a per-file provider failure', async () => {

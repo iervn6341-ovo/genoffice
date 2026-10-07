@@ -99,6 +99,8 @@ for (const theme of ['light', 'dark']) {
     ['slides', 2],
   ] as const) {
     test(`${kind} File button retains readable text on hover and open (${theme})`, async () => {
+      // macOS keeps File in the native menu bar; the ribbon has no File tab there
+      test.skip(process.platform === 'darwin', 'no ribbon File tab on macOS')
       const launched = await launchShell({
         onboardingSeen: true,
         settings: { theme },

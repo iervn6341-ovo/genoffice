@@ -396,6 +396,11 @@ export function docStyleCss(parsed: ParsedDocFull): string {
         ? normal.font
         : undefined
     decls.push(`--doc-line-factor-kr:${krLineFactor(normalEaKr ?? dd?.eastAsiaFont)}`)
+    // header/footer strip paragraphs pick one of these by their text (hf-dom);
+    // .page-wrap too, the first-page strips are .doc-page siblings
+    rules.push(
+      `.page-wrap { ${decls.filter((d) => d.startsWith('--doc-line-factor-')).join(';')} }`,
+    )
     // dual-slot baseline: Latin families first, then the East Asian chain
     const baseAscii = normal?.fontAscii ?? dd?.asciiFont
     const baseEa = normal?.font ?? dd?.eastAsiaFont
@@ -438,6 +443,18 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     rules.push(
       `.page-wrap, .doc-page, .pv-page { --doc-latin-chain:${docLatinChainCss(baseAscii ?? baseEa ?? 'Calibri')} }`,
     )
+    // inherited East Asian chain for Latin-only runs (cssLatinOnlyFontFamily):
+    // StyleDisplay.font is EA-first, so font === fontAscii is a Latin-only Normal
+    const docEa =
+      normal?.font &&
+      !normal.eaSlotEmpty &&
+      (normal.font !== normal.fontAscii || isCjkFontName(normal.font))
+        ? normal.font
+        : dd?.eastAsiaFont && !dd.eaSlotEmpty
+          ? dd.eastAsiaFont
+          : undefined
+    if (docEa)
+      rules.push(`.page-wrap, .doc-page, .pv-page { --doc-ea-chain:${cssFontFamily(docEa)} }`)
     // no size anywhere (HWP exports): Word's built-in default is 10pt, not the editor's 11pt
     const sizeHalf = normal?.sizeHalfPoints ?? dd?.sizeHalfPoints ?? 20
     if (sizeHalf) {
@@ -495,6 +512,12 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     // .pv-page too: preview header/footer strips must wrap with the same
     // document font/line-height the canvas strips inherit inside .doc-page
     rules.push(`.doc-page, .pv-page { ${decls.join(';')} }`)
+    // strip paragraphs re-resolve the line-height with their own per-script
+    // --doc-line-factor (hf-dom); an inherited line-height was substituted on
+    // .doc-page with the document factor. Declared spacing stays inline.
+    rules.push(
+      `:is(.page-wrap, .pv-page, #hf-strip-probe) .page-hf-para { line-height:${lh ?? (typedGrid ? cssGridLineExpr() : cssGridLineBase())} }`,
+    )
     if (typedGrid) {
       // Word's typed line grid governs the body flow only: header/footer strip
       // lines keep their natural heights (prod-sas 003/004 Word baselines:
@@ -712,6 +735,9 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       // the strut alias tail must follow the style's own chain, not the doc base
       if (gridStrut) decls.push(`--doc-grid-strut-tail:${styleFamily}`)
       if (d.fontAscii) decls.push(`--doc-latin-chain:${docLatinChainCss(d.fontAscii)}`)
+      if (!d.eaSlotEmpty && (d.font !== d.fontAscii || isCjkFontName(d.font))) {
+        decls.push(`--doc-ea-chain:${cssFontFamily(d.font)}`)
+      }
       // style-declared EA face re-anchors the CJK line factor for its paragraphs
       // (runs without their own fonts resolve --doc-line-factor-cjk through this);
       // an empty-theme-slot backfill is not a document choice and stays silent

@@ -157,9 +157,13 @@ export const CaretMarksMemory = Extension.create({
             // block: its paragraph formatting (style, paragraph-mark font,
             // alignment...) must come back from the removed range's first
             // paragraph, or style-derived fonts reset to the theme (r176)
-            const paraFormat = paraFormatIsDefault(block)
-              ? firstParaFormatIn(oldState.doc, from, to)
-              : null
+            // (a paragraph deletion that decided the survivor itself — WordSelectionDelete,
+            // where the last paragraph's mark and formatting stay — is left alone)
+            const survivorDecided = transactions.some((tr) => tr.getMeta('wordSurvivingPara'))
+            const paraFormat =
+              !survivorDecided && paraFormatIsDefault(block)
+                ? firstParaFormatIn(oldState.doc, from, to)
+                : null
             const restoresPara =
               paraFormat !== null &&
               PARA_FORMAT_ATTRS.some(

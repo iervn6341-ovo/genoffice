@@ -2560,6 +2560,8 @@ function createShellWindow(): void {
   const manager = new TabManager(
     win,
     () => {
+      // late tab events (title, fullscreen release timers) can outlive the window
+      if (win.isDestroyed()) return
       win.webContents.send(TABS_CHANNELS.changed, manager.list())
       refreshTitleBarOverlay()
       publishOpenDocumentsIfOwner(manager.openFilePaths())

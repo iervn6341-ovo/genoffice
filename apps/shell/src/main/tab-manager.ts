@@ -156,6 +156,10 @@ export class TabManager {
   setContentBleed(wc: WebContents, on: boolean): void {
     if (on) this.bleedWcIds.add(wc.id)
     else this.bleedWcIds.delete(wc.id)
+    // A show's deferred fullscreen release can fire after the shell window
+    // closed (the tab's webContents may still be alive for a moment): onChanged
+    // messages the destroyed window and threw "Object has been destroyed".
+    if (this.shellWindow.isDestroyed()) return
     this.layout()
     this.onChanged()
   }

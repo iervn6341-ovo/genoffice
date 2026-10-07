@@ -638,7 +638,7 @@ function listRefOf(
   ctx: BuildContext,
   pPr: XNode | undefined,
   styleId: string | undefined,
-): { numId: string; ilvl: number } | undefined {
+): { numId: string; ilvl: number; fromStyle?: true } | undefined {
   const numPr = pPr ? findChild(pPr, 'w:numPr') : undefined
   const directNumId = numPr ? attrsOf(findChild(numPr, 'w:numId') ?? {})['w:val'] : undefined
   const directIlvl = numPr ? attrsOf(findChild(numPr, 'w:ilvl') ?? {})['w:val'] : undefined
@@ -648,7 +648,7 @@ function listRefOf(
   const numId = directNumId ?? styleNumPr?.numId
   if (!numId) return undefined
   const ilvl = directIlvl !== undefined ? parseInt(directIlvl, 10) || 0 : (styleNumPr?.ilvl ?? 0)
-  return { numId, ilvl }
+  return { numId, ilvl, ...(directNumId === undefined ? { fromStyle: true as const } : {}) }
 }
 
 /** bullet/ordered classification of one list level (mixed lists differ per ilvl) */
@@ -1920,7 +1920,12 @@ function buildTextParagraph(
       ...base,
       type: 'listItem',
       styleId,
-      list: { kind, numId: listRef.numId, ilvl: listRef.ilvl },
+      list: {
+        kind,
+        numId: listRef.numId,
+        ilvl: listRef.ilvl,
+        ...(listRef.fromStyle ? { fromStyle: true as const } : {}),
+      },
       format,
       rawPPr,
       bookmarks,
@@ -6158,17 +6163,15 @@ function hfParagraphs(
     const mergedStops = mergeTabStops(d?.tabStops, direct?.tabStops)
     // a blank strip line is sized by its paragraph mark, else by the style's run size
     const styleId = pPr ? attrsOf(findChild(pPr, 'w:pStyle') ?? {})['w:val'] : undefined
-    const emptySz =
-      runs.length === 0
-        ? (emptyParaSizeHalfPoints(pNode, pPr) ??
-          (styleId ? styles?.get(styleId)?.display?.sizeHalfPoints : undefined))
-        : undefined
+    const styleSz = styleId ? styles?.get(styleId)?.display?.sizeHalfPoints : undefined
+    const emptySz = runs.length === 0 ? (emptyParaSizeHalfPoints(pNode, pPr) ?? styleSz) : undefined
     out.push({
       ...hfStyledParaFormat(pNode, styles, docDefaults),
       ...(mergedStops ? { tabStops: mergedStops } : {}),
       ...(sawPtab ? { ptabAligns } : {}),
       ...(frameXAlign ? { frameXAlign } : {}),
       ...(emptySz ? { emptyRunSizeHalfPoints: emptySz } : {}),
+      ...(runs.length > 0 && styleSz ? { styleSizeHalfPoints: styleSz } : {}),
       runs,
     })
     out.push(...anchoredBoxes)
