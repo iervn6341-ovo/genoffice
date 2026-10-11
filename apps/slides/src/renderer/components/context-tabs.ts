@@ -3,7 +3,8 @@ import type { RenderNode } from '@genoffice/pptx-render'
 /** 'mixed' = multi-select spanning pictures/groups: only selection-wide commands (outline) apply */
 export type ContextElementType =
   'table' | 'chart' | 'picture' | 'shape' | 'textShape' | 'mixed' | null
-export type ContextTab = 'tableDesign' | 'chartDesign' | 'pictureFormat' | 'shapeFormat'
+export type ContextTab =
+  'tableDesign' | 'tableLayout' | 'chartDesign' | 'pictureFormat' | 'shapeFormat'
 
 function nodeHasVisibleText(node: RenderNode): boolean {
   if (node.type === 'text' || node.type === 'shape') {
@@ -29,6 +30,13 @@ export function contextTabForElement(type: ContextElementType): ContextTab | nul
   if (type === 'picture' || type === 'mixed') return 'pictureFormat'
   if (type === 'shape' || type === 'textShape') return 'shapeFormat'
   return null
+}
+
+/** Every contextual tab a selection reveals, in ribbon order (a table has two, like PowerPoint). */
+export function contextTabsForElement(type: ContextElementType): ContextTab[] {
+  if (type === 'table') return ['tableDesign', 'tableLayout']
+  const tab = contextTabForElement(type)
+  return tab ? [tab] : []
 }
 
 /**

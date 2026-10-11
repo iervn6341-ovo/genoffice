@@ -5,7 +5,13 @@ import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+  setEditorLayoutWidth,
+} from './helpers'
 
 const FIXTURE = resolve(__dirname, '../apps/sheets/fixtures/generated/compatibility-basic.xlsx')
 
@@ -46,6 +52,8 @@ test.describe('sheets: ribbon batch-1 features', () => {
     })
     try {
       const sheets = await waitForPageWithUrl(launched.app, '://sheets/')
+      // wide enough that no ribbon group folds into a dropdown
+      await setEditorLayoutWidth(launched.app, '://sheets/', 2400)
       await waitForWorkbook(sheets)
       const status = sheets.locator('.workbook-status')
 
@@ -110,6 +118,8 @@ test.describe('sheets: ribbon batch-1 features', () => {
     })
     try {
       const sheets = await waitForPageWithUrl(second.app, '://sheets/')
+      // wide enough that no ribbon group folds into a dropdown
+      await setEditorLayoutWidth(second.app, '://sheets/', 2400)
       await waitForWorkbook(sheets)
       await sheets.getByRole('button', { name: 'View', exact: true }).click()
       const headingsBox = sheets
@@ -136,6 +146,8 @@ test.describe('sheets: ribbon batch-2 features', () => {
     })
     try {
       const sheets = await waitForPageWithUrl(launched.app, '://sheets/')
+      // wide enough that no ribbon group folds into a dropdown
+      await setEditorLayoutWidth(launched.app, '://sheets/', 2400)
       await waitForWorkbook(sheets)
       const status = sheets.locator('.workbook-status')
       const origin = await gridOrigin(sheets)
@@ -215,6 +227,8 @@ test.describe('sheets: ribbon batch-3 features', () => {
     })
     try {
       const sheets = await waitForPageWithUrl(launched.app, '://sheets/')
+      // wide enough that no ribbon group folds into a dropdown
+      await setEditorLayoutWidth(launched.app, '://sheets/', 2400)
       await waitForWorkbook(sheets)
       const status = sheets.locator('.workbook-status')
       const origin = await gridOrigin(sheets)
@@ -258,7 +272,7 @@ test.describe('sheets: ribbon batch-3 features', () => {
 
       // ── Page Layout > Themes: apply Indigo (grid recolors live) ──
       await sheets.getByRole('button', { name: 'Page Layout' }).click()
-      await sheets.locator('.ribbon-tool', { hasText: 'Themes' }).click()
+      await sheets.locator('.ribbon-tool:not(.rb-fold-btn)', { hasText: 'Themes' }).click()
       await sheets.getByRole('option', { name: 'Indigo' }).click()
       await expect(status).toContainText('Theme "Indigo" applied')
 

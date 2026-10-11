@@ -224,3 +224,41 @@ describe('motion paths', () => {
     expect(done.dx).toBeCloseTo(0.25 * W, 5)
   })
 })
+
+describe('After Animation hide', () => {
+  const item = (id: string, after?: 'hideOnNextClick' | 'hideAfter') => ({
+    sourceId: id,
+    targetName: id,
+    effect: 'appear' as const,
+    trigger: 'onClick' as const,
+    durationMs: 0,
+    delayMs: 0,
+    ...(after ? { after } : {}),
+  })
+
+  it('hide on next click: each item replaces the previous one', () => {
+    const steps = buildSteps([
+      item('a', 'hideOnNextClick'),
+      item('b', 'hideOnNextClick'),
+      item('c', 'hideOnNextClick'),
+    ])
+    const hidden = (played: number) =>
+      ['a', 'b', 'c'].map((id) => computeNodeStates(steps, played, null, 540).get(id)!.hidden)
+    expect(hidden(0)).toEqual([true, true, true])
+    expect(hidden(1)).toEqual([false, true, true])
+    expect(hidden(2)).toEqual([true, false, true])
+    expect(hidden(3)).toEqual([true, true, false])
+  })
+
+  it('hides at the start of the next click, not after it', () => {
+    const steps = buildSteps([item('a', 'hideOnNextClick'), item('b')])
+    const s = computeNodeStates(steps, 1, 0, 540)
+    expect(s.get('a')!.hidden).toBe(true)
+    expect(s.get('b')!.hidden).toBe(true)
+  })
+
+  it('hide after animation goes away once its own effect finishes', () => {
+    const steps = buildSteps([item('a', 'hideAfter')])
+    expect(computeNodeStates(steps, 1, null, 540).get('a')!.hidden).toBe(true)
+  })
+})

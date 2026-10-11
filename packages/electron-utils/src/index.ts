@@ -92,3 +92,10 @@ export {
   type RendererHost,
 } from './renderer-scheme'
 export { installRendererProtocol, registerRendererScheme } from './renderer-protocol'
+export {
+  directPrintOptions,
+  listSystemPrinters,
+  type DirectPrintOptions,
+  type PrinterJob,
+  type PrinterListEntry,
+} from './printer-settings'

@@ -1180,7 +1180,7 @@ function formatPPrChildren(format: ParaFormat | undefined): PPrChild[] {
     // ECMA-376 17.3.4: an omitted w:space is 0; the renderer pads an undeclared side by the same 0
     const space = Math.min(31, Math.max(0, Math.round(style?.spacePt ?? 0)))
     const defaultColor = style?.color ? escapeXmlAttr(style.color) : 'auto'
-    const line = (side: string, ch: 't' | 'b' | 'l' | 'r') => {
+    const line = (side: string, ch: 't' | 'b' | 'l' | 'r' | 'h') => {
       const declared = format.borderLines?.[ch]
       const sz = declared?.szPt ? Math.max(1, Math.round(declared.szPt * 8)) : defaultSz
       const color = declared?.color ? escapeXmlAttr(declared.color) : defaultColor
@@ -1188,14 +1188,16 @@ function formatPPrChildren(format: ParaFormat | undefined): PPrChild[] {
         declared?.spacePt !== undefined
           ? Math.min(31, Math.max(0, Math.round(declared.spacePt)))
           : space
-      return `<w:${side} w:val="single" w:sz="${sz}" w:space="${sp}" w:color="${color}"/>`
+      const val = declared?.val ? escapeXmlAttr(declared.val) : 'single'
+      return `<w:${side} w:val="${val}" w:sz="${sz}" w:space="${sp}" w:color="${color}"/>`
     }
     const sides: string[] = []
-    // schema order inside pBdr: top, left, bottom, right
+    // schema order inside pBdr: top, left, bottom, right, between
     if (format.borders.includes('t')) sides.push(line('top', 't'))
     if (format.borders.includes('l')) sides.push(line('left', 'l'))
     if (format.borders.includes('b')) sides.push(line('bottom', 'b'))
     if (format.borders.includes('r')) sides.push(line('right', 'r'))
+    if (format.borders.includes('h')) sides.push(line('between', 'h'))
     if (sides.length > 0) out.push({ name: 'w:pBdr', xml: `<w:pBdr>${sides.join('')}</w:pBdr>` })
   }
   if (format.shadingFill) {
@@ -1391,6 +1393,7 @@ function rawPBdrUnchanged(raw: string | undefined, f: ParaFormat): boolean {
       ['bottom', 'b'],
       ['left', 'l'],
       ['right', 'r'],
+      ['between', 'h'],
     ] as const) {
       const el = kids.find((k) => k.name === `w:${side}`)
       // mirror extractParaFormat: nil is a reset, not a border, or the raw/model
@@ -1405,7 +1408,13 @@ function rawPBdrUnchanged(raw: string | undefined, f: ParaFormat): boolean {
       if (Number.isFinite(sz) && sz > 0) line.szPt = sz / 8
       const space = parseInt(rawAttr(el.xml, 'w:space') ?? '', 10)
       if (Number.isFinite(space) && space > 0) line.spacePt = space
-      if (line.color !== undefined || line.szPt !== undefined || line.spacePt !== undefined)
+      if (val && val !== 'single') line.val = val
+      if (
+        line.color !== undefined ||
+        line.szPt !== undefined ||
+        line.spacePt !== undefined ||
+        line.val !== undefined
+      )
         rawLines[ch] = line
     }
   }
@@ -1413,10 +1422,11 @@ function rawPBdrUnchanged(raw: string | undefined, f: ParaFormat): boolean {
   if (norm(rawBorders) !== norm(f.borders)) return false
   const normLines = (lines: ParaFormat['borderLines']) =>
     JSON.stringify(
-      (['t', 'b', 'l', 'r'] as const).map((ch) => [
+      (['t', 'b', 'l', 'r', 'h'] as const).map((ch) => [
         lines?.[ch]?.color ?? null,
         lines?.[ch]?.szPt ?? null,
         lines?.[ch]?.spacePt ?? null,
+        lines?.[ch]?.val ?? null,
       ]),
     )
   return normLines(rawLines) === normLines(f.borderLines)

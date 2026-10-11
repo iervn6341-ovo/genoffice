@@ -14,7 +14,13 @@ import React, {
 import { createPortal } from 'react-dom'
 import { isNotesDefaultColor } from '../notes-color'
 import { isInsertGallery, RibbonGalleryPane } from './RibbonGalleryPane'
-import type { AnimEffectKind, GradientFillSpec, TransitionKind } from '../../shared/ipc'
+import type {
+  AnimEffectKind,
+  GradientFillSpec,
+  SetEffectsPatch,
+  SetTransitionDetailOp,
+  TransitionKind,
+} from '../../shared/ipc'
 import type { ChartStyleInfo } from '@genoffice/pptx-render'
 import {
   useDismissablePopover,
@@ -33,7 +39,6 @@ import { ICON_COLORS } from '../insert-presets'
 import { THEME_PRESETS, type SlideThemePreset } from '../themes'
 import { restoreEditSelection } from '../TextEditOverlay'
 import { armColorInput, toPickerHex } from '../color-input'
-import { TABLE_SHADING_COLORS } from './table-shading-colors'
 import { useI18n, type StringKey } from '../i18n/locale'
 import {
   IconSlideMaster,
@@ -85,13 +90,19 @@ import {
   IconAnimStar,
   IconAnimNone,
   IconPageBorders,
-  IconNoneX,
   IconPathRight,
   IconPathDown,
   IconPathDiagonal,
   IconPathCircle,
   IconPathZigzag,
   IconShapes,
+  IconShapeEffects,
+  IconClock,
+  IconHighlighterPen,
+  IconPen,
+  IconRuler,
+  IconSpellcheck,
+  IconTheme,
   IconShapeStyle,
   IconFillColor,
   IconOutlineColor,
@@ -132,7 +143,14 @@ import type { FormatCmd } from './ribbon-shared'
 import { RibbonHomeTab } from './RibbonHomeTab'
 import { RibbonInsertTab } from './RibbonInsertTab'
 import { ShapeGalleryContent } from './ShapeGalleryPopover'
-import { autoContextTabForElement, contextTabForElement, type ContextTab } from './context-tabs'
+import {
+  autoContextTabForElement,
+  contextTabForElement,
+  contextTabsForElement,
+  type ContextTab,
+} from './context-tabs'
+import { TableDesignTab, TableLayoutTab } from './RibbonTableTabs'
+import { tableRibbonLabels } from '../i18n/table-ribbon'
 
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
 /** shell tab mode: the tab strip above owns traffic lights / caption buttons */
@@ -178,6 +196,7 @@ const TAB_LABEL: Record<MainTab | ContextTab, StringKey> = {
   review: 'ribbonTabReview',
   view: 'ribbonTabView',
   tableDesign: 'ribbonTabTableDesign',
+  tableLayout: 'ribbonTabTableDesign', // label comes from table-ribbon strings
   chartDesign: 'ribbonTabChartDesign',
   pictureFormat: 'ribbonTabPictureFormat',
   shapeFormat: 'ribbonTabShapeFormat',
@@ -330,100 +349,6 @@ const MOTION_PATHS: Array<{ label: StringKey; icon: React.ReactElement; path: st
 ]
 
 // ── Constants + helper components used by contextual tabs ─────────────────────
-
-/** Mini table thumbnail of a preset style (colors match the engine-side TABLE_STYLE_PRESETS literals) */
-function TableMiniPreview({
-  header,
-  band,
-  rowLine,
-  gridLine,
-  outline,
-}: {
-  /** Header row background color */
-  header?: string
-  /** Banded stripe color (rows 2/4) */
-  band?: string
-  /** Horizontal line color between rows */
-  rowLine?: string
-  /** All-gridlines color (horizontal + vertical) */
-  gridLine?: string
-  /** Outer border color */
-  outline?: string
-}) {
-  const W = 44
-  const H = 26
-  const rows = 4
-  const cols = 3
-  const rh = H / rows
-  const cw = W / cols
-  const hLines = [1, 2, 3].map((i) => i * rh)
-  const line = gridLine ?? rowLine
-  return (
-    <svg width={W} height={H} shapeRendering="crispEdges" aria-hidden>
-      <rect x={0} y={0} width={W} height={H} fill="#fff" />
-      {band &&
-        [1, 3].map((r) => <rect key={r} x={0} y={r * rh} width={W} height={rh} fill={band} />)}
-      {header && <rect x={0} y={0} width={W} height={rh} fill={header} />}
-      {line &&
-        hLines.map((y) => (
-          <line key={y} x1={0} y1={y} x2={W} y2={y} stroke={line} strokeWidth={1} />
-        ))}
-      {gridLine &&
-        [1, 2].map((c) => (
-          <line key={c} x1={c * cw} y1={0} x2={c * cw} y2={H} stroke={gridLine} strokeWidth={1} />
-        ))}
-      <rect
-        x={0.5}
-        y={0.5}
-        width={W - 1}
-        height={H - 1}
-        fill="none"
-        stroke={outline ?? '#E3E3E3'}
-        strokeWidth={1}
-      />
-    </svg>
-  )
-}
-
-/** UI descriptions of the 8 table preset styles */
-const TABLE_STYLE_PRESETS_UI: Array<{
-  key: string
-  label: StringKey
-  preview: { header?: string; band?: string; rowLine?: string; gridLine?: string; outline?: string }
-}> = [
-  { key: 'none', label: 'ribbonTableStyleNone', preview: {} },
-  {
-    key: 'lightGrid',
-    label: 'ribbonTableStyleLightGrid',
-    preview: { gridLine: '#BFBFBF', outline: '#BFBFBF' },
-  },
-  {
-    key: 'zebraBlue',
-    label: 'ribbonTableStyleZebraBlue',
-    preview: { header: '#4472C4', band: '#D6E4F0', outline: '#C9D8EA' },
-  },
-  {
-    key: 'zebraGray',
-    label: 'ribbonTableStyleZebraGray',
-    preview: { header: '#595959', band: '#EDEDED', outline: '#D0D0D0' },
-  },
-  {
-    key: 'headerDarkBlue',
-    label: 'ribbonTableStyleHeaderDarkBlue',
-    preview: { header: '#1F3864', rowLine: '#D9D9D9', outline: '#D0D0D0' },
-  },
-  {
-    key: 'headerOrange',
-    label: 'ribbonTableStyleHeaderOrange',
-    preview: { header: '#ED7D31', rowLine: '#D9D9D9', outline: '#D0D0D0' },
-  },
-  { key: 'noBorder', label: 'ribbonTableStyleNoBorder', preview: { band: '#F2F2F2' } },
-  {
-    key: 'fullBorder',
-    label: 'ribbonTableStyleFullBorder',
-    preview: { gridLine: '#595959', outline: '#595959' },
-  },
-]
 
 /** Chart style presets (legend/gridlines/data labels/bar width combinations, applied to the same-named EditChartOp fields) */
 interface ChartStylePreset {
@@ -662,33 +587,6 @@ const CHART_COLOR_SCHEME_UI: Array<{ key: string; label: StringKey; colors: stri
   { key: 'mono', label: 'ribbonSchemeMono', colors: ['#404040', '#666666', '#888888', '#AAAAAA'] },
 ]
 
-/** Table option toggle button (state can't be displayed, click only toggles). */
-function TableToggleBtn({
-  label,
-  on,
-  disabled,
-  onClick,
-  offClick,
-}: {
-  label: string
-  on: boolean
-  disabled?: boolean
-  onClick: () => void
-  offClick: () => void
-}) {
-  const { t } = useI18n()
-  return (
-    <button
-      className={`rb-icon ${on ? 'active' : ''}`}
-      disabled={disabled}
-      data-tip={t(on ? 'ribbonToggleOffTip' : 'ribbonToggleOnTip', { name: label })}
-      onClick={() => (on ? offClick() : onClick())}
-    >
-      {label}
-    </button>
-  )
-}
-
 function DisabledBig({ icon, label }: { icon: ReactNode; label: string }) {
   const { t } = useI18n()
   return (
@@ -771,28 +669,6 @@ async function urlToBase64(url: string): Promise<string> {
 
 /** Right-pointing chevron on the gradient/texture submenu rows. */
 /** Table border weight picker (the old <select> was uncontrolled; the picked value lives here). */
-function BorderWeightDropdown({
-  tip,
-  onPick,
-}: {
-  readonly tip?: string
-  readonly onPick: (pt: number) => void
-}) {
-  const [val, setVal] = useState('1')
-  return (
-    <Dropdown
-      className="rb-border-weight-dd"
-      value={val}
-      tip={tip}
-      options={['0.5', '1', '1.5', '2.25', '3'].map((v) => ({ value: v, label: `${v}pt` }))}
-      onPick={(v) => {
-        setVal(v)
-        onPick(Number(v))
-      }}
-    />
-  )
-}
-
 function RbSubCaret() {
   return (
     <svg
@@ -1089,6 +965,19 @@ function ShapeFillMenu({
   )
 }
 
+/** Shape Effects → Shadow tiles in PowerPoint's 3×3 order: key, outerShdw direction (° clockwise from right; -1 = centred), label */
+const EFFECT_SHADOWS = [
+  ['br', 45, 'paneEffDirBR'],
+  ['b', 90, 'paneEffDirB'],
+  ['bl', 135, 'paneEffDirBL'],
+  ['r', 0, 'paneEffDirR'],
+  ['center', -1, 'paneEffCenter'],
+  ['l', 180, 'paneEffDirL'],
+  ['tr', 315, 'paneEffDirTR'],
+  ['t', 270, 'paneEffDirT'],
+  ['tl', 225, 'paneEffDirTL'],
+] as const
+
 export function Ribbon({
   hasDoc,
   deckEmpty,
@@ -1098,14 +987,10 @@ export function Ribbon({
   editing,
   autoSave,
   onAutoSaveChange,
-  onOpen,
   onSave,
   onUndo,
   onRedo,
-  onSaveAs,
-  onExportPdf,
-  onPrint,
-  onExportImages,
+  onFileTab,
   onFormat,
   zoom,
   onZoom,
@@ -1122,6 +1007,7 @@ export function Ribbon({
   onAddSlide,
   onAddSlideWithLayout,
   onAddSection,
+  sectionMenu,
   layouts,
   layoutSize,
   formatOpen,
@@ -1155,6 +1041,7 @@ export function Ribbon({
   curTextToggles,
   onTextAnchor,
   onTextDirection,
+  onTextColumns,
   onFindReplace,
   animByParagraph,
   onToggleAnimByParagraph,
@@ -1165,6 +1052,8 @@ export function Ribbon({
   onParagraphFormat,
   onInsertTable,
   transition,
+  transitionDetail,
+  onTransitionDetail,
   onTransition,
   selectedAnimEffect,
   timingAnim,
@@ -1234,12 +1123,13 @@ export function Ribbon({
   onToggleScreenRecord,
   contextElementType,
   contextElementId: _contextElementId,
-  contextSlideIndex: _contextSlideIndex,
+  contextSlideIndex,
   contextChartStyle,
   chartColorSchemes,
   contextPictureCanCutout,
   contextPictureStroke,
   onPictureStroke,
+  onShapeEffects,
   onChangeShape,
   onShapeStyle,
   onShapeFill,
@@ -1251,21 +1141,22 @@ export function Ribbon({
   onPictureCutout,
   onPictureReplace,
   onPictureRotate,
-  onEditTableStyle,
-  tableStyleFlags,
-  tableActiveCell,
+  tableTabInfo,
+  tableTabActions,
   onEditChart,
   onOpenChartDataDialog,
   onArrange,
   onFlip,
   canDistribute,
 }: Props) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const contextTab = contextTabForElement(contextElementType ?? null)
+  const contextTabs = contextTabsForElement(contextElementType ?? null)
+  const contextTabLabel = (ct: ContextTab): string =>
+    ct === 'tableLayout' ? tableRibbonLabels(lang).tableLayout : t(TAB_LABEL[ct])
   const autoContextTab = autoContextTabForElement(contextElementType ?? null)
 
   const [tab, setTab] = useState<MainTab | ContextTab>('home')
-  const [fileOpen, setFileOpen] = useState(false)
   const [colorOpen, setColorOpen] = useState(false)
   const [fontOpen, setFontOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
@@ -1345,7 +1236,6 @@ export function Ribbon({
   // the trigger's own (its toggle decides) and, for nested triggers, the panel
   // anchoring them.
   const closePanels = useCallback((keep: RibbonPanelKey[] = []) => {
-    if (!keep.includes('file')) setFileOpen(false)
     if (!keep.includes('color')) setColorOpen(false)
     if (!keep.includes('font')) setFontOpen(false)
     if (!keep.includes('size')) setSizeOpen(false)
@@ -1493,16 +1383,22 @@ export function Ribbon({
   // tab; shapes only reveal Shape Format (PowerPoint parity, so Home stays put for
   // text formatting). Leaving a tab that is no longer offered falls back to Home.
   const prevContextTab = useRef<ContextTab | null>(null)
+  const prevContextTabs = useRef<ContextTab[]>([])
   useEffect(() => {
     const previousContextTab = prevContextTab.current
     if (contextTab !== previousContextTab) {
       if (autoContextTab) {
         setTab(autoContextTab)
-      } else if (previousContextTab) {
-        setTab((cur) => (cur === previousContextTab ? 'home' : cur))
+      } else {
+        // every contextual tab of the old selection is gone (a table has two)
+        const gone = prevContextTabs.current
+        setTab((cur) => (gone.includes(cur as ContextTab) ? 'home' : cur))
       }
     }
     prevContextTab.current = contextTab
+    prevContextTabs.current = contextTabs
+    // contextTabs is derived from the same selection type as contextTab
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextTab, autoContextTab])
 
   /** Large galleries dock in the workspace; short menus stay beside their trigger. */
@@ -1884,6 +1780,222 @@ export function Ribbon({
     </div>
   )
 
+  /** Transitions → Effect Options: what the current effect lets the user choose (PowerPoint's menus) */
+  const transitionOptions: Array<{
+    key: string
+    label: StringKey
+    active: boolean
+    patch: SetTransitionDetailOp['detail']
+  }> = (() => {
+    const d = transitionDetail
+    if (!d) return []
+    const sides = (
+      [
+        ['u', 'ribbonTransFromBottom'],
+        ['r', 'ribbonTransFromLeft'],
+        ['l', 'ribbonTransFromRight'],
+        ['d', 'ribbonTransFromTop'],
+      ] as const
+    ).map(([dir, label]) => ({
+      key: dir,
+      label: label as StringKey,
+      active: d.dir === dir,
+      patch: { dir },
+    }))
+    if (d.kind === 'push' || d.kind === 'wipe' || d.kind === 'cover' || d.kind === 'pull')
+      return sides
+    if (d.kind === 'split') {
+      const o = d.orient ?? 'horz'
+      return (
+        [
+          ['vert', 'in', 'ribbonTransVertIn'],
+          ['vert', 'out', 'ribbonTransVertOut'],
+          ['horz', 'in', 'ribbonTransHorzIn'],
+          ['horz', 'out', 'ribbonTransHorzOut'],
+        ] as const
+      ).map(([orient, dir, label]) => ({
+        key: `${orient}-${dir}`,
+        label: label as StringKey,
+        active: o === orient && d.dir === dir,
+        patch: { orient, dir },
+      }))
+    }
+    if (d.kind === 'fade') {
+      return [
+        {
+          key: 'smooth',
+          label: 'ribbonTransSmoothly' as StringKey,
+          active: !d.thruBlk,
+          patch: { thruBlk: false },
+        },
+        {
+          key: 'black',
+          label: 'ribbonTransThroughBlack' as StringKey,
+          active: !!d.thruBlk,
+          patch: { thruBlk: true },
+        },
+      ]
+    }
+    return []
+  })()
+
+  /** Shape Effects menu (Shape Format tab; Home → Drawing as a small row): one preset per effect */
+  const renderShapeEffects = (variant: 'big' | 'small' = 'big', label?: string) => {
+    const open = insertDrop === 'shapeEffects'
+    const pick = (effects: SetEffectsPatch) => {
+      setInsertDrop(null)
+      onShapeEffects?.(effects)
+    }
+    return (
+      <div className="rb-drop-wrap">
+        <button
+          className={`${variant === 'big' ? 'rb-big' : 'rb-small'} ${open ? 'active' : ''}`}
+          disabled={!onShapeEffects}
+          data-tip={t('ribbonShapeEffects')}
+          aria-expanded={open}
+          onMouseDown={(e) => {
+            e.stopPropagation()
+            closeSiblingPanels(e, closePanels, 'insert')
+          }}
+          onClick={() => setInsertDrop((v) => (v === 'shapeEffects' ? null : 'shapeEffects'))}
+        >
+          {variant === 'big' ? (
+            <>
+              <span className="rb-big-icon">
+                <IconShapeEffects size={BIG} />
+                <RbCaret />
+              </span>
+              <span>{label ?? t('ribbonShapeEffects')}</span>
+            </>
+          ) : (
+            <>
+              <IconShapeEffects size={20} />
+              <span>{label ?? t('ribbonShapeEffects')}</span>
+              <RbCaret />
+            </>
+          )}
+        </button>
+        {open && (
+          <div className="rb-drop rb-effects-drop" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="rb-para-label">{t('paneEffShadow')}</div>
+            <div className="rb-effects-grid">
+              <button
+                className="rb-effects-opt"
+                data-tip={t('paneEffNoShadow')}
+                onClick={() => pick({ shadow: null })}
+              >
+                {t('paneEffNone')}
+              </button>
+              {EFFECT_SHADOWS.map(([key, dir, labelKey]) => (
+                <button
+                  key={key}
+                  className="rb-effects-opt rb-effects-shadow"
+                  data-tip={t(labelKey)}
+                  aria-label={t(labelKey)}
+                  style={
+                    {
+                      '--eff-dx': dir < 0 ? 0 : Math.round(Math.cos((dir * Math.PI) / 180) * 3),
+                      '--eff-dy': dir < 0 ? 0 : Math.round(Math.sin((dir * Math.PI) / 180) * 3),
+                      '--eff-blur': dir < 0 ? '5px' : '2px',
+                    } as React.CSSProperties
+                  }
+                  onClick={() =>
+                    pick({
+                      shadow:
+                        dir < 0
+                          ? { dirDeg: 0, dist: 0, blurRad: 63500, color: '#00000066' }
+                          : { dirDeg: dir, dist: 38100, blurRad: 50800, color: '#00000066' },
+                    })
+                  }
+                >
+                  <span />
+                </button>
+              ))}
+            </div>
+            <div className="rb-para-label">{t('paneEffReflection')}</div>
+            <div className="rb-effects-row">
+              <button
+                className="rb-effects-opt"
+                data-tip={t('paneEffNoReflection')}
+                onClick={() => pick({ reflection: null })}
+              >
+                {t('paneEffNone')}
+              </button>
+              {(
+                [
+                  ['paneEffReflTight', 0.35],
+                  ['paneEffReflHalf', 0.55],
+                  ['paneEffReflFull', 0.9],
+                ] as const
+              ).map(([labelKey, endPos]) => (
+                <button
+                  key={labelKey}
+                  className="rb-effects-opt"
+                  data-tip={t(labelKey)}
+                  onClick={() =>
+                    pick({ reflection: { blurRad: 6350, startA: 0.52, endPos, dist: 0 } })
+                  }
+                >
+                  {t(labelKey).replace(/\s*(Reflection|反射|映像)\s*/i, '') || t(labelKey)}
+                </button>
+              ))}
+            </div>
+            <div className="rb-para-label">{t('paneEffGlow')}</div>
+            <div className="rb-effects-row">
+              <button
+                className="rb-effects-opt"
+                data-tip={t('paneEffNone')}
+                onClick={() => pick({ glow: null })}
+              >
+                {t('paneEffNone')}
+              </button>
+              {[5, 8, 11, 18].map((pt) => (
+                <button
+                  key={pt}
+                  className="rb-effects-opt"
+                  data-tip={`${t('paneEffGlow')} ${pt} ${t('paneFormatPt')}`}
+                  onClick={() => pick({ glow: { color: '#FFC000', radius: pt * 12700 } })}
+                >
+                  {pt} {t('paneFormatPt')}
+                </button>
+              ))}
+            </div>
+            <div className="rb-para-label">{t('paneEffSoftEdge')}</div>
+            <div className="rb-effects-row">
+              <button
+                className="rb-effects-opt"
+                data-tip={t('paneEffNone')}
+                onClick={() => pick({ softEdge: null })}
+              >
+                {t('paneEffNone')}
+              </button>
+              {[1, 2.5, 5, 10, 25].map((pt) => (
+                <button
+                  key={pt}
+                  className="rb-effects-opt"
+                  data-tip={`${t('paneEffSoftEdge')} ${pt} ${t('paneFormatPt')}`}
+                  onClick={() => pick({ softEdge: pt * 12700 })}
+                >
+                  {pt} {t('paneFormatPt')}
+                </button>
+              ))}
+            </div>
+            <div className="rb-menu-sep" />
+            <button
+              className="rb-bullet-more"
+              onClick={() => {
+                setInsertDrop(null)
+                if (!formatOpen) onToggleFormat()
+              }}
+            >
+              {t('ribbonMoreEffects')}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const tabCtx: RibbonTabCtx = {
     aiOpen,
     brushMode,
@@ -1907,6 +2019,7 @@ export function Ribbon({
     layouts,
     layoutSize,
     onAddSection,
+    sectionMenu,
     onAddSlide,
     onAddSlideWithLayout,
     onAiPreset,
@@ -1921,6 +2034,7 @@ export function Ribbon({
     curTextToggles,
     onTextAnchor,
     onTextDirection,
+    onTextColumns,
     onFindReplace,
     onFontFamily,
     onFontSize,
@@ -1971,6 +2085,7 @@ export function Ribbon({
     renderQuickStyles,
     renderShapeFill,
     renderShapeOutline,
+    renderShapeEffects,
     fontDraft,
     setFontDraft,
     fmtBtn,
@@ -2030,77 +2145,9 @@ export function Ribbon({
         }`}
         onDoubleClick={collapse.onTabsDoubleClick}
       >
-        {!IS_MAC && (
-          <div className="file-tab-wrap">
-            <button
-              className={`ribbon-tab ribbon-tab-file ${fileOpen ? 'open' : ''}`}
-              onMouseDown={(e) => {
-                e.stopPropagation()
-                closeSiblingPanels(e, closePanels, 'file')
-              }}
-              onClick={() => setFileOpen((v) => !v)}
-            >
-              {t('ribbonTabFile')}
-            </button>
-            {fileOpen && (
-              <div className="file-menu">
-                <button
-                  onClick={() => {
-                    setFileOpen(false)
-                    onOpen()
-                  }}
-                >
-                  {t('ribbonFileOpen')} <span className="file-menu-key">Ctrl+O</span>
-                </button>
-                <button
-                  disabled={!hasDoc}
-                  onClick={() => {
-                    setFileOpen(false)
-                    onSave()
-                  }}
-                >
-                  {t('ribbonFileSave')} <span className="file-menu-key">Ctrl+S</span>
-                </button>
-                <button
-                  disabled={!hasDoc}
-                  onClick={() => {
-                    setFileOpen(false)
-                    onSaveAs()
-                  }}
-                >
-                  {t('ribbonFileSaveAs')} <span className="file-menu-key">Ctrl+Shift+S</span>
-                </button>
-                <button
-                  disabled={!hasDoc}
-                  onClick={() => {
-                    setFileOpen(false)
-                    onExportPdf()
-                  }}
-                >
-                  {t('ribbonFileExportPdf')}
-                </button>
-                <button
-                  disabled={!hasDoc}
-                  onClick={() => {
-                    setFileOpen(false)
-                    onPrint()
-                  }}
-                >
-                  {t('ribbonFilePrint')} <span className="file-menu-key">Ctrl+P</span>
-                </button>
-                <button
-                  disabled={!hasDoc}
-                  onClick={() => {
-                    setFileOpen(false)
-                    onExportImages()
-                  }}
-                >
-                  {t('ribbonFileExportImages')}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        <button className="ribbon-tab ribbon-tab-file" onClick={onFileTab}>
+          {t('ribbonTabFile')}
+        </button>
         <button
           className="qa-btn"
           data-tip={t('ribbonSaveTip')}
@@ -2162,25 +2209,24 @@ export function Ribbon({
             onClick={() => {
               collapse.onTabPress(tab === tb)
               setTab(tb)
-              setFileOpen(false)
             }}
           >
             {t(TAB_LABEL[tb])}
           </button>
         ))}
-        {contextTab && (
+        {contextTabs.map((ct) => (
           <button
-            key={contextTab}
-            className={`ribbon-tab ribbon-tab-context ${tab === contextTab ? 'active' : ''}`}
+            key={ct}
+            className={`ribbon-tab ribbon-tab-context ${tab === ct ? 'active' : ''}`}
             onClick={() => {
-              collapse.onTabPress(tab === contextTab)
-              setTab(contextTab)
+              collapse.onTabPress(tab === ct)
+              setTab(ct)
             }}
-            data-tip={t(TAB_LABEL[contextTab])}
+            data-tip={contextTabLabel(ct)}
           >
-            {t(TAB_LABEL[contextTab])}
+            {contextTabLabel(ct)}
           </button>
-        )}
+        ))}
         <span className="ribbon-tabs-spacer" />
       </div>
 
@@ -2258,7 +2304,10 @@ export function Ribbon({
             }
             return (
               <>
-                <Group label={t('ribbonGroupDrawTools')}>
+                <Group
+                  label={t('ribbonGroupDrawTools')}
+                  fold={{ icon: <IconPen size={BIG} />, priority: 3 }}
+                >
                   <button
                     className={`rb-big ${inkTool === 'select' ? 'active' : ''}`}
                     disabled={!hasDoc}
@@ -2289,7 +2338,10 @@ export function Ribbon({
                   </button>
                 </Group>
                 <div className="ribbon-sep" />
-                <Group label={t('ribbonGroupPenStyle')}>
+                <Group
+                  label={t('ribbonGroupPenStyle')}
+                  fold={{ icon: <IconHighlighterPen size={BIG} />, priority: 2 }}
+                >
                   <div className="pen-tray">
                     {penPresets.map((preset, i) => {
                       const held = selectedPen === i && inkTool === preset.kind
@@ -2331,7 +2383,10 @@ export function Ribbon({
                   {renderInkSettings(selectedPen)}
                 </Group>
                 <div className="ribbon-sep" />
-                <Group label={t('ribbonGroupClear')}>
+                <Group
+                  label={t('ribbonGroupClear')}
+                  fold={{ icon: <IconEraser size={BIG} />, priority: 1 }}
+                >
                   <button
                     className="rb-big"
                     disabled={!hasDoc || inkCount === 0}
@@ -2357,7 +2412,10 @@ export function Ribbon({
           })()
         ) : tab === 'design' ? (
           <>
-            <Group label={t('ribbonGroupThemes')}>
+            <Group
+              label={t('ribbonGroupThemes')}
+              fold={{ icon: <IconTheme size={BIG} />, priority: 3 }}
+            >
               <div className="theme-gallery">
                 {THEME_PRESETS.map((tp) => (
                   <button
@@ -2386,7 +2444,10 @@ export function Ribbon({
               </div>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupBackground')}>
+            <Group
+              label={t('ribbonGroupBackground')}
+              fold={{ icon: <IconPageColor size={BIG} />, priority: 2 }}
+            >
               <button
                 className="rb-big"
                 disabled={!hasDoc}
@@ -2400,7 +2461,10 @@ export function Ribbon({
               </button>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupCustomize')}>
+            <Group
+              label={t('ribbonGroupCustomize')}
+              fold={{ icon: <IconPageSize size={BIG} />, priority: 1 }}
+            >
               <div className="rb-drop-wrap">
                 <button
                   className={`rb-big ${slideSizeOpen ? 'active' : ''}`}
@@ -2444,7 +2508,10 @@ export function Ribbon({
           </>
         ) : tab === 'transitions' ? (
           <>
-            <Group label={t('ribbonGroupTransitionToThis')}>
+            <Group
+              label={t('ribbonGroupTransitionToThis')}
+              fold={{ icon: <IconTransFade size={BIG} />, priority: 3 }}
+            >
               {TRANSITIONS.map((tr) => (
                 <button
                   key={tr.kind}
@@ -2463,11 +2530,125 @@ export function Ribbon({
               ))}
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupTiming')}>
+            <Group
+              label={t('ribbonTransEffectOptions')}
+              fold={{ icon: <IconTransPush size={BIG} />, priority: 2 }}
+            >
+              {dropBig(
+                'transOptions',
+                <IconTransPush size={BIG} />,
+                t('ribbonTransEffectOptions'),
+                t('ribbonTransEffectOptions'),
+                <div className="rb-menu">
+                  {transitionOptions.map((o) => (
+                    <button
+                      key={o.key}
+                      className={o.active ? 'active' : ''}
+                      onClick={() => {
+                        setInsertDrop(null)
+                        onTransitionDetail(o.patch)
+                      }}
+                    >
+                      {t(o.label)}
+                    </button>
+                  ))}
+                </div>,
+                !hasDoc || transitionOptions.length === 0,
+              )}
+            </Group>
+            <div className="ribbon-sep" />
+            <Group
+              label={t('ribbonGroupTiming')}
+              fold={{ icon: <IconClock size={BIG} />, priority: 1 }}
+            >
+              <div className="rb-anim-timing">
+                <label>
+                  {t('ribbonAnimDuration')}
+                  <input
+                    key={`tdur-${contextSlideIndex}-${transitionDetail?.kind}-${transitionDetail?.durationMs ?? ''}`}
+                    type="number"
+                    min={0}
+                    step={0.25}
+                    disabled={!hasDoc || !transitionDetail || transitionDetail.kind === 'none'}
+                    defaultValue={((transitionDetail?.durationMs ?? 700) / 1000).toFixed(2)}
+                    title={t('ribbonTransDurationTip')}
+                    onBlur={(e) => {
+                      const v = parseFloat(e.target.value)
+                      if (!Number.isFinite(v) || v < 0) return
+                      const ms = Math.round(v * 1000)
+                      if (ms !== (transitionDetail?.durationMs ?? 700))
+                        onTransitionDetail({ durationMs: ms })
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                    }}
+                  />
+                  {t('ribbonSecondsUnit')}
+                </label>
+                <label className="rb-anim-check">
+                  <input
+                    type="checkbox"
+                    disabled={!hasDoc || !transitionDetail}
+                    checked={transitionDetail?.advClick ?? true}
+                    onChange={(e) => onTransitionDetail({ advClick: e.target.checked })}
+                  />
+                  {t('ribbonTransOnClick')}
+                </label>
+                <label className="rb-anim-check">
+                  <input
+                    type="checkbox"
+                    disabled={!hasDoc || !transitionDetail}
+                    checked={transitionDetail?.advTm != null}
+                    onChange={(e) => onTransitionDetail({ advTm: e.target.checked ? 5000 : null })}
+                  />
+                  {t('ribbonTransAfter')}
+                  <input
+                    key={`tadv-${contextSlideIndex}-${transitionDetail?.advTm ?? ''}`}
+                    type="number"
+                    min={0}
+                    step={1}
+                    disabled={!hasDoc || transitionDetail?.advTm == null}
+                    defaultValue={
+                      transitionDetail?.advTm != null
+                        ? (transitionDetail.advTm / 1000).toFixed(2)
+                        : ''
+                    }
+                    onBlur={(e) => {
+                      const v = parseFloat(e.target.value)
+                      if (
+                        Number.isFinite(v) &&
+                        v >= 0 &&
+                        Math.round(v * 1000) !== transitionDetail?.advTm
+                      )
+                        onTransitionDetail({ advTm: Math.round(v * 1000) })
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                    }}
+                  />
+                  {t('ribbonSecondsUnit')}
+                </label>
+              </div>
               <button
                 className="rb-big"
                 disabled={!hasDoc}
-                onClick={() => onTransition(transition, true)}
+                onClick={() => {
+                  onTransition(transition, true)
+                  if (transitionDetail) {
+                    const { dir, orient, thruBlk, durationMs, advClick, advTm } = transitionDetail
+                    onTransitionDetail(
+                      {
+                        ...(dir !== undefined ? { dir } : {}),
+                        ...(orient !== undefined ? { orient } : {}),
+                        ...(thruBlk !== undefined ? { thruBlk } : {}),
+                        durationMs,
+                        advClick,
+                        advTm,
+                      },
+                      true,
+                    )
+                  }
+                }}
                 data-tip={t('ribbonTransApplyAllTip')}
               >
                 <span className="rb-big-icon">
@@ -2479,7 +2660,10 @@ export function Ribbon({
           </>
         ) : tab === 'animations' ? (
           <>
-            <Group label={t('ribbonPreview')}>
+            <Group
+              label={t('ribbonPreview')}
+              fold={{ icon: <IconPlayCurrent size={BIG} />, priority: 1 }}
+            >
               <button
                 className="rb-big"
                 disabled={!hasDoc || animCount === 0}
@@ -2579,7 +2763,10 @@ export function Ribbon({
               ))}
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupAdvancedAnim')}>
+            <Group
+              label={t('ribbonGroupAdvancedAnim')}
+              fold={{ icon: <IconAnimStar size={BIG} />, priority: 2 }}
+            >
               {dropBig(
                 'addanim',
                 <IconSparkle size={BIG} />,
@@ -2636,7 +2823,10 @@ export function Ribbon({
               </button>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupTiming')}>
+            <Group
+              label={t('ribbonGroupTiming')}
+              fold={{ icon: <IconClock size={BIG} />, priority: 1 }}
+            >
               <div className="rb-anim-timing">
                 <label>
                   {t('ribbonAnimStart')}
@@ -2709,7 +2899,10 @@ export function Ribbon({
           </>
         ) : tab === 'slideShow' ? (
           <>
-            <Group label={t('ribbonGroupStartShow')}>
+            <Group
+              label={t('ribbonGroupStartShow')}
+              fold={{ icon: <IconPlayFromStart size={BIG} />, priority: 3 }}
+            >
               <button
                 className="rb-big"
                 disabled={!hasDoc}
@@ -2756,7 +2949,10 @@ export function Ribbon({
               </button>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupSetUp')}>
+            <Group
+              label={t('ribbonGroupSetUp')}
+              fold={{ icon: <IconSetupShow size={BIG} />, priority: 2 }}
+            >
               <DisabledBig icon={<IconSetupShow size={BIG} />} label={t('ribbonSetUpShow')} />
               <button
                 className={`rb-big ${currentHidden ? 'active' : ''}`}
@@ -2783,7 +2979,10 @@ export function Ribbon({
               <DisabledBig icon={<IconRecord size={BIG} />} label={t('ribbonRecord')} />
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupMonitors')}>
+            <Group
+              label={t('ribbonGroupMonitors')}
+              fold={{ icon: <IconPresenterView size={BIG} />, priority: 1 }}
+            >
               <div className="rb-check-grid">
                 <label className="rb-monitor" data-tip={t('ribbonShowMonitorTip')}>
                   <span>{t('ribbonShowMonitor')}</span>
@@ -2815,7 +3014,10 @@ export function Ribbon({
           </>
         ) : tab === 'review' ? (
           <>
-            <Group label={t('ribbonGroupProofing')}>
+            <Group
+              label={t('ribbonGroupProofing')}
+              fold={{ icon: <IconSpellcheck size={BIG} />, priority: 2 }}
+            >
               <button
                 className="rb-big"
                 disabled={!hasDoc}
@@ -2870,7 +3072,10 @@ export function Ribbon({
               </div>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupComments')}>
+            <Group
+              label={t('ribbonGroupComments')}
+              fold={{ icon: <IconComment size={BIG} />, priority: 1 }}
+            >
               <button
                 className="rb-big"
                 disabled={!hasDoc}
@@ -2900,7 +3105,10 @@ export function Ribbon({
           </>
         ) : tab === 'view' ? (
           <>
-            <Group label={t('ribbonGroupPresentationViews')}>
+            <Group
+              label={t('ribbonGroupPresentationViews')}
+              fold={{ icon: <IconReadMode size={BIG} />, priority: 3 }}
+            >
               {(
                 [
                   [
@@ -2953,7 +3161,10 @@ export function Ribbon({
               </button>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupShow')}>
+            <Group
+              label={t('ribbonGroupShow')}
+              fold={{ icon: <IconRuler size={BIG} />, priority: 2 }}
+            >
               <div className="rb-check-grid">
                 <RbCheck
                   label={t('ribbonRuler')}
@@ -2992,7 +3203,10 @@ export function Ribbon({
               </div>
             </Group>
             <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupZoom')}>
+            <Group
+              label={t('ribbonGroupZoom')}
+              fold={{ icon: <IconZoomIn size={BIG} />, priority: 1 }}
+            >
               <div className="rb-col">
                 <button
                   className="rb-small"
@@ -3028,132 +3242,10 @@ export function Ribbon({
               </button>
             </Group>
           </>
-        ) : tab === 'tableDesign' ? (
-          <>
-            <Group label={t('ribbonGroupTableStyles')}>
-              {TABLE_STYLE_PRESETS_UI.map((p) => (
-                <button
-                  key={p.key}
-                  className="rb-table-style-card"
-                  data-tip={t(p.label)}
-                  disabled={!onEditTableStyle}
-                  onClick={() => onEditTableStyle?.({ styleName: p.key })}
-                >
-                  <span className="rb-table-style-preview">
-                    <TableMiniPreview {...p.preview} />
-                  </span>
-                  <span className="rb-table-style-label">{t(p.label)}</span>
-                </button>
-              ))}
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupTableOptions')}>
-              <TableToggleBtn
-                label={t('ribbonHeaderRow')}
-                on={tableStyleFlags?.firstRow ?? false}
-                disabled={!onEditTableStyle}
-                onClick={() => onEditTableStyle?.({ firstRow: true })}
-                offClick={() => onEditTableStyle?.({ firstRow: false })}
-              />
-              <TableToggleBtn
-                label={t('ribbonBandedRows')}
-                on={tableStyleFlags?.bandRow ?? false}
-                disabled={!onEditTableStyle}
-                onClick={() => onEditTableStyle?.({ bandRow: true })}
-                offClick={() => onEditTableStyle?.({ bandRow: false })}
-              />
-              <TableToggleBtn
-                label={t('ribbonTableRtl')}
-                on={tableStyleFlags?.rtl ?? false}
-                disabled={!onEditTableStyle}
-                onClick={() => onEditTableStyle?.({ rtl: true })}
-                offClick={() => onEditTableStyle?.({ rtl: false })}
-              />
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={tableActiveCell ? t('ribbonGroupShadingCell') : t('ribbonGroupShading')}>
-              <div className="rb-table-shading">
-                {TABLE_SHADING_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    className="rb-color-swatch"
-                    style={{ background: c }}
-                    data-tip={c}
-                    aria-label={c}
-                    disabled={!onEditTableStyle}
-                    // preventDefault keeps a cell text-edit session alive so shading targets that cell
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() =>
-                      onEditTableStyle?.({
-                        shadingColor: c,
-                        ...(tableActiveCell ? { cells: [tableActiveCell] } : {}),
-                      })
-                    }
-                  />
-                ))}
-                <button
-                  className="rb-color-swatch rb-color-none"
-                  data-tip={t('ribbonNoShading')}
-                  aria-label={t('ribbonNoShading')}
-                  disabled={!onEditTableStyle}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() =>
-                    onEditTableStyle?.({
-                      shadingColor: 'none',
-                      ...(tableActiveCell ? { cells: [tableActiveCell] } : {}),
-                    })
-                  }
-                >
-                  <IconNoneX size={12} />
-                </button>
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupBorders')}>
-              <div className="rb-table-border-row">
-                <button
-                  className="rb-icon"
-                  data-tip={t('ribbonAllBordersTip')}
-                  aria-label={t('ribbonAllBordersTip')}
-                  disabled={!onEditTableStyle}
-                  onClick={() =>
-                    onEditTableStyle?.({
-                      borderPreset: 'all',
-                      borderColor: '#000000',
-                      borderWidthPt: 1,
-                    })
-                  }
-                >
-                  ⊞
-                </button>
-                <button
-                  className="rb-icon"
-                  data-tip={t('ribbonClearBordersTip')}
-                  aria-label={t('ribbonClearBordersTip')}
-                  disabled={!onEditTableStyle}
-                  onClick={() => onEditTableStyle?.({ borderPreset: 'none' })}
-                >
-                  ⊟
-                </button>
-              </div>
-              <div className="rb-table-border-row">
-                <span className="rb-label">{t('ribbonBorderColorLabel')}</span>
-                <input
-                  type="color"
-                  defaultValue="#000000"
-                  className="rb-color-input"
-                  data-tip={t('ribbonBorderColorTip')}
-                  onPointerDown={(e) => armColorInput(e.currentTarget)}
-                  onChange={(e) => onEditTableStyle?.({ borderColor: e.target.value })}
-                />
-                <span className="rb-label">{t('ribbonBorderWeightLabel')}</span>
-                <BorderWeightDropdown
-                  tip={t('ribbonBorderWeightTip')}
-                  onPick={(pt) => onEditTableStyle?.({ borderWidthPt: pt })}
-                />
-              </div>
-            </Group>
-          </>
+        ) : tab === 'tableDesign' && tableTabInfo && tableTabActions ? (
+          <TableDesignTab info={tableTabInfo} actions={tableTabActions} />
+        ) : tab === 'tableLayout' && tableTabInfo && tableTabActions ? (
+          <TableLayoutTab info={tableTabInfo} actions={tableTabActions} />
         ) : tab === 'chartDesign' ? (
           <>
             {/* Chart Design group order: chart layout | chart styles | data | type */}
@@ -3617,6 +3709,8 @@ export function Ribbon({
             <Group label={t('paneFormatFill')}>{renderShapeFill()}</Group>
             <div className="ribbon-sep" />
             <Group label={t('paneFormatOutline')}>{renderShapeOutline()}</Group>
+            <div className="ribbon-sep" />
+            <Group label={t('ribbonShapeEffects')}>{renderShapeEffects()}</Group>
           </>
         ) : null}
       </div>

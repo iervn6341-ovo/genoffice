@@ -52,6 +52,7 @@ import {
   installRendererProtocol,
   registerRendererScheme,
   rendererUrl,
+  listSystemPrinters,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang, type Lang, normalizeLang, setUiLang } from '@genoffice/i18n'
 import { ProjectStore } from '@genoffice/project-store'
@@ -122,6 +123,7 @@ import {
   workbookCreateDocumentRequestSchema,
   workbookExportCsvRequestSchema,
   workbookExportPdfRequestSchema,
+  workbookPrintJobSchema,
   workbookRangeRequestSchema,
   workbookRangeResultSchema,
   workbookSaveEditsAbortSchema,
@@ -2711,9 +2713,18 @@ export function registerSheetsIpc(): void {
     return result
   })
 
-  ipcMain.handle(IPC_CHANNELS.printWorkbook, async (event, input: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.printWorkbook, async (event, input: unknown, job: unknown) => {
     sessionFor(event)
-    return printWorkbook(event, workbookExportPdfRequestSchema.parse(input))
+    return printWorkbook(
+      event,
+      workbookExportPdfRequestSchema.parse(input),
+      job === undefined ? undefined : workbookPrintJobSchema.parse(job),
+    )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.listPrinters, (event) => {
+    sessionFor(event)
+    return listSystemPrinters(event.sender)
   })
 
   ipcMain.handle(IPC_CHANNELS.exportCsv, async (event, input: unknown) => {

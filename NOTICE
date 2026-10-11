@@ -31,3 +31,12 @@ Part 4, Transitional) XML Schema files for PresentationML and DrawingML, as
 distributed in the python-docx repository (ref/xsd), with one marked local
 amendment (see tools/ooxml-validate/README.md). They are used only by tests
 and development tooling and are not shipped in the application.
+
+ArtCraft toolbar icons
+
+packages/ui/src/craft-icons contains toolbar icons derived from the icon drawing
+code of WordCraft, DeckCraft and GridCraft (https://github.com/storytold/wordcraft,
+/deckcraft, /gridcraft), Copyright (c) 2026 ArtCraft Team and the respective
+contributors, used under the MIT License (the projects are dual-licensed MIT OR
+Apache-2.0). The license text is in packages/ui/src/craft-icons/NOTICE-craft-icons.md.
+The ArtCraft name and logos are trademarks of the ArtCraft Team and are not included.

@@ -526,7 +526,10 @@ function parseSpShape(
     }
     // explicit <a:ln><a:noFill/> (stroke === null) wins over the lnRef template
     if (stroke === undefined) stroke = styleRefStroke(node, ctx)
-    if (!shadow && !glow) {
+    // an explicit spPr <a:effectLst> — even the empty `<a:effectLst/>` — replaces the
+    // effectRef style's effects (PowerPoint draws no shadow there)
+    const ownEffects = spPr != null && typeof spPr === 'object' && 'a:effectLst' in spPr
+    if (!shadow && !glow && !ownEffects) {
       const ref = style['a:effectRef']
       const idx = parseInt(String(ref?.['@_idx'] ?? '0'), 10) || 0
       const phClr = resolveColorNode(ref, ctx)

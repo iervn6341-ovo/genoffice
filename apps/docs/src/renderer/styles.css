@@ -4007,6 +4007,52 @@ th.cell-rev-del {
   padding: 24px 0 48px;
 }
 
+/* print preview: the sheet being shown (pages per sheet / scale to paper) */
+.print-preview-zoom .pv-sheets {
+  display: block;
+}
+
+.print-preview-zoom .pv-sheet {
+  --sheet-bg: #ffffff;
+  --sheet-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+  position: relative;
+  width: var(--sheet-w);
+  height: var(--sheet-h);
+  background: var(--sheet-bg);
+  box-shadow: var(--sheet-shadow);
+  overflow: hidden;
+}
+
+.print-preview-zoom .pv-cell {
+  position: absolute;
+  overflow: hidden;
+}
+
+.print-preview-zoom .pv-cell .pv-page {
+  margin: 0;
+  box-shadow: none;
+}
+
+.print-preview-zoom.pv-no-pagecolor .pv-page {
+  --print-paper: #ffffff;
+  background: var(--print-paper) !important;
+}
+
+.print-options .ps-margins {
+  margin: 0 0 4px;
+  padding-inline-start: 10px;
+}
+
+.print-options .ps-margins .ps-field {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+/* print pane sheets exist only for the print job (print CSS shows them) */
+.pv-sheets {
+  display: none;
+}
+
 .pv-page {
   position: relative;
   /* own stacking context: behind-text layers (picture watermarks, z-index -1)
@@ -9462,6 +9508,45 @@ body.docs-crop-active
     display: none !important;
   }
 
+  /* print pane: pages per sheet / scale to paper / reverse order print these sheets
+     instead of the preview's own page list (print-sheets.ts) */
+  .pagination-preview.pv-has-sheets .pv-scroll {
+    display: none !important;
+  }
+
+  .pv-sheets {
+    display: block;
+  }
+
+  .pv-sheet {
+    position: relative;
+    width: var(--sheet-w);
+    height: calc(var(--sheet-h) - 2px);
+    overflow: hidden;
+    break-after: page;
+  }
+
+  .pv-sheet:last-child {
+    break-after: auto;
+  }
+
+  .pv-cell {
+    position: absolute;
+    overflow: hidden;
+  }
+
+  .pv-cell .pv-page {
+    break-after: auto !important;
+    margin: 0 !important;
+    transform-origin: 0 0;
+  }
+
+  /* "Print background colors and images" off: the page color doesn't print */
+  .pagination-preview.pv-no-pagecolor .pv-page {
+    --print-paper: #ffffff;
+    background: var(--print-paper) !important;
+  }
+
   /* with the pagination preview open, print its output: each .pv-page is exactly one sheet */
   .app:has(.pagination-preview) > *:not(.pagination-preview) {
     display: none !important;
@@ -10054,7 +10139,8 @@ ruby.doc-ruby rt {
   padding-bottom: 8px;
 }
 
-.font-check input[type='checkbox'] {
+.font-check input[type='checkbox'],
+.font-check input[type='radio'] {
   display: inline-block;
   width: auto;
   height: auto;
@@ -11266,4 +11352,563 @@ tr > .page-gap-cut {
 .rb-styles-glyph {
   font-size: 20px;
   line-height: 1;
+}
+
+/* "↵ Heading n" hint after a typed Markdown marker: a zero-size anchor with an absolutely
+   positioned label, so it can never reflow or wrap the line (and never wraps itself) */
+.md-shortcut-hint {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+  user-select: none;
+  pointer-events: none;
+}
+
+.md-shortcut-hint-label {
+  position: absolute;
+  left: 10px;
+  bottom: -0.35em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text-dim);
+  background: var(--hover);
+  font:
+    400 12px/1.4 system-ui,
+    sans-serif;
+  font-style: normal;
+  letter-spacing: normal;
+  text-indent: 0;
+  text-decoration: none;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+}
+
+@media print {
+  .md-shortcut-hint {
+    display: none;
+  }
+}
+
+/* ---- floating selection toolbar (Notion-style) ---- */
+/* a ribbon dropdown open: the mini toolbar steps aside instead of sitting on top of its items */
+:root:has([data-rb-panel]) .sel-tb {
+  display: none;
+}
+
+.sel-tb {
+  position: fixed;
+  z-index: 61;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 36px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8, 8px);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--docs-shadow-menu);
+}
+
+.sel-tb-anchor {
+  position: relative;
+  display: flex;
+}
+
+.sel-tb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-6, 6px);
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sel-tb-btn:hover {
+  background: var(--hover);
+}
+
+.sel-tb-btn.active {
+  background: var(--active-bg);
+}
+
+.sel-tb-block {
+  font-weight: 500;
+  padding: 0 8px;
+}
+
+.sel-tb-caret {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+.sel-tb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+.sel-tb-a {
+  display: inline-block;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sel-tb-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8, 8px);
+  background: var(--surface);
+  box-shadow: var(--docs-shadow-menu);
+}
+
+.sel-tb-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-6, 6px);
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sel-tb-item:hover {
+  background: var(--hover);
+}
+
+.sel-tb-item.active {
+  font-weight: 600;
+}
+
+.sel-tb-check {
+  width: 14px;
+  flex: none;
+  text-align: center;
+}
+
+.sel-tb-colors {
+  min-width: 196px;
+  padding: 8px;
+}
+
+.sel-tb-title {
+  margin: 2px 0 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.sel-tb-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 28px);
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.sel-tb-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sel-tb-swatch:hover {
+  border-color: var(--border-strong);
+}
+
+.sel-tb-fill {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+@media print {
+  .sel-tb {
+    display: none;
+  }
+}
+
+/* ---- "Markdown detected" paste chip ---- */
+.md-paste-chip {
+  position: fixed;
+  z-index: 59;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8, 8px);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: var(--docs-shadow-menu);
+}
+
+.md-paste-chip-label {
+  color: var(--text-secondary);
+}
+
+.md-paste-chip-convert {
+  padding: 3px 10px;
+  border: none;
+  border-radius: var(--radius-6, 6px);
+  background: var(--active-bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.md-paste-chip-convert:hover {
+  background: var(--pressed);
+}
+
+.md-paste-chip-close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-6, 6px);
+  background: none;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.md-paste-chip-close:hover {
+  background: var(--hover);
+}
+
+@media print {
+  .md-paste-chip {
+    display: none;
+  }
+}
+
+/* paragraph border "between" (w:pBdr w:between): a rule between consecutive paragraphs that both carry it */
+.bdr-between + .bdr-between {
+  border-top: var(--bdr-between) !important;
+}
+:where(.page-dark) .bdr-between + .bdr-between {
+  border-top: var(--dk-bdr-between, var(--bdr-between)) !important;
+}
+
+/* Layout-tab dialogs: Columns / Paper Size / Line Numbers */
+.cols-dialog {
+  width: 460px;
+}
+
+.cols-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.cols-presets button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cols-presets button:hover {
+  background: var(--hover);
+}
+
+.cols-widths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+
+/* Layout → Hyphenation (a user choice outranks the stylesheet generated from the file's settings.xml) */
+.doc-page[data-hyphenate='on'] {
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+.doc-page[data-hyphenate='off'] {
+  hyphens: manual !important;
+  -webkit-hyphens: manual !important;
+}
+
+.layout-menu-head {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/* Home → Borders and Line Spacing menus */
+.spacing-menu .menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+.borders-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.borders-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.borders-menu button:disabled:hover {
+  background: none;
+}
+
+/* Borders ▾ → View Gridlines */
+.doc-page.show-table-gridlines table td,
+.doc-page.show-table-gridlines table th {
+  outline: 1px dotted var(--text-dim);
+  outline-offset: -1px;
+}
+
+.cols-presets button.active,
+.cols-presets button[aria-pressed='true'] {
+  background: var(--active-bg);
+  border-color: var(--accent);
+}
+
+/* Borders and Shading dialog */
+.borders-dialog {
+  width: 520px;
+}
+
+.borders-dialog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 20px;
+  margin-bottom: 8px;
+}
+
+.borders-dialog-head {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.borders-dialog-fill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.borders-dialog-fill input[type='color'] {
+  width: 48px;
+  margin: 0;
+}
+
+.borders-dialog-preview {
+  margin: 8px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--docs-page-preview, var(--surface));
+}
+
+.borders-dialog-preview > div {
+  padding: 6px 8px;
+}
+
+.borders-dialog-preview span {
+  display: block;
+  height: 5px;
+  margin: 5px 0;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+/* Styles gallery: built-in paragraph style previews */
+.style-card-preview.style-nospacing {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.style-card-preview.style-title {
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 300;
+}
+
+.style-card-preview.style-subtitle {
+  color: var(--text-dim);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.style-card-preview.style-quote {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.style-card-preview.style-intense-quote {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.style-card-preview.style-list-paragraph {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.style-gallery-menu .style-gallery-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: none;
+  padding: 8px 6px 2px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.style-gallery-menu .style-gallery-footer:hover {
+  background: var(--hover);
+}
+
+/* Styles pane */
+.styles-pane {
+  width: 244px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.styles-pane-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.styles-pane-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.styles-pane-item:hover {
+  background: var(--hover);
+}
+
+.styles-pane-item.active {
+  background: var(--active-bg);
+}
+
+.styles-pane-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.styles-pane-kind {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Home → Paste ▾ */
+.rb-paste-split {
+  display: flex;
+  align-items: stretch;
+}
+
+.rb-paste-caret {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 14px;
+  padding: 0 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.rb-paste-caret:hover:not(:disabled),
+.rb-paste-caret[aria-expanded='true'] {
+  background: var(--hover);
+}
+
+.rb-paste-caret:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.paste-menu .menu-head {
+  padding: 4px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/* the entries without a glyph line up with the text of the ones that have one */
+.borders-menu button:not(:has(svg)) {
+  padding-left: 40px;
 }

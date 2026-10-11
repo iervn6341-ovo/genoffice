@@ -65,18 +65,33 @@ export async function createFormulaEngine(
     name: 'wb',
     styles: {},
     sheets: {
-      s1: { id: 's1', name: 'Sheet1', rowCount: size.rows, columnCount: size.columns, cellData: {} },
+      s1: {
+        id: 's1',
+        name: 'Sheet1',
+        rowCount: size.rows,
+        columnCount: size.columns,
+        cellData: {},
+      },
     },
   })
+  // let deferred plugin/function registration (and any installs hooked to it) run
+  await new Promise((resolve) => setTimeout(resolve, 60))
   const injector = univer.__getInjector()
   const commandService = injector.get(ICommandService)
   const instanceService = injector.get(IUniverInstanceService)
   const sheet = () =>
     (
       instanceService.getUnit('wb1') as unknown as {
-        getSheetBySheetId(id: string): { getCellRaw(row: number, column: number): EngineCell | null }
+        getSheetBySheetId(id: string): {
+          getCellRaw(row: number, column: number): EngineCell | null
+        }
       }
     ).getSheetBySheetId('s1')
+
+  const read = (address: string): EngineCell | null => {
+    const { row, column } = parseAddress(address)
+    return sheet().getCellRaw(row, column) ?? null
+  }
 
   let passes = 0
   let lastResultAt = 0
@@ -84,8 +99,8 @@ export async function createFormulaEngine(
     if (command.id === RESULT) lastResultAt = Date.now()
     if (
       command.id === NOTIFICATION &&
-      (command.params as { functionsExecutedState?: number } | undefined)?.functionsExecutedState ===
-        SUCCESS
+      (command.params as { functionsExecutedState?: number } | undefined)
+        ?.functionsExecutedState === SUCCESS
     ) {
       passes += 1
       lastResultAt = Date.now()
@@ -131,12 +146,9 @@ export async function createFormulaEngine(
         if (passes > before && Date.now() - lastResultAt >= QUIET_MS) return
       }
     },
-    get(address) {
-      const { row, column } = parseAddress(address)
-      return sheet().getCellRaw(row, column) ?? null
-    },
+    get: read,
     value(address) {
-      const cell = this.get(address)
+      const cell = read(address)
       if (!cell || cell.v === undefined || cell.v === null) return null
       if (cell.t === 3) return cell.v === 1 || cell.v === true
       return cell.v as number | string

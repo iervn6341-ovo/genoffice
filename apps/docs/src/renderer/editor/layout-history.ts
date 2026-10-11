@@ -22,6 +22,39 @@ export interface SectionLayout {
   readonly pageNumberStart?: number | undefined
 }
 
+/**
+ * Design-tab and header/footer state that Word also puts on the undo stack: page color, watermark,
+ * theme fonts / colors and the header / footer content (page numbers insert into the latter).
+ * Values are held as-is (App owns their types); `undefined` on a restored older snapshot = leave alone.
+ */
+export interface DocFlags {
+  /** settings.xml w:autoHyphenation */
+  readonly autoHyphenation: boolean
+  /** settings.xml w:mirrorMargins */
+  readonly mirrorMargins: boolean
+  /** Design → Paragraph Spacing preset id (rewrites the Normal style's spacing); null = the file's own */
+  readonly paragraphSpacing: string | null
+}
+
+export interface DesignSnapshot {
+  readonly docFlags?: DocFlags | undefined
+  readonly docFlagsDirty?: boolean | undefined
+  readonly pageColor: string | null
+  readonly pageColorDirty: boolean
+  readonly watermark: string | null
+  readonly watermarkDirty: boolean
+  readonly watermarkStyle: unknown
+  readonly watermarkPicture: unknown
+  readonly themeFonts: unknown
+  readonly themeFontsDirty: boolean
+  readonly themeColors: unknown
+  readonly themeColorsDirty: boolean
+  readonly header: unknown
+  readonly headerDirty: boolean
+  readonly footer: unknown
+  readonly footerDirty: boolean
+}
+
 export interface LayoutSnapshot {
   readonly section: SectionSettings | null
   readonly sectionDirty: boolean
@@ -33,6 +66,7 @@ export interface LayoutSnapshot {
   readonly evenOddHfDirty: boolean
   readonly pgNumEdit: { readonly fmt?: string; readonly start?: number } | null
   readonly pgNumDirtySections: readonly number[]
+  readonly design?: DesignSnapshot | undefined
 }
 
 export const LAYOUT_ATTR = 'layout'
@@ -128,5 +162,42 @@ export function withRestoreDirty(restored: LayoutSnapshot, live: LayoutSnapshot)
     evenOddHfDirty:
       restored.evenOddHfDirty || live.evenOddHfDirty || restored.evenOddHf !== live.evenOddHf,
     pgNumDirtySections: union(restored.pgNumDirtySections, live.pgNumDirtySections),
+    ...(restored.design && live.design
+      ? {
+          design: {
+            ...restored.design,
+            docFlagsDirty:
+              restored.design.docFlagsDirty ||
+              live.design.docFlagsDirty ||
+              !same(restored.design.docFlags, live.design.docFlags),
+            pageColorDirty:
+              restored.design.pageColorDirty ||
+              live.design.pageColorDirty ||
+              restored.design.pageColor !== live.design.pageColor,
+            watermarkDirty:
+              restored.design.watermarkDirty ||
+              live.design.watermarkDirty ||
+              restored.design.watermark !== live.design.watermark ||
+              !same(restored.design.watermarkStyle, live.design.watermarkStyle) ||
+              !same(restored.design.watermarkPicture, live.design.watermarkPicture),
+            themeFontsDirty:
+              restored.design.themeFontsDirty ||
+              live.design.themeFontsDirty ||
+              !same(restored.design.themeFonts, live.design.themeFonts),
+            themeColorsDirty:
+              restored.design.themeColorsDirty ||
+              live.design.themeColorsDirty ||
+              !same(restored.design.themeColors, live.design.themeColors),
+            headerDirty:
+              restored.design.headerDirty ||
+              live.design.headerDirty ||
+              !same(restored.design.header, live.design.header),
+            footerDirty:
+              restored.design.footerDirty ||
+              live.design.footerDirty ||
+              !same(restored.design.footer, live.design.footer),
+          },
+        }
+      : {}),
   }
 }

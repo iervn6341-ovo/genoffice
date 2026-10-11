@@ -180,12 +180,15 @@ function browserFontBox(
   probe.style.cssText = 'display:inline-block;width:0;height:0'
   host.append(text, probe)
   document.body.appendChild(host)
-  const hostTop = host.getBoundingClientRect().top
+  const textBox = text.getBoundingClientRect()
   const m = {
-    height: text.getBoundingClientRect().height,
-    // zero-size inline-block: its box top sits exactly on the baseline (fractional,
-    // unlike offsetTop which rounds to whole px)
-    ascent: probe.getBoundingClientRect().top - hostTop,
+    height: textBox.height,
+    // zero-size inline-block: its box top sits exactly on the baseline (fractional, unlike
+    // offsetTop which rounds to whole px). Measured from the TEXT box top, not the host top:
+    // with line-height:normal the host's line box also carries the font's hhea lineGap (half of
+    // it above the glyphs), which the text box's height excludes — mixing the two double-counted
+    // that leading and pushed lineGap fonts (Rockwell) a few px up when editing started.
+    ascent: probe.getBoundingClientRect().top - textBox.top,
   }
   host.remove()
   fontBoxCache.set(key, m)
@@ -418,7 +421,14 @@ export function populateEditorDom(
     const first = paraLines[0]!
     const last = paraLines[paraLines.length - 1]!
     if (!vertical) {
-      p.style.lineHeight = `${first.advance ?? first.height}px`
+      // One CSS line-height serves every wrapped line, but the engine's advances differ per
+      // line (a taller run — e.g. a larger space — only lifts the line that holds it). Continuation
+      // lines use their own pitch; the first line keeps its advance through ::first-line
+      // (--first-line-h, see styles.css), so neither the first nor the following lines drift.
+      const firstAdv = first.advance ?? first.height
+      const restAdv = paraLines.length > 1 ? (last.advance ?? last.height) : firstAdv
+      p.style.lineHeight = `${restAdv}px`
+      if (Math.abs(restAdv - firstAdv) > 0.5) p.style.setProperty('--first-line-h', `${firstAdv}px`)
       const gap = first.top - prevEnd
       if (Math.abs(gap) > 0.01) p.style.marginTop = `${gap}px`
     }
@@ -465,6 +475,9 @@ export function populateEditorDom(
           dominant.italic,
         )
       : 0
+    // An empty line (a blank table cell, an empty paragraph) has no run to take a baseline from: its
+    // "canvas baseline" is only the leading, and cancelling the difference to the DOM baseline shoved the
+    // caret ~18px up, out of the cell. With no `dominant` run the DOM keeps its natural position.
     // lnSpc>100%: the canvas pins glyphs to the slot bottom (leadAbove below the line top)
     const canvasBaseline = (first.leadAbove ?? 0) + engineAscent + drop
     const participants: Array<{ family: string; size: number; bold?: boolean; italic?: boolean }> =
@@ -476,7 +489,11 @@ export function populateEditorDom(
           bold: r.bold,
           italic: r.italic,
         }))
-    if (strutFont) participants.push({ family: strutFont.family, size: strutFont.size })
+    // Runs carry line-height 0 (horizontal flow), so the strut alone fixes the line's baseline
+    if (strutFont) {
+      if (!vertical) participants.length = 0
+      participants.push({ family: strutFont.family, size: strutFont.size })
+    }
     // Half-leading distributes over the CSS line-height, which is the advance
     // (box + external leading) when the font has an hhea lineGap
     const cssLineH = first.advance ?? first.height
@@ -487,7 +504,9 @@ export function populateEditorDom(
       domBaseline = Math.max(domBaseline, (cssLineH - m.height) / 2 + m.ascent)
     }
     const dyFix =
-      !vertical && canvasBaseline > 0 && domBaseline > 0 ? canvasBaseline - domBaseline : 0
+      !vertical && dominant && canvasBaseline > 0 && domBaseline > 0
+        ? canvasBaseline - domBaseline
+        : 0
     // Horizontal: nowrap overflow — the canvas centers/right-aligns within the box and
     // spills both ways; the DOM block is max-content wide and anchored at the box's left.
     // The difference is a constant per box (zero when the content fits or the box wraps).
@@ -563,6 +582,12 @@ export function populateEditorDom(
           // Super/subscript: the initial DOM must restore it (otherwise extraction sends explicit 0/false and wipes the original format)
           if (run.baselinePct) span.style.verticalAlign = run.baselinePct > 0 ? 'super' : 'sub'
           span.style.fontSize = `${run.fontSizePx}px`
+          // The paragraph's line-height (the engine's line advance) is set on the block, i.e. on
+          // the strut. Runs of different sizes that inherit the same absolute line-height each
+          // carry a differently-placed 69px box, and baseline-aligning those grows the line box
+          // (mixed sizes → every wrapped line sat ~15px lower than on the canvas, so the text
+          // jumped when editing started). A zero line-height keeps the strut as the only box.
+          if (!vertical) span.style.lineHeight = '0'
           if (run.fontFamily) {
             const display = displayFontFamily(run.fontFamily)
             span.style.fontFamily = display
@@ -590,6 +615,11 @@ export function populateEditorDom(
         if (!run.rtl && !vertical && !natural) {
           fragment.style.display = 'inline-block'
           fragment.style.width = `${run.widthPx}px`
+          // The browser's own advance for a word can exceed the engine's by a fraction of a pixel
+          // (kerning, hinting): inside a fixed-width cell that must overflow invisibly, not break
+          // the word's last letters onto the next line (the editor's overflow-wrap: break-word
+          // would). overflow-wrap rather than nowrap: word-under-caret selection reads the text flow.
+          fragment.style.overflowWrap = 'normal'
         }
         // Keep the browser editor visually aligned with the canvas renderer. This is display-only:
         // extraction intentionally preserves the source run's PPT letter spacing through srcRun.
@@ -613,6 +643,28 @@ export function populateEditorDom(
     }
     if (!p.childNodes.length) p.appendChild(document.createElement('br')) // Empty paragraph placeholder
     div.appendChild(p)
+    // The font-metric model above (browserFontBox) can be a pixel off for large faces: Blink
+    // rounds a font's ascent/descent to whole pixels, so the real DOM baseline sits up to ~1px
+    // from the modelled one and the text jumped when editing started. With the paragraph laid out
+    // (editor connected), read the actual first-line baseline and cancel the exact difference.
+    if (!vertical && dominant && div.isConnected && canvasBaseline > 0 && p.offsetWidth > 0) {
+      const probe = document.createElement('span')
+      probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline'
+      p.insertBefore(probe, p.firstChild)
+      const pr = p.getBoundingClientRect()
+      const br = probe.getBoundingClientRect()
+      probe.remove()
+      const k = pr.width / p.offsetWidth
+      const measured = (br.top - pr.top) / k
+      if (k > 0 && Number.isFinite(measured)) {
+        // The DOM snaps a baseline down to a whole device pixel where the canvas rounds to the
+        // nearest one: half a device pixel evens the two out (zoom k is css px per layout px)
+        const snap = 0.5 / ((globalThis.devicePixelRatio || 1) * k)
+        const fix = canvasBaseline - measured + snap
+        p.style.position = 'relative'
+        p.style.top = Math.abs(fix) > 0.01 ? `${fix}px` : ''
+      }
+    }
   })
 }
 
@@ -624,6 +676,7 @@ export function releaseEditorLayoutConstraints(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>('[data-layout-fragment]').forEach((fragment) => {
     fragment.style.display = ''
     fragment.style.width = ''
+    fragment.style.overflowWrap = ''
   })
 }
 
@@ -632,6 +685,7 @@ function releaseFragment(el: Element | null | undefined): void {
   if (!(el instanceof HTMLElement) || el.dataset.layoutFragment !== 'true') return
   el.style.display = ''
   el.style.width = ''
+  el.style.overflowWrap = ''
 }
 
 /** Nearest enclosing layout fragment of a DOM point (bounded by the editor root). */

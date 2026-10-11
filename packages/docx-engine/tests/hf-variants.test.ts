@@ -158,6 +158,61 @@ describe('first-page / even-page headers & footers', () => {
   })
 })
 
+describe('settings.xml document flags (hyphenation, mirrored margins)', () => {
+  it('writes autoHyphenation / mirrorMargins in schema order and reads them back', async () => {
+    const source = await buildDocx({ bodyXml: BODY })
+    const parsed = await parseDocx(source)
+    expect(parsed.autoHyphenation).toBeUndefined()
+    expect(parsed.mirrorMargins).toBeUndefined()
+
+    const saved = await saveDocx(parsed, [{ kind: 'original', docxIndex: 0 }], {
+      autoHyphenation: true,
+      mirrorMargins: true,
+      evenAndOddHeaders: true,
+    })
+    const settingsXml = (await zipText(saved, 'word/settings.xml'))!
+    expect(settingsXml).toContain('<w:mirrorMargins/>')
+    expect(settingsXml).toContain('<w:autoHyphenation/>')
+    // CT_Settings: mirrorMargins < autoHyphenation < evenAndOddHeaders
+    expect(settingsXml.indexOf('<w:mirrorMargins/>')).toBeLessThan(
+      settingsXml.indexOf('<w:autoHyphenation/>'),
+    )
+    const reparsed = await parseDocx(saved)
+    expect(reparsed.autoHyphenation).toBe(true)
+    expect(reparsed.mirrorMargins).toBe(true)
+
+    const off = await saveDocx(reparsed, [{ kind: 'original', docxIndex: 0 }], {
+      autoHyphenation: false,
+      mirrorMargins: false,
+    })
+    const offXml = (await zipText(off, 'word/settings.xml'))!
+    expect(offXml).not.toContain('autoHyphenation')
+    expect(offXml).not.toContain('mirrorMargins')
+    expect(offXml).toContain('<w:evenAndOddHeaders/>')
+  })
+
+  it('applySettingsFlag lands before the first later settings child', async () => {
+    const { applySettingsFlag } = await import('../src/patch')
+    const xml =
+      '<w:settings xmlns:w="x"><w:zoom w:percent="100"/><w:defaultTabStop w:val="720"/>' +
+      '<w:characterSpacingControl w:val="doNotCompress"/><w:compat/></w:settings>'
+    const hyph = applySettingsFlag(xml, 'autoHyphenation', true)
+    expect(hyph).toContain(
+      '<w:defaultTabStop w:val="720"/><w:autoHyphenation/><w:characterSpacingControl',
+    )
+    const mirror = applySettingsFlag(hyph, 'mirrorMargins', true)
+    expect(mirror).toContain('<w:zoom w:percent="100"/><w:mirrorMargins/><w:defaultTabStop')
+    // a flag written with w:val="false" is replaced, not duplicated
+    const falsy = applySettingsFlag(
+      '<w:settings xmlns:w="x"><w:autoHyphenation w:val="false"/></w:settings>',
+      'autoHyphenation',
+      true,
+    )
+    expect(falsy.match(/autoHyphenation/g)).toHaveLength(1)
+    expect(falsy).toContain('<w:autoHyphenation/>')
+  })
+})
+
 describe('hfAllSections (P17)', () => {
   it('injects new header/footer references into every ref-less body sectPr', async () => {
     const midSect =

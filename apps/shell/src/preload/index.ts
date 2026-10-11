@@ -6,7 +6,7 @@ import {
   AI_SEARCH_PROVIDERS,
   getProviderAdapter,
 } from '@genoffice/ai-provider/browser'
-import type { AiSettings, CodexModelCatalog } from '@genoffice/ai-provider/browser'
+import type { AiSettings, CodexModelCatalog, ListModelsResult } from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 import { normalizeAiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
 import type {
@@ -344,6 +344,9 @@ const homeApi: HomeApi = {
       }
       return { ...meta, defaultBaseUrl }
     })
+  },
+  async listAiModels(baseUrl, apiKey) {
+    return (await ipcRenderer.invoke('ai:list-models', baseUrl, apiKey)) as ListModelsResult
   },
   async getCodexModels(cliPath) {
     return (await ipcRenderer.invoke('ai:codex-models', cliPath)) as CodexModelCatalog

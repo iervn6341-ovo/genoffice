@@ -1016,6 +1016,43 @@ function flowIntoColumns(
   return { lines: out, contentHeight: maxBottom }
 }
 
+/**
+ * "Resize shape to fit text" with columns: the shape is as short as it can be while every line still
+ * lands within numCol columns (PowerPoint's spAutoFit + numCol), i.e. the columns come out balanced.
+ * Smallest column height at which flowIntoColumns places all lines without spilling past the last
+ * column; falls back to the box height when no taller-than-a-line height is needed.
+ */
+function balancedColumnHeight(
+  lines: readonly TextLine[],
+  numCol: number,
+  fallback: number,
+): number {
+  if (!lines.length) return fallback
+  const fits = (h: number): boolean => {
+    let col = 0
+    let colTop = 0
+    for (const ln of lines) {
+      const top = ln.top - colTop
+      if (top > 0 && top + ln.height > h) {
+        col += 1
+        colTop = ln.top
+        if (col >= numCol) return false
+      }
+    }
+    return true
+  }
+  const last = lines[lines.length - 1]!
+  let lo = Math.max(...lines.map((l) => l.height))
+  let hi = Math.max(last.top + last.height, lo)
+  if (!fits(hi)) return fallback
+  for (let i = 0; i < 24 && hi - lo > 0.25; i++) {
+    const mid = (lo + hi) / 2
+    if (fits(mid)) hi = mid
+    else lo = mid
+  }
+  return hi
+}
+
 /** Main entry: TextBody → RenderTextLayout (including autofit shrink stepping). */
 export function layoutText(input: TextLayoutInput): RenderTextLayout {
   const { body, boxWidthPx, boxHeightPx, metrics, vp } = input
@@ -1112,7 +1149,13 @@ export function layoutText(input: TextLayoutInput): RenderTextLayout {
       // Still doesn't fit after all steps → stop at 25% (overflow allowed)
     }
   }
-  if (numCol > 1) result = flowIntoColumns(result, availHeight, numCol, colWidth + colGapPx)
+  if (numCol > 1) {
+    const colHeight =
+      body.autofit === 'resize'
+        ? balancedColumnHeight(result.lines, numCol, availHeight)
+        : availHeight
+    result = flowIntoColumns(result, colHeight, numCol, colWidth + colGapPx)
+  }
 
   // Vertical anchor: middle/bottom shift everything down (negative offsets allowed
   // when content is too tall → overflow upward/on both sides),

@@ -768,6 +768,7 @@ function buildTable(
     gridY: rowY,
     ...(el.rtl ? { rtl: true } : {}),
     ...(el.styleFlags ? { styleFlags: el.styleFlags } : {}),
+    ...(el.styleId ? { styleId: el.styleId } : {}),
   }
 }
 

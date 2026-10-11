@@ -100,3 +100,39 @@
   - 字面值 `1.0` 走 `ValueObjectFactory.create`（約第 8112 行）：`Number("1.0").toString()` 不等於 `"1.0"` 時會變成字串物件，所以 `1.0&""` 得 "1.0"。**若屬實，`ISNUMBER(1.0)`、`3>=2.0` 這類比較也會出錯，影響會比其他項目大**，是第一個要用測試台確認的點。
   - `TAKE`（約第 29970 行）的 `_getResultArray` 看起來沒有問題，順序顛倒可能來自 `ArrayValueObject.slice` 或語料的資料排列，需要實測。
 - 建議做法：用測試台為第 3 節那 29 案建立 `excel-formula-parity.test.ts`（期望值取自 `test/_probe/fx/excel-out.txt`），逐項用「包裝原函式執行器」的方式修（同 `cell-function.ts`、`ifs-empty-set.ts`，在 `App.tsx` 安裝）；全部做完後用 `fx.probe.spec.ts` 在真 app 重跑 447 案，目標是 37 案降到只剩 8 個 Excel 端假差異。
+
+## 8. 2026-10-08 後續結果
+
+- **公式：** 新增 `apps/sheets/src/renderer/excel-formula-compat.ts`（在 `App.tsx` 安裝）與 `tests/excel-formula-parity.test.ts`（40 個測試，另有 `tests/formula-engine.ts` 測試台）。真 app 重跑 447 案：不同 37 → 19 案。
+  - 已修：字面值 `1.0`／`1E-7` 被當字串（`=3>=2.0`、`ISNUMBER(1.0)` 原本為 FALSE）、數字轉文字 15 位、`IF("text")`、`SEARCH` 萬用字元、`EDATE` 月底、`SECOND` 取整、`POWER(-8,1/3)`、`TEXT(TRUE)`、`DOLLAR`、`MATCH(…,-1)`、`--x`／`-"3"`／`--TRUE` 一元負號（只改計算用的文字，不動使用者看到的公式）。
+  - 剩 19 案：8 案是 Excel 端或語系的假差異；真差異有 `REPT("a",0)`／`T(1)`／`ISBLANK(="")` 的空字串、交集運算子 `#NULL!`、1900 年日期特例（`DATE(1900,2,29)`、`DAY(60)`、`DATE(1899,12,31)`）、`--"0x10"`（應為 #VALUE!）、18 位整數轉文字，以及 `TAKE`／`DROP`（真 app 內順序顛倒，但在 `formula-engine.ts` 單獨測是對的，原因未明）。
+- **Word：** Option＋Backspace 改為自訂（`word-keys.ts` 的 `wordDeleteRange`），標點前的空格會一併刪除，`K02` 已與 Word 一致；`K09`／`K10`／`K13`／`K14` 仍不同（見第 3 節）。補了 `tests/word-keys.test.ts`。
+- **完整 e2e：** 203 通過、10 略過、1 失敗（47.3 分鐘）。失敗的 `slides-show.spec.ts:45` 單獨重跑 2/2 通過，判定為偶發。這次跑的是 Option＋Backspace 修改之前的 build。
+- **單元測試：** sheets 2,811 通過、1 失敗（`xlsx-sidecar-cancel`，不含我的修改也失敗）。
+
+## Print panes grouped like Office (2026-10-10)
+
+Docs / Sheets / Slides print sheets now share the Office print-pane grouping (`PrintSection` in
+`packages/ui`): **Printer** (printer, copies, two-sided, collated) / **Settings** (what to print,
+pages, layout, color) / **Page Setup** (orientation, paper, margins, scaling, pages per sheet) /
+**Options**. Labels: `packages/ui/src/strings-print-office.ts` (20 languages).
+
+Source of the option lists: the PowerPoint / Word / Excel AppleScript dictionaries (`sdef`: print
+options, page setup) and Microsoft 365's print pane. The real print dialogs could not be opened
+(automation / accessibility permission denied), so the layout is from those, not observed.
+
+- Slides: range (all / selected / current / custom / section), layouts (full page, notes, outline,
+  handouts 1/2/3/4/6/9 horizontal + vertical), color / grayscale / B&W, paper + orientation, pages per
+  sheet with direction / rotate / flip, frame, scale to fit paper, high quality, print comments,
+  hidden slides, header & footer link. Not done: print ink markup, booklet.
+- Docs: all / current / custom pages, odd / even only, reverse order, orientation / paper / margins
+  (edits the document's page setup for every section, like Word), pages per sheet (2/4/6/8/16),
+  scale to paper size, page color on/off. `docs:print` now sets `printBackground` and the paper size.
+  Not done: print selection, print markup, document-properties page, hidden text.
+- Sheets: active sheets / entire workbook (one job per visible sheet) / selection, Ignore Print Area,
+  pages from-to, orientation, paper, margins presets, scaling (none / fit sheet / columns / rows /
+  custom %), gridlines, headings, header & footer link. Not done: custom margins, center on page,
+  black & white, draft quality, comments, cell errors, page order, first page number, print titles
+  columns.
+- Real printing (copies, duplex, page ranges on a physical printer) was not exercised.
+- `apps/sheets/tests/xlsx-sidecar-cancel.test.ts` fails on a clean tree of this change set (not touched).

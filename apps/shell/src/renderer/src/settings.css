@@ -469,6 +469,22 @@
 
 /* ── AI model pane ── */
 
+.set-input-row {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  width: 58%;
+  min-width: 260px;
+}
+.set-input-row .set-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.set-input-row .set-btn {
+  flex-shrink: 0;
+}
 .set-input {
   flex-shrink: 0;
   width: 46%;

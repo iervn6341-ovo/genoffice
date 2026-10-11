@@ -4,7 +4,13 @@ import { copyFile, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+  setEditorLayoutWidth,
+} from './helpers'
 
 const FIXTURE = resolve(__dirname, '../apps/sheets/fixtures/generated/compatibility-basic.xlsx')
 
@@ -53,6 +59,8 @@ test.describe('sheets: Insert → Equation and Checkbox', () => {
     })
     try {
       const sheets = await waitForPageWithUrl(launched.app, '://sheets/')
+      // wide enough that no ribbon group folds into a dropdown
+      await setEditorLayoutWidth(launched.app, '://sheets/', 2400)
       await waitForWorkbook(sheets)
 
       await sheets.getByRole('button', { name: 'Insert', exact: true }).click()
@@ -95,6 +103,8 @@ test.describe('sheets: Insert → Equation and Checkbox', () => {
     })
     try {
       const sheets = await waitForPageWithUrl(launched.app, '://sheets/')
+      // wide enough that no ribbon group folds into a dropdown
+      await setEditorLayoutWidth(launched.app, '://sheets/', 2400)
       await waitForWorkbook(sheets)
 
       await sheets.getByRole('button', { name: 'Insert', exact: true }).click()
@@ -127,6 +137,8 @@ test.describe('sheets: Insert → Timeline', () => {
     })
     try {
       const sheets = await waitForPageWithUrl(launched.app, '://sheets/')
+      // wide enough that no ribbon group folds into a dropdown
+      await setEditorLayoutWidth(launched.app, '://sheets/', 2400)
       await waitForWorkbook(sheets)
       // Full-load mode arrives within a few seconds on this tiny fixture;
       // typing the source table below takes longer than that.

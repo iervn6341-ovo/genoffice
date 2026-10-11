@@ -110,10 +110,10 @@ export function numberLines<T extends LineRef>(
 }
 
 export const hasLineNumbering = (sections: SectionInfo[]): boolean =>
-  sections.some((s) => s.settings.lineNumbers !== undefined)
+  sections.some((s) => s.settings.lineNumbers != null)
 
 const lnOfSections = (sections: SectionInfo[]) => (i: number) =>
-  sections[Math.min(i, sections.length - 1)]?.settings.lineNumbers
+  sections[Math.min(i, sections.length - 1)]?.settings.lineNumbers ?? undefined
 
 const distancePx = (ln: LineNumbering) =>
   twipsToPx(ln.distance ?? LINE_NUMBER_DEFAULT_DISTANCE_TWIPS)

@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/core'
 import { TextSelection } from '@tiptap/pm/state'
 
-export type CaseMode = 'upper' | 'lower' | 'title' | 'sentence'
+export type CaseMode = 'upper' | 'lower' | 'title' | 'sentence' | 'toggle'
 
 export function transformCase(s: string, mode: CaseMode): string {
   switch (mode) {
@@ -13,6 +13,15 @@ export function transformCase(s: string, mode: CaseMode): string {
       return s.toLowerCase().replace(/(^|\s)(\p{L})/gu, (m) => m.toUpperCase())
     case 'sentence':
       return s.toLowerCase().replace(/(^\s*\p{L})|([.!?。!?]\s*\p{L})/gu, (m) => m.toUpperCase())
+    case 'toggle':
+      // Word's tOGGLE cASE: every letter swaps case, other characters stay
+      return Array.from(s, (ch) =>
+        ch === ch.toUpperCase() && ch !== ch.toLowerCase()
+          ? ch.toLowerCase()
+          : ch === ch.toLowerCase() && ch !== ch.toUpperCase()
+            ? ch.toUpperCase()
+            : ch,
+      ).join('')
   }
 }
 

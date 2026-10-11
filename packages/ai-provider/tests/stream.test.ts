@@ -104,6 +104,72 @@ describe('streamForProvider: temperature policy', () => {
     expect(bodies[1].max_tokens).toBe(100)
     expect('max_completion_tokens' in bodies[1]).toBe(false)
   })
+
+  it('a cap of 0 means no limit: OpenAI-style bodies omit the field', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(okTurn()))
+    vi.stubGlobal('fetch', fetchMock)
+    const body = (i: number) =>
+      JSON.parse((fetchMock.mock.calls[i]![1] as RequestInit).body as string)
+    await streamForProvider(
+      'openai',
+      { apiKey: 'k', model: 'gpt-5.6-luna' },
+      's',
+      [],
+      [],
+      0,
+      collector().cb,
+    )
+    await streamForProvider(
+      'kimi',
+      { apiKey: 'k', model: 'kimi-k3' },
+      's',
+      [],
+      [],
+      0,
+      collector().cb,
+    )
+    expect('max_completion_tokens' in body(0) || 'max_tokens' in body(0)).toBe(false)
+    expect('max_completion_tokens' in body(1) || 'max_tokens' in body(1)).toBe(false)
+  })
+
+  it('stops a model that streams only thinking for too long and says why', async () => {
+    const line = (reasoning: string) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning } }] })}`
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(okResponse(sseStream([line('a'), line('b')])))),
+    )
+    let now = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => (now += 600_000))
+    await expect(
+      streamForProvider('openai', { apiKey: 'k', model: 'm' }, 's', [], [], 100, collector().cb),
+    ).rejects.toThrow(/kept thinking/)
+    vi.restoreAllMocks()
+  })
+
+  it('Ollama talks to its local /v1 endpoint without a key and without an output cap at 0', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(okTurn()))
+    vi.stubGlobal('fetch', fetchMock)
+    await streamForProvider(
+      'ollama',
+      { apiKey: '', model: 'llama3.2', baseUrl: 'http://localhost:11434/v1' },
+      's',
+      [],
+      [],
+      0,
+      collector().cb,
+    )
+    // the first call is the reachability probe, the second the chat request
+    expect(fetchMock.mock.calls[0]![0]).toBe('http://localhost:11434/v1/models')
+    const [url, init] = fetchMock.mock.calls[1]!
+    expect(url).toBe('http://localhost:11434/v1/chat/completions')
+    expect((init as RequestInit).headers).not.toHaveProperty('Authorization')
+    const sent = JSON.parse((init as RequestInit).body as string)
+    expect(sent.model).toBe('llama3.2')
+    expect('max_tokens' in sent).toBe(false)
+  })
 })
 
 describe('streamForProvider: empty SSE streams surface as errors', () => {

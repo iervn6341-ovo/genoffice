@@ -1577,6 +1577,13 @@ export function displayFontFamily(name: string): string {
 const MEASURE_PX = 100
 let baselineCtx: CanvasRenderingContext2D | null | undefined
 const baselineAnchor = new Map<string, { ratio: number; resolved: boolean }>()
+// The anchor is measured with whatever faces exist at that moment. A deck's private fonts register
+// after the first layout, so an anchor cached before they landed (family still "unresolved", ratio
+// of the fallback face) would stay wrong for the session: the canvas and the edit overlay then
+// disagree and the text jumps when a box enters editing. Start over whenever fonts finish loading.
+if (typeof document !== 'undefined') {
+  document.fonts?.addEventListener('loadingdone', () => baselineAnchor.clear())
+}
 // Private/embedded FontFaces register after the first React render, and a Konva batchDraw
 // repaints existing nodes without recomputing their glyph y props — anchors measured
 // against the fallback font would stick. Bump an epoch on 'loadingdone' so glyph-building

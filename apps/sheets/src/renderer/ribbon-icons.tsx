@@ -1,4 +1,9 @@
 import type { ReactElement, ReactNode } from 'react'
+import { CraftIcon, type CraftSet } from '@genoffice/ui'
+import { GRID_ICONS } from '@genoffice/ui/craft-icons/grid'
+
+/// Glyph icons drawn like the GridCraft icon set (packages/ui/src/craft-icons/NOTICE-craft-icons.md)
+const CRAFT: CraftSet = { grid: 16, icons: GRID_ICONS }
 
 /// Ribbon icon set drawn to the shared icon standard: 24×24 canvas with
 /// 1.5-unit strokes, round caps and round joins. The rendered size comes
@@ -228,21 +233,9 @@ const REFRESH_ICON = (
 /// such as $, ?, θ, ƒx are typography, not drawn icons).
 export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
   // ---- alignment / rows / columns ----
-  '≡': (
-    <Icon>
-      <path d="M4.75 4.75h14.5M4.75 9.5h9.5M4.75 14.25h14.5M4.75 19h9.5" />
-    </Icon>
-  ),
-  '≣': (
-    <Icon>
-      <path d="M4.75 4.75h14.5M7.25 9.5h9.5M4.75 14.25h14.5M7.25 19h9.5" />
-    </Icon>
-  ),
-  '☰': (
-    <Icon>
-      <path d="M4.75 4.75h14.5M9.75 9.5h9.5M4.75 14.25h14.5M9.75 19h9.5" />
-    </Icon>
-  ),
+  '≡': <CraftIcon set={CRAFT} name="AlignLeft" size={20} />,
+  '≣': <CraftIcon set={CRAFT} name="AlignCenter" size={20} />,
+  '☰': <CraftIcon set={CRAFT} name="AlignRight" size={20} />,
   '⤒': (
     <Icon>
       <path d="M5 4.75h14" />
@@ -255,13 +248,7 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <path d="M12 4.75v9.75M8.5 11l3.5 3.5 3.5-3.5" />
     </Icon>
   ),
-  '↩': (
-    <Icon>
-      <path d="M4.75 5.75h14.5" />
-      <path d="M4.75 11.25h10.25a3 3 0 0 1 0 6h-3.25" />
-      <path d="M14 15 11.75 17.25 14 19.5" />
-    </Icon>
-  ),
+  '↩': <CraftIcon set={CRAFT} name="Wrap" size={20} />,
   '⇤': (
     <Icon>
       <path d="M5 5v14" />
@@ -275,38 +262,15 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
     </Icon>
   ),
   // ---- mini chart-type grid ----
-  '▮▬': (
-    <Icon>
-      <path d="M4.5 19.5h15" />
-      <path d="M8 19.5V12M12.5 19.5V8.5M17 19.5V15" />
-    </Icon>
-  ),
-  '📈': (
-    <Icon>
-      <path d="M4.5 4.5v15h15" />
-      <path d="m7.5 15.5 3.5-4 2.7 2.5 4.3-5.5" />
-    </Icon>
-  ),
+  '▮▬': <CraftIcon set={CRAFT} name="ChartBar" size={20} />,
+  '📈': <CraftIcon set={CRAFT} name="ChartLine" size={20} />,
   '◪': (
     <Icon>
       <path d="M4.75 19.25V13.5l5.5-6 4 5.5 5-4.25v10.5H4.75Z" />
     </Icon>
   ),
-  '◔': (
-    <Icon>
-      <circle cx="12" cy="12" r="7.5" />
-      <path d="M12 12V4.5M12 12l6.75 3.25" />
-    </Icon>
-  ),
-  '∴': (
-    <Icon>
-      <path d="M4.5 4.5v15h15" />
-      <circle cx="9" cy="15" r="0.5" fill="currentColor" />
-      <circle cx="12" cy="9.5" r="0.5" fill="currentColor" />
-      <circle cx="16" cy="12.5" r="0.5" fill="currentColor" />
-      <circle cx="18" cy="7" r="0.5" fill="currentColor" />
-    </Icon>
-  ),
+  '◔': <CraftIcon set={CRAFT} name="ChartPie" size={20} />,
+  '∴': <CraftIcon set={CRAFT} name="ChartScatter" size={20} />,
   '✳': (
     <Icon>
       <path d="M12 4.25 18.75 8.1v7.8L12 19.75 5.25 15.9V8.1L12 4.25Z" />
@@ -329,15 +293,7 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
   // ---- clipboard ----
   // paste shares the docs ribbon's clipboard geometry (docs 16-canvas × 1.5);
   // paste special swaps the text lines for option sliders on the same board
-  '📋': (
-    <Icon>
-      <path d="M 8.14 18.16 H 5.89 C 4.85 18.16 4 17.31 4 16.26 V 6.79 C 4 5.74 4.85 4.89 5.89 4.89 H 7.32 M 17.26 7.74 V 6.79 C 17.26 5.74 16.41 4.89 15.37 4.89 H 13.95" />
-      <rect x="7.79" y="3" width="5.68" height="2.84" rx="0.95" />
-      <path d="M 18.21 7.74 H 9.68 C 8.64 7.74 7.79 8.59 7.79 9.63 V 19.11 C 7.79 20.15 8.64 21 9.68 21 H 15.49 L 20.11 16.03 V 9.63 C 20.11 8.59 19.26 7.74 18.21 7.74 Z" />
-      <path d="M 10.63 11.05 H 17.26 M 10.63 14.37 H 14.42" />
-      <path d="M 15.37 21 V 16.74 C 15.37 16.21 15.79 15.79 16.32 15.79 H 20.11" />
-    </Icon>
-  ),
+  '📋': <CraftIcon set={CRAFT} name="Paste" size={20} />,
   '📑': (
     <Icon>
       <path d="M 14.99 5.02 H 16.98 C 18.09 5.02 18.98 5.92 18.98 7.04 L 18.88 19.02 C 18.87 20.11 17.98 21 16.88 21 H 6.88 C 5.77 21 4.87 20.09 4.88 18.98 L 4.98 7 C 4.98 5.91 5.88 5.02 6.98 5.02 H 8.99" />
@@ -347,27 +303,14 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
   ),
   // cut / copy / format painter share one 24-canvas design across all three
   // apps (the docs ribbon carries the same geometry × 2/3 on its 16 canvas)
-  '✂': (
-    <Icon>
-      <path d="M 7.91 19.27 L 8.92 17.57 L 16.98 3.59 M 7.02 3.5 L 15.08 17.47 L 16.09 19.27" />
-      <circle cx="5.83" cy="18.13" r="2.37" />
-      <circle cx="18.17" cy="18.13" r="2.37" />
-    </Icon>
-  ),
+  '✂': <CraftIcon set={CRAFT} name="Cut" size={20} />,
   '⧉': (
     <Icon>
       <rect x="7" y="7" width="14" height="14" rx="3" />
       <path d="M 14.5 4 H 7 C 5.34 4 4 5.34 4 7 V 14.5" />
     </Icon>
   ),
-  '🖌': (
-    <Icon>
-      <rect x="10.65" y="4.05" width="2.7" height="5.1" rx="1.35" />
-      <rect x="4.5" y="9.15" width="15" height="10.8" rx="1.5" />
-      <path d="M 4.5 13.35 H 19.5" />
-      <path d="M 9.3 16.35 V 18.15 M 14.7 16.35 V 18.15" />
-    </Icon>
-  ),
+  '🖌': <CraftIcon set={CRAFT} name="Brush" size={20} />,
   // ---- find / filter ----
   '🔍': (
     <Icon>
@@ -375,11 +318,7 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <path d="m15 15 4.5 4.5" />
     </Icon>
   ),
-  '▽': (
-    <Icon>
-      <path d="M 4.17 4.71 h 15.66 l -5.94 6.8 v 7.45 l -3.78 -2.38 v -5.08 l -5.94 -6.8 Z" />
-    </Icon>
-  ),
+  '▽': <CraftIcon set={CRAFT} name="Filter" size={20} />,
   '⊘': (
     <Icon>
       <path d="M4 5.25h11.5l-4.35 5v5.4l-2.8-1.75v-3.65L4 5.25Z" />
@@ -393,13 +332,7 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
     </Icon>
   ),
   // ---- comments / review ----
-  '🗨': (
-    // Square-corner comment bubble with text lines, shared with docs/slides IconComment
-    <Icon>
-      <path d="M 4.51 4.87 h 14.99 v 10.22 h -8.18 L 7.23 19.18 v -4.09 h -2.73 z" />
-      <path d="M 7.91 8.28 h 8.18 M 7.91 11.68 h 5.45" />
-    </Icon>
-  ),
+  '🗨': <CraftIcon set={CRAFT} name="Comment" size={20} />,
   '🗑': (
     <Icon>
       <path d="M 5.48 7.05 h 13.05" />
@@ -454,48 +387,19 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
     </Icon>
   ),
   // ---- charts / analysis ----
-  '📊': (
-    <Icon>
-      <path d="M4.5 19.5h15" />
-      <path d="M8 19.5V9.5M12.5 19.5V4.75M17 19.5V12.5" />
-    </Icon>
-  ),
+  '📊': <CraftIcon set={CRAFT} name="Chart" size={20} />,
   '🗠': (
     <Icon>
       <path d="M4.5 4.5v15h15" />
       <path d="m7.5 15.5 3.5-4 2.7 2.5 4.3-5.5" />
     </Icon>
   ),
-  '〜': (
-    <Icon>
-      <path d="m4.5 19 5-7.5 3.5 3.5 6.5-9" />
-      <path d="M15.25 6h4.25v4.25" />
-    </Icon>
-  ),
+  '〜': <CraftIcon set={CRAFT} name="Sparkline" size={20} />,
   '✦': SPARKLE_ICON,
   '✧': SPARKLE_ICON,
-  '∑': (
-    <Icon>
-      <path d="M17.75 7.5V4.75H6.25L12.25 12l-6 7.25h11.5V16.5" />
-    </Icon>
-  ),
-  Σ: (
-    <Icon>
-      <path d="M17.75 7.5V4.75H6.25L12.25 12l-6 7.25h11.5V16.5" />
-    </Icon>
-  ),
-  '🧮': (
-    <Icon>
-      <rect x="6.08" y="4.49" width="11.83" height="15.02" rx="1.82" />
-      <path d="M 8.59 7.22 h 6.83 v 2.73 h -6.82 z" />
-      <circle cx="9.04" cy="13.14" r="0.36" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="13.14" r="0.36" fill="currentColor" stroke="none" />
-      <circle cx="14.96" cy="13.14" r="0.36" fill="currentColor" stroke="none" />
-      <circle cx="9.04" cy="16.32" r="0.36" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="16.32" r="0.36" fill="currentColor" stroke="none" />
-      <circle cx="14.96" cy="16.32" r="0.36" fill="currentColor" stroke="none" />
-    </Icon>
-  ),
+  '∑': <CraftIcon set={CRAFT} name="Subtotal" size={20} />,
+  Σ: <CraftIcon set={CRAFT} name="Sum" size={20} />,
+  '🧮': <CraftIcon set={CRAFT} name="Calc" size={20} />,
   // ---- grids / tables / layout ----
   '▦': (
     <Icon>
@@ -503,24 +407,14 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <path d="M4.5 9.5h15M4.5 14.5h15M9.5 4.5v15M14.5 4.5v15" />
     </Icon>
   ),
-  '⊞': (
-    <Icon>
-      <rect x="4.5" y="4.5" width="15" height="15" rx="1.5" />
-      <path d="M4.5 9.5h15M10.5 9.5v10" />
-    </Icon>
-  ),
+  '⊞': <CraftIcon set={CRAFT} name="PivotTable" size={20} />,
   '▤': (
     <Icon>
       <rect x="4.5" y="4.5" width="15" height="15" rx="1.5" />
       <path d="M4.5 9.5h15M4.5 14.5h15" />
     </Icon>
   ),
-  '⊟': (
-    <Icon>
-      <rect x="4.75" y="4.75" width="14.5" height="14.5" rx="2" />
-      <path d="M8.75 12h6.5" />
-    </Icon>
-  ),
+  '⊟': <CraftIcon set={CRAFT} name="Group" size={20} />,
   '⊕': (
     <Icon>
       <circle cx="12" cy="12" r="7.25" />
@@ -533,41 +427,16 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <circle cx="12" cy="12" r="1.9" fill="currentColor" stroke="none" />
     </Icon>
   ),
-  '⿴': (
-    <Icon>
-      <rect x="4.5" y="4.5" width="15" height="15" rx="1.5" />
-      <rect x="8.25" y="8.25" width="7.5" height="7.5" rx="0.75" />
-    </Icon>
-  ),
-  '⤢': (
-    <Icon>
-      <rect x="4.75" y="4.75" width="8.75" height="12" rx="1.5" />
-      <rect x="9" y="13.5" width="10.25" height="5.75" rx="1.5" />
-    </Icon>
-  ),
-  '▭': (
-    <Icon>
-      <rect x="6.75" y="4.5" width="10.5" height="15" rx="1.5" />
-    </Icon>
-  ),
+  '⿴': <CraftIcon set={CRAFT} name="Margins" size={20} />,
+  '⤢': <CraftIcon set={CRAFT} name="Orient" size={20} />,
+  '▭': <CraftIcon set={CRAFT} name="Paper" size={20} />,
   '⬚': (
     <Icon>
       <rect x="5" y="5" width="14" height="14" rx="1" strokeDasharray="3 2.7" />
     </Icon>
   ),
-  '┆': (
-    <Icon>
-      <path d="M6.5 8.75v-2.5a1.5 1.5 0 0 1 1.5-1.5h8a1.5 1.5 0 0 1 1.5 1.5v2.5" />
-      <path d="M6.5 15.25v2.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5v-2.5" />
-      <path d="M4.75 12h14.5" strokeDasharray="2.5 2.5" />
-    </Icon>
-  ),
-  '❄': (
-    <Icon>
-      <path d="M 12 4.64 v 14.72 M 5.62 8.32 l 12.75 7.36 M 18.38 8.32 5.62 15.68" />
-      <path d="m 9.7 6.39 2.3 1.84 2.3 -1.84 M 9.7 17.61 l 2.3 -1.84 2.3 1.84" />
-    </Icon>
-  ),
+  '┆': <CraftIcon set={CRAFT} name="PageBreak" size={20} />,
+  '❄': <CraftIcon set={CRAFT} name="Freeze" size={20} />,
   // ---- media / objects ----
   '🎨': (
     <Icon>
@@ -577,26 +446,9 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <circle cx="15.4" cy="9.3" r="0.5" fill="currentColor" stroke="none" />
     </Icon>
   ),
-  '🖼': (
-    <Icon>
-      <rect x="3.9" y="4.98" width="16.2" height="14.04" rx="2.16" />
-      <circle cx="8.76" cy="9.57" r="1.51" />
-      <path d="m 4.44 16.86 4.21 -4.21 3.51 3.51 3.62 -3.62 3.78 3.78" />
-    </Icon>
-  ),
-  '◇': (
-    <Icon>
-      <rect x="4.75" y="4.75" width="9.5" height="9.5" rx="1.5" />
-      <circle cx="15" cy="15" r="4.25" />
-    </Icon>
-  ),
-  '🔗': (
-    <Icon>
-      <path d="M 9.6 16 H 8 A 4 4 0 0 1 8 8 h 1.6" />
-      <path d="M 14.4 8 h 1.6 a 4 4 0 1 1 0 8 h -1.6" />
-      <path d="M 9 12 h 6" />
-    </Icon>
-  ),
+  '🖼': <CraftIcon set={CRAFT} name="Picture" size={20} />,
+  '◇': <CraftIcon set={CRAFT} name="Shapes" size={20} />,
+  '🔗': <CraftIcon set={CRAFT} name="Link" size={20} />,
   '🗎': (
     <Icon>
       <path d="M 13.37 4.49 H 7.68 c -0.76 0 -1.36 0.61 -1.36 1.37 v 12.29 c 0 0.76 0.61 1.37 1.37 1.37 h 8.65 c 0.76 0 1.37 -0.61 1.37 -1.36 V 8.82 L 13.37 4.49 Z" />
@@ -630,26 +482,9 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <path d="M4.75 12h14.5" />
     </Icon>
   ),
-  '🏷': (
-    <Icon>
-      <path d="M12.6 4.75H7a2.25 2.25 0 0 0-2.25 2.25v5.6c0 .6.24 1.17.66 1.59l5.9 5.9a2.25 2.25 0 0 0 3.18 0l4.86-4.86a2.25 2.25 0 0 0 0-3.18l-5.9-5.9a2.25 2.25 0 0 0-1.59-.66Z" />
-      <circle cx="9" cy="9" r="1.2" />
-    </Icon>
-  ),
-  '🔒': (
-    <Icon>
-      <rect x="5.75" y="10.5" width="12.5" height="9" rx="2" />
-      <path d="M8.75 10.5V8a3.25 3.25 0 0 1 6.5 0v2.5" />
-      <circle cx="12" cy="15" r="1" fill="currentColor" stroke="none" />
-    </Icon>
-  ),
-  '🔐': (
-    <Icon>
-      <rect x="5.75" y="10.5" width="12.5" height="9" rx="2" />
-      <path d="M8.75 10.5V8a3.25 3.25 0 0 1 6.5 0v2.5" />
-      <circle cx="12" cy="15" r="1" fill="currentColor" stroke="none" />
-    </Icon>
-  ),
+  '🏷': <CraftIcon set={CRAFT} name="Name" size={20} />,
+  '🔒': <CraftIcon set={CRAFT} name="Lock" size={20} />,
+  '🔐': <CraftIcon set={CRAFT} name="Lock" size={20} />,
   '▶': (
     <Icon>
       <path d="M 7.8 4.5 v 15 L 20.1 12 7.8 4.5 Z" />
@@ -678,12 +513,7 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
     </Icon>
   ),
   // ---- sort / move ----
-  '↓': (
-    <Icon>
-      <path d="M8 5v13.5M4.75 15.25 8 18.5l3.25-3.25" />
-      <path d="M13.5 6.5h6M13.5 10.5h4.5M13.5 14.5h3" />
-    </Icon>
-  ),
+  '↓': <CraftIcon set={CRAFT} name="FillDown" size={20} />,
   '↑': (
     <Icon>
       <path d="M8 19V5.5M4.75 8.75 8 5.5l3.25 3.25" />
@@ -696,19 +526,8 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
       <path d="M19.25 15.75H4.75M8 12.5l-3.25 3.25L8 19" />
     </Icon>
   ),
-  '⇅': (
-    <Icon>
-      <path d="M8.5 19V5.5M5.25 8.75 8.5 5.5l3.25 3.25" />
-      <path d="M15.5 5v13.5M12.25 15.25l3.25 3.25L18.75 15.25" />
-    </Icon>
-  ),
-  '⇶': (
-    <Icon>
-      <path d="M 5.48 7.05 h 10.35 M 13.35 4.57 l 2.93 2.48 -2.92 2.48" />
-      <path d="M 5.48 12 h 10.35 M 13.35 9.53 16.28 12 l -2.92 2.48" />
-      <path d="M 5.48 16.95 h 10.35 M 13.35 14.48 l 2.93 2.48 -2.92 2.48" />
-    </Icon>
-  ),
+  '⇅': <CraftIcon set={CRAFT} name="SortFilter" size={20} />,
+  '⇶': <CraftIcon set={CRAFT} name="TextColumns" size={20} />,
   // ---- text ----
   A: (
     <Icon>
@@ -791,47 +610,16 @@ export const RIBBON_GLYPH_ICONS: Record<string, ReactElement> = {
     </Icon>
   ),
   // ---- home formatting (borders / fill / merge / orientation) ----
-  '⊡': (
-    <Icon>
-      <rect x="4.5" y="4.5" width="15" height="15" rx="1.5" strokeDasharray="2.6 2.3" />
-      <path d="M12 4.5v15M4.5 12h15" />
-    </Icon>
-  ),
-  '◧': (
-    <Icon>
-      <path d="M11.25 4.75 4.6 11.4a1.5 1.5 0 0 0 0 2.1l4.9 4.9a1.5 1.5 0 0 0 2.1 0l6.65-6.65z" />
-      <path d="M19.4 13.9c.75 1 1.15 1.85 1.15 2.5a1.45 1.45 0 0 1-2.9 0c0-.65.4-1.5 1.15-2.5Z" />
-    </Icon>
-  ),
+  '⊡': <CraftIcon set={CRAFT} name="Borders" size={20} />,
+  '◧': <CraftIcon set={CRAFT} name="Fill" size={20} />,
   '∅': (
     <Icon>
       <rect x="4.75" y="4.75" width="14.5" height="14.5" rx="2" />
       <path d="m6.5 17.5 11-11" />
     </Icon>
   ),
-  '⇔': (
-    <Icon>
-      <rect x="4.5" y="4.75" width="15" height="14.5" rx="1.5" />
-      <path d="M8 12h8" />
-      <path d="M10.25 9.75 8 12l2.25 2.25M13.75 9.75 16 12l-2.25 2.25" />
-    </Icon>
-  ),
-  '⤴': (
-    <Icon>
-      <text
-        x="2.5"
-        y="17.5"
-        fontSize="12"
-        fill="currentColor"
-        stroke="none"
-        fontFamily="Segoe UI, sans-serif"
-      >
-        ab
-      </text>
-      <path d="m15.75 11.75 5.25-5.25" />
-      <path d="M17.25 6.5H21v3.75" />
-    </Icon>
-  ),
+  '⇔': <CraftIcon set={CRAFT} name="Merge" size={20} />,
+  '⤴': <CraftIcon set={CRAFT} name="Orientation" size={20} />,
 }
 
 /** Provider-independent assistant icon. */
@@ -851,5 +639,79 @@ export function AssistantMark({ size = 18 }: { size?: number }) {
       <path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
       <path d="m8 12 3-5 3 5M9 10h4M17 7v5" />
     </svg>
+  )
+}
+
+export function BorderBottomDoubleIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 3.02 11.6 h 9.96 M 3.02 13.6 h 9.96" strokeWidth="1" />
+    </BorderSvg>
+  )
+}
+
+export function BorderBottomThickIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 3.02 12.98 h 9.96" strokeWidth="2.3" />
+    </BorderSvg>
+  )
+}
+
+export function BorderTopBottomIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 3.02 3.02 h 9.96 M 3.02 12.98 h 9.96" />
+    </BorderSvg>
+  )
+}
+
+export function BorderTopThickBottomIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 3.02 3.02 h 9.96" />
+      <path d="M 3.02 12.98 h 9.96" strokeWidth="2.3" />
+    </BorderSvg>
+  )
+}
+
+export function BorderTopDoubleBottomIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 3.02 3.02 h 9.96" />
+      <path d="M 3.02 11.6 h 9.96 M 3.02 13.6 h 9.96" strokeWidth="1" />
+    </BorderSvg>
+  )
+}
+
+export function BorderInsideIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 3.02 8 h 9.96 M 8 3.02 v 9.96" />
+    </BorderSvg>
+  )
+}
+
+export function BorderInsideHorizontalIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 3.02 8 h 9.96" />
+    </BorderSvg>
+  )
+}
+
+export function BorderInsideVerticalIcon(): ReactElement {
+  return (
+    <BorderSvg>
+      <BorderDashedFrame />
+      <path d="M 8 3.02 v 9.96" />
+    </BorderSvg>
   )
 }

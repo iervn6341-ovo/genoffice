@@ -445,6 +445,109 @@ describe('column widths + section bidi (P3 pdf2docx support)', () => {
     expect(removed).not.toContain('<w:bidi/>')
   })
 
+  it('dropping colWidths turns unequal columns back into equal ones', async () => {
+    const { sectionSettingsFromXml } = await import('../src/index')
+    const base = sectionSettingsFromXml(BASE)
+    const unequal = applySectionSettings(BASE, {
+      ...base,
+      columns: 2,
+      colSpace: 400,
+      colWidths: [3000, 6000],
+    })
+    expect(unequal).toContain('w:equalWidth="0"')
+    const parsed = sectionSettingsFromXml(unequal)
+    const equal = applySectionSettings(unequal, { ...parsed, colWidths: undefined })
+    expect(equal).toContain('<w:cols w:num="2" w:space="400"/>')
+    expect(equal).not.toContain('<w:col ')
+    expect(equal).not.toContain('equalWidth')
+  })
+
+  it('colSep draws / removes the rule between columns and round-trips', async () => {
+    const { sectionSettingsFromXml } = await import('../src/index')
+    const base = sectionSettingsFromXml(BASE)
+    const withRule = applySectionSettings(BASE, {
+      ...base,
+      columns: 2,
+      colSpace: 500,
+      colSep: true,
+    })
+    expect(withRule).toMatch(/<w:cols [^>]*w:sep="1"/)
+    const parsed = sectionSettingsFromXml(withRule)
+    expect(parsed.colSep).toBe(true)
+    expect(applySectionSettings(withRule, parsed)).toBe(withRule)
+    // undefined keeps the file's rule, false removes it
+    expect(applySectionSettings(withRule, { ...parsed, colSep: undefined })).toBe(withRule)
+    const without = applySectionSettings(withRule, { ...parsed, colSep: false })
+    expect(without).not.toContain('w:sep=')
+    expect(sectionSettingsFromXml(without).colSep).toBeUndefined()
+  })
+
+  it('lineNumbers writes w:lnNumType before cols; null removes it; undefined keeps it', async () => {
+    const { sectionSettingsFromXml } = await import('../src/index')
+    const base = sectionSettingsFromXml(BASE)
+    const cols = applySectionSettings(BASE, { ...base, columns: 2, colSpace: 500 })
+    const numbered = applySectionSettings(cols, {
+      ...base,
+      columns: 2,
+      colSpace: 500,
+      lineNumbers: { countBy: 5, start: 1, distance: 360, restart: 'newSection' },
+    })
+    expect(numbered).toContain(
+      '<w:lnNumType w:countBy="5" w:distance="360" w:restart="newSection"/>',
+    )
+    expect(numbered.indexOf('<w:lnNumType')).toBeLessThan(numbered.indexOf('<w:cols'))
+    const parsed = sectionSettingsFromXml(numbered)
+    expect(parsed.lineNumbers).toEqual({
+      countBy: 5,
+      start: 1,
+      distance: 360,
+      restart: 'newSection',
+    })
+    expect(applySectionSettings(numbered, parsed)).toBe(numbered)
+    expect(applySectionSettings(numbered, { ...parsed, lineNumbers: undefined })).toBe(numbered)
+    const removed = applySectionSettings(numbered, { ...parsed, lineNumbers: null })
+    expect(removed).not.toContain('w:lnNumType')
+    expect(sectionSettingsFromXml(removed).lineNumbers).toBeUndefined()
+    // a start value other than 1 is written as the skipped-line count
+    const startAt = applySectionSettings(BASE, {
+      ...base,
+      lineNumbers: { countBy: 1, start: 10, restart: 'continuous' },
+    })
+    expect(startAt).toContain('w:start="9"')
+    expect(sectionSettingsFromXml(startAt).lineNumbers?.start).toBe(10)
+  })
+
+  it('page borders rebuild from details; matching details keep the file bytes', async () => {
+    const { sectionSettingsFromXml } = await import('../src/index')
+    const base = sectionSettingsFromXml(BASE)
+    const boxed = applySectionSettings(BASE, {
+      ...base,
+      pageBorder: true,
+      pageBorderProps: {
+        offsetFrom: 'text',
+        spacePt: 8,
+        widthPt: 3,
+        color: 'FF0000',
+        sides: {
+          top: { val: 'double', widthPt: 3, spacePt: 8, color: 'FF0000' },
+          bottom: { val: 'double', widthPt: 3, spacePt: 8, color: 'FF0000' },
+        },
+      },
+    })
+    expect(boxed).toContain('<w:pgBorders w:offsetFrom="text">')
+    expect(boxed).toContain('<w:top w:val="double" w:sz="24" w:space="8" w:color="FF0000"/>')
+    expect(boxed).not.toContain('<w:left')
+    const parsed = sectionSettingsFromXml(boxed)
+    expect(parsed.pageBorder).toBe(true)
+    expect(parsed.pageBorderProps?.sides?.top?.val).toBe('double')
+    // parse → apply keeps a custom box untouched (it used to collapse to the default single box)
+    expect(applySectionSettings(boxed, parsed)).toBe(boxed)
+    // no details: the default single-line box from the page edge
+    const plain = applySectionSettings(BASE, { ...base, pageBorder: true })
+    expect(plain).toContain('<w:top w:val="single" w:sz="4" w:space="24" w:color="auto"/>')
+    expect(applySectionSettings(plain, { ...base, pageBorder: false })).not.toContain('pgBorders')
+  })
+
   it('NewImage posOffsetEmu positions a floating image numerically', async () => {
     const parsed = await parseDocx(await buildDocx({ bodyXml: P('文字') }))
     const blocks: SaveBlock[] = [

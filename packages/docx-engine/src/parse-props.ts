@@ -1037,6 +1037,7 @@ export function paraBorderSidesOf(
     ['bottom', 'b'],
     ['left', 'l'],
     ['right', 'r'],
+    ['between', 'h'],
   ] as const) {
     let el: XNode | undefined
     for (const pBdr of pBdrs) el = findChild(pBdr, `w:${side}`) ?? el
@@ -1058,6 +1059,7 @@ export function paraBorderSidesOf(
     if (Number.isFinite(sz) && sz > 0) line.szPt = sz / 8
     const space = parseInt(a['w:space'] ?? '', 10)
     if (Number.isFinite(space) && space > 0) line.spacePt = space
+    if (val && val !== 'single') line.val = val
     sides[ch] = line
   }
   return Object.keys(sides).length > 0 ? sides : undefined
@@ -1071,7 +1073,7 @@ export function paraBordersOf(
   let borders = ''
   let reset = ''
   const lines: NonNullable<ParaFormat['borderLines']> = {}
-  for (const ch of ['t', 'b', 'l', 'r'] as const) {
+  for (const ch of ['t', 'b', 'l', 'r', 'h'] as const) {
     const line = sides[ch]
     if (line === undefined) continue
     if (line === null) {
@@ -1079,7 +1081,12 @@ export function paraBordersOf(
       continue
     }
     borders += ch
-    if (line.color !== undefined || line.szPt !== undefined || line.spacePt !== undefined)
+    if (
+      line.color !== undefined ||
+      line.szPt !== undefined ||
+      line.spacePt !== undefined ||
+      line.val !== undefined
+    )
       lines[ch] = line
   }
   if (borders) out.borders = borders
@@ -1099,7 +1106,7 @@ export function mergeStyleBorders(
 ): Pick<ParaFormat, 'borders' | 'borderLines'> {
   const declared = `${direct?.borders ?? ''}${direct?.borderReset ?? ''}`
   const merged: ParaBorderSides = {}
-  for (const ch of ['t', 'b', 'l', 'r'] as const) {
+  for (const ch of ['t', 'b', 'l', 'r', 'h'] as const) {
     if (direct?.borders?.includes(ch)) merged[ch] = direct.borderLines?.[ch] ?? {}
     else if (sides[ch] && !declared.includes(ch)) merged[ch] = sides[ch]
   }

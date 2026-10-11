@@ -3705,8 +3705,21 @@ textarea:focus {
 
 .equation-presets {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* 3 + 2 + 1 cards: the long series formulas get a wider card instead of being cut off */
+  grid-template-columns: repeat(6, 1fr);
   gap: 6px;
+}
+
+.equation-presets button {
+  grid-column: span 2;
+}
+
+.equation-presets button:nth-child(n + 4) {
+  grid-column: span 3;
+}
+
+.equation-presets button:nth-child(n + 6) {
+  grid-column: 1 / -1;
 }
 
 .equation-presets button {
@@ -5315,8 +5328,10 @@ textarea:focus {
 
 /* Shape gallery dropdown (slides/docs parity: grouped, outline-icon grid) */
 .menu-select-drop.rb-shape-gallery {
-  width: 264px;
-  max-height: 320px;
+  /* 8 cells of 28px + 7 gaps + padding, plus the vertical scrollbar's width: no sideways scroll */
+  width: 284px;
+  max-height: min(320px, calc(100vh - 140px));
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 6px 8px;
 }
@@ -5463,9 +5478,16 @@ textarea:focus {
 }
 
 /* View > Formula Bar toggle: an app-level setting (not in the file), hiding
-   Univer's formula-bar row; the flex workbench reflows the grid below. */
+   Univer's formula-bar row; the flex workbench reflows the grid below. The row keeps its
+   width: with display:none its text editor lays out at width 0 and Univer logs "The column
+   width is less than 0" on every selection. */
 #univer-container.formula-bar-hidden [data-u-comp='formula-bar'] {
-  display: none;
+  height: 0;
+  min-height: 0;
+  padding-block: 0;
+  border-width: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 
 /* ── Shared dropdown (@genoffice/ui gs-dd) app sizing ──────────────────────
@@ -5590,4 +5612,12 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* print pane: tall on small windows, so the groups scroll inside the dialog */
+.print-sheet-dialog .dialog-body {
+  display: grid;
+  gap: 8px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
 }

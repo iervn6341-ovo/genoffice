@@ -362,7 +362,8 @@ export function unpackMtx(buf: Uint8Array): [Uint8Array, Uint8Array, Uint8Array]
   const sizes = [offsets[1]! - offsets[0]!, offsets[2]! - offsets[1]!, buf.length - offsets[2]!]
   const out: Uint8Array[] = []
   for (let k = 0; k < 3; k++) {
-    if (sizes[k]! < 0 || offsets[k]! + sizes[k]! > buf.length) throw new MtxError('MTX block bounds')
+    if (sizes[k]! < 0 || offsets[k]! + sizes[k]! > buf.length)
+      throw new MtxError('MTX block bounds')
     out.push(unpackLz(buf.subarray(offsets[k]!, offsets[k]! + sizes[k]!), version))
   }
   return out as [Uint8Array, Uint8Array, Uint8Array]

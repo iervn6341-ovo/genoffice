@@ -183,6 +183,12 @@ import type {
 } from '../shared/desktop-api'
 import type { StructuralJournalOp } from './edit-journal'
 import {
+  ADD_TABLE_MUTATION,
+  DELETE_TABLE_MUTATION,
+  resetTableSync,
+  syncTableMutation,
+} from './table-sync'
+import {
   AUTO_FILL_COMMAND,
   AXIS_ATTR_MUTATIONS,
   BLOCKED_COMMAND_PATTERN,
@@ -325,6 +331,7 @@ import { installActiveCellDataValidationChrome } from './data-validation-dropdow
 import { installInvalidDataMarkerSuppression } from './data-validation-marker'
 import { installFormulaNullResultFix } from './formula-null-result'
 import { installNumberFormatFix } from './numfmt-fix'
+import { installExcelFormulaCompat } from './excel-formula-compat'
 import { installIfsEmptySetFix } from './ifs-empty-set'
 import { installCriteriaCompareCacheFix } from './criteria-compare-cache'
 import { installRateFallback } from './rate-function'
@@ -336,12 +343,15 @@ import {
   handleApplyHeaderFooter as handleApplyHeaderFooterImpl,
   handleExportPdf as handleExportPdfImpl,
   handlePageLayoutCommand as handlePageLayoutCommandImpl,
+  applyPageSetupPatch,
+  effectiveSetupFor,
   handlePrint as handlePrintImpl,
   type PageLayoutContext,
 } from './page-layout-actions'
 import { handleExportCsv as handleExportCsvImpl, type CsvExportContext } from './csv-export'
 import { effectivePageBreaks, installPageBreakPreview } from './page-break-preview'
 import { mapProtectedRanges } from './protected-ranges'
+import { PrintDialog } from './PrintDialog'
 import { handleSave as handleSaveImpl, type SaveContext, type SaveOutcome } from './save-actions'
 import {
   applyChartEdit as applyChartEditImpl,
@@ -377,6 +387,7 @@ import {
 } from './edit-journal'
 import { shiftPinnedCells } from './formula-closure'
 import { getLang, t, aiLangDirective } from './i18n/locale'
+import { Backstage, backstageLabels } from '@genoffice/ui'
 import { planStillMatches } from './lazy-plan'
 import { lastSurvivingScreenLine, netAxisDelta, screenToFile } from './view-transform'
 import { selectionFormatEquals, toSelectionFormat, type SelectionFormat } from './selection-format'
@@ -479,6 +490,11 @@ export function App(): React.JSX.Element {
   const pageBreakIdRef = useRef(0)
   /// App-level setting, Excel-style: not stored in the file, kept across
   /// workbook switches.
+  const [printOpen, setPrintOpen] = useState(false)
+  const [backstageOpen, setBackstageOpen] = useState(false)
+  const [recentBooks, setRecentBooks] = useState<Array<{ path: string; name: string }>>([])
+  /** The print pane's "Header & Footer…" asks the shell to open its dialog */
+  const [headerFooterRequest, setHeaderFooterRequest] = useState(0)
   const [formulaBarVisible, setFormulaBarVisible] = useState(true)
   /// Cross-highlight ("reading mode") of the active row/column, persisted in
   /// localStorage like the auto-save flag; off until the user opts in.
@@ -781,6 +797,7 @@ export function App(): React.JSX.Element {
       setMessage,
       setPendingEdits,
       refreshPageBreakPreview,
+      requestRender: () => setVisualEditTick((tick) => tick + 1),
       requestVisualInstall: () => {
         const runtime = univerRef.current
         if (!runtime) return
@@ -1677,6 +1694,9 @@ export function App(): React.JSX.Element {
     const rateFallbackDisposable = installRateFallback(runtime)
     // MINIFS/MAXIFS over zero matching cells return 0, not blank.
     const ifsEmptySetDisposable = installIfsEmptySetFix(runtime)
+    // Numeric literals like 1.0, Excel's 15-digit number→text, IF(text),
+    // SEARCH wildcards, EDATE clamp, SECOND rounding, (-8)^(1/3), MATCH -1…
+    const excelFormulaCompatDisposable = installExcelFormulaCompat(runtime.univer)
     // Repeated *IF(S) '=' compares on text columns survive the inverted-
     // index cache when the criteria was number-coerced ("2026-06").
     const criteriaCompareCacheDisposable = installCriteriaCompareCacheFix()
@@ -1913,6 +1933,22 @@ export function App(): React.JSX.Element {
     const journalDisposable = runtime.univerAPI.addEvent(
       runtime.univerAPI.Event.CommandExecuted,
       (event) => {
+        // ⌘Z / ⇧⌘Z of a table run Univer's delete-table / add-table mutation; the journal
+        // entry the save writes has to follow, also while a batch holds the suppression.
+        if (event.id === ADD_TABLE_MUTATION || event.id === DELETE_TABLE_MUTATION) {
+          const tableState = lazyWorkbookRef.current
+          if (
+            tableState &&
+            syncTableMutation(
+              tableState.editJournal,
+              event.id,
+              event.params as { tableId?: string } | undefined,
+            )
+          ) {
+            setPendingEdits(journalSize(tableState.editJournal))
+          }
+          return
+        }
         if (journalSuppression.active) return
         // The formula engine re-applies cached results with these execution
         // options; they are derived state, never user edits.
@@ -2840,6 +2876,7 @@ export function App(): React.JSX.Element {
       cellFilenameDisposable.dispose()
       rateFallbackDisposable.dispose()
       ifsEmptySetDisposable.dispose()
+      excelFormulaCompatDisposable.dispose()
       criteriaCompareCacheDisposable.dispose()
       formulaLexerFixDisposable.dispose()
       sheetRenameFixDisposable.dispose()
@@ -3888,8 +3925,13 @@ export function App(): React.JSX.Element {
     if ((window as unknown as Record<string, unknown>).__genofficeDebugHooks === true) {
       ;(window as unknown as Record<string, unknown>).__genofficeDebug = {
         univerAPI: univerRef.current?.univerAPI,
+        // the sheet's page-setup edits of this session (what the save writes)
+        pageSetup: (sheetId: string) => state.editJournal.pageSetup.get(sheetId) ?? null,
+        // the document theme edits of this session
+        theme: () => state.editJournal.theme,
       }
     }
+    resetTableSync()
     setRevision(0)
     setPreview(null)
     lazyPreviewRef.current = null
@@ -4093,7 +4135,7 @@ export function App(): React.JSX.Element {
     if (action === 'open') {
       void handleInspectWorkbook()
     } else if (action === 'print') {
-      void handlePrintImpl(pageLayoutContext())
+      setPrintOpen(true)
     } else if (action === 'export-pdf') {
       void handleExportPdfImpl(pageLayoutContext())
     } else if (action === 'export-csv') {
@@ -4368,6 +4410,54 @@ export function App(): React.JSX.Element {
   return (
     <>
       <ToastHost />
+      {backstageOpen && (
+        <Backstage
+          lang={getLang()}
+          kind="book"
+          docName={workbookFile?.name ?? ''}
+          filePath={workbookFile?.path ?? null}
+          hasDoc={workbookFile != null}
+          canSave={workbookFile != null}
+          recent={recentBooks}
+          exports={[
+            {
+              id: 'pdf',
+              label: backstageLabels(getLang()).exportPdf,
+              run: () => void handleExportPdfImpl(pageLayoutContext()),
+            },
+            {
+              id: 'csv',
+              label: backstageLabels(getLang()).exportCsv,
+              run: () => void handleExportCsvImpl(csvExportContext()),
+            },
+          ]}
+          onClose={() => setBackstageOpen(false)}
+          onNew={() => void window.desktopApi?.newBlankWorkbookTab?.()}
+          onOpen={() => void handleInspectWorkbook()}
+          onOpenRecent={(path) => void window.desktopApi?.openPathInShell?.(path)}
+          onSave={() => void handleSave('save')}
+          onSaveAs={() => void handleSave('save-as')}
+          onPrint={() => setPrintOpen(true)}
+        />
+      )}
+      {printOpen && (
+        <PrintDialog
+          readSetup={() => {
+            const sheetId = univerRef.current?.univerAPI
+              .getActiveWorkbook()
+              ?.getActiveSheet()
+              ?.getSheetId()
+            return sheetId ? effectiveSetupFor(pageLayoutContext(), sheetId) : null
+          }}
+          applyPatch={(patch) => applyPageSetupPatch(pageLayoutContext(), patch)}
+          onPrint={(job, scope) => handlePrintImpl(pageLayoutContext(), job, scope)}
+          onHeaderFooter={() => {
+            setPrintOpen(false)
+            setHeaderFooterRequest((n) => n + 1)
+          }}
+          onClose={() => setPrintOpen(false)}
+        />
+      )}
       {recoveryPrompt && (
         <RecoveryDialog
           prompt={recoveryPrompt}
@@ -4444,6 +4534,11 @@ export function App(): React.JSX.Element {
         preview={preview}
         sheetHasContent={sheetHasContent}
         pageLayout={activePageLayout}
+        headerFooterRequest={headerFooterRequest}
+        onFileTab={() => {
+          void window.desktopApi?.getRecentWorkbooks?.().then(setRecentBooks)
+          setBackstageOpen(true)
+        }}
         calcManual={calcManual}
         onGoalSeek={(setCell, toValue, byCell) => {
           const runtime = univerRef.current

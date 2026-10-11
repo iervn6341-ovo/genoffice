@@ -6,22 +6,53 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RenderSlide } from '@genoffice/pptx-render'
+import type { SectionInfo } from '../../shared/ipc'
 import { useI18n } from '../i18n/locale'
+import { outlineOf } from '../outline-of'
 import {
   buildPrintDocumentHtml,
   parsePrintRange,
   printPageCount,
+  handoutSpec,
+  type PrintCommentItem,
   type PrintLayout,
   type PrintOrientation,
+  type PrintOutput,
+  type PrintPaper,
+  type PrintPerSheet,
+  type PrintDirection,
+  PRINT_PER_SHEET,
+  PRINT_PAPERS,
 } from '../../shared/print-html'
 import { renderSlidesToPngBase64 } from '../export-render'
+import {
+  DEFAULT_PRINTER_SETTINGS,
+  PrintCheck,
+  PrinterSettingsFields,
+  PrintRow,
+  PrintSection,
+  printerJob,
+  printOfficeLabels,
+  type PrinterSettings,
+} from '@genoffice/ui'
 
-type RangeMode = 'all' | 'current' | 'custom'
+/** Arrow glyphs of the four fill orders (2×2 cells in a 20px box) */
+const DIR_PATHS: Record<PrintDirection, string> = {
+  z: 'M3 4h8M11 4l-8 6h14M3 16h14M15 14l2 2-2 2',
+  rz: 'M17 4H9M9 4l8 6H3M17 16H3M5 14l-2 2 2 2',
+  n: 'M4 3v8M4 11l6-8v14M16 3v14M14 15l2 2 2-2',
+  rn: 'M4 17V9M4 9l6 8V3M16 17V3M14 5l2-2 2 2',
+}
+
+type RangeMode = 'all' | 'selection' | 'current' | 'custom' | 'section'
 
 export function PrintDialog({
   slides,
   images,
   current,
+  selection,
+  sections,
+  onEditHeaderFooter,
   onClose,
   setStatus,
 }: {
@@ -30,10 +61,17 @@ export function PrintDialog({
   images: Map<string, HTMLImageElement>
   /** Current page index, for the "current slide" range */
   current: number
+  /** Slides highlighted in the thumbnail list (the "Print Selected Slides" range) */
+  selection: number[]
+  /** Deck sections ("Print Section" range) */
+  sections: SectionInfo[]
+  /** "Edit Header & Footer": closes this sheet and opens the header/footer dialog */
+  onEditHeaderFooter: () => void
   onClose: () => void
   setStatus: (s: string) => void
 }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  const L = printOfficeLabels(lang)
   const [pngs, setPngs] = useState<string[] | null>(null)
   const [notes, setNotes] = useState<string[]>([])
   const [layout, setLayout] = useState<PrintLayout>('full')
@@ -42,6 +80,18 @@ export function PrintDialog({
   const [orientation, setOrientation] = useState<PrintOrientation>('portrait')
   const [frame, setFrame] = useState(false)
   const [includeHidden, setIncludeHidden] = useState(false)
+  const [output, setOutput] = useState<PrintOutput>('color')
+  const [paper, setPaper] = useState<PrintPaper>('slide')
+  const [scaleFit, setScaleFit] = useState(false)
+  const [highQuality, setHighQuality] = useState(false)
+  const [withComments, setWithComments] = useState(false)
+  const [comments, setComments] = useState<PrintCommentItem[]>([])
+  const [sectionId, setSectionId] = useState(sections[0]?.id ?? '')
+  const [perSheet, setPerSheet] = useState<PrintPerSheet>(1)
+  const [direction, setDirection] = useState<PrintDirection>('z')
+  const [rotate180, setRotate180] = useState(false)
+  const [flipH, setFlipH] = useState(false)
+  const [printerSettings, setPrinterSettings] = useState<PrinterSettings>(DEFAULT_PRINTER_SETTINGS)
   const [printing, setPrinting] = useState(false)
   const blobUrlsRef = useRef<string[]>([])
   const frameRef = useRef<HTMLIFrameElement | null>(null)
@@ -69,7 +119,15 @@ export function PrintDialog({
       try {
         const rendered = await renderSlidesToPngBase64(slides, images)
         const noteTexts = await Promise.all(slides.map((_s, i) => window.slidesApi.getNotes(i)))
+        const commentLists = await Promise.all(
+          slides.map((_s, i) => window.slidesApi.getComments(i)),
+        )
         if (!alive) return
+        setComments(
+          commentLists.flatMap((list, i) =>
+            list.map((c) => ({ number: i + 1, author: c.author, text: c.text })),
+          ),
+        )
         blobUrlsRef.current = rendered.map((b64) =>
           URL.createObjectURL(
             new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/png' }),
@@ -104,15 +162,52 @@ export function PrintDialog({
   const rangeIndices = useMemo<number[] | null>(() => {
     if (rangeMode === 'all') return slides.map((_s, i) => i)
     if (rangeMode === 'current') return [current]
+    if (rangeMode === 'selection')
+      return [...new Set(selection.length > 0 ? selection : [current])].sort((a, b) => a - b)
+    if (rangeMode === 'section')
+      return [...(sections.find((x) => x.id === sectionId)?.slideIndices ?? [])].sort(
+        (a, b) => a - b,
+      )
     return parsePrintRange(customRange, slides.length)
-  }, [rangeMode, customRange, slides, current])
+  }, [rangeMode, customRange, slides, current, selection, sections, sectionId])
 
   const selected = useMemo(
     () => (rangeIndices ?? []).filter((i) => includeHidden || !slides[i].hidden),
     [rangeIndices, includeHidden, slides],
   )
   const rangeInvalid = rangeMode === 'custom' && rangeIndices === null
-  const pageCount = printPageCount(selected.length, layout)
+  const pageCount = printPageCount(selected.length, layout, perSheet)
+  /** "Slide size" paper only exists for one full-page slide per sheet; every other layout prints on paper */
+  const slidePage = layout === 'full' && perSheet === 1
+  const effPaper: PrintPaper = paper === 'slide' && !slidePage ? 'a4' : paper
+  const onRealPaper = effPaper !== 'slide'
+
+  const outline = useMemo(
+    () =>
+      layout === 'outline' ? selected.map((i) => ({ number: i + 1, ...outlineOf(slides[i]) })) : [],
+    [layout, selected, slides],
+  )
+  const pageComments = useMemo(() => {
+    if (!withComments) return []
+    const set = new Set(selected)
+    return comments.filter((c) => set.has(c.number - 1))
+  }, [withComments, comments, selected])
+
+  /** Everything the page assembly needs except the slide bitmaps (shared by preview and print) */
+  const docOptions = () => ({
+    layout,
+    orientation,
+    frame,
+    output,
+    paper: effPaper,
+    perSheet,
+    direction,
+    rotate180,
+    flipH,
+    scaleFit,
+    ...(layout === 'outline' ? { outline } : {}),
+    ...(pageComments.length > 0 ? { comments: pageComments, commentsTitle: L.comments } : {}),
+  })
 
   const previewHtml = useMemo(() => {
     if (!pngs || selected.length === 0) return null
@@ -120,13 +215,29 @@ export function PrintDialog({
     return buildPrintDocumentHtml({
       srcs: selected.map((i) => blobUrlsRef.current[i]),
       ratio: first.widthPx / first.heightPx,
-      layout,
       notes: selected.map((i) => notes[i] ?? ''),
-      orientation,
-      frame,
+      ...docOptions(),
       preview: true,
     })
-  }, [pngs, selected, slides, layout, notes, orientation, frame])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pngs,
+    selected,
+    slides,
+    layout,
+    notes,
+    orientation,
+    frame,
+    output,
+    effPaper,
+    perSheet,
+    direction,
+    rotate180,
+    flipH,
+    scaleFit,
+    outline,
+    pageComments,
+  ])
 
   /** Scale the preview document so one page fits the pane width (iframe body zoom) */
   const applyZoom = useCallback(() => {
@@ -152,14 +263,32 @@ export function PrintDialog({
     setPrinting(true)
     try {
       const first = slides[selected[0]]
+      // "High Quality": re-render the printed slides at a higher pixel ratio
+      const bitmaps = highQuality
+        ? await renderSlidesToPngBase64(
+            selected.map((i) => slides[i]),
+            images,
+            3,
+          )
+        : selected.map((i) => pngs[i])
+      const doc = docOptions()
       const r = await window.slidesApi.printSlides({
-        pngsBase64: selected.map((i) => pngs[i]),
+        pngsBase64: bitmaps,
         widthPx: first.widthPx,
         heightPx: first.heightPx,
         layout,
         ...(layout === 'notes' ? { notes: selected.map((i) => notes[i] ?? '') } : {}),
-        ...(layout !== 'full' ? { orientation } : {}),
-        ...(frame && layout === 'full' ? { frame: true } : {}),
+        ...(layout === 'outline' ? { outline } : {}),
+        ...(pageComments.length > 0 ? { comments: pageComments, commentsTitle: L.comments } : {}),
+        ...(onRealPaper || layout !== 'full' ? { orientation } : {}),
+        ...(frame ? { frame: true } : {}),
+        ...(layout === 'full' && perSheet > 1 ? { perSheet, direction } : {}),
+        ...(rotate180 ? { rotate180: true } : {}),
+        ...(flipH ? { flipH: true } : {}),
+        ...(output !== 'color' ? { output } : {}),
+        paper: doc.paper,
+        ...(scaleFit ? { scaleFit: true } : {}),
+        ...printerJob(printerSettings),
       })
       if (r.ok) onClose()
       else if (r.error) setStatus(t('appPrintFailed', { error: r.error }))
@@ -169,13 +298,20 @@ export function PrintDialog({
     }
   }
 
-  const layouts: Array<[PrintLayout, string]> = [
-    ['full', t('appPrintLayoutFull')],
-    ['handout2', t('appPrintLayoutHandout2')],
-    ['handout3', t('appPrintLayoutHandout3')],
-    ['handout6', t('appPrintLayoutHandout6')],
-    ['notes', t('appPrintLayoutNotes')],
+  /** One value for the "Print Layout" select */
+  const handoutOptions: Array<[PrintLayout, string]> = [
+    ['handout1', L.h1],
+    ['handout2', L.h2],
+    ['handout3', L.h3],
+    ['handout4h', L.h4h],
+    ['handout6h', L.h6h],
+    ['handout9h', L.h9h],
+    ['handout4v', L.h4v],
+    ['handout6v', L.h6v],
+    ['handout9v', L.h9v],
   ]
+  const layoutValue = layout === 'handout6' ? 'handout6h' : layout
+  const hasSections = sections.length > 0
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -205,103 +341,190 @@ export function PrintDialog({
             )}
           </div>
           <div className="print-options">
-            <fieldset>
-              <legend>{t('appPrintRange')}</legend>
-              <label className="print-radio">
-                <input
-                  type="radio"
-                  name="print-range"
-                  checked={rangeMode === 'all'}
-                  onChange={() => setRangeMode('all')}
-                />
-                {t('appPrintRangeAll')}
-              </label>
-              <label className="print-radio">
-                <input
-                  type="radio"
-                  name="print-range"
-                  checked={rangeMode === 'current'}
-                  onChange={() => setRangeMode('current')}
-                />
-                {t('appPrintRangeCurrent')}
-              </label>
-              <label className="print-radio">
-                <input
-                  type="radio"
-                  name="print-range"
-                  checked={rangeMode === 'custom'}
-                  onChange={() => setRangeMode('custom')}
-                />
-                {t('appPrintRangeCustom')}
-              </label>
-              <input
-                type="text"
-                className={`print-range-input ${rangeInvalid ? 'invalid' : ''}`}
-                placeholder={t('appPrintRangeHint')}
-                value={customRange}
-                disabled={rangeMode !== 'custom'}
-                onFocus={() => setRangeMode('custom')}
-                onChange={(e) => setCustomRange(e.target.value)}
+            <PrintSection title={L.secPrinter}>
+              <PrinterSettingsFields
+                lang={lang}
+                value={printerSettings}
+                onChange={setPrinterSettings}
+                listPrinters={() => window.slidesApi.listPrinters()}
               />
-            </fieldset>
-            <fieldset>
-              <legend>{t('appPrintLayoutGroup')}</legend>
-              {layouts.map(([k, label]) => (
-                <label key={k} className="print-radio">
+            </PrintSection>
+            <PrintSection title={L.secSettings}>
+              <select
+                className="ps-select"
+                aria-label={L.secSettings}
+                data-testid="print-range"
+                value={rangeMode}
+                onChange={(e) => setRangeMode(e.target.value as RangeMode)}
+              >
+                <option value="all">{L.rangeAllSlides}</option>
+                <option value="selection">{L.rangeSelSlides}</option>
+                <option value="current">{L.rangeCurSlide}</option>
+                <option value="custom">{L.rangeCustom}</option>
+                {hasSections && <option value="section">{L.rangeSection}</option>}
+              </select>
+              {rangeMode === 'custom' && (
+                <PrintRow label={L.slides}>
                   <input
-                    type="radio"
-                    name="print-layout"
-                    checked={layout === k}
-                    onChange={() => setLayout(k)}
+                    type="text"
+                    className={`print-range-input ${rangeInvalid ? 'invalid' : ''}`}
+                    placeholder={L.pagesHint}
+                    value={customRange}
+                    onChange={(e) => setCustomRange(e.target.value)}
                   />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <fieldset>
-              <legend>{t('appPrintOrientation')}</legend>
-              <label className="print-radio">
-                <input
-                  type="radio"
-                  name="print-orientation"
-                  disabled={layout === 'full'}
-                  checked={orientation === 'portrait'}
-                  onChange={() => setOrientation('portrait')}
-                />
-                {t('appPrintPortrait')}
-              </label>
-              <label className="print-radio">
-                <input
-                  type="radio"
-                  name="print-orientation"
-                  disabled={layout === 'full'}
-                  checked={orientation === 'landscape'}
-                  onChange={() => setOrientation('landscape')}
-                />
-                {t('appPrintLandscape')}
-              </label>
-            </fieldset>
-            <fieldset>
-              <label className="print-radio">
-                <input
-                  type="checkbox"
+                </PrintRow>
+              )}
+              {rangeMode === 'section' && (
+                <select
+                  className="ps-select"
+                  aria-label={L.rangeSection}
+                  value={sectionId}
+                  onChange={(e) => setSectionId(e.target.value)}
+                >
+                  {sections.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <PrintRow label={L.plLayout}>
+                <select
+                  className="ps-select"
+                  data-testid="print-layout"
+                  value={layoutValue}
+                  onChange={(e) => setLayout(e.target.value as PrintLayout)}
+                >
+                  <option value="full">{L.plFull}</option>
+                  <option value="notes">{L.plNotes}</option>
+                  <option value="outline">{L.plOutline}</option>
+                  <optgroup label={L.plHandouts}>
+                    {handoutOptions.map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </PrintRow>
+              <PrintRow label={L.colorLabel}>
+                <select
+                  className="ps-select"
+                  data-testid="print-color"
+                  value={output}
+                  onChange={(e) => setOutput(e.target.value as PrintOutput)}
+                >
+                  <option value="color">{L.colColor}</option>
+                  <option value="grayscale">{L.colGray}</option>
+                  <option value="bw">{L.colBW}</option>
+                </select>
+              </PrintRow>
+            </PrintSection>
+            <PrintSection title={L.secPageSetup} defaultOpen={false}>
+              <PrintRow label={L.orientation}>
+                <select
+                  className="ps-select"
+                  data-testid="print-orientation"
+                  value={orientation}
+                  disabled={!onRealPaper && layout === 'full'}
+                  onChange={(e) => setOrientation(e.target.value as PrintOrientation)}
+                >
+                  <option value="portrait">{L.portrait}</option>
+                  <option value="landscape">{L.landscape}</option>
+                </select>
+              </PrintRow>
+              <PrintRow label={L.paperSize}>
+                <select
+                  className="ps-select"
+                  data-testid="print-paper"
+                  value={effPaper}
+                  onChange={(e) => setPaper(e.target.value as PrintPaper)}
+                >
+                  {slidePage && <option value="slide">{L.slideSizePaper}</option>}
+                  {(Object.keys(PRINT_PAPERS) as PrintPaper[])
+                    .filter((k) => k !== 'slide')
+                    .map((k) => (
+                      <option key={k} value={k}>
+                        {PRINT_PAPERS[k].label}
+                      </option>
+                    ))}
+                </select>
+              </PrintRow>
+              <PrintRow label={L.pagesPerSheet}>
+                <select
+                  className="ps-select"
+                  data-testid="print-per-sheet"
+                  value={perSheet}
                   disabled={layout !== 'full'}
-                  checked={frame}
-                  onChange={(e) => setFrame(e.target.checked)}
-                />
-                {t('appPrintFrame')}
-              </label>
-              <label className="print-radio">
-                <input
-                  type="checkbox"
-                  checked={includeHidden}
-                  onChange={(e) => setIncludeHidden(e.target.checked)}
-                />
-                {t('appPrintHidden')}
-              </label>
-            </fieldset>
+                  onChange={(e) => setPerSheet(Number(e.target.value) as PrintPerSheet)}
+                >
+                  {PRINT_PER_SHEET.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </PrintRow>
+              <div className="ps-field">
+                <span>{t('appPrintDirection')}</span>
+                <span className="print-dirs" role="group" aria-label={t('appPrintDirection')}>
+                  {(['z', 'rz', 'n', 'rn'] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`print-dir ${direction === d ? 'active' : ''}`}
+                      aria-pressed={direction === d}
+                      disabled={layout !== 'full' || perSheet === 1}
+                      title={d.toUpperCase()}
+                      onClick={() => setDirection(d)}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+                        <path d={DIR_PATHS[d]} />
+                      </svg>
+                    </button>
+                  ))}
+                </span>
+              </div>
+              <PrintCheck
+                label={t('appPrintRotate180')}
+                checked={rotate180}
+                onChange={setRotate180}
+              />
+              <PrintCheck label={t('appPrintFlipH')} checked={flipH} onChange={setFlipH} />
+            </PrintSection>
+            <PrintSection title={L.secOptions} defaultOpen={false}>
+              <PrintCheck
+                label={L.frameSlides}
+                checked={frame}
+                disabled={layout === 'outline' || layout === 'notes'}
+                onChange={setFrame}
+              />
+              <PrintCheck
+                label={L.scaleFit}
+                checked={scaleFit}
+                disabled={!(layout === 'full' && perSheet === 1 && onRealPaper)}
+                onChange={setScaleFit}
+              />
+              <PrintCheck label={L.highQuality} checked={highQuality} onChange={setHighQuality} />
+              <PrintCheck
+                label={L.printComments}
+                checked={withComments}
+                disabled={comments.length === 0}
+                onChange={setWithComments}
+              />
+              <PrintCheck
+                label={L.printHiddenSlides}
+                checked={includeHidden}
+                onChange={setIncludeHidden}
+              />
+              <button type="button" className="ps-link" onClick={onEditHeaderFooter}>
+                {L.headerFooterBtn}
+              </button>
+            </PrintSection>
             <div className="print-page-count">
-              {selected.length > 0 ? t('appPrintPageCount', { n: pageCount }) : ''}
+              {selected.length > 0 && layout !== 'outline'
+                ? t('appPrintPageCount', { n: pageCount })
+                : ''}
             </div>
           </div>
         </div>

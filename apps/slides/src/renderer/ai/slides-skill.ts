@@ -1087,7 +1087,7 @@ function blockScratchBuild(
   const label = kind === 'smartart' ? t('aiLabelInsertSmartart') : t('aiFailNewElement')
   return {
     output:
-      "For blank/from-scratch scenarios don't hand-assemble pages element by element with addElement/addSmartArt/addTable/addChart ops (crude layout). " +
+      "For blank/from-scratch scenarios don't hand-assemble pages element by element with addElement/addSmartArt ops (crude layout). " +
       'Use the generation pipeline instead: new whole deck → generate_deck; new pages for an existing deck → generate_deck(pages, insert_mode:"append"). ' +
       'Write it beautifully in HTML/CSS and the system converts it into editable elements. Use insert ops only when the deck already has polished content and one element needs refining.',
     isError: true,
@@ -1230,7 +1230,10 @@ function applyOpsSummary(ops: unknown[], count: number): string {
 }
 
 /** Insert ops subject to the anti-scratch-build guard when the deck is still blank. */
-const SCRATCH_GUARDED_OPS = new Set(['addElement', 'addSmartArt', 'addTable', 'addChart'])
+// Tables and charts are deliberately not guarded: they are single, self-contained objects someone
+// asks for by name ("add a 2x2 table"), not a hand-laid-out page. Refusing them on a blank deck sent
+// a local model round in circles for ~20 minutes (19 retries) before it gave up.
+const SCRATCH_GUARDED_OPS = new Set(['addElement', 'addSmartArt'])
 
 interface OpPreflight {
   /** ops to send over the IPC (AI-layer fields stripped) */

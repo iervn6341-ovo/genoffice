@@ -164,6 +164,20 @@ Common mistakes
 
 - Names from other tools such as `"slide"` or `"cut"`: only the kinds listed above are accepted; the error lists them.
 
+### setTransitionDetail
+
+`{detail:{dir?,orient?,thruBlk?,durationMs?,advClick?}} — Effect Options / Duration / On Mouse Click`
+
+Tunes the page's existing transition without changing the effect. `dir` is the
+direction the effect moves (`l` = from the right, `r` = from the left, `u` = from the
+bottom, `d` = from the top; split takes `in`/`out` plus `orient` `horz`/`vert`; fade takes
+`thruBlk`). `durationMs` sets the transition time (null = the effect's default);
+`advClick:false` turns click-to-advance off. A slide with no transition only takes `advClick`.
+
+```json
+{ "op": "setTransitionDetail", "target": { "slide": 0 }, "detail": { "dir": "r", "durationMs": 1500 } }
+```
+
 ### setAdvanceTime
 
 `{ms:number|null} — auto-advance; null clears`

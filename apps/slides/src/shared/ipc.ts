@@ -1,4 +1,5 @@
 import type { AiPanelPrefs } from '@genoffice/ui'
+import type { PrintCommentItem, PrintLayout, PrintOutlineItem, PrintPaper } from './print-html'
 /**
  * slides main-process <-> renderer IPC contract (Phase 3: open/save/edit, AI not included yet).
  *
@@ -9,7 +10,7 @@ import type { AiPanelPrefs } from '@genoffice/ui'
  * them to the model and rebuilds the RenderSlide.
  */
 import type { RenderSlide } from '@genoffice/pptx-render'
-import type { SlideComment, SectionInfo } from '@genoffice/pptx-engine'
+import type { SlideComment, SectionInfo, StyleGalleryEntry } from '@genoffice/pptx-engine'
 import type { AiSettings, AiStreamChunk, AiStreamRequest } from '@genoffice/ai-provider'
 
 import type {
@@ -579,6 +580,8 @@ export interface AnimationItem {
   motionPath?: string
   /** Per-paragraph animation: 0-based paragraph number; default = the whole shape */
   paragraph?: number
+  /** After Animation: hide on the next click / right after the effect (PowerPoint's setting) */
+  after?: 'hideOnNextClick' | 'hideAfter'
 }
 
 /** Element pairing key for Morph transitions: cNvPr id / name are stable across pages; sourceId is per-page temporary. */
@@ -598,6 +601,33 @@ export interface SetAnimationsOp {
 export interface SetTransitionOp {
   slideIndex: number
   kind: TransitionKind
+}
+
+/** A page's transition settings beyond the effect itself (Transitions tab: Effect Options, Duration, Advance). */
+export interface TransitionDetail {
+  kind: TransitionKind
+  /** movement direction (push/wipe/cover/pull: l r u d …; split: in | out) */
+  dir?: string
+  orient?: 'horz' | 'vert'
+  /** fade: through black */
+  thruBlk?: boolean
+  /** null = the effect's own default */
+  durationMs: number | null
+  /** advance on mouse click */
+  advClick: boolean
+  /** auto-advance after this many ms (null = off) */
+  advTm: number | null
+}
+
+/** Patch one page (slideIndex) or every page (-1) */
+export interface SetTransitionDetailOp {
+  slideIndex: number
+  detail: Partial<
+    Pick<TransitionDetail, 'dir' | 'orient' | 'thruBlk' | 'durationMs' | 'advClick'>
+  > & {
+    /** auto-advance (ms, null clears); written through the advance-time op */
+    advTm?: number | null
+  }
 }
 
 /** Batch-write each page's auto-advance time (<p:transition advTm>, ms; ms=null clears). Used by rehearsal timing save. */
@@ -1003,6 +1033,13 @@ export interface EditTableStyleOp {
   firstRow?: boolean
   /** Banded rows toggle */
   bandRow?: boolean
+  /** Total row / first column / last column / banded columns toggles */
+  lastRow?: boolean
+  firstCol?: boolean
+  lastCol?: boolean
+  bandCol?: boolean
+  /** A built-in gallery style by name ("Medium Style 2 - Accent 1") or GUID; applying it clears direct cell formatting */
+  styleId?: string
   /** Right-to-left table toggle (tblPr rtl: mirrored grid) */
   rtl?: boolean
   /** Shading color #RRGGBB or 'none' (null = unchanged) */
@@ -1013,6 +1050,22 @@ export interface EditTableStyleOp {
   borderWidthPt?: number | null
   /** 'all' = all border lines; 'none' = clear border lines; null = unchanged */
   borderPreset?: 'all' | 'none' | null
+  /** Edge-wise border edit (Borders gallery), drawn with borderColor / borderWidthPt / borderDash */
+  borderMode?:
+    | 'top'
+    | 'bottom'
+    | 'left'
+    | 'right'
+    | 'insideH'
+    | 'insideV'
+    | 'outside'
+    | 'inside'
+    | 'all'
+    | 'none'
+    | 'diagDown'
+    | 'diagUp'
+  /** Pen dash: solid | dash | sysDash | sysDot | dashDot | lgDash | lgDashDot */
+  borderDash?: string
   /** Cells the shading/border edit applies to, as (row, tc index); undefined = whole table */
   cells?: Array<{ row: number; col: number }>
 }
@@ -1115,13 +1168,41 @@ export interface PrintSlidesOp {
   widthPx: number
   heightPx: number
   /** Layout: full slides / handouts (N per page) / notes pages (slide + notes text) */
-  layout?: 'full' | 'handout2' | 'handout3' | 'handout6' | 'notes'
+  layout?: PrintLayout
   /** Per-page notes text for the notes layout (same order as pngsBase64) */
   notes?: string[]
   /** Paper orientation for handout/notes pages (full pages always follow the slide ratio) */
   orientation?: 'portrait' | 'landscape'
   /** Border around full-page slides */
   frame?: boolean
+  /** Color / grayscale / black & white */
+  output?: 'color' | 'grayscale' | 'bw'
+  /** Paper for handout/notes pages */
+  paper?: PrintPaper
+  /** Outline layout: each printed slide's text */
+  outline?: PrintOutlineItem[]
+  /** Comment pages after the slides */
+  comments?: PrintCommentItem[]
+  commentsTitle?: string
+  /** Full layout on a real paper: scale the slide up to the paper */
+  scaleFit?: boolean
+  /** Full layout: slides per sheet and their fill order */
+  perSheet?: 1 | 2 | 4 | 6 | 9 | 16
+  direction?: 'z' | 'rz' | 'n' | 'rn'
+  rotate180?: boolean
+  flipH?: boolean
+  /** Target printer (system name); omitted = system default */
+  printer?: string
+  copies?: number
+  collate?: boolean
+  /** Two-sided printing: off / flip on long edge / flip on short edge */
+  duplex?: 'off' | 'long' | 'short'
+}
+
+export interface PrinterInfo {
+  name: string
+  displayName: string
+  isDefault: boolean
 }
 
 /** Show sync state from presenter view -> audience window (absolute state mirror; audience seek is idempotent) */
@@ -1343,6 +1424,8 @@ export interface SlidesApi {
       /** Internal margins (EMU); only the provided sides are written */
       insets?: Partial<{ l: number; t: number; r: number; b: number }>
       wrap?: boolean
+      /** Text columns: count (1 = single column) and the gap between them (EMU) */
+      columns?: { num: number; spacing?: number }
     }
   }) => Promise<RenderSlide | null>
   /** External clipboard content probe (internal/slide = last copy came from this app) */
@@ -1477,6 +1560,10 @@ export interface SlidesApi {
   setTransition: (op: SetTransitionOp) => Promise<boolean>
   /** The current page's transition effect (echoed on page switch) */
   getTransition: (slideIndex: number) => Promise<TransitionKind>
+  /** The page's transition settings (direction / duration / advance) */
+  getTransitionDetail: (slideIndex: number) => Promise<TransitionDetail>
+  /** Patch the transition settings of one page (or all with slideIndex -1); returns success */
+  setTransitionDetail: (op: SetTransitionDetailOp) => Promise<boolean>
   /** Batch-write each page's auto-advance time (rehearsal timing save; the saved pptx auto-advances in PowerPoint shows); returns success */
   setAdvanceTimes: (op: SetAdvanceTimesOp) => Promise<boolean>
   /** The current page's animation list (read by the Animations tab / during shows) */
@@ -1548,6 +1635,15 @@ export interface SlidesApi {
     label: string
     colors: string[]
   }> | null>
+  /** Built-in table styles as painted thumbnails under the given region toggles (theme-resolved) */
+  getTableStyleGallery: (flags: {
+    firstRow: boolean
+    lastRow: boolean
+    firstCol: boolean
+    lastCol: boolean
+    bandRow: boolean
+    bandCol: boolean
+  }) => Promise<StyleGalleryEntry[] | null>
   /** Read the chart's current data (dialog echo) */
   getChartData: (
     slideIndex: number,
@@ -1570,6 +1666,8 @@ export interface SlidesApi {
   exportPdf: (op: ExportPdfOp) => Promise<ExportPdfResult>
   /** Print (system dialog; cancel counts as ok=false without an error) */
   printSlides: (op: PrintSlidesOp) => Promise<{ ok: boolean; error?: string }>
+  /** Installed printers (empty when none are configured) */
+  listPrinters: () => Promise<PrinterInfo[]>
   save: () => Promise<{ ok: boolean; path?: string; error?: string; slides?: RenderSlide[] }>
   saveAs: (
     defaultName: string,

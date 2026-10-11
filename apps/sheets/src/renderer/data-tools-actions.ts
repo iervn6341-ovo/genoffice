@@ -27,6 +27,9 @@ import { resolveGoToRef, type GoToNameEntry } from './goto'
 import { getLang, t } from './i18n/locale'
 import { appendSymbol } from './SymbolDialog'
 import { inferContinuousRegion } from './table-actions'
+import { tableThemeFor, type TableThemeSheet } from './table-styles'
+import { tableIdOf } from './table-sync'
+import { runAsOneUndoStepAsync } from './undo-group'
 import {
   a1RangeRef,
   a1RowRangeRef,
@@ -625,6 +628,8 @@ export function handleOutline(
 
 /// Home → Format as Table: the manual entry over the same engine as the
 /// AI add_table op (Univer table rendering + journal + native table part).
+/// Over a range that already is a table it restyles that table, as Excel does:
+/// the table is replaced by one in the new style. Either way it is one ⌘Z step.
 export function handleFormatAsTable(ctx: DataToolsContext, style: string): void {
   const runtime = ctx.univerRef.current
   if (!runtime) return
@@ -656,17 +661,55 @@ export function handleFormatAsTable(ctx: DataToolsContext, style: string): void 
       endColumn = inferred.endColumn
     }
   }
-  try {
-    applyAiTableAdd(runtime, state, {
+  // a table under the selection: inside it the table is restyled, across its edge Excel refuses
+  const covering = state.editJournal.tableAdds.find(
+    (table) =>
+      table.sheetId === sheetId &&
+      !(
+        endRow < table.area.startRow ||
+        table.area.endRow < startRow ||
+        endColumn < table.area.startColumn ||
+        table.area.endColumn < startColumn
+      ),
+  )
+  const oldTableId = covering ? tableIdOf(sheetId, covering.name) : undefined
+  const inside =
+    covering !== undefined &&
+    startRow >= covering.area.startRow &&
+    endRow <= covering.area.endRow &&
+    startColumn >= covering.area.startColumn &&
+    endColumn <= covering.area.endColumn
+  if (covering && (!inside || !oldTableId)) {
+    ctx.setMessage(t('appTableOverlapsSession', { name: covering.name }))
+    return
+  }
+  const area = covering?.area ?? { startRow, startColumn, endRow, endColumn }
+  const target = `${columnLabel(area.startColumn)}${area.startRow + 1}:${columnLabel(area.endColumn)}${area.endRow + 1}`
+  void runAsOneUndoStepAsync(runtime, async () => {
+    if (covering && oldTableId) {
+      // table-sync drops the old journal entry when Univer's delete-table mutation runs
+      await (worksheet as unknown as { removeTable(id: string): Promise<boolean> }).removeTable(
+        oldTableId,
+      )
+    }
+    const { tableId, ready } = applyAiTableAdd(runtime, state, {
       op: 'add_table',
       sheetId,
-      range: `${columnLabel(startColumn)}${startRow + 1}:${columnLabel(endColumn)}${endRow + 1}`,
+      range: target,
+      ...(covering ? { name: covering.name } : {}),
       style,
       bandedRows: true,
     })
-    ctx.setPendingEdits(journalSize(state.editJournal))
-    ctx.setMessage(t('appTableCreated'))
-  } catch (error: unknown) {
-    ctx.setMessage(error instanceof Error ? error.message : t('appTableCreateFailed'))
-  }
+    await ready
+    const theme = tableThemeFor(style, `genoffice-${tableId}`)
+    if (theme) await (worksheet as unknown as TableThemeSheet).addTableTheme(tableId, theme)
+  })
+    .then(() => {
+      ctx.setPendingEdits(journalSize(state.editJournal))
+      ctx.setMessage(covering ? t('appTableRestyled') : t('appTableCreated'))
+    })
+    .catch((error: unknown) => {
+      ctx.setPendingEdits(journalSize(state.editJournal))
+      ctx.setMessage(error instanceof Error ? error.message : t('appTableCreateFailed'))
+    })
 }

@@ -326,10 +326,15 @@ export interface ParaBorderLine {
   szPt?: number
   /** gap between the text and the line in pt (w:space); absent = 0 */
   spacePt?: number
+  /** line style (w:val: double, dotted, dashed, ...); absent = single */
+  val?: string
 }
 
+/** Sides of w:pBdr: top, bottom, left, right and `h` = w:between (the rule between two paragraphs that share the border) */
+export type ParaBorderSide = 't' | 'b' | 'l' | 'r' | 'h'
+
 /** per-side w:pBdr lines; null = explicit none/nil (cancels a basedOn parent's side) */
-export type ParaBorderSides = Partial<Record<'t' | 'b' | 'l' | 'r', ParaBorderLine | null>>
+export type ParaBorderSides = Partial<Record<ParaBorderSide, ParaBorderLine | null>>
 
 /** Paragraph-level formatting that survives regeneration (subset of w:pPr). */
 /**
@@ -476,7 +481,7 @@ export interface ParaFormat {
   shadingDisplay?: string
   /** explicit w:shd without a fill (w:fill="auto"): cancels the style's shading (display-only) */
   shadingClear?: boolean
-  /** paragraph borders, subset of "tblr" e.g. "b" or "tblr" (w:pBdr, single lines) */
+  /** paragraph borders, subset of "tblrh" e.g. "b" or "tblr" (w:pBdr; h = the w:between rule) */
   borders?: string
   /**
    * style details for the `borders` sides: hex color (no '#', default auto),
@@ -485,7 +490,7 @@ export interface ParaFormat {
    */
   borderStyle?: { color?: string; szEighths?: number; spacePt?: number }
   /** per-side color/width of `borders` (w:color / w:sz); side absent = auto color, default width */
-  borderLines?: Partial<Record<'t' | 'b' | 'l' | 'r', ParaBorderLine>>
+  borderLines?: Partial<Record<ParaBorderSide, ParaBorderLine>>
   /** sides the direct w:pBdr resets (none/nil), subset of "tblr": display-only, cancels the style's side */
   borderReset?: string
   /** custom tab stops from w:tabs (non-empty overrides default 0.5in grid) */
@@ -622,8 +627,14 @@ export interface SectionSettings {
    * applySectionSettings only rebuilds w:cols children when this is provided.
    */
   colWidths?: number[]
-  /** line numbering (sectPr w:lnNumType): numbers beside body lines in the left margin */
-  lineNumbers?: LineNumbering
+  /** vertical rule between the columns (w:cols w:sep); undefined keeps the file's value, false removes it */
+  colSep?: boolean
+  /**
+   * line numbering (sectPr w:lnNumType): numbers beside body lines in the left margin.
+   * Parsing yields undefined when the section has none; null asks applySectionSettings to
+   * remove an existing w:lnNumType (undefined keeps whatever the file has).
+   */
+  lineNumbers?: LineNumbering | null
   /**
    * section base direction (sectPr w:bidi): Word fills columns right-to-left.
    * undefined = leave the document's tag untouched (round-trip safe).
@@ -2214,6 +2225,8 @@ export interface ParsedDoc {
   compatibilityMode?: number
   /** settings.xml <w:autoHyphenation/> — Word breaks words at line ends automatically */
   autoHyphenation?: boolean
+  /** settings.xml <w:mirrorMargins/> — binding-side (inside) / outside margins swap on even pages */
+  mirrorMargins?: boolean
   /** settings.xml <w:balanceSingleByteDoubleByteWidth/> — rPr w:spacing counts double on double-byte characters */
   balanceDbcsSpacing?: boolean
   /** settings.xml w:characterSpacingControl compressPunctuation* — justified CJK lines compress trailing-blank punctuation */

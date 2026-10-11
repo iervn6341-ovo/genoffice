@@ -1,5 +1,6 @@
 import type { AgentMessage, AgentToolDef } from '@genoffice/agent-core'
 import { withOutputCapFallback } from './output-cap'
+import { MAX_MAX_OUTPUT_TOKENS, UNLIMITED_OUTPUT_TOKENS } from './providers'
 import { streamAnthropic } from './protocols/anthropic'
 import { streamGemini } from './protocols/gemini'
 import { streamOpenAiCompatible } from './protocols/openai-compatible'
@@ -30,7 +31,16 @@ export async function streamForProvider(
     return streamCodexAppServer(config, system, messages, tools, maxTokens, cb)
   }
   const protocol: Exclude<AiProtocol, 'codex-app-server'> = endpoint.protocol
-  return withOutputCapFallback(baseUrl, config.model, maxTokens, (cap) => {
+  // "No limit": Anthropic's API insists on max_tokens, so ask for the ceiling (a rejection teaches
+  // the real one); the other dialects simply leave the field off
+  const unlimited = maxTokens === UNLIMITED_OUTPUT_TOKENS
+  const requested = unlimited && protocol === 'anthropic' ? MAX_MAX_OUTPUT_TOKENS : maxTokens
+  const run =
+    unlimited && protocol !== 'anthropic'
+      ? (fn: (cap: number) => Promise<void>) => fn(0)
+      : (fn: (cap: number) => Promise<void>) =>
+          withOutputCapFallback(baseUrl, config.model, requested, fn)
+  return run((cap) => {
     switch (protocol) {
       case 'anthropic':
         return streamAnthropic(config, system, messages, tools, cap, cb, baseUrl)

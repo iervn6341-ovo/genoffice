@@ -20,7 +20,6 @@ import type {
   EditChartOp,
   EditParagraph,
   EditStrokeOp,
-  EditTableStyleOp,
   GetLayoutsResult,
   GradientFillSpec,
   InsertKind,
@@ -30,6 +29,8 @@ import type {
   PasteSlideMode,
   SectionInfo,
   SetEffectsPatch,
+  SetTransitionDetailOp,
+  TransitionDetail,
   SlideComment,
   TransitionKind,
 } from '../shared/ipc'
@@ -61,7 +62,13 @@ import type { SlideThemePreset } from './themes'
 import { Ribbon, type FormatCmd, type SlidesViewMode } from './components/Ribbon'
 import { contextElementTypeForNode, type ContextElementType } from './components/context-tabs'
 import { SlideShowView } from './components/SlideShowView'
-import { IconNotes, IconPlayBoxed } from './components/icons'
+import {
+  IconArrangeAll,
+  IconNotes,
+  IconPlayBoxed,
+  IconPrintLayout,
+  IconReadMode,
+} from './components/icons'
 import { NotesEditor, readNotesEditor } from './components/NotesEditor'
 import { PresenterView } from './components/PresenterView'
 import { CustomShowDialog } from './components/CustomShowDialog'
@@ -90,9 +97,16 @@ import { FormatPane } from './components/FormatPane'
 import { CommentsPane } from './components/CommentsPane'
 import { AnimationPane } from './components/AnimationPane'
 import { AnimPreviewOverlay } from './components/AnimatedSlide'
+import { outlineOf } from './outline-of'
 import { EquationDialog, HeaderFooterDialog, LinkDialog } from './components/InsertDialogs'
 import { CutoutDialog } from './components/CutoutDialog'
-import { useAutoSavePref, type AiScopeQuoteData, type WordArtPreset } from '@genoffice/ui'
+import {
+  Backstage,
+  backstageLabels,
+  useAutoSavePref,
+  type AiScopeQuoteData,
+  type WordArtPreset,
+} from '@genoffice/ui'
 import type { ChartPresetDef, IconDef, SmartArtDef } from './insert-presets'
 import { AssistantMark, IconAiBeautify, IconAiFactCheck, IconAiImage } from './components/icons'
 import { ToastHost } from './components/toast'
@@ -128,6 +142,8 @@ import * as slideActions from './slide-actions'
 import * as pictureEditActions from './picture-edit-actions'
 import * as arrangeActions from './arrange-actions'
 import * as tableActions from './table-actions'
+import * as tableLayoutActions from './table-layout-actions'
+import type { TableTabActions, TableTabInfo } from './components/RibbonTableTabs'
 import * as styleActions from './style-actions'
 import { handleGlobalKeydown } from './keyboard-actions'
 import { buildCtxItems } from './context-menu-items'
@@ -160,38 +176,6 @@ function clampThumbsW(w: number): number {
 function loadThumbsW(): number {
   const saved = Number(localStorage.getItem(THUMBS_W_KEY))
   return Number.isFinite(saved) && saved > 0 ? clampThumbsW(saved) : THUMBS_W_DEFAULT
-}
-
-/** Outline view: extract one page's text from the render tree (title = the text box with the largest font size, topmost). */
-function outlineOf(s: RenderSlide): { title: string; lines: string[] } {
-  const texts: Array<{ y: number; fontSize: number; text: string }> = []
-  const walk = (nodes: readonly RenderNode[]) => {
-    for (const n of nodes) {
-      if ((n.type === 'shape' || n.type === 'text') && n.text?.lines?.length) {
-        const text = n.text.lines
-          .map((l) => l.runs.map((r) => r.text).join(''))
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-        if (text) {
-          texts.push({
-            y: n.box?.y ?? 0,
-            fontSize: n.text.lines[0]?.runs[0]?.fontSizePx ?? 0,
-            text,
-          })
-        }
-      }
-      if (n.type === 'group' && Array.isArray(n.children)) walk(n.children)
-    }
-  }
-  walk(s.nodes)
-  if (texts.length === 0) return { title: '', lines: [] }
-  const title = [...texts].sort((a, b) => b.fontSize - a.fontSize || a.y - b.y)[0]!
-  const lines = texts
-    .filter((t) => t !== title)
-    .sort((a, b) => a.y - b.y)
-    .map((t) => t.text)
-  return { title: title.text, lines }
 }
 
 /** Collect fonts/sizes (pt) of all text runs in a node (including group children, table cells) for ribbon display.
@@ -382,6 +366,10 @@ export function App() {
   /** Latest-state bundle for the extracted action modules; refreshed every render (see action-context.ts). */
   const ctxRef = useRef<ActionCtx>(null as unknown as ActionCtx)
   const [zoom, setZoom] = useState(1)
+  // Slide Sorter: the status-bar zoom sizes the thumbnails (PowerPoint), 80% = 208px wide
+  const [sorterZoom, setSorterZoom] = useState(0.8)
+  // Slides carrying an animation or a transition get the sorter's ★ mark
+  const [animatedSlides, setAnimatedSlides] = useState<ReadonlySet<number>>(new Set())
   /** unscaled layout size of .stage-scale — its transform-scaled visual size is
    * scaleBox * zoom, which the wrapper zoom-box adopts so scrolling can reach it all */
   const stageScaleRef = useRef<HTMLDivElement | null>(null)
@@ -400,6 +388,17 @@ export function App() {
   // ── Thumbnail sidebar width (drag the divider to resize; persisted) ─────────
   const [thumbsW, setThumbsW] = useState(loadThumbsW)
   const thumbsListRef = useRef<HTMLDivElement | null>(null)
+  // The list scrolls: a classic (non-overlay) scrollbar takes width out of the content box, so the
+  // thumbnails must be that much narrower or the right edge of every page is clipped. Measure it
+  // after each render (the bar appears/disappears with the slide count) — state only changes when
+  // the value does, so this settles in one pass.
+  const [thumbsBarW, setThumbsBarW] = useState(0)
+  useLayoutEffect(() => {
+    const list = thumbsListRef.current
+    if (!list) return
+    const bar = Math.max(0, list.offsetWidth - list.clientWidth - 1) // 1px border-right
+    setThumbsBarW((prev) => (Math.abs(prev - bar) > 0.5 ? bar : prev))
+  })
   // Re-clamp when the window shrinks (max is 40% of the window), like the AI panel
   useEffect(() => {
     const onResize = () => setThumbsW((w) => clampThumbsW(w))
@@ -453,7 +452,8 @@ export function App() {
     attachments?: AttachmentMeta[]
     slideShot?: boolean
   } | null>(null)
-  const [_recent, setRecent] = useState<string[]>([])
+  const [recent, setRecent] = useState<string[]>([])
+  const [showBackstage, setShowBackstage] = useState(false)
   const consumePendingRef = useRef<ReturnType<typeof window.slidesApi.consumePendingOpen> | null>(
     null,
   )
@@ -469,6 +469,8 @@ export function App() {
     return () => window.removeEventListener('focus', probe)
   }, [])
   const [transition, setTransition] = useState<TransitionKind>('none')
+  /** The current page's transition direction / duration / advance settings (Transitions tab) */
+  const [transitionDetail, setTransitionDetail] = useState<TransitionDetail | null>(null)
   // ── Animations tab: current page's animation list + pane/preview ─────────────
   const [animations, setAnimations] = useState<AnimationItem[]>([])
   const [showAnimPane, setShowAnimPane] = useState(false)
@@ -499,6 +501,26 @@ export function App() {
   const [stageViewportSize, setStageViewportSize] = useState({ w: 0, h: 0 })
   // ── View tab: view mode + display toggles ─────────────────────────────
   const [viewMode, setViewMode] = useState<SlidesViewMode>('normal')
+  // Sorter ★ marks: which slides have an animation or a transition (read when the view opens)
+  useEffect(() => {
+    if (viewMode !== 'sorter') return
+    let alive = true
+    void Promise.all(
+      slides.map(async (_s, i) => {
+        const [anims, trans] = await Promise.all([
+          window.slidesApi.getAnimations(i),
+          window.slidesApi.getTransition(i),
+        ])
+        return (anims?.length ?? 0) > 0 || (trans != null && trans !== 'none')
+      }),
+    ).then((flags) => {
+      if (alive) setAnimatedSlides(new Set(flags.flatMap((f, i) => (f ? [i] : []))))
+    })
+    return () => {
+      alive = false
+    }
+  }, [viewMode, slides])
+
   // Follow slide changes made outside the list (arrow keys, canvas paging); viewMode/showThumbs
   // re-run it because the list remounts at scroll 0 when the normal view returns
   useEffect(() => {
@@ -1682,6 +1704,23 @@ export function App() {
     if (!hasDoc) return
     void window.slidesApi.getTransition(current).then(setTransition)
   }, [hasDoc, current, path])
+  // the detail follows the page and the effect (switching effect resets the direction)
+  useEffect(() => {
+    if (!hasDoc) return
+    void window.slidesApi.getTransitionDetail(current).then(setTransitionDetail)
+  }, [hasDoc, current, path, transition])
+  const onTransitionDetail = useCallback(
+    async (detail: SetTransitionDetailOp['detail'], allSlides = false) => {
+      const ok = await window.slidesApi.setTransitionDetail({
+        slideIndex: allSlides ? -1 : current,
+        detail,
+      })
+      if (!ok) return
+      setDirty(true)
+      void window.slidesApi.getTransitionDetail(current).then(setTransitionDetail)
+    },
+    [current],
+  )
 
   const applyTransition = useCallback(
     (kind: TransitionKind, allSlides: boolean) =>
@@ -2063,41 +2102,6 @@ export function App() {
     lastFitRef.current = z
     setZoom(z)
   }, [fitZoom, slide])
-
-  // Reading view: ←/→/↑/↓/space page turn, Esc exit (capture beats the generic shortcuts)
-  useEffect(() => {
-    if (viewMode !== 'reading') return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setViewMode('normal')
-      } else if (
-        e.key === 'ArrowRight' ||
-        e.key === 'ArrowDown' ||
-        e.key === ' ' ||
-        e.key === 'PageDown' ||
-        e.key === 'Enter'
-      ) {
-        e.preventDefault()
-        setCurrent((c) => Math.min(c + 1, slides.length - 1))
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
-        e.preventDefault()
-        setCurrent((c) => Math.max(c - 1, 0))
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [viewMode, slides.length])
-
-  // Reading view follows window size
-  const [winSize, setWinSize] = useState({ w: window.innerWidth, h: window.innerHeight })
-  useEffect(() => {
-    if (viewMode !== 'reading') return
-    const onResize = () => setWinSize({ w: window.innerWidth, h: window.innerHeight })
-    onResize()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [viewMode])
 
   // ── Section management ─────────────────────────────────────────────────
   // Section data follows document refreshes: open/edit/undo/save all swap the slides array reference; re-fetch here in one place
@@ -2687,6 +2691,11 @@ export function App() {
     (anchor: 'top' | 'middle' | 'bottom') => void styleActions.onTextAnchor(ctxRef.current, anchor),
     [],
   )
+  const onTextColumnsRibbon = useCallback(
+    (num: number, spacing?: number) =>
+      void styleActions.onTextColumns(ctxRef.current, num, spacing),
+    [],
+  )
   const onTextDirectionRibbon = useCallback(
     (vert: 'horz' | 'vert' | 'vert270' | 'wordArtVert') =>
       void styleActions.onTextDirection(ctxRef.current, vert),
@@ -2791,22 +2800,68 @@ export function App() {
     [selectedNode],
   )
 
-  const tableStyleFlags = useMemo(() => {
-    if (selectedNode?.type !== 'table') return null
-    const tbl = selectedNode as TableRenderNode
-    const flags = tbl.styleFlags ?? { firstRow: false, bandRow: false }
-    return { ...flags, rtl: tbl.rtl === true }
-  }, [selectedNode])
+  // What the Table Design / Table Layout tabs can do to the selected table
+  const tableTabActions = useMemo<TableTabActions>(() => {
+    const ctx = () => ctxRef.current
+    const sourceId = () => {
+      const n = ctx().selectedNode
+      return n?.type === 'table' ? n.sourceId : null
+    }
+    return {
+      editStyle: (op) => void styleActions.onEditTableStyle(ctx(), op),
+      structure: (kind, index, before) => {
+        const id = sourceId()
+        if (id) void tableActions.tableStructureOp(ctx(), id, kind, index, before)
+      },
+      merge: (kind, row, col) => {
+        const id = sourceId()
+        if (id) void tableActions.tableMergeOp(ctx(), id, kind, row, col)
+      },
+      setRowHeightPx: (row, hPx) => {
+        const id = sourceId()
+        if (id) void tableActions.onTableRowResize(ctx(), id, row, hPx)
+      },
+      setColWidthPx: (col, wPx) => {
+        const id = sourceId()
+        if (id) void tableActions.onTableColResize(ctx(), id, col, wPx)
+      },
+      distribute: (axis) => void tableLayoutActions.distributeTable(ctx(), axis),
+      alignH: (align) => styleActions.onAlign(ctx(), align),
+      alignV: (anchor) => void tableLayoutActions.alignTableCells(ctx(), anchor),
+      resizeTable: (axis, px) => void tableLayoutActions.resizeTable(ctx(), axis, px),
+      deleteTable: () => void clipboardActions.deleteSelected(ctx()),
+      toggleRtl: (rtl) => void styleActions.onEditTableStyle(ctx(), { rtl }),
+    }
+  }, [])
 
-  const tableActiveCell = useMemo(
-    () =>
-      editingCell &&
-      selectedNode?.type === 'table' &&
-      selectedNode.sourceId === editingCell.sourceId
-        ? { row: editingCell.row, col: editingCell.col }
-        : null,
-    [editingCell, selectedNode],
-  )
+  // What the Table Design / Table Layout tabs show for the selected table
+  const tableTabInfo = useMemo<TableTabInfo | null>(() => {
+    if (selectedNode?.type !== 'table' || !slide) return null
+    const tbl = selectedNode as TableRenderNode
+    const gaps = (grid: number[]) => grid.slice(1).map((v, i) => v - grid[i]!)
+    const f = tbl.styleFlags
+    return {
+      rows: Math.max(0, tbl.gridY.length - 1),
+      cols: Math.max(0, tbl.gridX.length - 1),
+      rowHeightsPx: gaps(tbl.gridY),
+      colWidthsPx: gaps(tbl.gridX),
+      pxPerCm: (96 / 2.54) * slide.scale,
+      ...(tbl.styleId ? { styleId: tbl.styleId } : {}),
+      flags: {
+        firstRow: !!f?.firstRow,
+        lastRow: !!f?.lastRow,
+        firstCol: !!f?.firstCol,
+        lastCol: !!f?.lastCol,
+        bandRow: !!f?.bandRow,
+        bandCol: !!f?.bandCol,
+        rtl: tbl.rtl === true,
+      },
+      activeCell:
+        editingCell && editingCell.sourceId === tbl.sourceId
+          ? { row: editingCell.row, col: editingCell.col }
+          : null,
+    }
+  }, [selectedNode, slide, editingCell])
 
   // Theme-derived chart colors (fetched when a chart is selected; re-selecting after applying a theme refreshes)
   const [chartColorSchemes, setChartColorSchemes] = useState<Array<{
@@ -2826,11 +2881,6 @@ export function App() {
     }
   }, [selectedNode])
 
-  const onEditTableStyle = useCallback(
-    (op: Omit<EditTableStyleOp, 'slideIndex' | 'sourceId'>) =>
-      styleActions.onEditTableStyle(ctxRef.current, op),
-    [],
-  )
   const onEditChart = useCallback(
     (op: Omit<EditChartOp, 'slideIndex' | 'sourceId'>) =>
       styleActions.onEditChart(ctxRef.current, op),
@@ -3111,7 +3161,7 @@ export function App() {
   })
 
   return (
-    <div className="app">
+    <div className={`app${viewMode === 'reading' ? ' app-reading' : ''}`}>
       <ToastHost />
       <Ribbon
         hasDoc={!!slide}
@@ -3130,6 +3180,10 @@ export function App() {
         onExportPdf={() => void exportPdf()}
         onPrint={() => setPrintDlgOpen(true)}
         onExportImages={() => void exportImages()}
+        onFileTab={() => {
+          void window.slidesApi.getRecentFiles().then(setRecent)
+          setShowBackstage(true)
+        }}
         onFormat={onFormat}
         zoom={zoom}
         onZoom={previewZoom}
@@ -3145,6 +3199,27 @@ export function App() {
         onApplyTheme={(preset) => void applyThemePreset(preset)}
         onAddSlide={() => void addSlide()}
         onAddSection={() => void addSectionAt(current)}
+        sectionMenu={{
+          hasCurrent: sections.some((s) => s.slideIndices.includes(current)),
+          hasAny: sections.length > 0,
+          onRename: () => {
+            const sec = sections.find((s) => s.slideIndices.includes(current))
+            if (sec) setRenamingSec({ id: sec.id, value: sec.name })
+          },
+          onRemove: () => {
+            const sec = sections.find((s) => s.slideIndices.includes(current))
+            if (sec) void slideActions.removeSectionAt(ctxRef.current, sec.id)
+          },
+          onRemoveAll: () => {
+            void window.slidesApi.setSections([]).then((r) => {
+              if (r) {
+                setSections(r)
+                setDirty(true)
+                setStatus(t('appStatusSectionRemoved'))
+              }
+            })
+          },
+        }}
         onAddSlideWithLayout={(lp) => void addSlideWithLayout(lp)}
         layouts={layoutsResult?.layouts ?? null}
         layoutSize={layoutsResult?.size ?? null}
@@ -3183,6 +3258,7 @@ export function App() {
         curTextToggles={curTextToggles}
         onTextAnchor={onTextAnchorRibbon}
         onTextDirection={onTextDirectionRibbon}
+        onTextColumns={onTextColumnsRibbon}
         onFindReplace={() => setFindOpen(true)}
         animByParagraph={animByParagraph}
         onToggleAnimByParagraph={() => setAnimByParagraph((v) => !v)}
@@ -3228,6 +3304,8 @@ export function App() {
         onFontSize={onFontSize}
         onInsertTable={(rows, cols) => void insertTable(rows, cols)}
         transition={transition}
+        transitionDetail={transitionDetail}
+        onTransitionDetail={onTransitionDetail}
         onTransition={(kind, all) => {
           void applyTransition(kind, all)
           if (!all) previewTransitionOnCanvas(kind)
@@ -3304,6 +3382,23 @@ export function App() {
         chartColorSchemes={chartColorSchemes}
         contextPictureCanCutout={contextPictureCanCutout}
         contextPictureStroke={contextPictureStroke}
+        onShapeEffects={(effects) => {
+          // every selected shape / picture / text box; a group is left to the Format pane
+          void (async () => {
+            let slide: RenderSlide | null = null
+            for (const id of selectedIds) {
+              const n = findNodeCtx(id)?.node
+              if (!n || (n.type !== 'shape' && n.type !== 'picture' && n.type !== 'text')) continue
+              slide =
+                (await window.slidesApi.setEffects({
+                  slideIndex: current,
+                  sourceId: id,
+                  effects,
+                })) ?? slide
+            }
+            if (slide) applySlide(current, slide)
+          })()
+        }}
         onPictureStroke={(stroke) => {
           // applies to every selected shape/picture; a selected group pierces one level
           // down so its shape/picture members get the outline (PowerPoint semantics)
@@ -3448,9 +3543,8 @@ export function App() {
             .editPictureOpacity({ slideIndex: current, sourceId: selectedNode.sourceId, opacity })
             .then((r) => r && applySlide(current, r))
         }}
-        onEditTableStyle={(op) => void onEditTableStyle(op)}
-        tableStyleFlags={tableStyleFlags}
-        tableActiveCell={tableActiveCell}
+        tableTabInfo={tableTabInfo}
+        tableTabActions={tableTabActions}
         onEditChart={(op) => void onEditChart(op)}
         onOpenChartDataDialog={() => void openChartDataDialog()}
         onArrange={(op) => void alignSelected(op)}
@@ -3539,45 +3633,20 @@ export function App() {
             {!slide ? (
               <div className="start-screen start-booting">{t('appStartOpening')}</div>
             ) : viewMode === 'reading' ? (
-              (() => {
-                // Reading view: page fills the available area, click/arrow keys to turn pages, Esc to exit
-                const availH = Math.max(240, winSize.h - 40 - 112 - 24 - 76)
-                const availW = Math.max(320, winSize.w - 120)
-                const readW = Math.round(
-                  Math.min(availW, availH * (slide.widthPx / slide.heightPx)),
-                )
-                return (
-                  <div className="reading-view">
-                    <div
-                      className="reading-slide"
-                      data-tip={t('appReadingSlideTitle')}
-                      onClick={() => setCurrent((c) => Math.min(c + 1, slides.length - 1))}
-                    >
-                      <SlideThumb slide={slide} images={images} width={readW} />
-                    </div>
-                    <div className="reading-bar">
-                      <button
-                        disabled={current === 0}
-                        onClick={() => setCurrent((c) => Math.max(c - 1, 0))}
-                      >
-                        {t('appReadingPrev')}
-                      </button>
-                      <span className="reading-page">
-                        {current + 1} / {slides.length}
-                      </span>
-                      <button
-                        disabled={current === slides.length - 1}
-                        onClick={() => setCurrent((c) => Math.min(c + 1, slides.length - 1))}
-                      >
-                        {t('appReadingNext')}
-                      </button>
-                      <button className="reading-exit" onClick={() => onViewMode('normal')}>
-                        {t('appReadingExit')}
-                      </button>
-                    </div>
-                  </div>
-                )
-              })()
+              // Reading view: the real slide show (animations, transitions, links, ink) inside
+              // the window; Esc / the bar's End Show returns to Normal on the page last viewed
+              <div className="reading-view">
+                <SlideShowView
+                  windowed
+                  slides={slides}
+                  images={images}
+                  startAt={current}
+                  onExit={(last) => {
+                    setCurrent(last)
+                    setViewMode('normal')
+                  }}
+                />
+              </div>
             ) : viewMode === 'sorter' ? (
               <div className="sorter-view">
                 {slides.map((s, i) => (
@@ -3602,8 +3671,17 @@ export function App() {
                       setCtxMenu({ kind: 'thumb', x: e.clientX, y: e.clientY, index: i })
                     }}
                   >
-                    <SlideThumb slide={s} images={images} width={208} />
-                    <span className="sorter-num">{i + 1}</span>
+                    <div className="sorter-frame">
+                      <SlideThumb slide={s} images={images} width={Math.round(260 * sorterZoom)} />
+                    </div>
+                    <div className="sorter-meta">
+                      <span className="sorter-num">{i + 1}</span>
+                      {animatedSlides.has(i) && (
+                        <span className="sorter-star" data-tip={t('appSorterAnimatedTitle')}>
+                          ★
+                        </span>
+                      )}
+                    </div>
                     {pasteFloater?.index === i && (
                       <PasteOptionsFloater
                         mode={pasteFloater.mode}
@@ -3651,8 +3729,8 @@ export function App() {
                     <>
                       <div className="slide-list" ref={thumbsListRef} style={{ width: thumbsW }}>
                         {(() => {
-                          // width = sidebar minus horizontal padding (20) and .thumb border (4)
-                          const thumbW = Math.max(60, thumbsW - 24)
+                          // width = sidebar minus its right border (1), horizontal padding (20), .thumb border (4) and the scrollbar
+                          const thumbW = Math.max(60, thumbsW - 25 - thumbsBarW)
                           const thumbItem = (s: RenderSlide, i: number) => (
                             <div
                               key={i}
@@ -4349,16 +4427,47 @@ export function App() {
                 </button>
               )}
               {hasDoc && (
-                <button
-                  className="status-play-btn"
-                  data-tip={t('ribbonFromCurrentTip')}
-                  aria-label={t('ribbonFromCurrentTip')}
-                  onClick={() => startSlideShow(false)}
-                >
-                  <IconPlayBoxed size={18} />
-                </button>
+                // PowerPoint's status-bar view switcher: Normal / Slide Sorter / Reading View / Slide Show
+                <div className="status-views" role="group">
+                  {(
+                    [
+                      ['normal', <IconPrintLayout key="n" size={18} />, 'ribbonViewNormalTip'],
+                      ['sorter', <IconArrangeAll key="s" size={18} />, 'ribbonViewSorterTip'],
+                      ['reading', <IconReadMode key="r" size={18} />, 'ribbonViewReadingTip'],
+                    ] as const
+                  ).map(([mode, icon, tip]) => (
+                    <button
+                      key={mode}
+                      className={`status-play-btn${viewMode === mode ? ' on' : ''}`}
+                      data-tip={t(tip)}
+                      aria-label={t(tip)}
+                      aria-pressed={viewMode === mode}
+                      onClick={() => onViewMode(mode)}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                  <button
+                    className="status-play-btn"
+                    data-tip={t('ribbonFromCurrentTip')}
+                    aria-label={t('ribbonFromCurrentTip')}
+                    onClick={() => startSlideShow(false)}
+                  >
+                    <IconPlayBoxed size={18} />
+                  </button>
+                </div>
               )}
-              <ZoomControls zoom={zoom} onPreview={previewZoom} />
+              <ZoomControls
+                zoom={viewMode === 'sorter' ? sorterZoom : zoom}
+                onPreview={
+                  viewMode === 'sorter'
+                    ? (z) =>
+                        setSorterZoom((cur) =>
+                          Math.min(3, Math.max(0.25, typeof z === 'function' ? z(cur) : z)),
+                        )
+                    : previewZoom
+                }
+              />
             </div>
           </footer>
         </div>
@@ -4447,11 +4556,46 @@ export function App() {
         />
       )}
 
+      {showBackstage && (
+        <Backstage
+          lang={lang}
+          kind="deck"
+          docName={_fileName ?? ''}
+          filePath={path || null}
+          hasDoc={!!slide}
+          canSave={dirty}
+          recent={recent.map((p) => ({ path: p, name: p.split(/[\\/]/).pop() ?? p }))}
+          exports={[
+            { id: 'pdf', label: backstageLabels(lang).exportPdf, run: () => void exportPdf() },
+            {
+              id: 'images',
+              label: backstageLabels(lang).exportImages,
+              run: () => void exportImages(),
+            },
+          ]}
+          onClose={() => setShowBackstage(false)}
+          onNew={() => void newBlank()}
+          onOpen={() => void openDialog()}
+          onOpenRecent={(p) =>
+            void window.slidesApi.openPptxPath(p, FIT_WIDTH).then((r) => applyOpen(r))
+          }
+          onSave={() => void save()}
+          onSaveAs={() => void saveAs()}
+          onPrint={() => setPrintDlgOpen(true)}
+        />
+      )}
+
       {printDlgOpen && (
         <PrintDialog
           slides={slides}
           images={images}
           current={current}
+          selection={slideSelection}
+          sections={sections}
+          onEditHeaderFooter={() => {
+            setPrintDlgOpen(false)
+            void openHeaderFooter()
+          }}
           onClose={() => setPrintDlgOpen(false)}
           setStatus={setStatus}
         />

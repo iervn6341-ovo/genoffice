@@ -16,6 +16,22 @@ export const AI_IDLE_TIMEOUT_MS = 180_000
 /** Non-streaming chat waits for the full generation before headers arrive */
 export const AI_CHAT_RESPONSE_TIMEOUT_MS = 180_000
 
+/**
+ * A model that streams thinking but never an answer or a tool call for this long is looping
+ * (a reasoning model on a local server can burn its whole output budget this way while every
+ * byte keeps the idle timeout happy). Generous: legitimate deep thinking stays well below it.
+ */
+export const AI_REASONING_STALL_MS = 900_000
+
+export class AiReasoningStallError extends Error {
+  constructor(ms: number) {
+    super(
+      `The model kept thinking for ${Math.round(ms / 60_000)} min without producing an answer, so the request was stopped. Try a non-reasoning model or lower the output limit.`,
+    )
+    this.name = 'AiReasoningStallError'
+  }
+}
+
 export class AiTimeoutError extends Error {
   constructor(ms: number) {
     super(`AI request timed out: no data received from the network for ${Math.round(ms / 1000)}s`)
@@ -28,6 +44,8 @@ export interface StreamWatchdog {
   signal: AbortSignal
   /** data arrived: switch to (and re-arm) the idle timeout */
   touch(): void
+  /** cancel the request now (closing the connection also stops a local server's generation) */
+  abort(): void
   /** run the request; a timeout abort surfaces as AiTimeoutError; always disposes the timer */
   guard<T>(run: () => Promise<T>): Promise<T>
 }
@@ -54,6 +72,7 @@ export function createStreamWatchdog(
   return {
     signal: controller.signal,
     touch: () => arm(idleMs),
+    abort: () => controller.abort(),
     async guard<T>(run: () => Promise<T>): Promise<T> {
       try {
         return await run()

@@ -9,6 +9,20 @@
 import type { Slide } from './types'
 import { escapeXmlAttr } from './xml-utils'
 
+export type BorderMode =
+  | 'top'
+  | 'bottom'
+  | 'left'
+  | 'right'
+  | 'insideH'
+  | 'insideV'
+  | 'outside'
+  | 'inside'
+  | 'all'
+  | 'none'
+  | 'diagDown'
+  | 'diagUp'
+
 /** Table style edit parameters (engine side of the IPC EditTableStyleOp) */
 export interface TableStyleEdit {
   /** Whole-block tblPr XML replacement applied directly (used for styleName presets) */
@@ -31,6 +45,13 @@ export interface TableStyleEdit {
   borderColor?: string | null
   borderWidthEmu?: number | null
   borderPreset?: 'all' | 'none' | null
+  /**
+   * Edge-wise border edit (the ribbon's Borders gallery), applied to the bounding range of `cells`
+   * (whole table when absent) with borderColor / borderWidthEmu / borderDash as the pen.
+   */
+  borderMode?: BorderMode
+  /** a:prstDash value of the pen ('solid' omits the element) */
+  borderDash?: string
   /** Clear all tcPr direct fills/borders (what PowerPoint does when applying a gallery preset; otherwise direct cell formatting hides the style) */
   clearDirectFormatting?: boolean
   /** Cells the shading/border edit applies to, as (row, tc index); undefined = whole table */
@@ -181,7 +202,8 @@ export function ensureTableStyleXml(
   styleDefXml: string,
 ): string {
   const xml = tableStylesXml?.includes('<a:tblStyleLst') ? tableStylesXml : EMPTY_TABLE_STYLES_XML
-  if (xml.includes(styleId)) return xml
+  // the list's def="…" attribute names a style too, without defining it: match the definition itself
+  if (xml.includes(`styleId="${styleId}"`)) return xml
   const sc = /<a:tblStyleLst([^>]*)\/>/.exec(xml)
   if (sc) return xml.replace(sc[0], `<a:tblStyleLst${sc[1]}>${styleDefXml}</a:tblStyleLst>`)
   return xml.replace('</a:tblStyleLst>', () => `${styleDefXml}</a:tblStyleLst>`)
@@ -240,6 +262,9 @@ export function patchTableStyleXml(originalXml: string, edit: TableStyleEdit): s
   ) {
     xml = edit.cells ? patchCellsTcPr(xml, edit) : patchAllTcPr(xml, edit)
   }
+
+  // ── 3. Edge-wise borders ───────────────────────────────────────────
+  if (edit.borderMode) xml = applyBorderMode(xml, edit)
 
   return xml
 }
@@ -425,6 +450,176 @@ function patchCellsTcPr(xml: string, edit: TableStyleEdit): string {
       tcXml = tcXml.replace(/<\/a:tc>$/, `<a:tcPr>${applyTcPrEdit('', edit)}</a:tcPr></a:tc>`)
     }
     xml = xml.slice(0, tc.start) + tcXml + xml.slice(tc.end)
+  }
+  return xml
+}
+
+type Side = 'L' | 'R' | 'T' | 'B' | 'D' | 'U'
+const SIDE_TAG: Record<Side, string> = {
+  L: 'lnL',
+  R: 'lnR',
+  T: 'lnT',
+  B: 'lnB',
+  D: 'lnTlToBr',
+  U: 'lnBlToTr',
+}
+// CT_TableCellProperties: the line elements come in exactly this order, before cell3D and the fill
+const SIDE_ORDER = ['lnL', 'lnR', 'lnT', 'lnB', 'lnTlToBr', 'lnBlToTr']
+
+/** Rewrite some edges of one tcPr's children: the given sides get the pen (or "no line"), the others stay. */
+function applySideBorders(
+  inner: string,
+  sides: ReadonlySet<Side>,
+  pen: { none: boolean; color: string; widthEmu: number; dash?: string },
+): string {
+  const found = new Map<string, string>()
+  const rest = inner.replace(LN_ELEMENT_RE, (m, a: string | undefined, b: string | undefined) => {
+    found.set((a ?? b)!, m)
+    return ''
+  })
+  for (const side of sides) {
+    const tag = SIDE_TAG[side]
+    found.set(
+      tag,
+      pen.none
+        ? `<a:${tag} w="0"><a:noFill/></a:${tag}>`
+        : `<a:${tag} w="${pen.widthEmu}"><a:solidFill><a:srgbClr val="${pen.color}"/></a:solidFill>` +
+            `${pen.dash && pen.dash !== 'solid' ? `<a:prstDash val="${pen.dash}"/>` : ''}</a:${tag}>`,
+    )
+  }
+  return SIDE_ORDER.map((t) => found.get(t) ?? '').join('') + rest
+}
+
+/** Run `fn` over the children of the tcPr of cell (row, col), creating the tcPr when the cell has none. */
+function mapCellTcPr(xml: string, row: number, col: number, fn: (inner: string) => string): string {
+  const tr = nthSpan(xml, 'a:tr', row)
+  if (!tr) return xml
+  const tc = nthSpan(xml, 'a:tc', col, tr.start, tr.end)
+  if (!tc) return xml
+  let tcXml = xml.slice(tc.start, tc.end)
+  const m = /<a:tcPr([^>]*)>(.*?)<\/a:tcPr>|<a:tcPr([^>]*)\/>/s.exec(tcXml)
+  if (m) {
+    const attrs = m[1] ?? m[3] ?? ''
+    tcXml =
+      tcXml.slice(0, m.index) +
+      `<a:tcPr${attrs}>${fn(m[2] ?? '')}</a:tcPr>` +
+      tcXml.slice(m.index + m[0].length)
+  } else {
+    tcXml = tcXml.replace(/<\/a:tc>$/, `<a:tcPr>${fn('')}</a:tcPr></a:tc>`)
+  }
+  return xml.slice(0, tc.start) + tcXml + xml.slice(tc.end)
+}
+
+/**
+ * Which cell edges a Borders-gallery choice touches. An edge shared with a neighbour is written on
+ * both cells (that is how PowerPoint stores it, and either side may win when drawn).
+ */
+export function borderEdgeSets(
+  mode: BorderMode,
+  range: { r0: number; r1: number; c0: number; c1: number },
+  nRows: number,
+  nCols: number,
+): Map<string, Set<Side>> {
+  const out = new Map<string, Set<Side>>()
+  const add = (r: number, c: number, side: Side) => {
+    if (r < 0 || c < 0 || r >= nRows || c >= nCols) return
+    const key = `${r},${c}`
+    let set = out.get(key)
+    if (!set) out.set(key, (set = new Set()))
+    set.add(side)
+  }
+  const { r0, r1, c0, c1 } = range
+  const top = () => {
+    for (let c = c0; c <= c1; c++) (add(r0, c, 'T'), add(r0 - 1, c, 'B'))
+  }
+  const bottom = () => {
+    for (let c = c0; c <= c1; c++) (add(r1, c, 'B'), add(r1 + 1, c, 'T'))
+  }
+  const left = () => {
+    for (let r = r0; r <= r1; r++) (add(r, c0, 'L'), add(r, c0 - 1, 'R'))
+  }
+  const right = () => {
+    for (let r = r0; r <= r1; r++) (add(r, c1, 'R'), add(r, c1 + 1, 'L'))
+  }
+  const insideH = () => {
+    for (let r = r0; r < r1; r++)
+      for (let c = c0; c <= c1; c++) (add(r, c, 'B'), add(r + 1, c, 'T'))
+  }
+  const insideV = () => {
+    for (let c = c0; c < c1; c++)
+      for (let r = r0; r <= r1; r++) (add(r, c, 'R'), add(r, c + 1, 'L'))
+  }
+  const outside = () => (top(), bottom(), left(), right())
+  switch (mode) {
+    case 'top':
+      top()
+      break
+    case 'bottom':
+      bottom()
+      break
+    case 'left':
+      left()
+      break
+    case 'right':
+      right()
+      break
+    case 'insideH':
+      insideH()
+      break
+    case 'insideV':
+      insideV()
+      break
+    case 'outside':
+      outside()
+      break
+    case 'inside':
+      insideH()
+      insideV()
+      break
+    case 'all':
+    case 'none':
+      outside()
+      insideH()
+      insideV()
+      break
+    case 'diagDown':
+    case 'diagUp':
+      for (let r = r0; r <= r1; r++)
+        for (let c = c0; c <= c1; c++) add(r, c, mode === 'diagDown' ? 'D' : 'U')
+      break
+  }
+  return out
+}
+
+function applyBorderMode(xml: string, edit: TableStyleEdit): string {
+  const nRows = (xml.match(/<a:tr[\s>]/g) ?? []).length
+  const nCols = (xml.match(/<a:gridCol[\s/>]/g) ?? []).length
+  if (!nRows || !nCols || !edit.borderMode) return xml
+  let range = { r0: 0, r1: nRows - 1, c0: 0, c1: nCols - 1 }
+  if (edit.cells?.length) {
+    range = {
+      r0: Math.max(0, Math.min(...edit.cells.map((c) => c.row))),
+      r1: Math.min(nRows - 1, Math.max(...edit.cells.map((c) => c.row))),
+      c0: Math.max(0, Math.min(...edit.cells.map((c) => c.col))),
+      c1: Math.min(nCols - 1, Math.max(...edit.cells.map((c) => c.col))),
+    }
+  }
+  const sets = borderEdgeSets(edit.borderMode, range, nRows, nCols)
+  const pen = {
+    none: edit.borderMode === 'none',
+    color: (edit.borderColor ?? '#000000').replace('#', '').toUpperCase(),
+    widthEmu: edit.borderWidthEmu ?? 12700,
+    ...(edit.borderDash ? { dash: edit.borderDash } : {}),
+  }
+  // Back to front so earlier cell spans stay valid while splicing
+  const keys = [...sets.keys()].sort((a, b) => {
+    const [ar, ac] = a.split(',').map(Number) as [number, number]
+    const [br, bc] = b.split(',').map(Number) as [number, number]
+    return br - ar || bc - ac
+  })
+  for (const key of keys) {
+    const [r, c] = key.split(',').map(Number) as [number, number]
+    xml = mapCellTcPr(xml, r, c, (inner) => applySideBorders(inner, sets.get(key)!, pen))
   }
   return xml
 }

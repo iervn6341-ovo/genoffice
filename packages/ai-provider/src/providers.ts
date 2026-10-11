@@ -243,6 +243,16 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     keyPlaceholder: 'API Key',
   },
   {
+    id: 'ollama',
+    label: 'Ollama',
+    // The installed models are read live from the server (GET /models), so none are listed here
+    models: [],
+    defaultModel: '',
+    keyPlaceholder: '',
+    needsBaseUrl: true,
+    defaultBaseUrl: 'http://localhost:11434/v1',
+  },
+  {
     id: 'custom',
     label: 'Custom',
     models: [],
@@ -266,7 +276,7 @@ export function defaultAiSettings(
     providers[meta.id] = {
       apiKey: defaultApiKeys?.[meta.id] ?? '',
       model: meta.defaultModel,
-      baseUrl: meta.needsBaseUrl ? '' : undefined,
+      baseUrl: meta.needsBaseUrl ? (meta.defaultBaseUrl ?? '') : undefined,
       cliPath: meta.needsCliPath ? '' : undefined,
     }
   }
@@ -320,12 +330,15 @@ const RETIRED_MODELS: Partial<Record<AiProviderId, Record<string, string>>> = {
 export const DEFAULT_MAX_OUTPUT_TOKENS = 32768
 /** bounds accepted for AiSettings.maxOutputTokens: below the first a short answer cannot even finish, above the second one turn risks the whole context window */
 export const MIN_MAX_OUTPUT_TOKENS = 1024
+/** a maxOutputTokens of 0 means "no limit": the cap is left off the request (APIs that insist on one get the ceiling) */
+export const UNLIMITED_OUTPUT_TOKENS = 0
 export const MAX_MAX_OUTPUT_TOKENS = 131072
 
 /** Out-of-range or non-finite input falls back to a bound / the default (a mistyped settings field must not kill AI features) */
 export function clampMaxOutputTokens(value: unknown): number {
   const n = typeof value === 'number' ? Math.floor(value) : Number.NaN
   if (!Number.isFinite(n)) return DEFAULT_MAX_OUTPUT_TOKENS
+  if (n === UNLIMITED_OUTPUT_TOKENS) return UNLIMITED_OUTPUT_TOKENS
   return Math.min(MAX_MAX_OUTPUT_TOKENS, Math.max(MIN_MAX_OUTPUT_TOKENS, n))
 }
 

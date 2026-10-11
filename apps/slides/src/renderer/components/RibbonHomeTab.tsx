@@ -24,6 +24,7 @@ import {
   IconBullets,
   IconRefresh,
   IconCharSpacing,
+  IconColumns,
   IconChangeCase,
   IconTextHighlight,
   IconTextDirection,
@@ -159,6 +160,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
     layouts,
     layoutSize,
     onAddSection,
+    sectionMenu,
     onAddSlide,
     onInsert,
     onInsertImage,
@@ -171,9 +173,11 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
     curTextToggles,
     onTextAnchor,
     onTextDirection,
+    onTextColumns,
     renderQuickStyles,
     renderShapeFill,
     renderShapeOutline,
+    renderShapeEffects,
     onAddSlideWithLayout,
     onAiPreset,
     onAlign,
@@ -215,7 +219,6 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
     lastColor,
     layoutOpen,
     layoutPickOpen,
-    lineSpacingOpen,
     onCustomBulletColor,
     onCustomTextColor,
     paraOpen,
@@ -226,7 +229,6 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
     setLastColor,
     setLayoutOpen,
     setLayoutPickOpen,
-    setLineSpacingOpen,
     setParaOpen,
     setSizeDraft,
     setSizeOpen,
@@ -386,6 +388,448 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
   // typing in a text box counts as a target even when no element is selected (selectedIds empty)
   const paraTarget = hasSelection || Boolean(editing)
   const paraExpanded = autoFold && !collapsedGroups.includes('paragraph')
+
+  // ── Paragraph: PowerPoint-style Bullets ▾ / Numbering ▾ libraries, Columns ▾ ──
+  const [bulletOpts, setBulletOpts] = useState(false)
+  const applyPara = (patch: Parameters<typeof onParagraphFormat>[0], keepOpen = false) => {
+    if (!paraTarget) return
+    onParagraphFormat(patch)
+    if (!keepOpen) setInsertDrop(null)
+  }
+  const bulletLibrary = () => (
+    <div className="rb-bullet-lib">
+      <div className="rb-para-label">{t('ribbonBulletLibrary')}</div>
+      <div className="rb-bullet-grid">
+        <button
+          className={`rb-bullet-tile rb-bullet-tile-none ${curBulletChar === '' ? 'on' : ''}`}
+          disabled={!paraTarget}
+          data-tip={t('ribbonNone')}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            applyPara({ bullet: 'none' })
+          }}
+        >
+          {t('ribbonNone')}
+        </button>
+        {BULLET_PRESETS.map((p) => (
+          <button
+            key={p.glyph}
+            className={`rb-bullet-tile ${curBulletChar === bulletRunText(p.char, p.font) ? 'on' : ''}`}
+            disabled={!paraTarget}
+            data-tip={t('ribbonBulletChar')}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              applyPara({ bullet: 'char', bulletChar: p.char, bulletFont: p.font })
+            }}
+          >
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="rb-bullet-tile-row">
+                <span className="rb-bullet-tile-glyph">{p.glyph}</span>
+                <span className="rb-bullet-tile-bar" />
+              </span>
+            ))}
+          </button>
+        ))}
+      </div>
+      <div className="rb-para-label">{t('ribbonBulletCustom')}</div>
+      <div className="rb-row rb-bullet-custom">
+        {EXTRA_BULLET_SYMBOLS.map((ch) => (
+          <button
+            key={ch}
+            className={`rb-bullet-sym ${curBulletChar === ch ? 'on' : ''}`}
+            disabled={!paraTarget}
+            data-tip={t('ribbonBulletCustom')}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              applyPara({ bullet: 'char', bulletChar: ch })
+            }}
+          >
+            {ch}
+          </button>
+        ))}
+      </div>
+      <div className="rb-row rb-bullet-custom">
+        <input
+          className="rb-bullet-hang rb-bullet-sym-input"
+          disabled={!paraTarget}
+          data-tip={t('ribbonBulletCustomTip')}
+          placeholder={t('ribbonBulletCustom')}
+          value={symDraft}
+          onMouseDown={(e) => e.stopPropagation()}
+          onChange={(e) => setSymDraft(e.target.value)}
+          onKeyDown={draftKeys(commitSymDraft)}
+        />
+        <button
+          className={`rb-bullet-hang ${curBulletChar === '#img' ? 'on' : ''}`}
+          disabled={!paraTarget}
+          data-tip={t('ribbonBulletPicture')}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            if (paraTarget) void pickBulletPicture()
+          }}
+        >
+          {t('ribbonBulletPicture')}
+        </button>
+      </div>
+      <button
+        className="rb-bullet-more"
+        aria-expanded={bulletOpts}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setBulletOpts((v) => !v)
+        }}
+      >
+        {t('ribbonBulletOptions')}
+        <span aria-hidden="true">{bulletOpts ? ' ▴' : ' ▾'}</span>
+      </button>
+      {bulletOpts && (
+        <>
+          <div className="rb-para-label">{t('ribbonBulletSize')}</div>
+          <div className="rb-row">
+            {[75, 90, 100, 125, 150].map((pct) => (
+              <button
+                key={pct}
+                className="rb-bullet-hang"
+                disabled={!paraTarget}
+                data-tip={t('ribbonBulletSize')}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  applyPara({ bulletSizePct: pct }, true)
+                }}
+              >
+                {pct}%
+              </button>
+            ))}
+          </div>
+          <div className="rb-para-label">{t('ribbonBulletHang')}</div>
+          <div className="rb-row">
+            {BULLET_HANG_PRESETS.map(([key, emu]) => (
+              <button
+                key={key}
+                className="rb-bullet-hang"
+                disabled={!paraTarget}
+                data-tip={t('ribbonBulletHang')}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  applyPara({ bulletHangEmu: emu }, true)
+                }}
+              >
+                {t(key)}
+              </button>
+            ))}
+            <input
+              className="rb-bullet-hang rb-bullet-hang-input"
+              disabled={!paraTarget}
+              data-tip={t('ribbonBulletHangCustomTip')}
+              placeholder="px"
+              value={hangDraft}
+              onMouseDown={(e) => e.stopPropagation()}
+              onChange={(e) => setHangDraft(e.target.value)}
+              onKeyDown={draftKeys(commitHangDraft)}
+            />
+          </div>
+          <div className="rb-para-label">{t('ribbonBulletColor')}</div>
+          <div className="rb-row rb-bullet-colors">
+            {TEXT_COLORS.map((c) => (
+              <button
+                key={c}
+                className="rb-swatch"
+                style={{ background: c }}
+                disabled={!paraTarget}
+                data-tip={c}
+                aria-label={c}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  applyPara({ bulletColor: c }, true)
+                }}
+              />
+            ))}
+            <label
+              className="rb-color-more rb-bullet-color-more"
+              data-tip={t('ribbonMoreColors')}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <input
+                type="color"
+                value={lastBulletColor}
+                onPointerDown={(e) => armColorInput(e.currentTarget)}
+                onChange={(e) => {
+                  if (paraTarget) onCustomBulletColor(e.target.value)
+                }}
+              />
+              {t('ribbonMoreColors')}
+            </label>
+          </div>
+        </>
+      )}
+    </div>
+  )
+  const numberLibrary = () => (
+    <div className="rb-bullet-lib">
+      <div className="rb-para-label">{t('ribbonNumberLibrary')}</div>
+      <div className="rb-bullet-grid">
+        <button
+          className={`rb-bullet-tile rb-bullet-tile-none ${curBulletChar === '' ? 'on' : ''}`}
+          disabled={!paraTarget}
+          data-tip={t('ribbonNone')}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            applyPara({ bullet: 'none' })
+          }}
+        >
+          {t('ribbonNone')}
+        </button>
+        {NUMBER_PRESETS.map((p) => (
+          <button
+            key={p.numType}
+            className={`rb-bullet-tile ${curBulletChar === `#num:${p.numType}` ? 'on' : ''}`}
+            disabled={!paraTarget}
+            data-tip={t('ribbonNumberStyle')}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              applyPara({ bullet: 'number', numType: p.numType })
+            }}
+          >
+            {p.sample.map((smp, i) => (
+              <span key={i} className="rb-bullet-tile-row">
+                <span className="rb-bullet-tile-glyph rb-bullet-tile-num">{smp}</span>
+                <span className="rb-bullet-tile-bar" />
+              </span>
+            ))}
+          </button>
+        ))}
+      </div>
+      <div className="rb-para-label">{t('ribbonNumberStartAt')}</div>
+      <div className="rb-row">
+        <input
+          className="rb-bullet-hang rb-bullet-start-input"
+          type="number"
+          min={1}
+          disabled={!paraTarget}
+          data-tip={t('ribbonNumberStartAtTip')}
+          placeholder="1"
+          value={startDraft}
+          onMouseDown={(e) => e.stopPropagation()}
+          onChange={(e) => setStartDraft(e.target.value)}
+          onKeyDown={draftKeys(commitStartDraft)}
+        />
+      </div>
+    </div>
+  )
+  /** Bullets / Numbering: the icon applies the default list, the caret opens its library */
+  const listSplit = (
+    key: 'bullets' | 'numbering',
+    icon: ReactNode,
+    title: string,
+    onMain: () => void,
+    library: ReactNode,
+  ) => (
+    <div className="rb-drop-wrap rb-split-icon">
+      <button
+        className="rb-icon"
+        disabled={!paraTarget}
+        data-tip={title}
+        aria-label={title}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          if (paraTarget) onMain()
+        }}
+      >
+        {icon}
+      </button>
+      <button
+        className={`rb-icon rb-icon-caret ${insertDrop === key ? 'active' : ''}`}
+        disabled={!paraTarget}
+        data-tip={title}
+        aria-label={title}
+        aria-expanded={insertDrop === key}
+        onMouseDown={(e) => {
+          e.stopPropagation()
+          closeSiblingPanels(e, closePanels, 'insert')
+        }}
+        onClick={() => setInsertDrop((v) => (v === key ? null : key))}
+      >
+        <RbCaret />
+      </button>
+      {insertDrop === key && (
+        <div
+          className="rb-drop rb-bullet-drop"
+          data-keep-edit=""
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {library}
+        </div>
+      )}
+    </div>
+  )
+  const [colCount, setColCount] = useState('')
+  const [colGap, setColGap] = useState('')
+  const commitColumns = () => {
+    const count = Number(colCount.trim())
+    if (!Number.isInteger(count) || count < 1 || count > 16) return
+    const gapPt = Number(colGap.trim().replace(',', '.'))
+    const gapEmu =
+      colGap.trim() && Number.isFinite(gapPt) && gapPt >= 0 ? Math.round(gapPt * 12700) : undefined
+    onTextColumns(count, gapEmu)
+    setInsertDrop(null)
+  }
+  const columnsMenu = () => (
+    <div className="rb-menu">
+      {(
+        [
+          [1, 'ribbonColumnOne'],
+          [2, 'ribbonColumnTwo'],
+          [3, 'ribbonColumnThree'],
+        ] as const
+      ).map(([n, key]) => (
+        <button
+          key={n}
+          onClick={() => {
+            setInsertDrop(null)
+            onTextColumns(n)
+          }}
+        >
+          {t(key)}
+        </button>
+      ))}
+      <div className="rb-menu-sep" />
+      {/* "More Columns…": any count 1-16 and its gap in pt, applied on Enter */}
+      <label className="rb-menu-input">
+        <span>{t('ribbonColumnCount')}</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="2"
+          aria-label={t('ribbonColumnCount')}
+          value={colCount}
+          onMouseDown={(e) => e.stopPropagation()}
+          onChange={(e) => setColCount(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitColumns()
+          }}
+        />
+      </label>
+      <label className="rb-menu-input">
+        <span>{t('ribbonColumnSpacing')}</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="pt"
+          aria-label={t('ribbonColumnSpacing')}
+          value={colGap}
+          onMouseDown={(e) => e.stopPropagation()}
+          onChange={(e) => setColGap(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitColumns()
+          }}
+        />
+      </label>
+    </div>
+  )
+  const columnsDrop = (size: number) =>
+    dropIcon('columns', <IconColumns size={size} />, t('ribbonColumns'), columnsMenu(), !paraTarget)
+  /** The two Paragraph rows (also the body of the collapsed Paragraph panel) */
+  const paragraphRows = (size: number, withDir: boolean) => (
+    <>
+      <div className="rb-row">
+        {listSplit(
+          'bullets',
+          <IconBullets size={size} />,
+          t('ribbonBullets'),
+          () => onParagraphFormat({ bullet: 'char' }),
+          bulletLibrary(),
+        )}
+        {listSplit(
+          'numbering',
+          <IconNumbered size={size} />,
+          t('ribbonNumbering'),
+          () => onParagraphFormat({ bullet: 'number' }),
+          numberLibrary(),
+        )}
+        {(
+          [
+            [<IconIndentDec key="d" size={size} />, t('ribbonIndentDec'), { indentDelta: -1 }],
+            [<IconIndentInc key="i" size={size} />, t('ribbonIndentInc'), { indentDelta: 1 }],
+          ] as const
+        ).map(([icon, label, patch]) => (
+          <button
+            key={label}
+            className="rb-icon"
+            disabled={!paraTarget}
+            data-tip={label}
+            aria-label={label}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              if (paraTarget) onParagraphFormat(patch)
+            }}
+          >
+            {icon}
+          </button>
+        ))}
+        <span className="rb-mini-sep" />
+        {dropIcon(
+          'lineSpacingTop',
+          <IconLineSpacing size={size} />,
+          t('ribbonLineSpacing'),
+          <div className="rb-menu">{lineSpacingItems(() => setInsertDrop(null))}</div>,
+          !paraTarget,
+        )}
+        {columnsDrop(size)}
+      </div>
+      <div className="rb-row">
+        {(
+          [
+            ['left', <IconAlignLeft key="l" size={size} />, t('ribbonAlignLeft')],
+            ['center', <IconAlignCenter key="c" size={size} />, t('ribbonAlignCenter')],
+            ['right', <IconAlignRight key="r" size={size} />, t('ribbonAlignRight')],
+            ['justify', <IconAlignJustify key="j" size={size} />, t('ribbonAlignJustify')],
+          ] as const
+        ).map(([align, icon, label]) => (
+          <button
+            key={align}
+            className={`rb-icon ${curAlign === align ? 'active' : ''}`}
+            disabled={!editing && !paraTarget}
+            data-tip={label}
+            aria-label={label}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              if (editing || hasSelection) onAlign(align)
+            }}
+          >
+            {icon}
+          </button>
+        ))}
+        {withDir && (
+          <>
+            <span className="rb-mini-sep" />
+            {(
+              [
+                [false, <IconDirLtr key="ltr" size={size} />, t('ribbonDirLtr')],
+                [true, <IconDirRtl key="rtl" size={size} />, t('ribbonDirRtl')],
+              ] as const
+            ).map(([rtl, icon, label]) => (
+              <button
+                key={rtl ? 'rtl' : 'ltr'}
+                className={`rb-icon ${curRtl === rtl ? 'active' : ''}`}
+                disabled={!editing && !paraTarget}
+                data-tip={label}
+                aria-label={label}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  if (editing || hasSelection) onDirection(rtl)
+                }}
+              >
+                {icon}
+              </button>
+            ))}
+          </>
+        )}
+        <span className="rb-mini-sep" />
+        {textDirDrop()}
+        {alignTextDrop()}
+      </div>
+    </>
+  )
 
   return (
     <>
@@ -572,15 +1016,64 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
             <IconRefresh size={20} />
             <span>{t('ribbonReset')}</span>
           </button>
-          <button
-            className="rb-small"
-            disabled={!hasDoc}
-            onClick={onAddSection}
-            data-tip={t('ribbonAddSectionTip')}
-          >
-            <IconSection size={20} />
-            <span>{t('ribbonAddSection')}</span>
-          </button>
+          <div className="rb-drop-wrap">
+            <button
+              className={`rb-small ${insertDrop === 'sections' ? 'active' : ''}`}
+              disabled={!hasDoc}
+              aria-expanded={insertDrop === 'sections'}
+              data-tip={t('ribbonSectionMenuTip')}
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                closeSiblingPanels(e, closePanels, 'insert')
+              }}
+              onClick={() => setInsertDrop((v) => (v === 'sections' ? null : 'sections'))}
+            >
+              <IconSection size={20} />
+              <span>{t('ribbonSection')}</span>
+              <RbCaret />
+            </button>
+            {insertDrop === 'sections' && (
+              <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                <button
+                  data-tip={t('ribbonAddSectionTip')}
+                  onClick={() => {
+                    setInsertDrop(null)
+                    onAddSection()
+                  }}
+                >
+                  {t('ribbonAddSection')}
+                </button>
+                <div className="rb-menu-sep" />
+                <button
+                  disabled={!sectionMenu.hasCurrent}
+                  onClick={() => {
+                    setInsertDrop(null)
+                    sectionMenu.onRename()
+                  }}
+                >
+                  {t('appCtxRenameSection')}
+                </button>
+                <button
+                  disabled={!sectionMenu.hasCurrent}
+                  onClick={() => {
+                    setInsertDrop(null)
+                    sectionMenu.onRemove()
+                  }}
+                >
+                  {t('appCtxRemoveSection')}
+                </button>
+                <button
+                  disabled={!sectionMenu.hasAny}
+                  onClick={() => {
+                    setInsertDrop(null)
+                    sectionMenu.onRemoveAll()
+                  }}
+                >
+                  {t('ribbonSectionRemoveAll')}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </Group>
       <div className="ribbon-sep" />
@@ -1058,92 +1551,9 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
       <Group label={t('ribbonGroupParagraph')} groupId="paragraph">
         <div className="rb-drop-wrap">
           {paraExpanded ? (
-            // Expanded (auto layout, window wide enough): bullets / indent and alignment inline;
-            // the small caret opens the same full panel the collapsed button opens
-            <div className="rb-para-inline">
-              <div className="rb-row">
-                {(
-                  [
-                    [<IconBullets key="b" size={18} />, t('ribbonBullets'), { bullet: 'char' }],
-                    [
-                      <IconNumbered key="n" size={18} />,
-                      t('ribbonNumbering'),
-                      { bullet: 'number' },
-                    ],
-                    [
-                      <IconIndentDec key="d" size={18} />,
-                      t('ribbonIndentDec'),
-                      { indentDelta: -1 },
-                    ],
-                    [<IconIndentInc key="i" size={18} />, t('ribbonIndentInc'), { indentDelta: 1 }],
-                  ] as const
-                ).map(([icon, label, patch]) => (
-                  <button
-                    key={label}
-                    className="rb-icon"
-                    disabled={!paraTarget}
-                    data-tip={label}
-                    aria-label={label}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (paraTarget) onParagraphFormat(patch)
-                    }}
-                  >
-                    {icon}
-                  </button>
-                ))}
-                <span className="rb-mini-sep" />
-                {dropIcon(
-                  'lineSpacingTop',
-                  <IconLineSpacing size={18} />,
-                  t('ribbonLineSpacing'),
-                  <div className="rb-menu">{lineSpacingItems(() => setInsertDrop(null))}</div>,
-                  !paraTarget,
-                )}
-                <button
-                  className={`rb-icon ${paraOpen ? 'active' : ''}`}
-                  disabled={!hasDoc}
-                  data-tip={t('ribbonGroupParagraph')}
-                  aria-label={t('ribbonGroupParagraph')}
-                  data-keep-edit=""
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'para')
-                    if (editing) saveEditSelection()
-                  }}
-                  onClick={() => setParaOpen((v) => !v)}
-                >
-                  <RbCaret />
-                </button>
-              </div>
-              <div className="rb-row">
-                {(
-                  [
-                    ['left', <IconAlignLeft key="l" size={18} />, t('ribbonAlignLeft')],
-                    ['center', <IconAlignCenter key="c" size={18} />, t('ribbonAlignCenter')],
-                    ['right', <IconAlignRight key="r" size={18} />, t('ribbonAlignRight')],
-                    ['justify', <IconAlignJustify key="j" size={18} />, t('ribbonAlignJustify')],
-                  ] as const
-                ).map(([align, icon, label]) => (
-                  <button
-                    key={align}
-                    className={`rb-icon ${curAlign === align ? 'active' : ''}`}
-                    disabled={!editing && !paraTarget}
-                    data-tip={label}
-                    aria-label={label}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (editing || hasSelection) onAlign(align)
-                    }}
-                  >
-                    {icon}
-                  </button>
-                ))}
-                <span className="rb-mini-sep" />
-                {textDirDrop()}
-                {alignTextDrop()}
-              </div>
-            </div>
+            // Expanded (auto layout, window wide enough): the two rows inline; each list /
+            // spacing / column / direction control opens its own compact dropdown
+            <div className="rb-para-inline">{paragraphRows(18, false)}</div>
           ) : (
             <button
               className={`rb-big ${paraOpen ? 'active' : ''}`}
@@ -1170,323 +1580,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
               data-keep-edit=""
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <div className="rb-col">
-                <div className="rb-row">
-                  <button
-                    className="rb-icon"
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonBullets')}
-                    aria-label={t('ribbonBullets')}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (paraTarget) onParagraphFormat({ bullet: 'char' })
-                    }}
-                  >
-                    <IconBullets size={20} />
-                  </button>
-                  <button
-                    className="rb-icon"
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonNumbering')}
-                    aria-label={t('ribbonNumbering')}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (paraTarget) onParagraphFormat({ bullet: 'number' })
-                    }}
-                  >
-                    <IconNumbered size={20} />
-                  </button>
-                  <button
-                    className="rb-icon"
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonIndentDec')}
-                    aria-label={t('ribbonIndentDec')}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (paraTarget) onParagraphFormat({ indentDelta: -1 })
-                    }}
-                  >
-                    <IconIndentDec size={20} />
-                  </button>
-                  <button
-                    className="rb-icon"
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonIndentInc')}
-                    aria-label={t('ribbonIndentInc')}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (paraTarget) onParagraphFormat({ indentDelta: 1 })
-                    }}
-                  >
-                    <IconIndentInc size={20} />
-                  </button>
-                </div>
-                <div className="rb-para-label">{t('ribbonBulletChar')}</div>
-                <div className="rb-bullet-grid">
-                  <button
-                    className={`rb-bullet-tile rb-bullet-tile-none ${curBulletChar === '' ? 'on' : ''}`}
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonNone')}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (paraTarget) onParagraphFormat({ bullet: 'none' })
-                    }}
-                  >
-                    {t('ribbonNone')}
-                  </button>
-                  {BULLET_PRESETS.map((p) => (
-                    <button
-                      key={p.glyph}
-                      className={`rb-bullet-tile ${curBulletChar === bulletRunText(p.char, p.font) ? 'on' : ''}`}
-                      disabled={!paraTarget}
-                      data-tip={t('ribbonBulletChar')}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (paraTarget)
-                          onParagraphFormat({
-                            bullet: 'char',
-                            bulletChar: p.char,
-                            bulletFont: p.font,
-                          })
-                      }}
-                    >
-                      {[0, 1, 2].map((i) => (
-                        <span key={i} className="rb-bullet-tile-row">
-                          <span className="rb-bullet-tile-glyph">{p.glyph}</span>
-                          <span className="rb-bullet-tile-bar" />
-                        </span>
-                      ))}
-                    </button>
-                  ))}
-                </div>
-                <div className="rb-row rb-bullet-custom">
-                  {EXTRA_BULLET_SYMBOLS.map((ch) => (
-                    <button
-                      key={ch}
-                      className={`rb-bullet-sym ${curBulletChar === ch ? 'on' : ''}`}
-                      disabled={!paraTarget}
-                      data-tip={t('ribbonBulletCustom')}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (paraTarget) onParagraphFormat({ bullet: 'char', bulletChar: ch })
-                      }}
-                    >
-                      {ch}
-                    </button>
-                  ))}
-                  <input
-                    className="rb-bullet-hang rb-bullet-sym-input"
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonBulletCustomTip')}
-                    placeholder={t('ribbonBulletCustom')}
-                    value={symDraft}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onChange={(e) => setSymDraft(e.target.value)}
-                    onKeyDown={draftKeys(commitSymDraft)}
-                  />
-                  <button
-                    className={`rb-bullet-hang ${curBulletChar === '#img' ? 'on' : ''}`}
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonBulletPicture')}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (paraTarget) void pickBulletPicture()
-                    }}
-                  >
-                    {t('ribbonBulletPicture')}
-                  </button>
-                </div>
-                <div className="rb-para-label">{t('ribbonNumberStyle')}</div>
-                <div className="rb-bullet-grid">
-                  {NUMBER_PRESETS.map((p) => (
-                    <button
-                      key={p.numType}
-                      className={`rb-bullet-tile ${curBulletChar === `#num:${p.numType}` ? 'on' : ''}`}
-                      disabled={!paraTarget}
-                      data-tip={t('ribbonNumberStyle')}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (paraTarget) onParagraphFormat({ bullet: 'number', numType: p.numType })
-                      }}
-                    >
-                      {p.sample.map((s, i) => (
-                        <span key={i} className="rb-bullet-tile-row">
-                          <span className="rb-bullet-tile-glyph rb-bullet-tile-num">{s}</span>
-                          <span className="rb-bullet-tile-bar" />
-                        </span>
-                      ))}
-                    </button>
-                  ))}
-                  <input
-                    className="rb-bullet-hang rb-bullet-start-input"
-                    type="number"
-                    min={1}
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonNumberStartAtTip')}
-                    placeholder={t('ribbonNumberStartAt')}
-                    value={startDraft}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onChange={(e) => setStartDraft(e.target.value)}
-                    onKeyDown={draftKeys(commitStartDraft)}
-                  />
-                </div>
-                <div className="rb-para-label">{t('ribbonBulletHang')}</div>
-                <div className="rb-row">
-                  {BULLET_HANG_PRESETS.map(([key, emu]) => (
-                    <button
-                      key={key}
-                      className="rb-bullet-hang"
-                      disabled={!paraTarget}
-                      data-tip={t('ribbonBulletHang')}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (paraTarget) onParagraphFormat({ bulletHangEmu: emu })
-                      }}
-                    >
-                      {t(key)}
-                    </button>
-                  ))}
-                  <input
-                    className="rb-bullet-hang rb-bullet-hang-input"
-                    disabled={!paraTarget}
-                    data-tip={t('ribbonBulletHangCustomTip')}
-                    placeholder="px"
-                    value={hangDraft}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onChange={(e) => setHangDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        commitHangDraft()
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault()
-                        e.currentTarget.blur()
-                      }
-                    }}
-                  />
-                </div>
-                <div className="rb-para-label">{t('ribbonBulletSize')}</div>
-                <div className="rb-row">
-                  {[75, 90, 100, 125, 150].map((pct) => (
-                    <button
-                      key={pct}
-                      className="rb-bullet-hang"
-                      disabled={!paraTarget}
-                      data-tip={t('ribbonBulletSize')}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (paraTarget) onParagraphFormat({ bulletSizePct: pct })
-                      }}
-                    >
-                      {pct}%
-                    </button>
-                  ))}
-                </div>
-                <div className="rb-para-label">{t('ribbonBulletColor')}</div>
-                <div className="rb-row rb-bullet-colors">
-                  {TEXT_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      className="rb-swatch"
-                      style={{ background: c }}
-                      disabled={!paraTarget}
-                      data-tip={c}
-                      aria-label={c}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (paraTarget) onParagraphFormat({ bulletColor: c })
-                      }}
-                    />
-                  ))}
-                  <label
-                    className="rb-color-more rb-bullet-color-more"
-                    data-tip={t('ribbonMoreColors')}
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      type="color"
-                      value={lastBulletColor}
-                      onPointerDown={(e) => armColorInput(e.currentTarget)}
-                      onChange={(e) => {
-                        if (paraTarget) onCustomBulletColor(e.target.value)
-                      }}
-                    />
-                    {t('ribbonMoreColors')}
-                  </label>
-                </div>
-                <div className="rb-row">
-                  {(
-                    [
-                      ['left', <IconAlignLeft key="l" size={20} />, t('ribbonAlignLeft')],
-                      ['center', <IconAlignCenter key="c" size={20} />, t('ribbonAlignCenter')],
-                      ['right', <IconAlignRight key="r" size={20} />, t('ribbonAlignRight')],
-                      ['justify', <IconAlignJustify key="j" size={20} />, t('ribbonAlignJustify')],
-                    ] as const
-                  ).map(([align, icon, label]) => (
-                    <button
-                      key={align}
-                      className={`rb-icon ${curAlign === align ? 'active' : ''}`}
-                      disabled={!editing && !paraTarget}
-                      data-tip={label}
-                      aria-label={label}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (editing || hasSelection) onAlign(align)
-                      }}
-                    >
-                      {icon}
-                    </button>
-                  ))}
-                  <span className="rb-mini-sep" />
-                  {(
-                    [
-                      [false, <IconDirLtr key="ltr" size={20} />, t('ribbonDirLtr')],
-                      [true, <IconDirRtl key="rtl" size={20} />, t('ribbonDirRtl')],
-                    ] as const
-                  ).map(([rtl, icon, label]) => (
-                    <button
-                      key={rtl ? 'rtl' : 'ltr'}
-                      className={`rb-icon ${curRtl === rtl ? 'active' : ''}`}
-                      disabled={!editing && !paraTarget}
-                      data-tip={label}
-                      aria-label={label}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        if (editing || hasSelection) onDirection(rtl)
-                      }}
-                    >
-                      {icon}
-                    </button>
-                  ))}
-                  <span className="rb-mini-sep" />
-                  <div className="rb-drop-wrap">
-                    <button
-                      className={`rb-icon ${lineSpacingOpen ? 'active' : ''}`}
-                      disabled={!paraTarget}
-                      data-tip={t('ribbonLineSpacing')}
-                      aria-label={t('ribbonLineSpacing')}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        if (paraTarget) {
-                          closeSiblingPanels(e, closePanels, 'lineSpacing')
-                          setLineSpacingOpen((v) => !v)
-                        }
-                      }}
-                    >
-                      <IconLineSpacing size={20} />
-                    </button>
-                    {lineSpacingOpen && (
-                      <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                        {lineSpacingItems(() => setLineSpacingOpen(false))}
-                      </div>
-                    )}
-                  </div>
-                  <span className="rb-mini-sep" />
-                  {textDirDrop()}
-                  {alignTextDrop()}
-                </div>
-              </div>
+              <div className="rb-col">{paragraphRows(20, true)}</div>
             </div>
           )}
         </div>
@@ -1651,6 +1745,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
         <div className="rb-col rb-drawing-col">
           {renderShapeFill('small', t('ribbonShapeFill'))}
           {renderShapeOutline('small', t('ribbonShapeOutline'))}
+          {renderShapeEffects('small', t('ribbonShapeEffects'))}
         </div>
       </Group>
       <div className="ribbon-sep" />

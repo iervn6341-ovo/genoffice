@@ -282,6 +282,11 @@ export const strings = {
     setAiMaxTokens: '单次输出上限（tokens）',
     setAiMaxTokensDesc:
       '一次回合的输出预算。推理模型会先消耗预算用于思考，预算用完时回复可能变成空白，遇到这种情况请调大此项。',
+    setAiMaxTokensZero: '填 0 表示不限制。',
+    setAiOllamaHint:
+      '通过 Ollama 在你自己的电脑上运行（默认 http://localhost:11434/v1），无需 API Key：先启动 Ollama，再选择已安装的模型。',
+    setAiFetchModels: '刷新模型',
+    setAiOllamaEmpty: '没有找到模型。请先安装一个，例如 ollama pull llama3.2。',
     setSecAiMedia: '生图、媒体与搜索',
     setAiImageModel: '生图模型',
     setAiAnalysisModel: '解析模型',
@@ -617,6 +622,11 @@ export const strings = {
     setAiMaxTokens: 'Max output tokens',
     setAiMaxTokensDesc:
       'Output budget for one turn. Reasoning models spend part of it thinking, so an answer can come back empty once the budget runs out; raise this value if that happens.',
+    setAiMaxTokensZero: 'Enter 0 for no limit.',
+    setAiOllamaHint:
+      'Runs on your own computer through Ollama (default http://localhost:11434/v1). No API key needed: start Ollama, then pick an installed model.',
+    setAiFetchModels: 'Refresh models',
+    setAiOllamaEmpty: 'No models found. Install one first, e.g. ollama pull llama3.2.',
     setSecAiMedia: 'AI Media & Search',
     setAiImageModel: 'Image model',
     setAiAnalysisModel: 'Analysis model',
@@ -964,6 +974,12 @@ export const strings = {
     setAiMaxTokens: '1 回あたりの出力トークン上限',
     setAiMaxTokensDesc:
       '1 ターンの出力予算です。推論モデルは思考にも消費するため、使い切ると返信が空になることがあります。その場合は値を大きくしてください。',
+    setAiMaxTokensZero: '0 を入力すると上限なしになります。',
+    setAiOllamaHint:
+      'Ollama 経由で自分のコンピューター上で動作します（既定 http://localhost:11434/v1）。API キーは不要です。Ollama を起動し、インストール済みのモデルを選んでください。',
+    setAiFetchModels: 'モデルを更新',
+    setAiOllamaEmpty:
+      'モデルが見つかりません。先にインストールしてください（例: ollama pull llama3.2）。',
     setSecAiMedia: 'AI メディアと検索',
     setAiImageModel: '画像モデル',
     setAiAnalysisModel: '解析モデル',
@@ -1305,6 +1321,11 @@ export const strings = {
     setAiMaxTokens: '턴당 출력 토큰 상한',
     setAiMaxTokensDesc:
       '한 턴의 출력 예산입니다. 추론 모델은 생각하는 데 소모하므로 예산이 떨어지면 응답이 비어 올 수 있습니다. 그럴 때 값을 키우세요.',
+    setAiMaxTokensZero: '0을 입력하면 제한이 없습니다.',
+    setAiOllamaHint:
+      'Ollama를 통해 내 컴퓨터에서 실행됩니다(기본 http://localhost:11434/v1). API 키는 필요 없습니다. Ollama를 시작한 뒤 설치된 모델을 선택하세요.',
+    setAiFetchModels: '모델 새로 고침',
+    setAiOllamaEmpty: '모델을 찾을 수 없습니다. 먼저 설치하세요(예: ollama pull llama3.2).',
     setSecAiMedia: 'AI 미디어 및 검색',
     setAiImageModel: '이미지 모델',
     setAiAnalysisModel: '분석 모델',
@@ -1658,6 +1679,11 @@ export const strings = {
     setAiMaxTokens: 'Jetons de sortie max.',
     setAiMaxTokensDesc:
       'Budget de sortie pour un tour. Les modèles à raisonnement le dépensent en réflexion ; quand il est épuisé, la réponse arrive vide : augmentez cette valeur.',
+    setAiMaxTokensZero: 'Saisissez 0 pour ne pas limiter.',
+    setAiOllamaHint:
+      "S'exécute sur votre ordinateur via Ollama (par défaut http://localhost:11434/v1). Aucune clé API : lancez Ollama, puis choisissez un modèle installé.",
+    setAiFetchModels: 'Actualiser les modèles',
+    setAiOllamaEmpty: 'Aucun modèle trouvé. Installez-en un d’abord, p. ex. ollama pull llama3.2.',
     setSecAiMedia: 'Médias IA et recherche',
     setAiImageModel: "Modèle d'image",
     setAiAnalysisModel: "Modèle d'analyse",
@@ -2016,6 +2042,12 @@ export const strings = {
     setAiMaxTokens: 'Max. Ausgabe-Tokens',
     setAiMaxTokensDesc:
       'Ausgabe-Budget pro Durchlauf. Denk-Modelle verbrauchen es beim Reasoning; ist es erschöpft, kommt eine leere Antwort zurück — dann diesen Wert erhöhen.',
+    setAiMaxTokensZero: 'Mit 0 gibt es keine Begrenzung.',
+    setAiOllamaHint:
+      'Läuft über Ollama auf Ihrem eigenen Rechner (Standard http://localhost:11434/v1). Kein API-Schlüssel nötig: Ollama starten und ein installiertes Modell wählen.',
+    setAiFetchModels: 'Modelle aktualisieren',
+    setAiOllamaEmpty:
+      'Keine Modelle gefunden. Installieren Sie zuerst eines, z. B. ollama pull llama3.2.',
     setSecAiMedia: 'KI-Medien & Suche',
     setAiImageModel: 'Bildmodell',
     setAiAnalysisModel: 'Analysemodell',
@@ -2370,6 +2402,12 @@ export const strings = {
     setAiMaxTokens: 'Tokens de salida máx.',
     setAiMaxTokensDesc:
       'Presupuesto de salida por turno. Los modelos de razonamiento lo gastan en pensar; si se agota, la respuesta llega vacía: suba este valor.',
+    setAiMaxTokensZero: 'Escriba 0 para no poner límite.',
+    setAiOllamaHint:
+      'Se ejecuta en su propio equipo con Ollama (por defecto http://localhost:11434/v1). No hace falta clave de API: inicie Ollama y elija un modelo instalado.',
+    setAiFetchModels: 'Actualizar modelos',
+    setAiOllamaEmpty:
+      'No se encontraron modelos. Instale uno primero, p. ej. ollama pull llama3.2.',
     setSecAiMedia: 'Medios de IA y búsqueda',
     setAiImageModel: 'Modelo de imagen',
     setAiAnalysisModel: 'Modelo de análisis',
@@ -2708,6 +2746,11 @@ export const strings = {
     setAiMaxTokens: 'จำนวนโทเคนขาออกสูงสุด',
     setAiMaxTokensDesc:
       'งบผลลัพธ์ต่อหนึ่งรอบ โมเดลแบบใช้เหตุผลจะใช้ส่วนหนึ่งไปกับการคิด หากงบหมด คำตอบอาจกลับมาว่างเปล่า ให้เพิ่มค่านี้',
+    setAiMaxTokensZero: 'ใส่ 0 เพื่อไม่จำกัด',
+    setAiOllamaHint:
+      'ทำงานบนคอมพิวเตอร์ของคุณผ่าน Ollama (ค่าเริ่มต้น http://localhost:11434/v1) ไม่ต้องใช้ API Key เริ่ม Ollama แล้วเลือกโมเดลที่ติดตั้งไว้',
+    setAiFetchModels: 'รีเฟรชโมเดล',
+    setAiOllamaEmpty: 'ไม่พบโมเดล โปรดติดตั้งก่อน เช่น ollama pull llama3.2',
     setSecAiMedia: 'สื่อ AI และการค้นหา',
     setAiImageModel: 'โมเดลสร้างภาพ',
     setAiAnalysisModel: 'โมเดลวิเคราะห์',
@@ -3055,6 +3098,11 @@ export const strings = {
     setAiMaxTokens: 'Token keluaran maks.',
     setAiMaxTokensDesc:
       'Anggaran keluaran untuk satu giliran. Model penalaran memakainya untuk berpikir; jika habis, balasan datang kosong — naikkan nilai ini.',
+    setAiMaxTokensZero: 'Isi 0 untuk tanpa batas.',
+    setAiOllamaHint:
+      'Berjalan di komputer Anda sendiri lewat Ollama (bawaan http://localhost:11434/v1). Tanpa API key: jalankan Ollama, lalu pilih model yang terpasang.',
+    setAiFetchModels: 'Muat ulang model',
+    setAiOllamaEmpty: 'Model tidak ditemukan. Pasang dulu, mis. ollama pull llama3.2.',
     setSecAiMedia: 'Media & Pencarian AI',
     setAiImageModel: 'Model gambar',
     setAiAnalysisModel: 'Model analisis',
@@ -3401,6 +3449,11 @@ export const strings = {
     setAiMaxTokens: 'Макс. токенов на ответ',
     setAiMaxTokensDesc:
       'Бюджет вывода за один ход. Модели рассуждений тратят его на размышления: если бюджет иссякнет, ответ придёт пустым — увеличьте значение.',
+    setAiMaxTokensZero: 'Введите 0, чтобы снять ограничение.',
+    setAiOllamaHint:
+      'Работает на вашем компьютере через Ollama (по умолчанию http://localhost:11434/v1). Ключ API не нужен: запустите Ollama и выберите установленную модель.',
+    setAiFetchModels: 'Обновить модели',
+    setAiOllamaEmpty: 'Модели не найдены. Сначала установите, например: ollama pull llama3.2.',
     setSecAiMedia: 'Медиа и поиск ИИ',
     setAiImageModel: 'Модель изображений',
     setAiAnalysisModel: 'Модель анализа',
@@ -3742,6 +3795,11 @@ export const strings = {
     setAiMaxTokens: 'الحد الأقصى لرموز المخرجات',
     setAiMaxTokensDesc:
       'ميزانية الإخراج في الدورة الواحدة. نماذج الاستدلال تصرفها على التفكير، فإذا نفدت جاء الرد فارغًا؛ ارفع هذه القيمة عندئذ.',
+    setAiMaxTokensZero: 'أدخل 0 لإلغاء الحد.',
+    setAiOllamaHint:
+      'يعمل على جهازك عبر Ollama (الافتراضي http://localhost:11434/v1). لا حاجة إلى مفتاح API: شغّل Ollama ثم اختر نموذجًا مثبّتًا.',
+    setAiFetchModels: 'تحديث النماذج',
+    setAiOllamaEmpty: 'لم يُعثر على نماذج. ثبّت واحدًا أولًا، مثل ollama pull llama3.2.',
     setSecAiMedia: 'وسائط الذكاء الاصطناعي والبحث',
     setAiImageModel: 'نموذج الصور',
     setAiAnalysisModel: 'نموذج التحليل',
@@ -4087,6 +4145,11 @@ export const strings = {
     setAiMaxTokens: 'Máx. de tokens de saída',
     setAiMaxTokensDesc:
       'Orçamento de saída por turno. Modelos de raciocínio gastam-no pensando; se esgotar, a resposta vem vazia — aumente este valor.',
+    setAiMaxTokensZero: 'Digite 0 para não ter limite.',
+    setAiOllamaHint:
+      'Roda no seu próprio computador via Ollama (padrão http://localhost:11434/v1). Sem chave de API: inicie o Ollama e escolha um modelo instalado.',
+    setAiFetchModels: 'Atualizar modelos',
+    setAiOllamaEmpty: 'Nenhum modelo encontrado. Instale um antes, p. ex. ollama pull llama3.2.',
     setSecAiMedia: 'Mídia e busca de IA',
     setAiImageModel: 'Modelo de imagem',
     setAiAnalysisModel: 'Modelo de análise',
@@ -4429,6 +4492,11 @@ export const strings = {
     setAiMaxTokens: 'Token di output massimi',
     setAiMaxTokensDesc:
       'Budget di uscita per singolo turno. I modelli di ragionamento lo consumano pensando: se si esaurisce, la risposta arriva vuota; aumentalo.',
+    setAiMaxTokensZero: 'Inserisci 0 per nessun limite.',
+    setAiOllamaHint:
+      'Funziona sul tuo computer tramite Ollama (predefinito http://localhost:11434/v1). Nessuna chiave API: avvia Ollama e scegli un modello installato.',
+    setAiFetchModels: 'Aggiorna modelli',
+    setAiOllamaEmpty: 'Nessun modello trovato. Installane uno prima, ad es. ollama pull llama3.2.',
     setSecAiMedia: 'Media e ricerca IA',
     setAiImageModel: 'Modello immagini',
     setAiAnalysisModel: 'Modello di analisi',
@@ -4767,6 +4835,11 @@ export const strings = {
     setAiMaxTokens: 'Maks. tokeny wyjścia',
     setAiMaxTokensDesc:
       'Budżet wyjścia na jedną turę. Modele rozumowania zużywają go na myślenie; gdy się wyczerpie, odpowiedź przychodzi pusta — zwiększ tę wartość.',
+    setAiMaxTokensZero: 'Wpisz 0, aby nie ograniczać.',
+    setAiOllamaHint:
+      'Działa na Twoim komputerze przez Ollamę (domyślnie http://localhost:11434/v1). Klucz API niepotrzebny: uruchom Ollamę i wybierz zainstalowany model.',
+    setAiFetchModels: 'Odśwież modele',
+    setAiOllamaEmpty: 'Nie znaleziono modeli. Najpierw zainstaluj jeden, np. ollama pull llama3.2.',
     setSecAiMedia: 'Media i wyszukiwanie AI',
     setAiImageModel: 'Model obrazów',
     setAiAnalysisModel: 'Model analizy',
@@ -5088,6 +5161,12 @@ export const strings = {
     setAiMaxTokens: 'Max. počet výstupních tokenů',
     setAiMaxTokensDesc:
       'Rozpočet výstupu na jeden tah. Modely s uvažováním jeho část spotřebují na přemýšlení, takže po vyčerpání rozpočtu může být odpověď prázdná; v takovém případě hodnotu zvyšte.',
+    setAiMaxTokensZero: 'Zadejte 0 pro žádný limit.',
+    setAiOllamaHint:
+      'Běží na vašem počítači přes Ollamu (výchozí http://localhost:11434/v1). Klíč API není potřeba: spusťte Ollamu a vyberte nainstalovaný model.',
+    setAiFetchModels: 'Obnovit modely',
+    setAiOllamaEmpty:
+      'Žádné modely nenalezeny. Nejdřív nějaký nainstalujte, např. ollama pull llama3.2.',
     setSecAiMedia: 'AI média a vyhledávání',
     setAiImageModel: 'Model pro obrázky',
     setAiAnalysisModel: 'Model pro analýzu',
@@ -5444,6 +5523,11 @@ export const strings = {
     setAiMaxTokens: 'Max. outputtokens',
     setAiMaxTokensDesc:
       'Uitvoerbudget voor één beurt. Redeneermodellen geven dit uit aan denken; is het op, dan komt een leeg antwoord terug — verhoog deze waarde.',
+    setAiMaxTokensZero: 'Vul 0 in voor geen limiet.',
+    setAiOllamaHint:
+      'Draait op je eigen computer via Ollama (standaard http://localhost:11434/v1). Geen API-sleutel nodig: start Ollama en kies een geïnstalleerd model.',
+    setAiFetchModels: 'Modellen vernieuwen',
+    setAiOllamaEmpty: 'Geen modellen gevonden. Installeer er eerst een, bv. ollama pull llama3.2.',
     setSecAiMedia: 'AI-media en zoeken',
     setAiImageModel: 'Afbeeldingsmodel',
     setAiAnalysisModel: 'Analysemodel',
@@ -5789,6 +5873,11 @@ export const strings = {
     setAiMaxTokens: 'Token output maks.',
     setAiMaxTokensDesc:
       'Belanjawan output untuk satu pusingan. Model penaakulan menghabiskannya untuk berfikir; jika habis, balasan datang kosong — tingkatkan nilai ini.',
+    setAiMaxTokensZero: 'Masukkan 0 untuk tiada had.',
+    setAiOllamaHint:
+      'Dijalankan pada komputer anda sendiri melalui Ollama (lalai http://localhost:11434/v1). Tiada kunci API diperlukan: mulakan Ollama, kemudian pilih model yang dipasang.',
+    setAiFetchModels: 'Muat semula model',
+    setAiOllamaEmpty: 'Tiada model ditemui. Pasang satu dahulu, cth. ollama pull llama3.2.',
     setSecAiMedia: 'Media & Carian AI',
     setAiImageModel: 'Model imej',
     setAiAnalysisModel: 'Model analisis',
@@ -6118,6 +6207,11 @@ export const strings = {
     setAiMaxTokens: 'מקסימום טוקנים לתשובה',
     setAiMaxTokensDesc:
       'תקציב פלט לסיבוב אחד. מודלי היסק מנצלים חלק ממנו לחשיבה, ואם הוא נגמר התשובה עלולה לחזור ריקה — במקרה כזה העלו את הערך.',
+    setAiMaxTokensZero: 'הזינו 0 לאי-הגבלה.',
+    setAiOllamaHint:
+      'פועל במחשב שלכם דרך Ollama (ברירת מחדל http://localhost:11434/v1). אין צורך במפתח API: הפעילו את Ollama ובחרו מודל מותקן.',
+    setAiFetchModels: 'רענון מודלים',
+    setAiOllamaEmpty: 'לא נמצאו מודלים. התקינו אחד קודם, למשל ollama pull llama3.2.',
     setSecAiMedia: 'מדיה וחיפוש AI',
     setAiImageModel: 'מודל תמונות',
     setAiAnalysisModel: 'מודל ניתוח',
@@ -6454,6 +6548,11 @@ export const strings = {
     setAiMaxTokens: 'अधिकतम आउटपुट टोकन',
     setAiMaxTokensDesc:
       'एक टर्न का आउटपुट बजट। रीज़निंग मॉडल इसका कुछ हिस्सा सोचने में खर्च करते हैं; बजट खत्म होने पर उत्तर खाली आ सकता है — ऐसा हो तो इसे बढ़ाएँ।',
+    setAiMaxTokensZero: 'कोई सीमा न रखने के लिए 0 दर्ज करें।',
+    setAiOllamaHint:
+      'Ollama के ज़रिए आपके अपने कंप्यूटर पर चलता है (डिफ़ॉल्ट http://localhost:11434/v1)। API कुंजी की ज़रूरत नहीं: Ollama शुरू करें और इंस्टॉल किया हुआ मॉडल चुनें।',
+    setAiFetchModels: 'मॉडल रीफ़्रेश करें',
+    setAiOllamaEmpty: 'कोई मॉडल नहीं मिला। पहले एक इंस्टॉल करें, जैसे ollama pull llama3.2।',
     setSecAiMedia: 'AI मीडिया और खोज',
     setAiImageModel: 'इमेज मॉडल',
     setAiAnalysisModel: 'विश्लेषण मॉडल',
@@ -6781,6 +6880,11 @@ export const strings = {
     setAiMaxTokens: '單次輸出上限（tokens）',
     setAiMaxTokensDesc:
       '一次回合的輸出預算。推理模型會先消耗預算用於思考，預算用畢時回覆可能變成空白，遇到此情況請調高本項。',
+    setAiMaxTokensZero: '填 0 代表不限制。',
+    setAiOllamaHint:
+      '透過 Ollama 在你自己的電腦上執行（預設 http://localhost:11434/v1），不需要 API Key：先啟動 Ollama，再選擇已安裝的模型。',
+    setAiFetchModels: '重新整理模型',
+    setAiOllamaEmpty: '找不到模型。請先安裝一個，例如 ollama pull llama3.2。',
     setSecAiMedia: '生圖、媒體與搜尋',
     setAiImageModel: '生圖模型',
     setAiAnalysisModel: '解析模型',

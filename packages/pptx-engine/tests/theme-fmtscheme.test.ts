@@ -125,6 +125,17 @@ describe('p:style references -> fmtScheme templates', () => {
     expect(el.glow!.color.startsWith('#4472C4')).toBe(true)
   })
 
+  it('an explicit empty <a:effectLst/> in spPr cancels the effectRef shadow and glow', () => {
+    const slide = parseSlide({
+      path: 'ppt/slides/slide1.xml',
+      slideXml: slideWith(shapeWithStyle(STYLE_REFS, '<a:effectLst/>')),
+      ctx: { theme },
+    })
+    const el = slide.elements[0] as TextElement
+    expect(el.shadow).toBeUndefined()
+    expect(el.glow).toBeUndefined()
+  })
+
   it('fillRef idx=1001 -> first entry of bgFillStyleLst', () => {
     const style =
       '<a:lnRef idx="0"/><a:fillRef idx="1001"><a:schemeClr val="accent3"/></a:fillRef>' +

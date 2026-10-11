@@ -5,6 +5,7 @@ import { chatCodexAppServer } from './codex-app-server'
 import { getProviderAdapter, type ResolvedEndpoint } from './registry'
 import type { AiChatResponse, AiProviderConfig, AiProviderId } from './types'
 import { AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS } from './local'
+import { assertEndpointReachable } from './reach'
 import { AI_CHAT_RESPONSE_TIMEOUT_MS, createStreamWatchdog } from './watchdog'
 
 /** route a one-shot (non-streaming, non-tool-calling) chat call by provider id */
@@ -28,7 +29,8 @@ export async function chatForProvider(
   const wd = endpoint.patientTimeouts
     ? createStreamWatchdog(signal, AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS)
     : createStreamWatchdog(signal, AI_CHAT_RESPONSE_TIMEOUT_MS)
-  return wd.guard(() => {
+  return wd.guard(async () => {
+    if (endpoint.patientTimeouts) await assertEndpointReachable(endpoint.baseUrl, wd.signal)
     switch (endpoint.protocol) {
       case 'codex-app-server':
         return chatCodexAppServer(config, system, user, wd.signal)

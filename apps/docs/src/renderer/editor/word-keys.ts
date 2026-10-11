@@ -214,6 +214,19 @@ export const WordSelectionDelete = Extension.create({
   },
 })
 
+/**
+ * Option+Backspace: the word unit before the caret, plus the space in front of it when what
+ * follows is closing punctuation (Word's smart cut: "Hello, world|!" → "Hello,!").
+ */
+export function wordDeleteRange(text: string, offset: number): [number, number] {
+  let from = wordLeft(text, offset)
+  const after = text[offset]
+  if (from > 0 && text[from - 1] === ' ' && after !== undefined && /[.,;:!?)\]}]/.test(after)) {
+    from -= 1
+  }
+  return [from, offset]
+}
+
 /** Option / Cmd arrow movement and the selection picks Word makes at a paragraph end */
 export const WordNavigation = Extension.create({
   name: 'wordNavigation',
@@ -295,6 +308,17 @@ export const WordNavigation = Extension.create({
       )
       return true
     }
+    const deleteWordBack = (): boolean => {
+      const { state, view } = this.editor
+      const { selection } = state
+      if (!(selection instanceof TextSelection) || !selection.empty) return false
+      const { $head } = selection
+      if (!$head.parent.isTextblock || $head.parentOffset === 0) return false
+      const [from, to] = wordDeleteRange(blockText($head.parent), $head.parentOffset)
+      const start = $head.start()
+      view.dispatch(state.tr.delete(start + from, start + to).scrollIntoView())
+      return true
+    }
     // Ctrl+Up/Down is Word's paragraph movement on Windows too; the Option and Shift+End rules
     // are the Mac keymap (Windows keeps the browser's Ctrl+Arrow word movement)
     const everywhere = {
@@ -306,6 +330,7 @@ export const WordNavigation = Extension.create({
     if (!IS_MAC) return everywhere
     return {
       ...everywhere,
+      'Alt-Backspace': deleteWordBack,
       'Alt-ArrowRight': word(1, false),
       'Alt-ArrowLeft': word(-1, false),
       'Alt-Shift-ArrowRight': word(1, true),

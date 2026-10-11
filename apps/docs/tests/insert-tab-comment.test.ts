@@ -56,9 +56,9 @@ describe('Insert → Comment', () => {
       (b) => b.textContent === t('ribbonTabInsert'),
     )!
     act(() => insertTab.click())
-    return [...container.querySelectorAll<HTMLButtonElement>('button.rb-big')].find(
-      (b) => b.textContent === t('ribbonComment'),
-    )!
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>('button.rb-big:not(.rb-fold-btn)'),
+    ].find((b) => b.textContent === t('ribbonComment'))!
   }
 
   it('starts a new comment when an anchor is available', () => {

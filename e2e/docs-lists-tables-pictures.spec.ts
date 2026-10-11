@@ -109,7 +109,7 @@ test('a table selected with its move handle keeps the Table tabs, and Insert Bel
   const { p, launched } = await blankDoc()
   try {
     await p.locator('.ribbon-tab', { hasText: /^Insert$/ }).click()
-    await p.locator('.ribbon-body button', { hasText: 'Table' }).first().click()
+    await p.locator('.ribbon-body button:not(.rb-fold-btn)', { hasText: 'Table' }).first().click()
     const cell = p.locator('.table-picker-grid .table-cell').nth(11) // 2 × 2
     await cell.hover()
     await cell.click()

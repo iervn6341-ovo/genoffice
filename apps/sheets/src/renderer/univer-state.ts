@@ -342,5 +342,29 @@ export const BORDER_COMMAND_TYPES: Record<string, BorderType> = {
   bottom: BorderType.BOTTOM,
   left: BorderType.LEFT,
   right: BorderType.RIGHT,
+  inside: BorderType.INSIDE,
+  'inside-h': BorderType.HORIZONTAL,
+  'inside-v': BorderType.VERTICAL,
   none: BorderType.NONE,
+}
+
+/// Excel's compound presets: edges set together, each with its own line style
+export const BORDER_COMPOUND_PRESETS: Record<
+  string,
+  readonly { readonly type: BorderType; readonly style: 'thick' | 'double' | null }[]
+> = {
+  'bottom-double': [{ type: BorderType.BOTTOM, style: 'double' }],
+  'bottom-thick': [{ type: BorderType.BOTTOM, style: 'thick' }],
+  'top-bottom': [
+    { type: BorderType.TOP, style: null },
+    { type: BorderType.BOTTOM, style: null },
+  ],
+  'top-thick-bottom': [
+    { type: BorderType.TOP, style: null },
+    { type: BorderType.BOTTOM, style: 'thick' },
+  ],
+  'top-double-bottom': [
+    { type: BorderType.TOP, style: null },
+    { type: BorderType.BOTTOM, style: 'double' },
+  ],
 }

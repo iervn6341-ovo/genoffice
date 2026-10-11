@@ -60,6 +60,27 @@ describe('setElementTextBodyProps', () => {
     expect(el.text!.autofit).toBe('none')
   })
 
+  it('columns write numCol/spcCol, default the gap, and clear back to one column', async () => {
+    const { slide, el } = await textboxSlide()
+    expect(setElementTextBodyProps(slide, el.id, { columns: { num: 2 } })).toBe(true)
+    expect(el.anchor.originalXml).toMatch(/numCol="2"/)
+    expect(el.anchor.originalXml).toMatch(/spcCol="457200"/)
+    expect(el.text!.numCol).toBe(2)
+    expect(el.text!.spcCol).toBe(457200)
+    // a custom gap, three columns; other attributes stay put
+    expect(
+      setElementTextBodyProps(slide, el.id, { wrap: false, columns: { num: 3, spacing: 127000 } }),
+    ).toBe(true)
+    expect(el.anchor.originalXml).toMatch(/numCol="3"/)
+    expect(el.anchor.originalXml).toMatch(/spcCol="127000"/)
+    expect(el.anchor.originalXml).toMatch(/wrap="none"/)
+    // one column removes both attributes
+    expect(setElementTextBodyProps(slide, el.id, { columns: { num: 1 } })).toBe(true)
+    expect(el.anchor.originalXml).not.toMatch(/numCol=|spcCol=/)
+    expect(el.text!.numCol).toBeUndefined()
+    expect(el.text!.spcCol).toBeUndefined()
+  })
+
   it('combined patch applies attributes and autofit together', async () => {
     const { slide, el } = await textboxSlide()
     expect(

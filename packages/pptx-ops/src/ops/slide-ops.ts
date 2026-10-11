@@ -47,6 +47,7 @@ import {
   setSlideNotesParagraphs,
   setSlideSize,
   setSlideTransition,
+  setSlideTransitionDetail,
   elementSpid,
   matchesElementRef,
   ANIM_EFFECTS,
@@ -55,6 +56,7 @@ import {
   type SectionInfo,
   type ThemeSpec,
   type SlideAnimation,
+  type SlideTransitionDetailPatch,
   type SlideTransitionKind,
   type TextElement,
 } from '@genoffice/pptx-engine'
@@ -493,6 +495,37 @@ register({
 })
 
 register({
+  name: 'setTransitionDetail',
+  validate(op, ctx) {
+    resolveSlide(ctx, op)
+    const d = op.detail as SlideTransitionDetailPatch | undefined
+    if (!d || typeof d !== 'object' || Object.keys(d).length === 0) {
+      throw new GuidedError(
+        'op "setTransitionDetail" needs "detail": at least one of dir/orient/thruBlk/durationMs/advClick.',
+      )
+    }
+    if (d.durationMs != null && (!Number.isFinite(d.durationMs) || d.durationMs < 0)) {
+      throw new GuidedError(
+        'op "setTransitionDetail": "durationMs" must be milliseconds >= 0, or null.',
+      )
+    }
+    if (d.orient != null && d.orient !== 'horz' && d.orient !== 'vert') {
+      throw new GuidedError('op "setTransitionDetail": "orient" must be horz or vert.')
+    }
+    if (d.dir != null && !/^(?:[lrud]|lu|ru|ld|rd|in|out)$/.test(d.dir)) {
+      throw new GuidedError(
+        'op "setTransitionDetail": "dir" must be l/r/u/d/lu/ru/ld/rd or in/out.',
+      )
+    }
+  },
+  apply(op, ctx): OpRecord {
+    const { slide } = resolveSlide(ctx, op)
+    setSlideTransitionDetail(slide, op.detail as SlideTransitionDetailPatch)
+    return { op, after: op.detail }
+  },
+})
+
+register({
   name: 'setAdvanceTime',
   validate(op, ctx) {
     resolveSlide(ctx, op)
@@ -568,6 +601,9 @@ register({
         ...(raw.paragraph != null ? { paragraph: raw.paragraph as number } : {}),
         ...(typeof raw.direction === 'string'
           ? { direction: raw.direction as SlideAnimation['direction'] }
+          : {}),
+        ...(raw.after === 'hideOnNextClick' || raw.after === 'hideAfter'
+          ? { after: raw.after }
           : {}),
         ...(typeof raw.presetXml === 'string' ? { presetXml: raw.presetXml } : {}),
       })

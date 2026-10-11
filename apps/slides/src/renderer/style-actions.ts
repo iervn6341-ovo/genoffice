@@ -438,6 +438,31 @@ export async function onTextAnchor(
   if (slide) ctx.applySlide(ctx.current, slide)
 }
 
+/** Home → Paragraph → Columns: flow the box's text across `num` columns (1 = back to one) */
+export async function onTextColumns(ctx: ActionCtx, num: number, spacing?: number): Promise<void> {
+  let slide: RenderSlide | null = null
+  for (const sourceId of textTargets(ctx)) {
+    // A plain text box keeps its size when it has no autofit, so its second column would hang out
+    // of a one-line box. PowerPoint's text boxes resize to fit their text, which balances the
+    // columns: columns on such a box switch it to "resize shape to fit text".
+    const node = ctx.findNodeCtx(sourceId)?.node
+    const grow =
+      num > 1 &&
+      node?.type === 'text' &&
+      ((node as { text?: { autofit?: string } }).text?.autofit ?? 'none') === 'none'
+    slide =
+      (await window.slidesApi.setTextBodyProps({
+        slideIndex: ctx.current,
+        sourceId,
+        props: {
+          columns: spacing === undefined ? { num } : { num, spacing },
+          ...(grow ? { autofit: 'resize' as const } : {}),
+        },
+      })) ?? slide
+  }
+  if (slide) ctx.applySlide(ctx.current, slide)
+}
+
 export async function onTextDirection(
   ctx: ActionCtx,
   vert: 'horz' | 'vert' | 'vert270' | 'wordArtVert',

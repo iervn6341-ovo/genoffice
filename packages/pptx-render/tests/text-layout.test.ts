@@ -1408,6 +1408,43 @@ describe('bodyPr numCol columns', () => {
     expect(layout.contentHeight).toBeCloseTo(layout.lines[3]!.top + layout.lines[3]!.height, 1)
   })
 
+  it('resize-to-fit boxes balance their columns instead of piling the text into the last one', () => {
+    const paras = Array.from({ length: 8 }, (_, i) => ({
+      runs: [{ text: `p${i}`, fontSize: 20 }],
+    }))
+    const layout = layoutText({
+      // a one-line-high box: spAutoFit must grow it until both columns hold half the lines
+      body: { ...body({ paragraphs: paras }), numCol: 2, spcCol: 0, autofit: 'resize' },
+      boxWidthPx: 400,
+      boxHeightPx: 20 * (96 / 72) * 1.2 + 2,
+      metrics: new HeuristicMetrics(),
+      vp,
+    })
+    const xs = layout.lines.map((l) => l.runs[0]!.x)
+    expect(xs.filter((x) => x < 200)).toHaveLength(4)
+    expect(xs.filter((x) => x >= 200)).toHaveLength(4)
+    // the content height is the balanced column height (what autofit writes into the shape)
+    expect(layout.contentHeight).toBeCloseTo(layout.lines[3]!.top + layout.lines[3]!.height, 1)
+  })
+
+  it('a three-column balance keeps every line inside three columns', () => {
+    const paras = Array.from({ length: 7 }, (_, i) => ({
+      runs: [{ text: `p${i}`, fontSize: 20 }],
+    }))
+    const layout = layoutText({
+      body: { ...body({ paragraphs: paras }), numCol: 3, spcCol: 0, autofit: 'resize' },
+      boxWidthPx: 600,
+      boxHeightPx: 30,
+      metrics: new HeuristicMetrics(),
+      vp,
+    })
+    const stride = 200
+    const cols = layout.lines.map((l) => Math.floor(l.runs[0]!.x / stride))
+    expect(Math.max(...cols)).toBe(2)
+    // 7 lines over 3 columns fill 3 / 2 / 2 or 3 / 3 / 1: never a column beyond the third
+    expect(cols.filter((c) => c === 0).length).toBeGreaterThanOrEqual(2)
+  })
+
   it('single column behavior unchanged when numCol absent', () => {
     const layout = layoutText({
       body: body({ paragraphs: [{ runs: [{ text: 'x', fontSize: 20 }] }] }),

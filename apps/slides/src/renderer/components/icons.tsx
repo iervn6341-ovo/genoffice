@@ -1,7 +1,12 @@
 /** Small monochrome SVG icons approximating Word's ribbon glyphs. */
 
 import type { ReactNode } from 'react'
+import { CraftIcon, stableHtml, type CraftSet } from '@genoffice/ui'
+import { DECK_ICONS } from '@genoffice/ui/craft-icons/deck'
 import type { AnimEffectKind } from '../../shared/ipc'
+
+/** Toolbar glyphs drawn like the DeckCraft icon set (see packages/ui/src/craft-icons/NOTICE-craft-icons.md) */
+const CRAFT: CraftSet = { grid: 24, icons: DECK_ICONS }
 
 interface IconProps {
   size?: number
@@ -47,93 +52,33 @@ export function IconGlyph({ body, size = 18 }: { body: string; size?: number }) 
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
-      dangerouslySetInnerHTML={{ __html: body }}
+      dangerouslySetInnerHTML={stableHtml(body)}
     />
   )
 }
 
 export function IconFind(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="10.13" cy="10.13" r="5.61" />
-      <path d="M 14.41 14.41 L 19.48 19.48" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="search" size={props.size ?? 24} />
 }
 
 export function IconBullets(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="5.48" cy="6.67" r="1.3" fill="currentColor" stroke="none" />
-      <circle cx="5.48" cy="12" r="1.3" fill="currentColor" stroke="none" />
-      <circle cx="5.48" cy="17.33" r="1.3" fill="currentColor" stroke="none" />
-      <path d="M 9.63 6.67 h 9.48 M 9.63 12 h 9.48 M 9.63 17.33 h 9.48" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="bullets" size={props.size ?? 24} />
 }
 
 export function IconNumbered(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <text
-        x="1.5"
-        y="8.1"
-        fontSize="8.1"
-        fill="currentColor"
-        stroke="none"
-        fontFamily="Segoe UI, sans-serif"
-      >
-        1
-      </text>
-      <text
-        x="1.5"
-        y="15.6"
-        fontSize="8.1"
-        fill="currentColor"
-        stroke="none"
-        fontFamily="Segoe UI, sans-serif"
-      >
-        2
-      </text>
-      <text
-        x="1.5"
-        y="23.1"
-        fontSize="8.1"
-        fill="currentColor"
-        stroke="none"
-        fontFamily="Segoe UI, sans-serif"
-      >
-        3
-      </text>
-      <path d="M9.75 5.25 h12 M9.75 12.75 h12 M9.75 20.25 h12" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="numbering" size={props.size ?? 24} />
 }
 
 export function IconIndentDec(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 5.15 h 14.94 M 12 9.26 h 7.47 M 12 12.62 h 7.47 M 12 15.98 h 7.47 M 4.53 19.47 h 14.94" />
-      <path d="M 8.51 9.26 4.78 12.62 l 3.74 3.36 z" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="decrease-indent" size={props.size ?? 24} />
 }
 
 export function IconIndentInc(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 5.15 h 14.94 M 12 9.26 h 7.47 M 12 12.62 h 7.47 M 12 15.98 h 7.47 M 4.53 19.47 h 14.94" />
-      <path d="M 4.78 9.26 l 3.74 3.36 -3.73 3.36 z" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="increase-indent" size={props.size ?? 24} />
 }
 
 export function IconAlignLeft(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 5.78 h 14.94 M 4.53 9.51 h 9.96 M 4.53 13.25 h 14.94 M 4.53 16.98 h 9.96" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-left" size={props.size ?? 24} />
 }
 
 export function IconDirLtr(props: IconProps) {
@@ -155,164 +100,70 @@ export function IconDirRtl(props: IconProps) {
 }
 
 export function IconAlignCenter(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 5.78 h 14.94 M 7.02 9.51 h 9.96 M 4.53 13.25 h 14.94 M 7.02 16.98 h 9.96" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-center" size={props.size ?? 24} />
 }
 
 export function IconAlignRight(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 5.78 h 14.94 M 9.51 9.51 h 9.96 M 4.53 13.25 h 14.94 M 9.51 16.98 h 9.96" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-right" size={props.size ?? 24} />
 }
 
 export function IconAlignJustify(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 5.78 h 14.94 M 4.53 9.51 h 14.94 M 4.53 13.25 h 14.94 M 4.53 16.98 h 14.94" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="justify" size={props.size ?? 24} />
 }
 
 export function IconLineSpacing(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 12 5.85 h 7.38 M 12 10.03 h 7.38 M 12 14.21 h 7.38 M 12 18.4 h 7.38" />
-      <path d="M 6.47 6.1 v 11.81 M 4.37 8.56 l 2.09 -2.46 2.09 2.46 M 4.37 15.44 l 2.09 2.46 2.09 -2.46" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="line-spacing" size={props.size ?? 24} />
 }
 
 export function IconClearFormat(props: IconProps) {
-  return (
-    <Svg {...props}>
-      {/* letter A with a wiped-off stroke at its top left */}
-      <path d="M3.75 18.75 8.25 6l4.5 12.75" />
-      <path d="M5.55 14.25h5.4" />
-      <path d="M4.35 8.85l1.8-1.8" />
-      {/* compact diagonal eraser at the lower right (the old diamond's spot), outline only, band facing the A */}
-      <g transform="rotate(45 17.4 17.4)">
-        <rect x="13.05" y="14.25" width="8.7" height="6.3" rx="0.9" />
-        <path d="M15.6 14.25v6.3" />
-      </g>
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="clear-formatting" size={props.size ?? 24} />
 }
 
 export function IconGrowFont(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M3.25 19 8.5 5.25 13.75 19M5.1 14.25h6.8" />
-      <path d="M18 17.5V6.75M14.9 9.85 18 6.75l3.1 3.1" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="font-grow" size={props.size ?? 24} />
 }
 
 export function IconShrinkFont(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M3.25 19 8.5 5.25 13.75 19M5.1 14.25h6.8" />
-      <path d="M18 6.75V17.5M14.9 14.4l3.1 3.1 3.1-3.1" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="font-shrink" size={props.size ?? 24} />
 }
 
 /* Fluent-style sub/superscript: lowercase-x strokes + a stroked digit 2 in the
    corner (replaces the old HTML x<sub>2</sub> text glyphs) */
 export function IconSuperscript(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M4.05 9.9 12.45 19.5M12.45 9.9 4.05 19.5" />
-      <path d="M15.9 7.05a2.25 2.25 0 0 1 4.5 0c0 1.35-1.28 2.4-4.5 4.65h4.73" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="superscript" size={props.size ?? 24} />
 }
 
 export function IconSubscript(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M4.05 6.9 12.45 16.5M12.45 6.9 4.05 16.5" />
-      <path d="M15.9 14.85a2.25 2.25 0 0 1 4.5 0c0 1.35-1.28 2.4-4.5 4.65h4.73" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="subscript" size={props.size ?? 24} />
 }
 
 /** Character spacing (MS-style): AV above a double-headed arrow */
 export function IconCharSpacing(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={4} y={13.5} s={13}>
-        AV
-      </TextGlyph>
-      <path d="M4.5 18.75 h15 M7.2 16.05 4.5 18.75 l2.7 2.7 M16.8 16.05 19.5 18.75 l-2.7 2.7" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="char-spacing" size={props.size ?? 24} />
 }
 
 /** Change Case (MS-style): "Aa" */
 export function IconChangeCase(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={2.5} y={17.5} s={14}>
-        Aa
-      </TextGlyph>
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="change-case" size={props.size ?? 24} />
 }
 
 /** Align Text (vertical alignment): text lines centred in a frame, arrows to top and bottom */
 export function IconAlignText(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="3.75" y="3.75" width="16.5" height="16.5" rx="1.5" />
-      <path d="M 7.5 10.5 h 9 M 7.5 13.5 h 9" />
-      <path d="M 12 3.75 v 3 M 10.5 5.25 12 6.75 13.5 5.25 M 12 20.25 v -3 M 10.5 18.75 12 17.25 13.5 18.75" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-text" size={props.size ?? 24} />
 }
 
 /** Text Direction: a rotated "A" beside a downward arrow */
 export function IconTextDirection(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4 7.5 14 4.5 M 4 7.5 14 10.5 M 7.4 6.5 v 3" />
-      <path d="M 18 4.5 v 15 M 15.75 17.25 18 19.5 20.25 17.25" />
-      <path d="M 4 14.25 h 9 M 4 18 h 9" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="text-direction" size={props.size ?? 24} />
 }
 
 /** MS-style text highlighter: marker nib only; the color bar is rendered by the button */
 export function IconTextHighlight(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M4.5 16.5 14.25 6.75 a2.1 2.1 0 0 1 3 0 l0.75 0.75 a2.1 2.1 0 0 1 0 3 L8.25 20.25 H4.5 z" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="highlight" size={props.size ?? 24} />
 }
 
 export function IconHighlight(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path
-        d="M 4.95 15.38 14.5 5.83 a 2.06 2.06 0 0 1 2.94 0 l 0.73 0.73 a 2.06 2.06 0 0 1 0 2.94 L 8.62 19.05 H 4.95 z"
-        fill="none"
-      />
-      <rect
-        x="3.78"
-        y="17.87"
-        width="5.87"
-        height="2.35"
-        rx="1.17"
-        fill="currentColor"
-        stroke="none"
-      />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="highlight" size={props.size ?? 24} />
 }
 
 /* ---------- shared shapes ---------- */
@@ -351,141 +202,72 @@ function TextGlyph({
 /* ---------- clipboard (Home) ---------- */
 
 export function IconPaste(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 8.14 18.16 H 5.89 C 4.85 18.16 4 17.31 4 16.26 V 6.79 C 4 5.74 4.85 4.89 5.89 4.89 H 7.32 M 17.26 7.74 V 6.79 C 17.26 5.74 16.41 4.89 15.37 4.89 H 13.95" />
-      <rect x="7.79" y="3" width="5.68" height="2.84" rx="0.95" />
-      <path d="M 18.21 7.74 H 9.68 C 8.64 7.74 7.79 8.59 7.79 9.63 V 19.11 C 7.79 20.15 8.64 21 9.68 21 H 15.49 L 20.11 16.03 V 9.63 C 20.11 8.59 19.26 7.74 18.21 7.74 Z" />
-      <path d="M 10.63 11.05 H 17.26 M 10.63 14.37 H 14.42" />
-      <path d="M 15.37 21 V 16.74 C 15.37 16.21 15.79 15.79 16.32 15.79 H 20.11" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="paste" size={props.size ?? 24} />
 }
 
 export function IconCut(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 7.91 19.27 L 8.92 17.57 L 16.98 3.59 M 7.02 3.5 L 15.08 17.47 L 16.09 19.27" />
-      <circle cx="5.83" cy="18.13" r="2.37" />
-      <circle cx="18.17" cy="18.13" r="2.37" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="cut" size={props.size ?? 24} />
 }
 
 export function IconCopy(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="7" y="7" width="14" height="14" rx="3" />
-      <path d="M 14.5 4 H 7 C 5.34 4 4 5.34 4 7 V 14.5" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="copy" size={props.size ?? 24} />
 }
 
 /** Shape style gallery: two offset rounded rects (context-menu quick bar) */
 export function IconShapeStyle(props: IconProps) {
+  return <CraftIcon set={CRAFT} name="quick-styles" size={props.size ?? 24} />
+}
+
+/** Shape Effects: a rounded square casting an offset shadow */
+export function IconShapeEffects(props: IconProps) {
   return (
-    <Svg {...props}>
-      <rect x="4" y="5" width="11" height="9" rx="1.5" />
-      <rect x="9.5" y="10.5" width="10.5" height="8.5" rx="1.5" fill="var(--surface)" />
+    <Svg size={props.size ?? 24}>
+      <rect x="3.5" y="3.5" width="12" height="12" rx="2.5" />
+      <path d="M18.5 8.5v9a2.5 2.5 0 0 1-2.5 2.5H8" />
+      <path d="M20.5 11.5v6a3.5 3.5 0 0 1-3.5 3.5h-6" opacity="0.5" />
     </Svg>
   )
 }
 
 /** Paint bucket + drop (context-menu quick bar fill entry) */
 export function IconFillColor(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 7.6 10.4 12.6 5.4 l 5.6 5.6 -6.3 6.3 a 1.4 1.4 0 0 1 -2 0 L 5.6 13 a 1.4 1.4 0 0 1 0 -2 z" />
-      <path d="M 12.6 5.4 10.9 3.7" />
-      <path
-        d="M 19.7 15.4 c 0.9 1.2 1.5 2.2 1.5 3 a 1.5 1.5 0 0 1 -3 0 c 0 -0.8 0.6 -1.8 1.5 -3 z"
-        fill="currentColor"
-        stroke="none"
-      />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="shape-fill" size={props.size ?? 24} />
 }
 
 /** Concentric squares suggesting an outline ring (context-menu quick bar outline entry) */
 export function IconOutlineColor(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.5" y="4.5" width="15" height="15" rx="2" />
-      <rect x="9" y="9" width="6" height="6" rx="1" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="shape-outline" size={props.size ?? 24} />
 }
 
 export function IconFormatPainter(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="10.65" y="4.05" width="2.7" height="5.1" rx="1.35" />
-      <rect x="4.5" y="9.15" width="15" height="10.8" rx="1.5" />
-      <path d="M 4.5 13.35 H 19.5" />
-      <path d="M 9.3 16.35 V 18.15 M 14.7 16.35 V 18.15" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="format-painter" size={props.size ?? 24} />
 }
 
 /** Slide layout: slide frame + title line + two content placeholders */
 export function IconSlideLayout(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.53" y="5.15" width="14.94" height="13.69" rx="1" />
-      <path d="M 7.64 8.89 h 8.72" />
-      <rect x="7.64" y="11.38" width="3.74" height="4.36" rx="0.5" />
-      <rect x="12.62" y="11.38" width="3.74" height="4.36" rx="0.5" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="layout" size={props.size ?? 24} />
 }
 
 /* ---------- Insert ---------- */
 
 export function IconTable(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.53" y="5.15" width="14.94" height="13.69" rx="1" />
-      <path d="M 4.53 9.76 h 14.94 M 4.53 14.37 h 14.94 M 9.51 5.15 v 13.69 M 14.49 5.15 v 13.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="table" size={props.size ?? 24} />
 }
 
 export function IconPicture(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.53" y="5.78" width="14.94" height="12.45" rx="1" />
-      <circle cx="8.76" cy="9.76" r="1.37" />
-      <path d="M 5.15 16.98 10.13 12 l 3.74 3.74 2.49 -2.49 2.49 2.49" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="picture" size={props.size ?? 24} />
 }
 
 export function IconShapes(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="9.42" cy="9.42" r="4.64" />
-      <rect x="11.36" y="11.36" width="8.39" height="8.39" rx="1.03" fill="var(--surface, #fff)" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="shapes" size={props.size ?? 24} />
 }
 
 export function IconLink(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 10.35 13.65 13.65 10.35" />
-      <path d="M 11.31 7.59 13.38 5.52 a 3.59 3.59 0 0 1 5.1 5.1 L 16.41 12.69" />
-      <path d="M 12.69 16.41 10.62 18.48 a 3.59 3.59 0 0 1 -5.1 -5.1 l 2.07 -2.07" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="link" size={props.size ?? 24} />
 }
 
 export function IconComment(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.51 4.87 h 14.99 v 10.22 h -8.18 L 7.23 19.18 v -4.09 h -2.73 z" />
-      <path d="M 7.91 8.28 h 8.18 M 7.91 11.68 h 5.45" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="comment" size={props.size ?? 24} />
 }
 
 export function IconPageBreak(props: IconProps) {
@@ -498,122 +280,45 @@ export function IconPageBreak(props: IconProps) {
 }
 
 export function IconHeader(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="6.23" y="4.49" width="11.55" height="15.02" rx="0.92" />
-      <path d="M 7.96 7.38 h 8.09 M 7.96 9.46 h 8.09" opacity="0.9" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="header-footer" size={props.size ?? 24} />
 }
 
 export function IconFooter(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="6.23" y="4.49" width="11.55" height="15.02" rx="0.92" />
-      <path d="M 7.96 14.54 h 8.09 M 7.96 16.62 h 8.09" opacity="0.9" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="header-footer" size={props.size ?? 24} />
 }
 
 export function IconPageNumber(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="6.25" y="4.5" width="11.5" height="15" rx="0.95" />
-      <TextGlyph x={9.2} y={15.5} s={8}>
-        #
-      </TextGlyph>
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="slide-number" size={props.size ?? 24} />
 }
 
 export function IconSymbol(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={3.4} y={20.4} s={24}>
-        Ω
-      </TextGlyph>
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="symbol" size={props.size ?? 24} />
 }
 
 export function IconEquation(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={5.4} y={17.75} s={22}>
-        π
-      </TextGlyph>
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="equation" size={props.size ?? 24} />
 }
 
 /* ---------- Design ---------- */
 
 export function IconSlideMaster(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.2" y="4.8" width="12" height="8.4" rx="1.2" />
-      <path d="M 6.6 7.8 h 7.2 M 6.6 10.2 h 4.8" />
-      <rect x="9.6" y="15" width="9.6" height="4.8" rx="0.96" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="slide-master" size={props.size ?? 24} />
 }
 
 export function IconTheme(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={2.25} y={17.25} s={16.5}>
-        A
-      </TextGlyph>
-      <TextGlyph x={12.75} y={17.25} s={12}>
-        a
-      </TextGlyph>
-      <rect
-        x="3.75"
-        y="19.35"
-        width="16.5"
-        height="2.7"
-        rx="1.35"
-        fill="currentColor"
-        stroke="none"
-      />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="themes" size={props.size ?? 24} />
 }
 
 export function IconThemeFonts(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={3} y={18} s={16.5}>
-        F
-      </TextGlyph>
-      <path d="M14.25 18 18 6.75 21.75 18 M15.45 14.4 h5.1" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="fonts" size={props.size ?? 24} />
 }
 
 export function IconThemeColors(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="7.32" cy="7.63" r="2.81" />
-      <circle cx="16.68" cy="7.63" r="2.81" />
-      <circle cx="7.32" cy="16.32" r="2.81" />
-      <circle cx="16.68" cy="16.32" r="2.81" fill="currentColor" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="colors" size={props.size ?? 24} />
 }
 
 export function IconPageColor(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 12.84 5.04 6.6 11.28 a 1.56 1.56 0 0 0 0 2.16 l 3.96 3.96 a 1.56 1.56 0 0 0 2.16 0 l 6.24 -6.24 z" />
-      <path d="M 12.84 5.04 10.8 7.2" />
-      <path
-        d="M 18.72 15.12 s 1.68 2.04 1.68 3.24 a 1.68 1.68 0 0 1 -3.36 0 c 0 -1.2 1.68 -3.24 1.68 -3.24 z"
-        fill="currentColor"
-        stroke="none"
-      />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="background-styles" size={props.size ?? 24} />
 }
 
 export function IconWatermark(props: IconProps) {
@@ -657,23 +362,12 @@ export function IconOrientation(props: IconProps) {
 
 /* landscape slide with a diagonal resize arrow — PowerPoint's Slide Size glyph */
 export function IconPageSize(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.1" y="6.25" width="15.8" height="11.5" rx="0.92" />
-      <path d="M 8.8 8.8 L 15.2 15.2 M 11.4 8.8 h -2.6 v 2.6 M 12.6 15.2 h 2.6 v -2.6" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="slide-size" size={props.size ?? 24} />
 }
 
 /* stacked slides with a check on the front one — applied across the deck */
 export function IconApplyAll(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="9.1" y="5.25" width="10.2" height="7" rx="0.92" />
-      <rect x="4.7" y="9.15" width="12.2" height="9.6" rx="0.92" fill="var(--surface, #fff)" />
-      <path d="M 8 14.15 l 2.3 2.3 l 4.6 -4.6" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="apply-to-all" size={props.size ?? 24} />
 }
 
 export function IconColumns(props: IconProps) {
@@ -787,14 +481,7 @@ export function IconWordCount(props: IconProps) {
 }
 
 export function IconSpellcheck(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={2.1} y={12.75} s={11.25}>
-        abc
-      </TextGlyph>
-      <path d="M9 17.25 12.75 20.25 19.5 11.25" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="spelling" size={props.size ?? 24} />
 }
 
 export function IconSparkle(props: IconProps) {
@@ -812,24 +499,7 @@ export function IconSparkle(props: IconProps) {
 /** Remove Background: dashed marching-ants selection around a landscape photo
  * (sun + mountains), an AI sparkle in the top-right notch. */
 export function IconRemoveBg(props: IconProps) {
-  return (
-    <Svg {...props}>
-      {/* dashed selection frame, top-right corner open for the sparkle */}
-      <path
-        d="M 15.3 5.6 H 6.8 a 2.4 2.4 0 0 0 -2.4 2.4 v 8.6 a 2.4 2.4 0 0 0 2.4 2.4 h 10.4 a 2.4 2.4 0 0 0 2.4 -2.4 V 9.8"
-        strokeDasharray="2.7 2.05"
-      />
-      {/* photo subject: sun + mountains */}
-      <circle cx={9.4} cy={9.8} r={1.5} />
-      <path d="M 6.3 16.4 l 3.1 -3.5 2.5 2.7 1.9 -2.1 3.4 2.9" />
-      {/* sparkle */}
-      <path
-        d="M 18.9 3.4 l 0.78 2.12 2.12 0.78 -2.12 0.78 -0.78 2.12 -0.78 -2.12 -2.12 -0.78 2.12 -0.78 z"
-        fill="currentColor"
-        stroke="none"
-      />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="remove-background" size={props.size ?? 24} />
 }
 
 export function IconWand(props: IconProps) {
@@ -851,14 +521,7 @@ export function IconWand(props: IconProps) {
 }
 
 export function IconTranslate(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <TextGlyph x={1.8} y={13.5} s={12.75}>
-        文
-      </TextGlyph>
-      <path d="M13.2 20.25 17.25 9.75 21.3 20.25 M14.55 16.95 h5.4" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="translate" size={props.size ?? 24} />
 }
 
 export function IconTrackChanges(props: IconProps) {
@@ -888,23 +551,11 @@ export function IconReject(props: IconProps) {
 }
 
 export function IconCompare(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="6.23" width="6.35" height="11.55" rx="0.92" />
-      <rect x="13.16" y="6.23" width="6.35" height="11.55" rx="0.92" />
-      <path d="M 9.69 12 h 4.62 M 12.69 10.38 14.31 12 l -1.62 1.62" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="compare" size={props.size ?? 24} />
 }
 
 export function IconLock(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="6.4" y="10.76" width="11.21" height="9.34" rx="1.24" />
-      <path d="M 8.89 10.76 V 8.27 a 3.11 3.11 0 0 1 6.23 0 v 2.49" />
-      <circle cx="12" cy="15.11" r="1.24" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="lock" size={props.size ?? 24} />
 }
 
 /* ---------- View ---------- */
@@ -920,23 +571,11 @@ function Magnifier({ children }: { children?: ReactNode }) {
 }
 
 export function IconZoomOut(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <Magnifier>
-        <path d="M7.2 10.5 h6.6" />
-      </Magnifier>
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="zoom-out" size={props.size ?? 24} />
 }
 
 export function IconZoomIn(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <Magnifier>
-        <path d="M7.2 10.5 h6.6 M10.5 7.2 v6.6" />
-      </Magnifier>
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="zoom-in" size={props.size ?? 24} />
 }
 
 export function IconZoom100(props: IconProps) {
@@ -964,15 +603,7 @@ export function IconPageWidth(props: IconProps) {
  *  framed by four edge chevrons. Deliberately arrow-free — inward/outward
  *  arrows read as fullscreen, and the original page-with-plus as "new page". */
 export function IconFitWindow(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="8.5" y="8.5" width="7" height="7" rx="1.5" />
-      <path d="M5.2 9.3 3.4 12l1.8 2.7" />
-      <path d="M18.8 9.3 20.6 12l-1.8 2.7" />
-      <path d="M9.3 5.2 12 3.4l2.7 1.8" />
-      <path d="M9.3 18.8 12 20.6l2.7-1.8" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="fit-to-window" size={props.size ?? 24} />
 }
 
 export function IconAiPanel(props: IconProps) {
@@ -998,29 +629,15 @@ export function IconMoon(props: IconProps) {
 }
 
 export function IconReadMode(props: IconProps) {
-  return <IconBook {...props} />
+  return <CraftIcon set={CRAFT} name="view-reading" size={props.size ?? 24} />
 }
 
 export function IconOutlineView(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="5.48" cy="6.13" r="1.31" fill="currentColor" stroke="none" />
-      <path d="M 8.74 6.13 h 10.44" />
-      <circle cx="8.74" cy="12" r="1.31" fill="currentColor" stroke="none" />
-      <path d="M 12 12 h 7.18" />
-      <circle cx="8.74" cy="17.87" r="1.31" fill="currentColor" stroke="none" />
-      <path d="M 12 17.87 h 7.18" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="view-outline" size={props.size ?? 24} />
 }
 
 export function IconRuler(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="9.11" width="15.02" height="5.78" rx="0.92" />
-      <path d="M 7.96 9.11 v 2.31 M 10.85 9.11 v 3.47 M 13.73 9.11 v 2.31 M 16.62 9.11 v 3.47" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="ruler" size={props.size ?? 24} />
 }
 
 export function IconNavPane(props: IconProps) {
@@ -1062,31 +679,15 @@ export function IconWebLayout(props: IconProps) {
 }
 
 export function IconGridlines(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.53" y="4.53" width="14.94" height="14.94" rx="1" />
-      <path d="M 4.53 9.51 h 14.94 M 4.53 14.49 h 14.94 M 9.51 4.53 v 14.94 M 14.49 4.53 v 14.94" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="gridlines" size={props.size ?? 24} />
 }
 
 export function IconNewWindow(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="7.96" width="11.55" height="11.55" rx="0.92" />
-      <path d="M 7.96 7.96 v -2.31 a 1.16 1.16 0 0 1 1.16 -1.15 h 9.24 a 1.16 1.16 0 0 1 1.16 1.16 v 9.24 a 1.16 1.16 0 0 1 -1.15 1.16 h -2.31" />
-      <path d="M 10.27 13.73 h 4.62 M 12.58 11.42 v 4.62" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="new-window" size={props.size ?? 24} />
 }
 
 export function IconArrangeAll(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="5.07" width="15.02" height="6.01" rx="0.92" />
-      <rect x="4.49" y="12.92" width="15.02" height="6.01" rx="0.92" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="arrange" size={props.size ?? 24} />
 }
 
 export function IconSwitchWindows(props: IconProps) {
@@ -1248,31 +849,15 @@ function SvgRatio({ size = 24, children }: IconProps & { children: ReactNode }) 
 }
 
 export function IconSave(props: IconProps) {
-  return (
-    <SvgRatio {...props}>
-      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-      <path d="M17 21v-8H7v8" />
-      <path d="M7 3v5h8V3" />
-    </SvgRatio>
-  )
+  return <CraftIcon set={CRAFT} name="save" size={props.size ?? 24} />
 }
 
 export function IconUndo(props: IconProps) {
-  return (
-    <SvgRatio {...props}>
-      <path d="M5.91026 4L2.5 7.14791L5.91026 10.8205" />
-      <path d="M3.96154 7.41028H15.1636C18.5169 7.41028 21.3646 10.1484 21.4953 13.5C21.6334 17.0416 18.707 20.0769 15.1636 20.0769H6.88384" />
-    </SvgRatio>
-  )
+  return <CraftIcon set={CRAFT} name="undo" size={props.size ?? 24} />
 }
 
 export function IconRedo(props: IconProps) {
-  return (
-    <SvgRatio {...props}>
-      <path d="M18.0897 4L21.5 7.14791L18.0897 10.8205" />
-      <path d="M20.0385 7.41028H8.83636C5.4831 7.41028 2.63537 10.1484 2.5047 13.5C2.36657 17.0416 5.29296 20.0769 8.83636 20.0769H17.1162" />
-    </SvgRatio>
-  )
+  return <CraftIcon set={CRAFT} name="redo" size={props.size ?? 24} />
 }
 
 export function IconCursor(props: IconProps) {
@@ -1284,72 +869,29 @@ export function IconCursor(props: IconProps) {
 }
 
 export function IconPen(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="m 3.78 20.22 1.17 -4.41 L 14.94 5.83 a 2.06 2.06 0 0 1 2.94 0 l 0.29 0.29 a 2.06 2.06 0 0 1 0 2.94 L 8.18 19.05 3.78 20.22 Z" />
-      <path d="M 13.47 7.3 16.7 10.53" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="pen" size={props.size ?? 24} />
 }
 
 export function IconHighlighterPen(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 8.85 13.89 15.53 7.21 a 1.64 1.64 0 0 1 2.39 0 l -1.13 -1.13 1.13 1.13 a 1.64 1.64 0 0 1 0 2.39 L 11.24 16.28 l -3.28 0.88 0.88 -3.28 Z" />
-      <rect
-        x="5.7"
-        y="18.05"
-        width="12.6"
-        height="3.02"
-        rx="1.51"
-        fill="currentColor"
-        stroke="none"
-        opacity="0.5"
-      />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="highlighter-pen" size={props.size ?? 24} />
 }
 
 export function IconEraser(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="m12.495 5.29 6.765 6.765 a1.98 1.98 0 0 1 0 2.805 L14.64 19.48 H10.02 L4.74 14.2 a1.98 1.98 0 0 1 0 -2.805 l4.95 -4.95 a1.98 1.98 0 0 1 2.805 0 Z" />
-      <path d="M7.875 8.92 15.63 16.675" />
-      <path d="M10.02 19.48 h10.56" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="eraser" size={props.size ?? 24} />
 }
 
 export function IconTextBox(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="5.65" width="15.02" height="12.71" rx="1.16" />
-      <path d="M 8.54 9.11 h 6.93 M 12 9.11 v 6.35" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="text-box" size={props.size ?? 24} />
 }
 
 /** New slide (MS-style): slide frame with a title band and a split content area */
 export function IconNewSlide(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.53" y="6.4" width="14.94" height="11.21" rx="0.62" />
-      <path d="M 4.53 10.13 h 14.94" />
-      <path d="M 13.25 10.13 V 17.6" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="new-slide" size={props.size ?? 24} />
 }
 
 /** Section: divider + disclosure triangle, slide thumbnails grouped beneath */
 export function IconSection(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 5.78 h 14.94" />
-      <path d="M 4.78 8.89 l 3.24 2.37 -3.24 2.37 z" fill="currentColor" stroke="none" />
-      <rect x="10.13" y="8.89" width="9.34" height="4.36" rx="0.62" />
-      <rect x="10.13" y="15.11" width="9.34" height="4.36" rx="0.62" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="section" size={props.size ?? 24} />
 }
 
 export function IconRect(props: IconProps) {
@@ -1379,199 +921,95 @@ export function IconEllipse(props: IconProps) {
 /** Slide show: from beginning (slide open at the bottom-right, its bottom edge
  * running out as an arrow into a play triangle — loop back to slide 1 and play) */
 export function IconPlayFromStart(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M19.51 11.3 V6.57 a0.92 0.92 0 0 0 -0.92 -0.92 H5.41 a0.92 0.92 0 0 0 -0.92 0.92 v8.56 a0.92 0.92 0 0 0 0.92 0.92 h8.25" />
-      <path d="M10.85 14.2 l1.89 1.85 -1.89 1.85" />
-      <path d="M15.3 12.7 L20.9 16.05 L15.3 19.4 Z" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="play-from-start" size={props.size ?? 24} />
 }
 
 /** Slide show: from current slide (screen + play triangle) */
 export function IconPlayCurrent(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="5.65" width="15.02" height="10.4" rx="0.92" />
-      <path d="M 10.27 8.3 v 5.08 l 4.39 -2.54 z" fill="currentColor" stroke="none" />
-      <path d="M 12 16.04 v 2.31 M 9.11 18.35 h 5.78" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="play-from-current" size={props.size ?? 24} />
 }
 
 /** Status-bar play: solid triangle in a rounded square. The frame is nearly
  *  the full viewBox — the monitor-and-stand ribbon glyph reads too small at
  *  status-bar sizes */
 export function IconPlayBoxed(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.2" y="4.2" width="15.6" height="15.6" rx="2" />
-      <path d="M 9.9 8.3 v 7.4 l 6.2 -3.7 z" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="play" size={props.size ?? 24} />
 }
 
 /** Status-bar notes toggle: a note page with text lines (near-full viewBox,
  *  same rationale as IconPlayBoxed at status-bar sizes) */
 export function IconNotes(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.2" y="4.2" width="15.6" height="15.6" rx="2" />
-      <path d="M8 9.3h8M8 12.3h8M8 15.3h5" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="notes" size={props.size ?? 24} />
 }
 
 /** Presenter view: main screen + small presenter screen */
 export function IconPresenterView(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="5.65" width="10.4" height="8.09" rx="0.92" />
-      <rect x="12.58" y="11.42" width="6.93" height="5.78" rx="0.92" fill="var(--surface, #fff)" />
-      <circle cx="16.04" cy="13.4" r="1.15" fill="currentColor" stroke="none" />
-      <path d="M 13.84 16.35 a 2.2 1.45 0 0 1 4.4 0 z" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="presenter-view" size={props.size ?? 24} />
 }
 
 /** Custom show: screen + gear dots */
 export function IconCustomShow(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="5.65" width="15.02" height="10.4" rx="0.92" />
-      <path d="M 7.96 9.11 h 8.09 M 7.96 12 h 4.62" />
-      <path d="M 12 16.04 v 2.31 M 9.11 18.35 h 5.78" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="custom-show" size={props.size ?? 24} />
 }
 
 /** Set up slide show: screen + wrench slash */
 export function IconSetupShow(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="5.65" width="15.02" height="10.4" rx="0.92" />
-      <path d="M 8.54 13.73 13.73 8.54 M 13.16 8.54 h 1.73 v 1.73" />
-      <path d="M 12 16.04 v 2.31 M 9.11 18.35 h 5.78" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="set-up-show" size={props.size ?? 24} />
 }
 
 /** Hide slide: slide + slash */
 export function IconHideSlide(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="5.65" y="6.8" width="12.71" height="10.4" rx="0.92" />
-      <path d="M 4.49 19.51 19.51 4.49" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="hide-slide" size={props.size ?? 24} />
 }
 
 /** Rehearse timings: stopwatch */
 export function IconRehearse(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="13.25" r="6.23" />
-      <path d="M 12 10.13 V 13.25 l 2.24 1.74" />
-      <path d="M 10.13 4.53 h 3.74 M 12 4.53 v 2.24" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="rehearse-timings" size={props.size ?? 24} />
 }
 
 /** Record slide show: recording dot */
 export function IconRecord(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="7.48" />
-      <circle cx="12" cy="12" r="3.1" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="record" size={props.size ?? 24} />
 }
 
 /** Chart: bar chart */
 export function IconChart(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.53 4.53 v 14.94 h 14.94" />
-      <rect x="7.64" y="12" width="2.74" height="4.98" fill="currentColor" stroke="none" />
-      <rect x="12" y="8.27" width="2.74" height="8.72" fill="currentColor" stroke="none" />
-      <rect x="16.36" y="10.13" width="2.74" height="6.85" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="chart" size={props.size ?? 24} />
 }
 
 /** SmartArt: connected nodes */
 export function IconSmartArt(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="9.11" y="4.49" width="5.78" height="4.16" rx="0.92" />
-      <rect x="4.49" y="14.89" width="5.78" height="4.16" rx="0.92" />
-      <rect x="13.73" y="14.89" width="5.78" height="4.16" rx="0.92" />
-      <path d="M 12 8.65 v 2.77 M 12 11.42 L 7.38 14.89 M 12 11.42 l 4.62 3.47" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="smart-art" size={props.size ?? 24} />
 }
 
 /** WordArt: outlined block-letter A (matches docs IconWordArt, scaled 16→24 canvas) */
 export function IconWordArt(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 12 4.5 L 5.25 19.5 h 3.45 l 1.5 -3.75 h 3.6 l 1.5 3.75 h 3.45 L 12 4.5 Z" />
-      <path d="M 8.4 13.8 h 7.2" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="word-art" size={props.size ?? 24} />
 }
 
 /** Icon gallery: smiley */
 export function IconIconLib(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="7.47" />
-      <circle cx="9.26" cy="10.13" r="0.87" fill="currentColor" stroke="none" />
-      <circle cx="14.74" cy="10.13" r="0.87" fill="currentColor" stroke="none" />
-      <path d="M 8.64 13.99 a 4.23 4.23 0 0 0 6.72 0" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="icons" size={props.size ?? 24} />
 }
 
 /** Video: film play */
 export function IconVideo(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="6.8" width="15.02" height="10.4" rx="1.62" />
-      <path d="M 10.5 9.69 l 3.93 2.31 -3.93 2.31 z" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="video" size={props.size ?? 24} />
 }
 
 /** Audio: speaker */
 export function IconAudio(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 5.15 9.76 h 2.99 L 12.62 5.78 v 12.45 L 8.14 14.24 H 5.15 z" />
-      <path d="M 15.49 9.01 a 4.23 4.23 0 0 1 0 5.98 M 17.98 6.77 a 7.47 7.47 0 0 1 0 10.46" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="audio" size={props.size ?? 24} />
 }
 
 /** Screen recording: screen + record dot */
 export function IconScreenRec(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.49" y="5.65" width="15.02" height="10.4" rx="1.39" />
-      <path d="M 9.11 18.93 h 5.78" />
-      <circle cx="12" cy="10.85" r="2.31" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="screen-recording" size={props.size ?? 24} />
 }
 
 /** 3D model: cube */
 export function Icon3d(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 12 4.47 l 6.68 3.77 v 7.53 L 12 19.53 l -6.68 -3.77 V 8.23 z" />
-      <path d="M 12 12 l 6.68 -3.77 M 12 12 L 5.32 8.23 M 12 12 v 7.53" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="models-3d" size={props.size ?? 24} />
 }
 
 /** Zoom link: jump arrow + page */
@@ -1587,144 +1025,60 @@ export function IconZoomJump(props: IconProps) {
 
 /** Date-time: calendar + hour hand */
 export function IconDateTime(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.93" y="6.3" width="10.83" height="10.83" rx="1.37" />
-      <path d="M 4.93 9.72 h 10.83 M 8.01 4.93 V 7.44 M 13.14 4.93 V 7.44" />
-      <circle cx="16.56" cy="15.99" r="3.42" fill="var(--surface, #fff)" />
-      <path d="M 16.56 14.28 v 1.71 l 1.25 1.03" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="date-time" size={props.size ?? 24} />
 }
 
 /** Object align/distribute (distinct from paragraph text alignment IconAlign*): color blocks + alignment baseline */
 export function IconObjAlignLeft(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 5.65 4.49 v 15.02" />
-      <rect x="7.96" y="6.23" width="10.4" height="4.16" rx="0.69" />
-      <rect x="7.96" y="13.62" width="6.35" height="4.16" rx="0.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-obj-left" size={props.size ?? 24} />
 }
 
 export function IconObjAlignCenterH(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 12 4.49 v 15.02" />
-      <rect x="6.23" y="6.23" width="11.55" height="4.16" rx="0.69" />
-      <rect x="8.77" y="13.62" width="6.47" height="4.16" rx="0.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-obj-center" size={props.size ?? 24} />
 }
 
 export function IconObjAlignRight(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 18.35 4.49 v 15.02" />
-      <rect x="5.65" y="6.23" width="10.4" height="4.16" rx="0.69" />
-      <rect x="9.69" y="13.62" width="6.35" height="4.16" rx="0.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-obj-right" size={props.size ?? 24} />
 }
 
 export function IconObjAlignTop(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.49 5.65 h 15.02" />
-      <rect x="6.23" y="7.96" width="4.16" height="10.4" rx="0.69" />
-      <rect x="13.62" y="7.96" width="4.16" height="6.35" rx="0.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-obj-top" size={props.size ?? 24} />
 }
 
 export function IconObjAlignMiddle(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="6.23" y="6.23" width="4.16" height="11.55" rx="0.69" />
-      <rect x="13.62" y="8.77" width="4.16" height="6.47" rx="0.69" />
-      <path d="M 4.49 12 H 6.23 M 10.38 12 h 3.23 M 17.77 12 h 1.73" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-obj-middle" size={props.size ?? 24} />
 }
 
 export function IconObjAlignBottom(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.49 18.35 h 15.02" />
-      <rect x="6.23" y="5.65" width="4.16" height="10.4" rx="0.69" />
-      <rect x="13.62" y="9.69" width="4.16" height="6.35" rx="0.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="align-obj-bottom" size={props.size ?? 24} />
 }
 
 export function IconObjDistributeH(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 5.65 4.49 v 15.02 M 18.35 4.49 v 15.02" />
-      <rect x="9.92" y="6.4" width="4.16" height="11.21" rx="0.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="distribute-h" size={props.size ?? 24} />
 }
 
 export function IconObjDistributeV(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.49 5.65 h 15.02 M 4.49 18.35 h 15.02" />
-      <rect x="6.4" y="9.92" width="11.21" height="4.16" rx="0.69" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="distribute-v" size={props.size ?? 24} />
 }
 
 export function IconObjFlipH(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 12 4.49 v 15.02" strokeDasharray="2.4 2.1" />
-      <path d="M 9.1 6.9 v 10.2 h -4.4 z M 14.9 6.9 v 10.2 h 4.4 z" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="flip-h" size={props.size ?? 24} />
 }
 
 export function IconObjFlipV(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 4.49 12 h 15.02" strokeDasharray="2.4 2.1" />
-      <path d="M 6.9 9.1 h 10.2 v -4.4 z M 6.9 14.9 h 10.2 v 4.4 z" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="flip-v" size={props.size ?? 24} />
 }
 
 export function IconSwitchRowCol(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 6.27 9.88 A 6.47 6.47 0 0 1 17.1 7.64" />
-      <path d="M 17.73 4.53 v 3.36 H 14.37" />
-      <path d="M 17.73 14.12 A 6.47 6.47 0 0 1 6.9 16.36" />
-      <path d="M 6.27 19.47 v -3.36 h 3.36" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="switch-row-col" size={props.size ?? 24} />
 }
 
 export function IconEditChartData(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="5.3" y="5.3" width="10.15" height="10.15" rx="0.86" />
-      <path d="M 5.3 8.65 h 10.15 M 8.65 5.3 v 10.15" />
-      <path d="M 17.62 13.19 l 1.84 1.84 -4.64 4.64 -2.48 0.65 0.65 -2.48 z" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="edit-data" size={props.size ?? 24} />
 }
 
 export function IconChangeChartType(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 6.79 8.8 A 5.81 5.81 0 0 1 16.74 6.9" />
-      <path d="M 17.45 4.3 v 3.08 H 14.37" />
-      <rect x="5.6" y="13.9" width="2.96" height="5.45" fill="currentColor" stroke="none" />
-      <rect x="10.34" y="11.29" width="2.96" height="8.06" fill="currentColor" stroke="none" />
-      <rect x="15.08" y="12.59" width="2.96" height="6.75" fill="currentColor" stroke="none" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="change-chart-type" size={props.size ?? 24} />
 }
 
 // ── Animation effect icons (Animations tab; color comes from .rb-anim-* via currentColor) ──
@@ -2086,12 +1440,7 @@ export function IconPathZigzag(props: IconProps) {
 }
 
 export function IconCrop(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M8 4.75v11.25h11.25" />
-      <path d="M4.75 8H16v11.25" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="crop" size={props.size ?? 24} />
 }
 
 export function IconNoneX(props: IconProps) {
@@ -2159,32 +1508,15 @@ export function IconAiImage(props: IconProps) {
 }
 
 export function IconRotateRight(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 18.6 9.3 a 6.9 6.9 0 1 0 0.9 4.95" />
-      <path d="M 19.05 4.8 v 4.5 h -4.5" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="rotate-right" size={props.size ?? 24} />
 }
 
 export function IconRotateLeft(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M 5.4 9.3 a 6.9 6.9 0 1 1 -0.9 4.95" />
-      <path d="M 4.95 4.8 v 4.5 h 4.5" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="rotate-left" size={props.size ?? 24} />
 }
 
 export function IconReplacePicture(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="4.3" y="9.05" width="10.67" height="9.48" rx="0.95" />
-      <circle cx="7.38" cy="12" r="1.07" />
-      <path d="M 4.89 17.69 l 3.2 -3.2 2.25 2.25 1.67 -1.67 2.13 2.13" />
-      <path d="M 13.79 5.6 h 5.44 m 0 0 -2.01 -1.89 m 2.01 1.89 -2.01 1.89" />
-    </Svg>
-  )
+  return <CraftIcon set={CRAFT} name="change-picture" size={props.size ?? 24} />
 }
 
 /** Provider-independent assistant icon. */

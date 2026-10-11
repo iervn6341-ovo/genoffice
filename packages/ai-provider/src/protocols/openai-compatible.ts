@@ -5,7 +5,13 @@ import { opencodeSessionHeaders } from '../providers'
 import { modelEchoesReasoning } from '../registry'
 import type { AiChatResponse, AiProviderConfig } from '../types'
 import { AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS } from '../local'
-import { createStreamWatchdog, type StreamWatchdog } from '../watchdog'
+import { assertEndpointReachable } from '../reach'
+import {
+  AI_REASONING_STALL_MS,
+  AiReasoningStallError,
+  createStreamWatchdog,
+  type StreamWatchdog,
+} from '../watchdog'
 import {
   jsonBodyInsteadOfSse,
   parseToolInput,
@@ -134,9 +140,20 @@ export async function streamOpenAiCompatible(
   const wd = options.patientTimeouts
     ? createStreamWatchdog(cb.signal, AI_LOCAL_CONNECT_TIMEOUT_MS, AI_LOCAL_IDLE_TIMEOUT_MS)
     : createStreamWatchdog(cb.signal)
-  return wd.guard(() =>
-    openAiCompatibleTurn(baseUrl, config, system, messages, tools, maxTokens, cb, wd, options),
-  )
+  return wd.guard(async () => {
+    if (options.patientTimeouts) await assertEndpointReachable(baseUrl, wd.signal)
+    return openAiCompatibleTurn(
+      baseUrl,
+      config,
+      system,
+      messages,
+      tools,
+      maxTokens,
+      cb,
+      wd,
+      options,
+    )
+  })
 }
 
 async function openAiCompatibleTurn(
@@ -164,9 +181,12 @@ async function openAiCompatibleTurn(
     },
     body: JSON.stringify({
       model: config.model,
-      ...(options.useMaxCompletionTokens
-        ? { max_completion_tokens: maxTokens }
-        : { max_tokens: maxTokens }),
+      // 0 = no limit: leave the cap off and let the server decide
+      ...(maxTokens <= 0
+        ? {}
+        : options.useMaxCompletionTokens
+          ? { max_completion_tokens: maxTokens }
+          : { max_tokens: maxTokens }),
       messages: openAiMessages(system, messages, modelEchoesReasoning(config.model)),
       ...(tools.length > 0
         ? {
@@ -217,6 +237,9 @@ async function openAiCompatibleTurn(
     }
     pendingTools.clear()
   }
+  // thinking with no answer yet: when it started, and whether any answer/tool call has begun
+  let reasoningSince: number | undefined
+  let answering = false
   for await (const line of sseLines(response.body, onBytes)) {
     if (!line.startsWith('data:')) continue
     const payload = line.slice(5).trim()
@@ -253,7 +276,15 @@ async function openAiCompatibleTurn(
     const choice = event.choices?.[0]
     if (!choice) continue
     const reasoning = choice.delta?.reasoning_content ?? choice.delta?.reasoning
-    if (typeof reasoning === 'string' && reasoning) cb.onReasoningDelta?.(reasoning)
+    if (typeof reasoning === 'string' && reasoning) {
+      cb.onReasoningDelta?.(reasoning)
+      reasoningSince ??= Date.now()
+      if (!answering && Date.now() - reasoningSince > AI_REASONING_STALL_MS) {
+        wd.abort()
+        throw new AiReasoningStallError(Date.now() - reasoningSince)
+      }
+    }
+    if (choice.delta?.content || choice.delta?.tool_calls?.length) answering = true
     if (choice.delta?.content) {
       emitted = true
       cb.onDelta(choice.delta.content)

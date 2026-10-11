@@ -417,8 +417,17 @@ export interface TableRenderNode extends RenderNodeBase {
   gridY: number[]
   /** tblPr rtl="1": cell geometry is mirrored (logical column 1 rendered rightmost) */
   rtl?: boolean
-  /** tblPr header-row / banded-row toggles (for the Ribbon "Table Design" display) */
-  styleFlags?: { firstRow: boolean; bandRow: boolean }
+  /** tblPr region toggles (for the Ribbon "Table Design" display) */
+  styleFlags?: {
+    firstRow: boolean
+    bandRow: boolean
+    lastRow?: boolean
+    firstCol?: boolean
+    lastCol?: boolean
+    bandCol?: boolean
+  }
+  /** a:tableStyleId (a built-in GUID or a custom style), for the gallery's current pick */
+  styleId?: string
 }
 
 // ── Charts (precomputed draw primitives, coordinates relative to the chart box top-left, px) ──

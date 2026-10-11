@@ -83,12 +83,12 @@ test.describe('Home → Font extras on a selected text box', () => {
   test('Text Highlight: palette colour, the split button re-applies it, No Color removes it', async () => {
     const { s, launched } = await deckWithBox('Marked')
     try {
-      await s.locator('.rb-split-icon .rb-icon-caret').click()
+      await s.locator('.rb-split-icon .rb-icon-caret[aria-label="Text Highlight Color"]').click()
       await s.locator('.rb-highlight-grid button[data-tip="#00FF00"]').click()
       await expect
         .poll(async () => (await box(s)).runs[0]!.highlight?.toUpperCase())
         .toBe('#00FF00')
-      await s.locator('.rb-split-icon .rb-icon-caret').click()
+      await s.locator('.rb-split-icon .rb-icon-caret[aria-label="Text Highlight Color"]').click()
       await s.locator('.rb-highlight-pop button', { hasText: 'No Color' }).click()
       await expect.poll(async () => (await box(s)).runs[0]!.highlight).toBeNull()
       // the main half remembers the last colour
@@ -109,7 +109,7 @@ test.describe('Home → Font extras while typing', () => {
       await s.keyboard.press('Enter') // back into the box, caret at the end
       await s.waitForSelector('.slide-text-editor')
       for (let i = 0; i < 5; i++) await s.keyboard.press('Shift+ArrowLeft') // "world"
-      await s.locator('.rb-split-icon .rb-icon-caret').click()
+      await s.locator('.rb-split-icon .rb-icon-caret[aria-label="Text Highlight Color"]').click()
       await s.locator('.rb-highlight-grid button[data-tip="#FFFF00"]').click()
       // the editor keeps focus and the selection, so the next command hits the same word
       expect(await s.evaluate(() => window.getSelection()?.toString())).toBe('world')

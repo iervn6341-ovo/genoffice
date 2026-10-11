@@ -596,14 +596,54 @@ class FontRegistry {
   private parsed = new Map<string, OpentypeFontLike | null>()
   private indexed = false
 
-  private addFlatDir(dir: string, files: string[]): void {
+  /** Office-bundled copy of a family that ALSO exists as a system file under the same name
+   *  (Rockwell.ttf in DFonts vs Apple's Rockwell.ttc): key -> Office path. PowerPoint renders
+   *  with its own copy, and the two can differ in advances (Apple's Rockwell is ~8% wider). */
+  private officeAlt = new Map<string, string>()
+  private officeWinsCache = new Map<string, boolean>()
+
+  private addFlatDir(dir: string, files: string[], office = false): void {
     for (const name of files) {
       const m = /^(.+)\.(ttf|otf|ttc|otc)$/i.exec(name)
       if (!m) continue
       // Strip the variable-font axis suffix: NotoSansSC[wght].ttf -> notosanssc
       const key = norm(m[1]!.replace(/\[[^\]]*\]$/, ''))
       if (!this.index.has(key)) this.index.set(key, join(dir, name))
+      else if (office && !this.isPrivate(this.index.get(key)!) && !this.officeAlt.has(key)) {
+        this.officeAlt.set(key, join(dir, name))
+      }
     }
+  }
+
+  /** The file for a family key: the system one, unless PowerPoint's own bundled copy has
+   *  different advances (then PowerPoint's wins, as in PowerPoint). Identical metrics keep the
+   *  non-private system file (arial.ttf, calibri…). */
+  private pickPath(key: string): string | undefined {
+    const path = this.index.get(key)
+    const alt = this.officeAlt.get(key)
+    if (!path || !alt) return path
+    let wins = this.officeWinsCache.get(key)
+    if (wins === undefined) {
+      const width = (file: string): number | null => {
+        try {
+          const face = this.facesOf(file)[0]
+          const font = face ? this.parseFace(file, face.offset) : null
+          return font
+            ? font.getAdvanceWidth(
+                'Introduction (3/4) Efficient LLM Inference Over Heterogeneous Edge',
+                1000,
+              )
+            : null
+        } catch {
+          return null
+        }
+      }
+      const a = width(path)
+      const b = width(alt)
+      wins = a != null && b != null && Math.abs(a - b) / Math.max(a, b) > 0.005
+      this.officeWinsCache.set(key, wins)
+    }
+    return wins ? alt : path
   }
 
   private buildIndex(): void {
@@ -625,6 +665,7 @@ class FontRegistry {
     // One prefix each covers every scanned asset dir for the isPrivate check
     this.privateDirs.push(APPLE_FONT_ASSET_ROOT, APPLE_FONT_SUBSETS, EMBEDDED_FONT_DIR)
     flat.push(...appleFontAssetDirs())
+    const officeDirs = new Set(officeFontDirs())
     const tasks: ScanTask[] = flat.map((dir) => ({ kind: 'flat', dir }))
     const cloudBase = cloudFontBase()
     if (cloudBase) tasks.push({ kind: 'cloud', base: cloudBase, sub: 'CloudFonts' })
@@ -633,7 +674,7 @@ class FontRegistry {
       const r = results[i]
       if (!r) return
       if (task.kind === 'flat' && r.kind === 'flat') {
-        this.addFlatDir(task.dir, r.files)
+        this.addFlatDir(task.dir, r.files, officeDirs.has(task.dir))
         return
       }
       if (r.kind !== 'cloud') return
@@ -818,7 +859,7 @@ class FontRegistry {
       const base = norm(family)
       // Try style-variant files first, then fall back to regular (approximate widths still far better than heuristics)
       for (const suf of [...suffixes, '', 'regular']) {
-        const path = this.index.get(base + norm(suf))
+        const path = this.pickPath(base + norm(suf))
         if (!path) continue
         const hit = this.loadBest(path, base, style, origKey, reqWeight)
         if (hit && (!strict || faceMatches(hit.font)))
@@ -1190,6 +1231,25 @@ export function createSystemFontMetrics(): FontMetricsProvider {
       } else {
         // Same file+face as regular: register the regular face (even if no regular run
         // exists in the deck) so Chromium has a real face to synthesize bold/italic from.
+        privateFaces.set(`${base.family}|00`, {
+          family: base.family,
+          bold: false,
+          italic: false,
+          path: base.path,
+          offset: base.offset,
+        })
+      }
+      // A private bold/italic face registers a FontFace under the family name, and an author
+      // FontFace set SHADOWS the installed family entirely: a regular run would then be drawn
+      // with the bold/italic private face (heavy glyphs, wider than the regular metrics the
+      // layout measured, so the edit overlay wraps mid-word). When the regular face is a plain
+      // system file, register it too so the family keeps a real regular face.
+      if (
+        base &&
+        !registry.isPrivate(base.path) &&
+        !base.substituted &&
+        norm(base.family) === norm(raw.family)
+      ) {
         privateFaces.set(`${base.family}|00`, {
           family: base.family,
           bold: false,

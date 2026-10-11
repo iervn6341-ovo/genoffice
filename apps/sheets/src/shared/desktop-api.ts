@@ -2398,6 +2398,27 @@ export const workbookPrintResultSchema = z.union([
 ])
 export type WorkbookPrintResult = z.infer<typeof workbookPrintResultSchema>
 
+/// Printer choices from the renderer's print sheet; without `printer` the
+/// system dialog opens.
+export const workbookPrintJobSchema = z
+  .object({
+    printer: z.string().max(512).optional(),
+    copies: z.number().int().min(1).max(999).optional(),
+    duplex: z.enum(['off', 'long', 'short']).optional(),
+    collate: z.boolean().optional(),
+    /// Excel's Pages from / to (1-based, inclusive).
+    pageFrom: z.number().int().min(1).max(100_000).optional(),
+    pageTo: z.number().int().min(1).max(100_000).optional(),
+  })
+  .strict()
+export type WorkbookPrintJob = z.infer<typeof workbookPrintJobSchema>
+
+export interface WorkbookPrinter {
+  readonly name: string
+  readonly displayName: string
+  readonly isDefault: boolean
+}
+
 /// CSV export of the active sheet: the renderer serializes display values,
 /// the main process runs the loss warning + save dialog and writes the bytes.
 export const workbookExportCsvRequestSchema = z
@@ -2577,6 +2598,12 @@ export interface DesktopApi {
    * press for dismissing open popovers
    */
   onChromePressed(handler: () => void): () => void
+  /** File view: recent spreadsheet files from the shell-wide recent list */
+  getRecentWorkbooks?(): Promise<Array<{ path: string; name: string }>>
+  /** File view: open a path through the shell (a new tab, routed by extension) */
+  openPathInShell?(path: string): Promise<void>
+  /** File view: open a blank workbook in a new tab */
+  newBlankWorkbookTab?(): Promise<void>
   selectWorkbook(): Promise<WorkbookFile | null>
   /** multi-select xlsx picker; each file opens a secondary sidecar session for merge reads */
   selectWorkbooksForMerge(): Promise<WorkbookFile[] | null>
@@ -2610,7 +2637,12 @@ export interface DesktopApi {
     baseName: string,
   ): Promise<{ renamed: boolean; name?: string }>
   exportPdf(request: WorkbookExportPdfRequest): Promise<WorkbookExportPdfResult>
-  printWorkbook(request: WorkbookExportPdfRequest): Promise<WorkbookPrintResult>
+  printWorkbook(
+    request: WorkbookExportPdfRequest,
+    job?: WorkbookPrintJob,
+  ): Promise<WorkbookPrintResult>
+  /// Installed printers for the print sheet
+  listPrinters(): Promise<WorkbookPrinter[]>
   exportCsv(request: WorkbookExportCsvRequest): Promise<WorkbookExportCsvResult>
   /// First Save of a CSV session: native "keep this format?" dialog.
   confirmCsvSave(): Promise<'csv' | 'xlsx' | 'cancel'>

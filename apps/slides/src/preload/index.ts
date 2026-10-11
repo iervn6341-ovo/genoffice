@@ -45,6 +45,7 @@ import type {
   SetAdvanceTimesOp,
   SetAnimationsOp,
   SetSlideHiddenOp,
+  SetTransitionDetailOp,
   SetTransitionOp,
   SectionInfo,
   AddSectionOp,
@@ -196,6 +197,7 @@ const api: SlidesApi = {
       autofit?: 'none' | 'shrink' | 'resize'
       insets?: Partial<{ l: number; t: number; r: number; b: number }>
       wrap?: boolean
+      columns?: { num: number; spacing?: number }
     }
   }) => ipcRenderer.invoke('slides:set-text-body-props', op),
   setEffects: (op: { slideIndex: number; sourceId: string; effects: SetEffectsPatch }) =>
@@ -252,6 +254,7 @@ const api: SlidesApi = {
   editTableStyle: (op: EditTableStyleOp) => ipcRenderer.invoke('slides:edit-table-style', op),
   editChart: (op: EditChartOp) => ipcRenderer.invoke('slides:edit-chart', op),
   getChartColorSchemes: () => ipcRenderer.invoke('slides:chart-color-schemes'),
+  getTableStyleGallery: (flags) => ipcRenderer.invoke('slides:table-style-gallery', flags),
   getChartData: (slideIndex: number, sourceId: string) =>
     ipcRenderer.invoke('slides:get-chart-data', slideIndex, sourceId),
   copyElements: (op: CopyElementsOp) => ipcRenderer.invoke('slides:copy-elements', op),
@@ -283,6 +286,10 @@ const api: SlidesApi = {
   applyTheme: (op: ApplyThemeOp) => ipcRenderer.invoke('slides:apply-theme', op),
   setTransition: (op: SetTransitionOp) => ipcRenderer.invoke('slides:set-transition', op),
   getTransition: (slideIndex: number) => ipcRenderer.invoke('slides:get-transition', slideIndex),
+  getTransitionDetail: (slideIndex: number) =>
+    ipcRenderer.invoke('slides:get-transition-detail', slideIndex),
+  setTransitionDetail: (op: SetTransitionDetailOp) =>
+    ipcRenderer.invoke('slides:set-transition-detail', op),
   setAdvanceTimes: (op: SetAdvanceTimesOp) => ipcRenderer.invoke('slides:set-advance-times', op),
   getAnimations: (slideIndex: number) => ipcRenderer.invoke('slides:get-animations', slideIndex),
   getShapeKeys: (slideIndex: number) => ipcRenderer.invoke('slides:get-shape-keys', slideIndex),
@@ -316,6 +323,7 @@ const api: SlidesApi = {
     ipcRenderer.invoke('slides:pick-export-pdf-path', defaultName),
   exportPdf: (op: ExportPdfOp) => ipcRenderer.invoke('slides:export-pdf', op),
   printSlides: (op: PrintSlidesOp) => ipcRenderer.invoke('slides:print', op),
+  listPrinters: () => ipcRenderer.invoke('slides:list-printers'),
   save: () => ipcRenderer.invoke('slides:save'),
   saveAs: (defaultName: string) => ipcRenderer.invoke('slides:save-as', defaultName),
   onCloseSaveRequest: (handler: () => void) => {

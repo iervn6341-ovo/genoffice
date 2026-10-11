@@ -1,5 +1,6 @@
 import { aiFetch } from './fetch'
 import { parseModelList } from './local'
+import { describeNetworkError } from './reach'
 
 export type ListModelsResult = { ok: true; models: string[] } | { ok: false; error: string }
 
@@ -57,7 +58,7 @@ export async function listOpenAiCompatibleModels(
         error: `No response from ${root} within ${LIST_MODELS_TIMEOUT_MS / 1000}s`,
       }
     }
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false, error: describeNetworkError(e) }
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', onParentAbort)

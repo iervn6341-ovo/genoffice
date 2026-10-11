@@ -38,7 +38,10 @@ class Reader {
     this.need(4)
     const b = this.buf
     const v =
-      ((b[this.pos]! << 24) | (b[this.pos + 1]! << 16) | (b[this.pos + 2]! << 8) | b[this.pos + 3]!) >>>
+      ((b[this.pos]! << 24) |
+        (b[this.pos + 1]! << 16) |
+        (b[this.pos + 2]! << 8) |
+        b[this.pos + 3]!) >>>
       0
     this.pos += 4
     return v
@@ -289,7 +292,8 @@ function decodeSimpleGlyph(
     const coords = new Reader(sIn.bytes(more))
     const dx = coords.readNBits(enc[1])
     const dy = coords.readNBits(enc[2])
-    if (coords.pos !== coords.size || coords.bitPos !== 0) throw new MtxError('triplet width mismatch')
+    if (coords.pos !== coords.size || coords.bitPos !== 0)
+      throw new MtxError('triplet width mismatch')
     xs[i] = i16(enc[5] * (dx + enc[3]))
     ys[i] = i16(enc[6] * (dy + enc[4]))
     curX = i16(curX + xs[i]!)
@@ -348,7 +352,8 @@ function decodeCompositeGlyph(streams: [Reader, Reader, Reader], out: Writer): v
     out.u16(flags)
     out.bytes(sIn.bytes(2)) // glyph index
     out.bytes(sIn.bytes(flags & ARGS_WORDS ? 4 : 2))
-    const transform = flags & HAVE_2_BY_2 ? 8 : flags & HAVE_XY_SCALE ? 4 : flags & HAVE_SCALE ? 2 : 0
+    const transform =
+      flags & HAVE_2_BY_2 ? 8 : flags & HAVE_XY_SCALE ? 4 : flags & HAVE_SCALE ? 2 : 0
     if (transform) out.bytes(sIn.bytes(transform))
   } while (flags & MORE_COMPONENTS)
   if (flags & HAVE_INSTR) {
@@ -569,7 +574,11 @@ export function sanitizeCmap(data: Uint8Array): Uint8Array {
 
 /** Rebuild an sfnt from the three inflated CTF streams (parseCTF + dumpContainer). */
 export function ctfToSfnt(streams: [Uint8Array, Uint8Array, Uint8Array]): Uint8Array {
-  const rs: [Reader, Reader, Reader] = [new Reader(streams[0]), new Reader(streams[1]), new Reader(streams[2])]
+  const rs: [Reader, Reader, Reader] = [
+    new Reader(streams[0]),
+    new Reader(streams[1]),
+    new Reader(streams[2]),
+  ]
   const s0 = rs[0]
   s0.u32() // scaler type
   const numTables = s0.u16()

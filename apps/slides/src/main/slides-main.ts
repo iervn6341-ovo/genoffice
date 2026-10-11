@@ -13,6 +13,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  screen,
   session as electronSession,
   shell,
   webContents,
@@ -44,6 +45,8 @@ import {
   installRendererProtocol,
   registerRendererScheme,
   rendererUrl,
+  directPrintOptions,
+  listSystemPrinters,
 } from '@genoffice/electron-utils'
 import {
   resolveGroupChildId,
@@ -89,6 +92,7 @@ import {
   getSlideNotes,
   getSlideNotesParagraphs,
   getSlideTransition,
+  getSlideTransitionDetail,
   elementSpid,
   getSlideAnimations,
   listEmbeddedFonts,
@@ -113,6 +117,9 @@ import {
   type Paragraph,
   type Slide,
   type TextElement,
+  openedDeckTheme,
+  tableStyleGallery,
+  type TableStyleFlags,
 } from '@genoffice/pptx-engine'
 import {
   buildRenderSlide,
@@ -192,6 +199,7 @@ import type {
   SetNotesOp,
   NotesParagraphView,
   SetSlideHiddenOp,
+  SetTransitionDetailOp,
   SetTransitionOp,
   AddSectionOp,
   RenameSectionOp,
@@ -202,6 +210,7 @@ import type {
   ApplyTxnOp,
   ApplyTxnResult,
   AnimationItem,
+  TransitionDetail,
   ShapeKey,
   SetEffectsPatch,
 } from '../shared/ipc'
@@ -3001,6 +3010,24 @@ export function registerSlidesIpc(): void {
     return { slide: rebuilt, sourceId: newId }
   })
 
+  // The ribbon's table style gallery: every built-in style as a small painted grid under the
+  // table's current region toggles, resolved against this deck's theme
+  ipcMain.handle(
+    'slides:table-style-gallery',
+    (e, flags: Partial<Record<keyof TableStyleFlags, boolean>>) => {
+      const session = sessions.get(e.sender.id)
+      if (!session) return null
+      return tableStyleGallery(openedDeckTheme(session.opened), {
+        firstRow: flags?.firstRow === true,
+        lastRow: flags?.lastRow === true,
+        firstCol: flags?.firstCol === true,
+        lastCol: flags?.lastCol === true,
+        bandRow: flags?.bandRow === true,
+        bandCol: flags?.bandCol === true,
+      })
+    },
+  )
+
   ipcMain.handle('slides:chart-color-schemes', (e) => {
     const session = sessions.get(e.sender.id)
     return session ? chartColorSchemes(session.opened) : null
@@ -3124,6 +3151,7 @@ export function registerSlidesIpc(): void {
           autofit?: 'none' | 'shrink' | 'resize'
           insets?: Partial<{ l: number; t: number; r: number; b: number }>
           wrap?: boolean
+          columns?: { num: number; spacing?: number }
         }
       },
     ) => {
@@ -3776,6 +3804,31 @@ export function registerSlidesIpc(): void {
     return r !== null
   })
 
+  ipcMain.handle('slides:get-transition-detail', (e, slideIndex: number): TransitionDetail => {
+    const session = sessions.get(e.sender.id)
+    const slide = session?.opened.deck.slides[slideIndex]
+    if (!slide) return { kind: 'none', durationMs: null, advClick: true, advTm: null }
+    return getSlideTransitionDetail(slide) as TransitionDetail
+  })
+
+  ipcMain.handle('slides:set-transition-detail', (e, op: SetTransitionDetailOp) => {
+    const session = sessions.get(e.sender.id)
+    if (!session) return false
+    const slides = session.opened.deck.slides
+    const idxs =
+      op.slideIndex === -1 ? slides.map((_, i) => i) : slides[op.slideIndex] ? [op.slideIndex] : []
+    if (idxs.length === 0) return false
+    const { advTm, ...rest } = op.detail
+    const ops: Op[] = []
+    for (const i of idxs) {
+      if (Object.keys(rest).length)
+        ops.push({ op: 'setTransitionDetail', target: { slide: i }, detail: rest })
+      if (advTm !== undefined) ops.push({ op: 'setAdvanceTime', target: { slide: i }, ms: advTm })
+    }
+    if (ops.length === 0) return false
+    return sessionTxn(session, { ops }) !== null
+  })
+
   ipcMain.handle('slides:get-transition', (e, slideIndex: number) => {
     const session = sessions.get(e.sender.id)
     const slide = session?.opened.deck.slides[slideIndex]
@@ -3831,6 +3884,7 @@ export function registerSlidesIpc(): void {
         delayMs: a.delayMs,
         ...(a.motionPath != null ? { motionPath: a.motionPath } : {}),
         ...(a.paragraph != null ? { paragraph: a.paragraph } : {}),
+        ...(a.after ? { after: a.after } : {}),
       })
     }
     return out
@@ -4196,6 +4250,16 @@ export function registerSlidesIpc(): void {
         ...(op.notes ? { notes: op.notes } : {}),
         ...(op.orientation ? { orientation: op.orientation } : {}),
         ...(op.frame ? { frame: true } : {}),
+        ...(op.output && op.output !== 'color' ? { output: op.output } : {}),
+        ...(op.paper ? { paper: op.paper } : {}),
+        ...(op.outline ? { outline: op.outline } : {}),
+        ...(op.comments ? { comments: op.comments } : {}),
+        ...(op.commentsTitle ? { commentsTitle: op.commentsTitle } : {}),
+        ...(op.scaleFit ? { scaleFit: true } : {}),
+        ...(op.perSheet ? { perSheet: op.perSheet } : {}),
+        ...(op.direction ? { direction: op.direction } : {}),
+        ...(op.rotate180 ? { rotate180: true } : {}),
+        ...(op.flipH ? { flipH: true } : {}),
       })
       const owner = BrowserWindow.fromWebContents(e.sender) ?? dialogParent()
       const win = new BrowserWindow({
@@ -4226,7 +4290,7 @@ export function registerSlidesIpc(): void {
         }
         const result = await new Promise<{ success: boolean; failureReason: string }>((resolve) => {
           win.webContents.print(
-            { silent: false, printBackground: true },
+            { ...directPrintOptions(op), printBackground: true },
             (success, failureReason) => resolve({ success, failureReason }),
           )
         })
@@ -4244,6 +4308,8 @@ export function registerSlidesIpc(): void {
       }
     },
   )
+
+  ipcMain.handle('slides:list-printers', (e) => listSystemPrinters(e.sender))
 
   ipcMain.handle('slides:recent', () => readRecent())
 
@@ -4291,9 +4357,18 @@ export function registerSlidesIpc(): void {
       if (process.platform !== 'darwin' && standaloneWindows.has(wc.id)) {
         win.setTitleBarOverlay({ color: '#000000', symbolColor: '#ffffff', height: 40 })
       }
+      // The shell window carries a macOS vibrancy material; a full-screen translucent window
+      // makes WindowServer blend the whole screen against what is behind it on every frame,
+      // which drags the mouse and the Dock animation while the (opaque, black) show runs.
+      if (process.platform === 'darwin') win.setVibrancy(null)
       if (process.platform === 'darwin' && !win.isFullScreen()) {
         win.setFullScreenable(false)
-        if (!win.isSimpleFullScreen()) win.setSimpleFullScreen(true)
+        if (!win.isSimpleFullScreen()) {
+          // setSimpleFullScreen animates the frame change (~350 ms of black before the
+          // show appears); jumping to the display bounds first leaves it nothing to animate
+          win.setBounds(screen.getDisplayMatching(win.getBounds()).bounds, false)
+          win.setSimpleFullScreen(true)
+        }
       }
       // The snap can leave the window's first responder on the shell chrome view, so
       // keys land in the tab-strip renderer (Esc dead until a click on the show).
@@ -4315,6 +4390,8 @@ export function registerSlidesIpc(): void {
         if (process.platform === 'darwin') {
           if (win.isSimpleFullScreen()) win.setSimpleFullScreen(false)
           win.setFullScreenable(true)
+          // same material the shell creates its window with (apps/shell/src/main/index.ts)
+          win.setVibrancy('sidebar')
         }
       }, 150)
     }

@@ -5657,6 +5657,7 @@ async function parseCompatibilityMode(zip: JSZip): Promise<number> {
 /** settings.xml w:autoHyphenation + w:defaultTabStop (absent = Word's 720 twips) */
 async function parseLayoutSettings(zip: JSZip): Promise<{
   autoHyphenation?: boolean
+  mirrorMargins?: boolean
   defaultTabStopTwips?: number
   balanceDbcsSpacing?: boolean
   compressPunctuation?: boolean
@@ -5669,6 +5670,7 @@ async function parseLayoutSettings(zip: JSZip): Promise<{
   const csc = /<w:characterSpacingControl[^>]*w:val="(\w+)"/.exec(xml)
   return {
     ...(xmlFlagOn(xml, 'w:autoHyphenation') ? { autoHyphenation: true } : {}),
+    ...(xmlFlagOn(xml, 'w:mirrorMargins') ? { mirrorMargins: true } : {}),
     ...(tab ? { defaultTabStopTwips: parseInt(tab[1], 10) } : {}),
     ...(xmlFlagOn(xml, 'w:balanceSingleByteDoubleByteWidth') ? { balanceDbcsSpacing: true } : {}),
     ...(csc && csc[1].startsWith('compressPunctuation') ? { compressPunctuation: true } : {}),

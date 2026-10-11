@@ -1473,3 +1473,23 @@ describe('paragraph direction rtl: overlay marks + patch collection', () => {
     expect(collectParagraphFormatPatches(out)).toEqual([{ index: 1, patch: { rtl: true } }])
   })
 })
+
+describe('editor line pitch matches the canvas when line advances differ', () => {
+  it('keeps run boxes out of the line box and gives the first line its own advance', () => {
+    const lines = layout([{ runs: [{ text: 'aaaa bbbb cccc dddd eeee ffff' }] }], 80).lines
+    // the first line is taller than the continuation line (a larger space run lifts only it)
+    const first = lines[0]!
+    const tall = [
+      { ...first, advance: 69, paraStart: true },
+      { ...first, advance: 57, paraStart: false },
+    ]
+    const div = document.createElement('div')
+    document.body.appendChild(div)
+    populateEditorDom(div, tall)
+    const p = div.firstElementChild as HTMLElement
+    expect(p.style.lineHeight).toBe('57px')
+    expect(p.style.getPropertyValue('--first-line-h')).toBe('69px')
+    expect((p.querySelector('[data-run-container]') as HTMLElement).style.lineHeight).toBe('0')
+    div.remove()
+  })
+})

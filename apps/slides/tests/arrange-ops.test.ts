@@ -216,6 +216,53 @@ describe('setTableStyle with a built-in style', () => {
     })
   })
 
+  it('defines the style in tableStyles.xml so a populated part does not leave it unstyled', () => {
+    const tbl = {
+      id: addTable(opened, 0, { rows: 2, cols: 2, offset: box(0, 3000000) })!.elementId,
+    }
+    // a custom preset first: the part now holds explicit definitions
+    expect(
+      apply([{ op: 'setTableStyle', target: { slide: 0, el: tbl.id }, styleName: 'zebraBlue' }])
+        .applied,
+    ).toBe(true)
+    const r = apply([
+      {
+        op: 'setTableStyle',
+        target: { slide: 0, el: tbl.id },
+        styleId: 'Medium Style 2 - Accent 1',
+      },
+    ])
+    expect(r.applied).toBe(true)
+    const part = opened.archive.readText('ppt/tableStyles.xml')!
+    expect(part).toContain('styleId="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"')
+    expect(part).toContain('styleName="Medium Style 2 - Accent 1"')
+  })
+
+  it('edge-wise borders go through the op with a pen, and bad values are guided', () => {
+    const tbl = {
+      id: addTable(opened, 0, { rows: 3, cols: 2, offset: box(0, 3000000) })!.elementId,
+    }
+    const ok = apply([
+      {
+        op: 'setTableStyle',
+        target: { slide: 0, el: tbl.id },
+        borderMode: 'bottom',
+        borderColor: '#FF0000',
+        borderWidthPt: 2.25,
+        borderDash: 'dash',
+        cells: [{ row: 0, col: 0 }],
+      },
+    ])
+    expect(ok.applied).toBe(true)
+    const xml = find(tbl.id).anchor.originalXml
+    expect(xml).toContain('<a:prstDash val="dash"/>')
+    expect(xml).toContain('w="28575"')
+    const bad = apply([
+      { op: 'setTableStyle', target: { slide: 0, el: tbl.id }, borderMode: 'sideways' },
+    ])
+    expect(bad.failures![0]!.error).toContain('borderMode must be one of')
+  })
+
   it('lists the gallery when the name is unknown and accepts a GUID', () => {
     const tbl = {
       id: addTable(opened, 0, { rows: 2, cols: 2, offset: box(0, 3000000) })!.elementId,

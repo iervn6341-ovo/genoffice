@@ -5,6 +5,7 @@
  * fresh per call (wrapped in useCallback with the original dependency lists)
  * so state never goes stale.
  */
+import type { DocFlags } from './editor/layout-history'
 import type { Editor } from '@tiptap/core'
 import { history } from '@tiptap/pm/history'
 import {
@@ -152,6 +153,10 @@ export interface FileActionContext {
   setTitlePgDirty: (dirty: boolean) => void
   setEvenOddHf: (value: boolean) => void
   setEvenOddHfDirty: (dirty: boolean) => void
+  docFlags: DocFlags
+  docFlagsDirty: boolean
+  setDocFlags: (value: DocFlags) => void
+  setDocFlagsDirty: (dirty: boolean) => void
   setHfView: (view: HfView) => void
   pgNumEdit: { fmt?: string; start?: number } | null
   pgNumDirtySections: number[]
@@ -408,6 +413,12 @@ export async function loadFile(
     ctx.setTitlePgDirty(false)
     ctx.setEvenOddHf(parsed.evenAndOddHeaders ?? false)
     ctx.setEvenOddHfDirty(false)
+    ctx.setDocFlags({
+      autoHyphenation: parsed.autoHyphenation ?? false,
+      mirrorMargins: parsed.mirrorMargins ?? false,
+      paragraphSpacing: null,
+    })
+    ctx.setDocFlagsDirty(false)
     ctx.setHfView('default')
     ctx.setShowComments(hasUnanchoredComments(parsed.comments, parsed.blocks))
     ctx.setComments(parsed.comments)
@@ -703,6 +714,8 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
         : undefined,
     titlePg: ctx.titlePgDirty ? ctx.titlePg : undefined,
     evenAndOddHeaders: ctx.evenOddHfDirty ? ctx.evenOddHf : undefined,
+    autoHyphenation: ctx.docFlagsDirty ? ctx.docFlags.autoHyphenation : undefined,
+    mirrorMargins: ctx.docFlagsDirty ? ctx.docFlags.mirrorMargins : undefined,
     partXml: Object.keys(partXml).length > 0 ? partXml : undefined,
     partBinary: Object.keys(partBinary).length > 0 ? partBinary : undefined,
     comments: ctx.commentsDirty ? ctx.comments : undefined,
@@ -1063,6 +1076,12 @@ async function saveOnce(
     ctx.setTitlePgDirty(false)
     ctx.setEvenOddHf(reparsed.evenAndOddHeaders ?? false)
     ctx.setEvenOddHfDirty(false)
+    ctx.setDocFlags({
+      autoHyphenation: reparsed.autoHyphenation ?? false,
+      mirrorMargins: reparsed.mirrorMargins ?? false,
+      paragraphSpacing: null,
+    })
+    ctx.setDocFlagsDirty(false)
     ctx.setComments(reparsed.comments)
     ctx.setCommentsDirty(false)
     ctx.setWatermark(reparsed.watermarkText ?? null)

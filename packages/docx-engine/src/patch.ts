@@ -150,6 +150,10 @@ export interface SaveOptions {
   sectionHf?: Array<{ lastBlockIndex: number; kind: 'header' | 'footer'; hf: HeaderFooter }>
   /** "different odd & even pages": set/remove settings.xml w:evenAndOddHeaders */
   evenAndOddHeaders?: boolean
+  /** automatic hyphenation: set/remove settings.xml w:autoHyphenation (undefined keeps the file's value) */
+  autoHyphenation?: boolean
+  /** mirrored margins: set/remove settings.xml w:mirrorMargins (undefined keeps the file's value) */
+  mirrorMargins?: boolean
   /**
    * Inject the newly created header/footer references into EVERY body sectPr
    * that has none (not just the trailing one). Generated multi-section
@@ -374,6 +378,8 @@ export async function saveDocx(
     options.numbering === undefined &&
     (options.styleUpserts === undefined || options.styleUpserts.length === 0) &&
     options.evenAndOddHeaders === undefined &&
+    options.autoHyphenation === undefined &&
+    options.mirrorMargins === undefined &&
     options.comments === undefined &&
     options.protection === undefined &&
     options.writeProtection === undefined &&
@@ -1150,7 +1156,9 @@ export async function saveDocx(
     options.protection !== undefined ||
     options.writeProtection !== undefined ||
     options.removePersonalInfo !== undefined ||
-    options.evenAndOddHeaders !== undefined
+    options.evenAndOddHeaders !== undefined ||
+    options.autoHyphenation !== undefined ||
+    options.mirrorMargins !== undefined
   ) {
     const file = zip.file(settingsPath)
     let xml: string
@@ -1192,6 +1200,14 @@ export async function saveDocx(
     }
     if (options.evenAndOddHeaders !== undefined) {
       xml = applyEvenAndOddHeaders(xml, options.evenAndOddHeaders)
+      touched = true
+    }
+    if (options.autoHyphenation !== undefined) {
+      xml = applySettingsFlag(xml, 'autoHyphenation', options.autoHyphenation)
+      touched = true
+    }
+    if (options.mirrorMargins !== undefined) {
+      xml = applySettingsFlag(xml, 'mirrorMargins', options.mirrorMargins)
       touched = true
     }
     if (touched) settingsXml = xml
@@ -1931,6 +1947,126 @@ async function scrubPersonalMetadata(zip: JSZip): Promise<void> {
     if (isPeople) scrubbed = scrubPeopleMetadata(scrubbed)
     if (scrubbed !== original) zip.file(name, scrubbed, { date: entry.date })
   }
+}
+
+/** CT_Settings child order (ECMA-376 17.15.1.78), the part of it a flag can land between */
+const SETTINGS_ORDER = [
+  'writeProtection',
+  'view',
+  'zoom',
+  'removePersonalInformation',
+  'removeDateAndTime',
+  'doNotDisplayPageBoundaries',
+  'displayBackgroundShape',
+  'printPostScriptOverText',
+  'printFractionalCharacterWidth',
+  'printFormsData',
+  'embedTrueTypeFonts',
+  'embedSystemFonts',
+  'saveSubsetFonts',
+  'saveFormsData',
+  'mirrorMargins',
+  'alignBordersAndEdges',
+  'bordersDoNotSurroundHeader',
+  'bordersDoNotSurroundFooter',
+  'gutterAtTop',
+  'hideSpellingErrors',
+  'hideGrammaticalErrors',
+  'activeWritingStyle',
+  'proofState',
+  'formsDesign',
+  'attachedTemplate',
+  'linkStyles',
+  'stylePaneFormatFilter',
+  'stylePaneSortMethod',
+  'documentType',
+  'mailMerge',
+  'revisionView',
+  'trackRevisions',
+  'doNotTrackMoves',
+  'doNotTrackFormatting',
+  'documentProtection',
+  'autoFormatOverride',
+  'styleLockTheme',
+  'styleLockQFSet',
+  'defaultTabStop',
+  'autoHyphenation',
+  'consecutiveHyphenLimit',
+  'hyphenationZone',
+  'doNotHyphenateCaps',
+  'showEnvelope',
+  'summaryLength',
+  'clickAndTypeStyle',
+  'defaultTableStyle',
+  'evenAndOddHeaders',
+  'bookFoldRevPrinting',
+  'bookFoldPrinting',
+  'bookFoldPrintingSheets',
+  'drawingGridHorizontalSpacing',
+  'drawingGridVerticalSpacing',
+  'displayHorizontalDrawingGridEvery',
+  'displayVerticalDrawingGridEvery',
+  'doNotUseMarginsForDrawingGridOrigin',
+  'drawingGridHorizontalOrigin',
+  'drawingGridVerticalOrigin',
+  'doNotShadeFormData',
+  'noPunctuationKerning',
+  'characterSpacingControl',
+  'printTwoOnOne',
+  'strictFirstAndLastChars',
+  'noLineBreaksAfter',
+  'noLineBreaksBefore',
+  'savePreviewPicture',
+  'doNotValidateAgainstSchema',
+  'saveInvalidXml',
+  'ignoreMixedContent',
+  'alwaysShowPlaceholderText',
+  'doNotDemarcateInvalidXml',
+  'saveXmlDataOnly',
+  'useXSLTWhenSaving',
+  'saveThroughXslt',
+  'showXMLTags',
+  'alwaysMergeEmptyNamespace',
+  'updateFields',
+  'hdrShapeDefaults',
+  'footnotePr',
+  'endnotePr',
+  'compat',
+  'docVars',
+  'rsids',
+  'mathPr',
+  'attachedSchema',
+  'themeFontLang',
+  'clrSchemeMapping',
+  'doNotIncludeSubdocsInStats',
+  'doNotAutoCompressPictures',
+  'forceUpgrade',
+  'captions',
+  'readModeInkLockDown',
+  'smartTagType',
+  'schemaLibrary',
+  'shapeDefaults',
+  'doNotEmbedSmartTags',
+  'decimalSymbol',
+  'listSeparator',
+]
+
+/**
+ * Set or remove an on/off settings.xml flag (`<w:name/>`), placing a new one before the first
+ * later CT_Settings child so Word's strict sequence order holds.
+ */
+export function applySettingsFlag(xml: string, name: string, on: boolean): string {
+  const out = xml.replace(new RegExp(`<w:${name}\\b[^>]*/>`), '')
+  if (!on) return out
+  const tag = `<w:${name}/>`
+  const after = SETTINGS_ORDER.slice(SETTINGS_ORDER.indexOf(name) + 1)
+  let at = -1
+  for (const child of after) {
+    const m = new RegExp(`<w:${child}[\\s/>]`).exec(out)
+    if (m && (at < 0 || m.index < at)) at = m.index
+  }
+  if (at >= 0) return `${out.slice(0, at)}${tag}${out.slice(at)}`
+  return out.replace(/<\/w:settings>/, `${tag}</w:settings>`)
 }
 
 /** set or remove <w:titlePg/> ("different first page"), before w:docGrid per schema order */

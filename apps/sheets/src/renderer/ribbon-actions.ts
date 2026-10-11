@@ -65,6 +65,7 @@ import {
 import { applyShowFormulasView, formulaViewSheets } from './formula-view'
 import { t } from './i18n/locale'
 import { mergeWorkbooksIntoCurrent } from './merge-workbooks'
+import { runAsOneUndoStep } from './undo-group'
 import {
   handleOpenSlicerPicker,
   handleOpenTimelinePicker,
@@ -88,6 +89,7 @@ import {
 } from './univer-sync'
 import {
   BORDER_COMMAND_TYPES,
+  BORDER_COMPOUND_PRESETS,
   type ActiveWorkbook,
   type LazyWorkbookState,
   type UniverRuntime,
@@ -338,7 +340,10 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
       // The sheet clipboard implementation registers on the shared UI
       // command ids; paste falls back to the internal copy cache when the
       // Clipboard API is unavailable.
-      void runtime.univerAPI.executeCommand(`univer.command.${command}`)
+      // An explicit params object is required: the permission pre-check reads `params.value`, so a
+      // bare call threw "Cannot read properties of undefined (reading 'value')" and the ribbon
+      // Paste button silently did nothing (same trap as the CF / DV panels below).
+      void runtime.univerAPI.executeCommand(`univer.command.${command}`, {})
       return
     case 'paste-special:value':
       // Excel's Paste Special: Univer ships each variant as its own sheet
@@ -1071,6 +1076,17 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     )
     return
   }
+  if (command.startsWith('cf-open:')) {
+    // Excel's Conditional Formatting menu: Univer's panel opens preset to the chosen kind
+    // (1 highlight cells, 3 new rule, 4 top/bottom, 5 formula, 6 color scale, 7 data bar,
+    // 8 icon set, 2 manage list); 9 / 10 clear the selection / the whole sheet.
+    const kind = Number(command.slice('cf-open:'.length))
+    if (Number.isInteger(kind) && kind >= 1 && kind <= 10)
+      void runtime.univerAPI.executeCommand('sheet.operation.open.conditional.formatting.panel', {
+        value: kind,
+      })
+    return
+  }
   if (command.startsWith('cell-style:')) {
     const presets = CELL_STYLE_PRESETS[command.slice('cell-style:'.length)]
     const range = runtime.univerAPI.getActiveWorkbook()?.getActiveRange()
@@ -1078,7 +1094,10 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
       ctx.setMessage(t('appSelectCellsFirst'))
       return
     }
-    for (const patch of presets) applyFormatPatchToRange(range, patch)
+    // a cell style is several commands (fill, font, borders...): one ⌘Z takes back the whole style
+    runAsOneUndoStep(runtime, () => {
+      for (const patch of presets) applyFormatPatchToRange(range, patch)
+    })
     ctx.setMessage(t('appCellStyleApplied'))
     return
   }
@@ -1535,12 +1554,13 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
             return
           }
         }
-        for (let column = startColumn; column < startColumn + range.getWidth(); column += 1) {
-          const letter = columnLabel(column)
-          worksheet
-            .getRange(lastRow + 1, column)
-            .setFormula(`=${argument}(${letter}${startRow + 1}:${letter}${lastRow + 1})`)
-        }
+        // one write for the whole result row: a setFormula per column was a separate undo
+        // step each, so a single ⌘Z took back only the last column's total
+        const formulas = Array.from({ length: range.getWidth() }, (_x, offset) => {
+          const letter = columnLabel(startColumn + offset)
+          return `=${argument}(${letter}${startRow + 1}:${letter}${lastRow + 1})`
+        })
+        worksheet.getRange(lastRow + 1, startColumn, 1, formulas.length).setFormulas([formulas])
         ctx.setMessage(t('appAutofnInserted', { fn: argument }))
         return
       }
@@ -1852,6 +1872,21 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
         return
       }
       case 'border': {
+        const compound = BORDER_COMPOUND_PRESETS[argument]
+        if (compound) {
+          const [colorOnly = ''] = extra.split(':')
+          const color = /^#[0-9a-fA-F]{6}$/.test(colorOnly) ? colorOnly : '#000000'
+          // several edges, one ⌘Z
+          runAsOneUndoStep(runtime, () => {
+            for (const edge of compound)
+              range.setBorder(
+                edge.type,
+                edge.style ? BORDER_LINE_STYLE_TYPES[edge.style]! : BorderStyleTypes.THIN,
+                color,
+              )
+          })
+          break
+        }
         const type = BORDER_COMMAND_TYPES[argument]
         if (!type) return
         // `extra` is "<#color>[:<line-style>]" — the ribbon sends only the

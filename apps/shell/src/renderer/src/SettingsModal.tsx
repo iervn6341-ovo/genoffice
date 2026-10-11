@@ -12,7 +12,6 @@ import type { AiFontSize, AiPanelPrefs, AiPanelSide, RibbonFold } from '@genoffi
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   MAX_MAX_OUTPUT_TOKENS,
-  MIN_MAX_OUTPUT_TOKENS,
   clampMaxOutputTokens,
 } from '@genoffice/ai-provider/browser'
 import type {
@@ -247,6 +246,9 @@ function AiModelPane({ t }: { t: TFunc }) {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   /** free-typed value of the output-cap field; committed (and clamped) on blur */
   const [maxTokensDraft, setMaxTokensDraft] = useState<string | null>(null)
+  const [serverModels, setServerModels] = useState<string[]>([])
+  const [modelsError, setModelsError] = useState('')
+  const [modelsBusy, setModelsBusy] = useState(false)
 
   const refreshCodexModels = useCallback(async (cliPath = '', selectedModel = '') => {
     if (!window.aiOffice.getCodexModels) return
@@ -278,6 +280,37 @@ function AiModelPane({ t }: { t: TFunc }) {
     }
   }, [refreshCodexModels])
 
+  // Models the configured OpenAI-compatible server (Ollama, LM Studio, a gateway) says it serves
+  const pickerBase = (() => {
+    const id = settings?.provider
+    const entry = catalog.find((c) => c.id === id)
+    return settings && id && entry?.needsBaseUrl ? (settings.providers[id]?.baseUrl ?? '') : ''
+  })()
+  const pickerKey = settings?.providers[settings.provider]?.apiKey ?? ''
+  const fetchServerModels = useCallback(async (baseUrl: string, apiKey: string) => {
+    if (!window.aiOffice.listAiModels) return
+    setModelsBusy(true)
+    try {
+      const result = await window.aiOffice.listAiModels(baseUrl, apiKey)
+      setServerModels(result.ok ? result.models : [])
+      setModelsError(result.ok ? '' : `${baseUrl}: ${result.error}`)
+    } catch (error) {
+      setServerModels([])
+      setModelsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setModelsBusy(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (!pickerBase) {
+      setServerModels([])
+      setModelsError('')
+      return
+    }
+    const timer = window.setTimeout(() => void fetchServerModels(pickerBase, pickerKey), 500)
+    return () => window.clearTimeout(timer)
+  }, [pickerBase, pickerKey, fetchServerModels])
+
   if (!settings) return null
   const provider = settings.provider
   const meta = catalog.find((c) => c.id === provider)
@@ -289,6 +322,7 @@ function AiModelPane({ t }: { t: TFunc }) {
   }
 
   const isCodex = provider === 'codex'
+  const isOllama = provider === 'ollama'
 
   const touch = () => {
     setDirty(true)
@@ -371,7 +405,7 @@ function AiModelPane({ t }: { t: TFunc }) {
         />
       </div>
       <div className="set-field-desc set-ai-note">
-        {isCodex ? t('setAiCodexHint') : t('setAiByokNote')}
+        {isCodex ? t('setAiCodexHint') : isOllama ? t('setAiOllamaHint') : t('setAiByokNote')}
       </div>
       <div className="set-field">
         <div className="set-field-text">
@@ -385,6 +419,33 @@ function AiModelPane({ t }: { t: TFunc }) {
             options={meta.models.map((m) => ({ value: m, label: m }))}
             onPick={(m) => updateConfig({ model: m })}
           />
+        ) : meta?.needsBaseUrl ? (
+          // a local / self-hosted server: suggest what it reports, but any id can be typed
+          <div className="set-input-row">
+            <input
+              id="set-ai-model"
+              className="set-input"
+              type="text"
+              list="set-ai-model-list"
+              value={config.model}
+              placeholder={isOllama ? 'llama3.2' : 'model-id'}
+              spellCheck={false}
+              onChange={(e) => updateConfig({ model: e.target.value })}
+            />
+            <datalist id="set-ai-model-list">
+              {serverModels.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <button
+              className="set-btn"
+              type="button"
+              disabled={modelsBusy || !config.baseUrl}
+              onClick={() => void fetchServerModels(config.baseUrl ?? '', config.apiKey)}
+            >
+              {t('setAiFetchModels')}
+            </button>
+          </div>
         ) : (
           <input
             id="set-ai-model"
@@ -397,6 +458,11 @@ function AiModelPane({ t }: { t: TFunc }) {
           />
         )}
       </div>
+      {meta?.needsBaseUrl &&
+        (modelsError ||
+          (isOllama && config.baseUrl && !modelsBusy && serverModels.length === 0)) && (
+          <div className="set-field-desc set-ai-note">{modelsError || t('setAiOllamaEmpty')}</div>
+        )}
       {isCodex ? (
         <div className="set-field">
           <div className="set-field-text">
@@ -473,14 +539,16 @@ function AiModelPane({ t }: { t: TFunc }) {
             <label className="set-field-label" htmlFor="set-ai-max-tokens">
               {t('setAiMaxTokens')}
             </label>
-            <div className="set-field-desc">{t('setAiMaxTokensDesc')}</div>
+            <div className="set-field-desc">
+              {t('setAiMaxTokensDesc')} {t('setAiMaxTokensZero')}
+            </div>
           </div>
         </div>
         <input
           id="set-ai-max-tokens"
           className="set-input"
           type="number"
-          min={MIN_MAX_OUTPUT_TOKENS}
+          min={0}
           max={MAX_MAX_OUTPUT_TOKENS}
           step={1024}
           value={maxTokensDraft ?? String(settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS)}

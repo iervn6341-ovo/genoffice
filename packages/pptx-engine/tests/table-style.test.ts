@@ -246,3 +246,62 @@ describe('built-in style family expansion (full GUID table)', () => {
     expect(def.outer?.l).toBeUndefined()
   })
 })
+
+describe('builtinTableStyleDefXml', () => {
+  it('every built-in style survives serialize → tableStyles.xml → resolve unchanged', async () => {
+    const { BUILTIN_TABLE_STYLES, builtinTableStyleDefXml } = await import('../src/table-style')
+    const full = {
+      colors: {
+        dk1: '#000000',
+        lt1: '#FFFFFF',
+        accent1: '#4472C4',
+        accent2: '#ED7D31',
+        accent3: '#A5A5A5',
+        accent4: '#FFC000',
+        accent5: '#5B9BD5',
+        accent6: '#70AD47',
+      },
+    } as unknown as Theme
+    expect(BUILTIN_TABLE_STYLES.length).toBe(74)
+    for (const s of BUILTIN_TABLE_STYLES) {
+      const direct = resolveTableStyle(s.id, undefined, full)
+      const xml = `<a:tblStyleLst xmlns:a="a" def="${s.id}">${builtinTableStyleDefXml(s.id, full)}</a:tblStyleLst>`
+      const viaPart = resolveTableStyle(s.id, xml, full)
+      expect(viaPart, s.name).toEqual(direct ?? {})
+    }
+    // not vacuous: the definition really carries the header fill and the white inner lines
+    const m2 = resolveTableStyle(
+      MEDIUM2_A1,
+      `<a:tblStyleLst xmlns:a="a">${builtinTableStyleDefXml(MEDIUM2_A1, full)}</a:tblStyleLst>`,
+      full,
+    )
+    expect(m2?.firstRow?.fill).toEqual({ type: 'solid', color: '#4472C4' })
+    expect(m2?.insideH?.width).toBe(12700)
+  })
+})
+
+describe('tableStyleGallery', () => {
+  it('paints Medium Style 2 thumbnails from the deck theme and the current toggles', async () => {
+    const { tableStyleGallery } = await import('../src/table-gallery')
+    const flags = {
+      firstRow: true,
+      lastRow: false,
+      firstCol: false,
+      lastCol: false,
+      bandRow: true,
+      bandCol: false,
+    }
+    const gallery = tableStyleGallery(theme, flags)
+    expect(gallery).toHaveLength(74)
+    const m2 = gallery.find((g) => g.id === MEDIUM2_A1)!
+    expect(m2.cells).toHaveLength(4)
+    expect(m2.cells[0]![0]).toMatchObject({ fill: '#4472C4', text: '#FFFFFF', bold: true })
+    // banded rows alternate the body fill
+    expect(m2.cells[1]![0]!.fill).not.toBe(m2.cells[2]![0]!.fill)
+    // turning the header off drops the header fill
+    const noHeader = tableStyleGallery(theme, { ...flags, firstRow: false }).find(
+      (g) => g.id === MEDIUM2_A1,
+    )!
+    expect(noHeader.cells[0]![0]!.fill).not.toBe('#4472C4')
+  })
+})

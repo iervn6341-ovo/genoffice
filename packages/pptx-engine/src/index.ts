@@ -7,6 +7,7 @@
 import JSZip from 'jszip'
 import { PackageArchive, relsPathFor, resolveTarget, type Relationship } from './zip'
 import { parseClrMap, parseTheme, type Theme } from './theme'
+import { builtinTableStyleDefXml } from './table-style'
 import {
   parseSlide,
   parseDecorations,
@@ -34,16 +35,20 @@ import {
   patchSlideBackgroundXml,
   patchSlideHiddenXml,
   patchSlideShowMasterSpXml,
+  patchSlideTransitionDetailXml,
   patchSlideTransitionXml,
   patchTextElementXml,
   rebuildTxBody,
   readSlideAdvanceTimeXml,
   readSlideHiddenXml,
+  readSlideTransitionDetailXml,
   readSlideTransitionXml,
   removeSlideBackgroundXml,
   topLevelChildren,
   type FillPatch,
   type GradientFillPatch,
+  type SlideTransitionDetail,
+  type SlideTransitionDetailPatch,
   type SlideTransitionKind,
   type StrokePatch,
 } from './generate'
@@ -117,6 +122,7 @@ export {
   type AnimClass,
   type AnimEffectKind,
   type AnimTrigger,
+  type AnimAfter,
   type SlideAnimation,
 } from './animation'
 export { PackageArchive, PPTX_ZIP_LIMITS, assertZipWithinLimits } from './zip'
@@ -150,17 +156,22 @@ export {
   patchSlideBackgroundXml,
   patchSlideHiddenXml,
   patchSlideShowMasterSpXml,
+  patchSlideTransitionDetailXml,
   patchSlideTransitionXml,
   readSlideAdvanceTimeXml,
   readSlideHiddenXml,
+  readSlideTransitionDetailXml,
   readSlideTransitionXml,
   removeSlideBackgroundXml,
+  TRANSITION_DIRS,
   generateParagraphXml,
   generateXfrmXml,
   isConnectorXml,
   TRANSITION_KINDS,
   type GradientFillPatch,
   type BackgroundImagePatch,
+  type SlideTransitionDetail,
+  type SlideTransitionDetailPatch,
   type SlideTransitionKind,
   type StrokePatch,
 } from './generate'
@@ -190,11 +201,19 @@ export {
   type AlignRect,
 } from './align'
 export { createBlankPptx } from './blank'
+export { tableStyleGallery, type StyleGalleryEntry, type StylePreviewCell } from './table-gallery'
 export {
   BUILTIN_TABLE_STYLES,
+  builtinTableStyleDefXml,
   builtinTableStyleName,
+  cellPartStyle,
+  cellStyleBorders,
   resolveBuiltinTableStyleId,
+  resolveTableStyle,
   type BuiltinTableStyle,
+  type TablePartStyle,
+  type TableStyleDef,
+  type TableStyleFlags,
 } from './table-style'
 export {
   elementCNvPrId,
@@ -1237,6 +1256,9 @@ export function setElementTextAnchor(
   return true
 }
 
+/** PowerPoint's default gap between text columns (0.5 in) */
+const DEFAULT_COLUMN_GAP_EMU = 457200
+
 /** Patch for setElementTextBodyProps; only the provided fields are written. */
 export interface TextBodyPropsPatch {
   /** Text direction ('horz' clears the vert attribute) */
@@ -1246,6 +1268,8 @@ export interface TextBodyPropsPatch {
   /** Internal margins (EMU); only the provided sides are written */
   insets?: Partial<{ l: number; t: number; r: number; b: number }>
   wrap?: boolean
+  /** Text columns (<a:bodyPr numCol spcCol>): `num` 1 clears them; `spacing` is the gap in EMU */
+  columns?: { num: number; spacing?: number }
 }
 
 /**
@@ -1280,6 +1304,16 @@ export function setElementTextBodyProps(
 
   if (patch.vert !== undefined) setAttr('vert', patch.vert === 'horz' ? null : patch.vert)
   if (patch.wrap !== undefined) setAttr('wrap', patch.wrap ? 'square' : 'none')
+  const columns = patch.columns
+    ? {
+        num: Math.max(1, Math.min(16, Math.round(patch.columns.num))),
+        spacing: Math.max(0, Math.round(patch.columns.spacing ?? DEFAULT_COLUMN_GAP_EMU)),
+      }
+    : undefined
+  if (columns) {
+    setAttr('numCol', columns.num > 1 ? String(columns.num) : null)
+    setAttr('spcCol', columns.num > 1 ? String(columns.spacing) : null)
+  }
   if (patch.insets) {
     for (const side of ['l', 't', 'r', 'b'] as const) {
       const v = patch.insets[side]
@@ -1314,6 +1348,15 @@ export function setElementTextBodyProps(
     else t.text.vert = patch.vert
   }
   if (patch.wrap !== undefined) t.text.wrap = patch.wrap
+  if (columns) {
+    if (columns.num > 1) {
+      t.text.numCol = columns.num
+      t.text.spcCol = columns.spacing
+    } else {
+      delete t.text.numCol
+      delete t.text.spcCol
+    }
+  }
   if (patch.insets) {
     const base = { l: 91440, t: 45720, r: 91440, b: 45720, ...(t.text.insets ?? {}) }
     if (patch.insets.l != null) base.l = Math.max(0, Math.round(patch.insets.l))
@@ -2677,6 +2720,34 @@ export function editTableStyle(slide: Slide, elementId: string, edit: TableStyle
   el.anchor.originalXml = patchTableStyleXml(el.anchor.originalXml, edit)
   slide.structureDirty = true
   return true
+}
+
+/** The deck's theme (first slide's master chain): the colors a built-in table style resolves against. */
+export function openedDeckTheme(opened: OpenedPptx): Theme | undefined {
+  const path = opened.deck.slides[0]?.path
+  const themePath = path ? opened.archive.resolveSlideChain(path).themePath : undefined
+  const themeXml = themePath ? opened.archive.readText(themePath) : null
+  return themeXml ? parseTheme(themeXml) : undefined
+}
+
+/**
+ * Put a built-in gallery style's definition (theme colors resolved) into ppt/tableStyles.xml, like
+ * PowerPoint does when a style is applied: a populated part without the id leaves the table unstyled.
+ * `slidePath` picks the theme (the slide's master chain); the deck's first slide when omitted.
+ */
+export function ensureBuiltinTableStylePart(
+  opened: OpenedPptx,
+  styleId: string,
+  slidePath?: string,
+): void {
+  const { archive } = opened
+  const path = slidePath ?? opened.deck.slides[0]?.path
+  let theme: Theme | undefined
+  const themePath = path ? archive.resolveSlideChain(path).themePath : undefined
+  const themeXml = themePath ? archive.readText(themePath) : null
+  if (themeXml) theme = parseTheme(themeXml)
+  const def = builtinTableStyleDefXml(styleId, theme)
+  if (def) ensureTableStylePart(opened, styleId.toUpperCase(), def)
 }
 
 /**
@@ -4065,6 +4136,17 @@ export function setSlideTransition(slide: Slide, kind: SlideTransitionKind): voi
 /** Read the current transition. */
 export function getSlideTransition(slide: Slide): SlideTransitionKind {
   return readSlideTransitionXml(slide.bodySuffix)
+}
+
+/** Direction / duration / advance settings of the transition (Transitions tab). */
+export function getSlideTransitionDetail(slide: Slide): SlideTransitionDetail {
+  return readSlideTransitionDetailXml(slide.bodySuffix)
+}
+
+/** Patch the transition's direction / duration / on-click flag without touching the effect. */
+export function setSlideTransitionDetail(slide: Slide, patch: SlideTransitionDetailPatch): void {
+  slide.bodySuffix = patchSlideTransitionDetailXml(slide.bodySuffix, patch)
+  slide.structureDirty = true
 }
 
 /** Set/clear the auto-advance time (advTm, ms; saved by rehearsal timing, auto-advances in PowerPoint slideshows). */

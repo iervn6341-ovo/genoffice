@@ -96,6 +96,10 @@ function ribbonProps(editor: Editor) {
     onTitlePg: noop,
     evenOddHf: false,
     onEvenOddHf: noop,
+    docFlags: { autoHyphenation: false, mirrorMargins: false, paragraphSpacing: null },
+    onDocFlags: noop,
+    onEnsureStyle: noop,
+    onStylesPane: noop,
     showMarks: false,
     onShowMarks: noop,
     showRuler: false,
@@ -178,7 +182,7 @@ describe('style gallery overflow', () => {
 
   it('shows no expander while every card fits', () => {
     expect(container.querySelector('.style-gallery')).not.toBeNull()
-    expect(container.querySelectorAll('.style-gallery .style-card').length).toBe(6)
+    expect(container.querySelectorAll('.style-gallery .style-card').length).toBe(12)
     expect(container.querySelector('.style-gallery-more')).toBeNull()
   })
 
@@ -191,7 +195,7 @@ describe('style gallery overflow', () => {
     // the gallery is capped right after the last visible card (2 × 78 - 4 gap)
     expect((gallery as HTMLElement).style.maxWidth).toBe('152px')
 
-    setRowLayout(gallery, 6)
+    setRowLayout(gallery, 12)
     act(() => FakeResizeObserver.fire(wrap))
     expect(container.querySelector('.style-gallery-more')).toBeNull()
     expect((gallery as HTMLElement).style.maxWidth).toBe('')
@@ -208,11 +212,11 @@ describe('style gallery overflow', () => {
 
     const menu = container.querySelector('.style-gallery-menu')!
     const cards = menu.querySelectorAll<HTMLButtonElement>('.style-card')
-    // 4 paragraph styles + 2 preset character styles: nothing is dropped
-    expect(cards.length).toBe(6)
+    // 10 paragraph styles + 2 preset character styles: nothing is dropped
+    expect(cards.length).toBe(12)
 
     editor.commands.setTextSelection(3)
-    act(() => cards[1].click()) // Heading 1
+    act(() => cards[2].click()) // Heading 1 (Normal, No Spacing, then the headings)
     expect(editor.isActive('docHeading', { level: 1 })).toBe(true)
     expect(container.querySelector('.style-gallery-menu')).toBeNull()
   })

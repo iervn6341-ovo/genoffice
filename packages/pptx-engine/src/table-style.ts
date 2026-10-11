@@ -629,7 +629,79 @@ function parseTableStylesXml(
     b: readInside(style['a:wholeTbl'], 'a:bottom', theme),
   }
   if (outer.l || outer.r || outer.t || outer.b) def.outer = outer
+  // header / total row separators live on the row parts themselves in real files
+  const headerBottom = readInside(style['a:firstRow'], 'a:bottom', theme)
+  if (headerBottom) def.firstRowBottom = headerBottom
+  const totalTop = readInside(style['a:lastRow'], 'a:top', theme)
+  if (totalTop) def.lastRowTop = totalTop
   return Object.keys(def).length ? def : undefined
+}
+
+const hexOf = (fill: Fill | undefined): string | undefined =>
+  fill?.type === 'solid' ? fill.color.replace('#', '').toUpperCase() : undefined
+
+function lnXml(tag: string, stroke: Stroke | undefined): string {
+  const c = hexOf(stroke?.fill)
+  if (!stroke || !c) return ''
+  return `<a:${tag}><a:ln w="${stroke.width}" cmpd="sng"><a:solidFill><a:srgbClr val="${c}"/></a:solidFill></a:ln></a:${tag}>`
+}
+
+function partToXml(
+  tag: string,
+  part: TablePartStyle | undefined,
+  edges: { insideH?: Stroke; insideV?: Stroke; l?: Stroke; r?: Stroke; t?: Stroke; b?: Stroke },
+): string {
+  const text = part?.textColor?.replace('#', '').toUpperCase()
+  const tx =
+    part?.bold || text
+      ? `<a:tcTxStyle${part?.bold ? ' b="on"' : ''}>${text ? `<a:srgbClr val="${text}"/>` : ''}</a:tcTxStyle>`
+      : ''
+  const bdr =
+    lnXml('left', edges.l) +
+    lnXml('right', edges.r) +
+    lnXml('top', edges.t) +
+    lnXml('bottom', edges.b) +
+    lnXml('insideH', edges.insideH) +
+    lnXml('insideV', edges.insideV)
+  const fillHex = hexOf(part?.fill)
+  const fill = fillHex
+    ? `<a:fill><a:solidFill><a:srgbClr val="${fillHex}"/></a:solidFill></a:fill>`
+    : ''
+  const tcStyle =
+    bdr || fill ? `<a:tcStyle>${bdr ? `<a:tcBdr>${bdr}</a:tcBdr>` : ''}${fill}</a:tcStyle>` : ''
+  return tx || tcStyle ? `<a:${tag}>${tx}${tcStyle}</a:${tag}>` : ''
+}
+
+/**
+ * <a:tblStyle> definition of a built-in style with the theme's colors resolved, for
+ * ppt/tableStyles.xml. PowerPoint writes the definition of every style a deck uses, and a
+ * populated part without the id renders the table unstyled, so applying a gallery style
+ * must put it there. Round-trips through resolveTableStyle (see tests).
+ */
+export function builtinTableStyleDefXml(styleId: string, theme?: Theme): string | undefined {
+  const id = styleId.toUpperCase()
+  const b = BUILTIN[id]
+  if (!b) return undefined
+  const def = builtinStyle(b.family, b.accent, theme)
+  // CT_TableStyle order: wholeTbl, band1H, band2H, band1V, band2V, lastCol, firstCol, lastRow, firstRow
+  const parts =
+    partToXml('wholeTbl', def.wholeTbl, {
+      insideH: def.insideH,
+      insideV: def.insideV,
+      l: def.outer?.l,
+      r: def.outer?.r,
+      t: def.outer?.t,
+      b: def.outer?.b,
+    }) +
+    partToXml('band1H', def.band1H, {}) +
+    partToXml('band2H', def.band2H, {}) +
+    partToXml('band1V', def.band1V, {}) +
+    partToXml('band2V', def.band2V, {}) +
+    partToXml('lastCol', def.lastCol, {}) +
+    partToXml('firstCol', def.firstCol, {}) +
+    partToXml('lastRow', def.lastRow, { t: def.lastRowTop }) +
+    partToXml('firstRow', def.firstRow, { b: def.firstRowBottom })
+  return `<a:tblStyle styleId="${id}" styleName="${builtinName(b.family, b.accent)}">${parts}</a:tblStyle>`
 }
 
 /**

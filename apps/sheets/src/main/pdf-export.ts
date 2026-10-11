@@ -11,6 +11,7 @@ import { BrowserWindow, dialog } from 'electron'
 import { isHeadlessMode, showSaveDialogWithMemory } from '@genoffice/electron-utils'
 
 import { evenPageRanges, stitchPlan, type PageVariant } from './pdf-page-variants'
+import { directPrintOptions, type PrinterJob } from '@genoffice/electron-utils'
 import { printOptionsFor } from './print-options'
 
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
@@ -62,6 +63,7 @@ export async function exportPdf(
 export async function printWorkbook(
   event: IpcMainInvokeEvent,
   request: WorkbookExportPdfRequest,
+  job?: PrinterJob & { pageFrom?: number | undefined; pageTo?: number | undefined },
 ): Promise<WorkbookPrintResult> {
   const owner = BrowserWindow.fromWebContents(event.sender)
   const workDir = await mkdtemp(join(tmpdir(), 'ai-excel-print-'))
@@ -84,8 +86,16 @@ export async function printWorkbook(
       window.focus()
     }
     const outcome = await new Promise<{ success: boolean; failureReason: string }>((resolve) => {
-      window.webContents.print(printOptionsFor(request), (success, failureReason) =>
-        resolve({ success, failureReason }),
+      window.webContents.print(
+        {
+          ...printOptionsFor(request),
+          ...directPrintOptions(job),
+          // Excel's Pages from / to (Electron counts pages from 0)
+          ...(job?.pageFrom === undefined
+            ? {}
+            : { pageRanges: [{ from: job.pageFrom - 1, to: (job.pageTo ?? 100_000) - 1 }] }),
+        },
+        (success, failureReason) => resolve({ success, failureReason }),
       )
     })
     if (outcome.success) return { ok: true }

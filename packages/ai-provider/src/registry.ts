@@ -249,6 +249,20 @@ export const AI_PROVIDER_ADAPTERS: Record<AiProviderId, ProviderAdapter> = {
       anthropic: /^(minimax-|qwen3\.8-flash$)/,
     }),
   },
+  ollama: {
+    meta: metaOf('ollama'),
+    // Ollama serves the OpenAI chat-completions dialect under /v1 (tools and streaming included)
+    capabilities: { auth: 'api-key', vision: true },
+    resolveEndpoint(config) {
+      const baseUrl = config.baseUrl?.trim() || metaOf('ollama').defaultBaseUrl!
+      return {
+        protocol: 'openai-compatible',
+        baseUrl,
+        ...(modelHasFixedSampling(config.model) ? { omitTemperature: true } : {}),
+        ...(isLocalEndpoint(baseUrl) ? { patientTimeouts: true } : {}),
+      }
+    },
+  },
   custom: {
     meta: metaOf('custom'),
     capabilities: { auth: 'api-key', vision: true },

@@ -11,7 +11,7 @@ import {
   type SourceInfo,
   type TocEntry,
 } from '@genoffice/docx-engine'
-import { Dropdown } from '@genoffice/ui'
+import { Dropdown, RibbonFoldGroup } from '@genoffice/ui'
 import { PromptModal } from './PromptModal'
 import { collectHeadings } from '../editor/headings'
 import { t, useI18n, type StringKey } from '../i18n/locale'
@@ -491,223 +491,235 @@ export function ReferencesTab({
 
   return (
     <>
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
+      <RibbonFoldGroup
+        label={t('zoteroGroup')}
+        icon={<IconBook size={BIG} />}
+        caret={<IconCaret />}
+        priority={1}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc || zoteroBusy !== null}
+          data-tip={t('zoteroCitationTip')}
+          onClick={() => void runZotero('addEditCitation')}
+        >
+          <span className="rb-big-icon">
+            <IconCitation size={BIG} />
+          </span>
+          <span>{t('zoteroCitation')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc || zoteroBusy !== null}
+          data-tip={t('zoteroBibliographyTip')}
+          onClick={() => void runZotero('addEditBibliography')}
+        >
+          <span className="rb-big-icon">
+            <IconBook size={BIG} />
+          </span>
+          <span>{t('zoteroBibliography')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc || zoteroBusy !== null}
+          data-tip={t('zoteroRefreshTip')}
+          onClick={() => void runZotero('refresh')}
+        >
+          <span className="rb-big-icon">
+            <IconRefresh size={BIG} />
+          </span>
+          <span>{t('zoteroRefresh')}</span>
+        </button>
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
             disabled={!hasDoc || zoteroBusy !== null}
-            data-tip={t('zoteroCitationTip')}
-            onClick={() => void runZotero('addEditCitation')}
+            data-tip={t('zoteroDocumentSettingsTip')}
+            onClick={() => toggleDropdown(setDropdown, 'zotero-settings')}
           >
             <span className="rb-big-icon">
               <IconCitation size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('zoteroCitation')}</span>
+            <span>{t('zoteroDocumentSettings')}</span>
           </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc || zoteroBusy !== null}
-            data-tip={t('zoteroBibliographyTip')}
-            onClick={() => void runZotero('addEditBibliography')}
-          >
-            <span className="rb-big-icon">
-              <IconBook size={BIG} />
-            </span>
-            <span>{t('zoteroBibliography')}</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc || zoteroBusy !== null}
-            data-tip={t('zoteroRefreshTip')}
-            onClick={() => void runZotero('refresh')}
-          >
-            <span className="rb-big-icon">
-              <IconRefresh size={BIG} />
-            </span>
-            <span>{t('zoteroRefresh')}</span>
-          </button>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc || zoteroBusy !== null}
-              data-tip={t('zoteroDocumentSettingsTip')}
-              onClick={() => toggleDropdown(setDropdown, 'zotero-settings')}
-            >
-              <span className="rb-big-icon">
-                <IconCitation size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('zoteroDocumentSettings')}</span>
-            </button>
-            {dropdown === 'zotero-settings' && (
-              <div data-rb-panel="" className="layout-menu">
-                <button onClick={() => void runZotero('setDocPrefs')}>
-                  {t('zoteroDocumentPreferences')}
-                </button>
-                <button onClick={() => void runZotero('removeCodes')}>
-                  {t('zoteroRemoveCodes')}
-                </button>
-              </div>
-            )}
-          </div>
+          {dropdown === 'zotero-settings' && (
+            <div data-rb-panel="" className="layout-menu">
+              <button onClick={() => void runZotero('setDocPrefs')}>
+                {t('zoteroDocumentPreferences')}
+              </button>
+              <button onClick={() => void runZotero('removeCodes')}>
+                {t('zoteroRemoveCodes')}
+              </button>
+            </div>
+          )}
         </div>
-        <div className="ribbon-group-label">{t('zoteroGroup')}</div>
-      </div>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonTocTip')}
-            onClick={insertToc}
-          >
-            <span className="rb-big-icon">
-              <IconToc size={BIG} />
-            </span>
-            <span>{t('ribbonToc')}</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonTocUpdateTip')}
-            onClick={() => updateTocField(editor, blocks, headingPages)}
-          >
-            <span className="rb-big-icon">
-              <IconRefresh size={BIG} />
-            </span>
-            <span>{t('ribbonTocUpdate')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonToc')}</div>
-      </div>
+      <RibbonFoldGroup
+        label={t('ribbonToc')}
+        icon={<IconToc size={BIG} />}
+        caret={<IconCaret />}
+        priority={4}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonTocTip')}
+          onClick={insertToc}
+        >
+          <span className="rb-big-icon">
+            <IconToc size={BIG} />
+          </span>
+          <span>{t('ribbonToc')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonTocUpdateTip')}
+          onClick={() => updateTocField(editor, blocks, headingPages)}
+        >
+          <span className="rb-big-icon">
+            <IconRefresh size={BIG} />
+          </span>
+          <span>{t('ribbonTocUpdate')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonFootnoteTip')}
-            onClick={() => onInsertNote('footnote')}
-          >
-            <span className="rb-big-icon">
-              <IconFootnote size={BIG} />
-            </span>
-            <span>{t('ribbonFootnote')}</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonEndnoteTip')}
-            onClick={() => onInsertNote('endnote')}
-          >
-            <span className="rb-big-icon">
-              <IconEndnote size={BIG} />
-            </span>
-            <span>{t('ribbonEndnote')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupFootnotes')}</div>
-      </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupFootnotes')}
+        icon={<IconFootnote size={BIG} />}
+        caret={<IconCaret />}
+        priority={3}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonFootnoteTip')}
+          onClick={() => onInsertNote('footnote')}
+        >
+          <span className="rb-big-icon">
+            <IconFootnote size={BIG} />
+          </span>
+          <span>{t('ribbonFootnote')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonEndnoteTip')}
+          onClick={() => onInsertNote('endnote')}
+        >
+          <span className="rb-big-icon">
+            <IconEndnote size={BIG} />
+          </span>
+          <span>{t('ribbonEndnote')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonCitationTip')}
-              onClick={() => toggleDropdown(setDropdown, 'citation')}
-            >
-              <span className="rb-big-icon">
-                <IconCitation size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonCitation')}</span>
-            </button>
-            {dropdown === 'citation' && (
-              <div data-rb-panel="" className="layout-menu">
-                {sources.map((s) => (
-                  <button key={s.tag} data-tip={s.title} onClick={() => insertCitation(s)}>
-                    {citationText(s)} {s.title.slice(0, 12)}
-                  </button>
-                ))}
-                <button
-                  onClick={() => {
-                    setSourceOpen(true)
-                    setDropdown(() => null)
-                  }}
-                >
-                  {t('ribbonAddNewSource')}
-                </button>
-              </div>
-            )}
-          </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupCitationsIndex')}
+        icon={<IconCitation size={BIG} />}
+        caret={<IconCaret />}
+        priority={2}
+        caption
+      >
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
             disabled={!hasDoc}
-            data-tip={t('ribbonBibliographyTip')}
-            onClick={insertBibliography}
+            data-tip={t('ribbonCitationTip')}
+            onClick={() => toggleDropdown(setDropdown, 'citation')}
           >
             <span className="rb-big-icon">
-              <IconBook size={BIG} />
+              <IconCitation size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonBibliography')}</span>
+            <span>{t('ribbonCitation')}</span>
           </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonCaptionTip')}
-            onClick={() => setCaptionOpen(true)}
-          >
-            <span className="rb-big-icon">
-              <IconCaption size={BIG} />
-            </span>
-            <span>{t('ribbonCaption')}</span>
-          </button>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonIndexTip')}
-              onClick={() => toggleDropdown(setDropdown, 'index')}
-            >
-              <span className="rb-big-icon">
-                <IconIndex size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonIndex')}</span>
-            </button>
-            {dropdown === 'index' && (
-              <div data-rb-panel="" className="layout-menu">
-                <button
-                  onClick={() => {
-                    markIndexEntry()
-                    setDropdown(() => null)
-                  }}
-                >
-                  {t('ribbonMarkEntry')}
+          {dropdown === 'citation' && (
+            <div data-rb-panel="" className="layout-menu">
+              {sources.map((s) => (
+                <button key={s.tag} data-tip={s.title} onClick={() => insertCitation(s)}>
+                  {citationText(s)} {s.title.slice(0, 12)}
                 </button>
-                <button
-                  onClick={() => {
-                    insertIndex()
-                    setDropdown(() => null)
-                  }}
-                >
-                  {t('ribbonInsertIndex')}
-                </button>
-              </div>
-            )}
-          </div>
+              ))}
+              <button
+                onClick={() => {
+                  setSourceOpen(true)
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonAddNewSource')}
+              </button>
+            </div>
+          )}
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupCitationsIndex')}</div>
-      </div>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonBibliographyTip')}
+          onClick={insertBibliography}
+        >
+          <span className="rb-big-icon">
+            <IconBook size={BIG} />
+          </span>
+          <span>{t('ribbonBibliography')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonCaptionTip')}
+          onClick={() => setCaptionOpen(true)}
+        >
+          <span className="rb-big-icon">
+            <IconCaption size={BIG} />
+          </span>
+          <span>{t('ribbonCaption')}</span>
+        </button>
+        <div className="rb-split-wrap">
+          <button
+            className="rb-big"
+            disabled={!hasDoc}
+            data-tip={t('ribbonIndexTip')}
+            onClick={() => toggleDropdown(setDropdown, 'index')}
+          >
+            <span className="rb-big-icon">
+              <IconIndex size={BIG} />
+              <IconCaret />
+            </span>
+            <span>{t('ribbonIndex')}</span>
+          </button>
+          {dropdown === 'index' && (
+            <div data-rb-panel="" className="layout-menu">
+              <button
+                onClick={() => {
+                  markIndexEntry()
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonMarkEntry')}
+              </button>
+              <button
+                onClick={() => {
+                  insertIndex()
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonInsertIndex')}
+              </button>
+            </div>
+          )}
+        </div>
+      </RibbonFoldGroup>
 
       {captionOpen && (
         <CaptionModal editor={editor} blocks={blocks} onClose={() => setCaptionOpen(false)} />

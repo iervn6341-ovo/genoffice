@@ -3,16 +3,20 @@
  * small layout components, and the RibbonTabCtx bundle handed to the
  * extracted tab components.
  */
+import type { TableTabActions, TableTabInfo } from './RibbonTableTabs'
+import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, MouseEvent as ReactMouseEvent, ReactNode, SetStateAction } from 'react'
 import type {
   AnimEffectKind,
   AnimTrigger,
   AnimationItem,
   EditChartOp,
-  EditTableStyleOp,
   GetLayoutsResult,
   GradientFillSpec,
   InsertKind,
+  SetEffectsPatch,
+  SetTransitionDetailOp,
+  TransitionDetail,
   TransitionKind,
 } from '../../shared/ipc'
 import type { InkPenSettings, InkTool } from '../ink'
@@ -47,6 +51,12 @@ export type InsertDropKey =
   | 'lineSpacingTop'
   | 'alignText'
   | 'textDir'
+  | 'bullets'
+  | 'numbering'
+  | 'columns'
+  | 'shapeEffects'
+  | 'transOptions'
+  | 'sections'
 
 export const BIG = 28
 
@@ -219,8 +229,11 @@ const LAYOUT_NAME_KEYS: Record<string, StringKey> = {
   'Title and Content': 'ribbonLayoutTitleAndContent',
   'Section Header': 'ribbonLayoutSectionHeader',
   'Two Content': 'ribbonLayoutTwoContent',
+  Comparison: 'ribbonLayoutComparison',
   'Title Only': 'ribbonLayoutTitleOnly',
   Blank: 'ribbonLayoutBlank',
+  'Content with Caption': 'ribbonLayoutContentCaption',
+  'Picture with Caption': 'ribbonLayoutPictureCaption',
 }
 
 /** Layout candidates with placeholder-sketch previews (new-slide dropdown + layout picker) */
@@ -320,15 +333,96 @@ export function closeSiblingPanels(
   closePanels(nested ? [own, 'collapse', 'para'] : [own])
 }
 
+/**
+ * A group that folds into one dropdown button when the ribbon is too narrow, so the ribbon never
+ * scrolls sideways (Microsoft 365 does the same). The fit hook (useRibbonLabelFit) folds groups in
+ * `priority` order — lowest first — only as many as it takes to fit; the items render once and
+ * become the button's flyout, so no command is duplicated.
+ */
+function FoldGroup({
+  label,
+  children,
+  groupId,
+  className,
+  fold,
+}: {
+  label: string
+  children: ReactNode
+  groupId?: string | undefined
+  className?: string | undefined
+  fold: { icon: ReactNode; priority: number }
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) close()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+  return (
+    <div
+      ref={rootRef}
+      className={`ribbon-group rb-fold-group${open ? ' rb-fold-open' : ''}${className ? ` ${className}` : ''}`}
+      data-rbgroup={groupId}
+      data-fold-priority={fold.priority}
+      aria-label={label}
+    >
+      <button
+        type="button"
+        className={`rb-big rb-fold-btn${open ? ' active' : ''}`}
+        data-tip={label}
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="rb-big-icon">
+          {fold.icon}
+          <RbCaret />
+        </span>
+        <span>{label}</span>
+      </button>
+      <div
+        className="ribbon-group-items rb-fold-items"
+        // a command picked in the flyout closes it; a dropdown the click just opened keeps it open
+        onClick={(e) => {
+          if (!open || !(e.target as Element).closest('button')) return
+          requestAnimationFrame(() => {
+            if (!rootRef.current?.querySelector('.rb-drop, .rb-color-pop')) setOpen(false)
+          })
+        }}
+      >
+        {children}
+      </div>
+      <div className="ribbon-group-label">{label}</div>
+    </div>
+  )
+}
+
 export function Group({
   label,
   children,
   groupId,
   collapse,
   className,
+  fold,
 }: {
   label: string
   children: ReactNode
+  /** folds into one dropdown button on a narrow window (lowest priority folds first) */
+  fold?: { icon: ReactNode; priority: number }
   /** extra class on the group root, e.g. `rb-group-end` to push it to the ribbon's right edge */
   className?: string
   /** identity for width measurement + collapse bookkeeping */
@@ -342,6 +436,13 @@ export function Group({
     keepMounted?: boolean
   }
 }) {
+  if (fold && !collapse) {
+    return (
+      <FoldGroup label={label} groupId={groupId} className={className} fold={fold}>
+        {children}
+      </FoldGroup>
+    )
+  }
   if (collapse?.collapsed) {
     return (
       <div className={`ribbon-group${className ? ` ${className}` : ''}`} data-rbgroup={groupId}>
@@ -404,6 +505,8 @@ export interface Props {
   onPrint: () => void
   /** Export as images (one PNG per page, hidden slides skipped) */
   onExportImages: () => void
+  /** File tab: opens the full-window File view */
+  onFileTab?: () => void
   onFormat: (cmd: FormatCmd) => void
   zoom: number
   onZoom: (z: number | ((current: number) => number)) => void
@@ -430,6 +533,14 @@ export interface Props {
   onAddSlideWithLayout: (layoutPath: string) => void
   /** Add a section (before the current page, modeled on PowerPoint Home tab "Section") */
   onAddSection: () => void
+  /** Home → Section ▾: rename / remove the section holding the current slide, or drop every section */
+  sectionMenu: {
+    hasCurrent: boolean
+    hasAny: boolean
+    onRename: () => void
+    onRemove: () => void
+    onRemoveAll: () => void
+  }
   /** The current pptx's layout list (null = not loaded) */
   layouts: GetLayoutsResult['layouts'] | null
   /** Slide size (EMU) for normalizing layout previews */
@@ -518,11 +629,17 @@ export interface Props {
   onTextAnchor: (anchor: 'top' | 'middle' | 'bottom') => void
   /** Home → Paragraph → Text Direction on the edited or selected text boxes */
   onTextDirection: (vert: 'horz' | 'vert' | 'vert270' | 'wordArtVert') => void
+  /** Home → Paragraph → Columns: `num` columns (1 = one) with an optional gap in EMU */
+  onTextColumns: (num: number, spacing?: number) => void
   onInsertTable: (rows: number, cols: number) => void
   /** Current page's transition effect (for display) */
   transition: TransitionKind
   /** Set the transition effect; allSlides=true applies to all pages */
   onTransition: (kind: TransitionKind, allSlides: boolean) => void
+  /** Current page's transition direction / duration / advance settings */
+  transitionDetail: TransitionDetail | null
+  /** Patch those settings (allSlides applies the patch to every page) */
+  onTransitionDetail: (detail: SetTransitionDetailOp['detail'], allSlides?: boolean) => void
   // ── Animations tab ─────────────────────────────────────────────────────
   /** Selected shape's current animation effect (gallery highlight; null when no selection/no animation) */
   selectedAnimEffect: AnimEffectKind | null
@@ -661,6 +778,8 @@ export interface Props {
   onPictureRotate?: (deltaDeg: -90 | 90) => void
   /** Selected picture's current border (null = none) */
   contextPictureStroke?: { color: string; widthPt: number; dashPreset?: string } | null
+  /** Shape Effects menu: shadow / reflection / glow / soft-edge preset on the selection (null clears one) */
+  onShapeEffects?: (effects: SetEffectsPatch) => void
   /** Picture border (null clears it) */
   onPictureStroke?: (stroke: { color: string; widthPt: number; dash?: string } | null) => void
   /** Replace the selected shape's preset geometry while preserving its formatting and text */
@@ -674,12 +793,10 @@ export interface Props {
   onShapeFillImage?: (mode: 'stretch' | 'tile', source?: { base64: string; ext: string }) => void
   /** Selected shape's current fill (#RRGGBB, 'none' = no fill, null = non-solid): picker highlight + gradient preset base */
   contextShapeFill?: string | null
-  /** Execute a table style operation */
-  onEditTableStyle?: (op: Omit<EditTableStyleOp, 'slideIndex' | 'sourceId'>) => void
-  /** Selected table's header-row/banded-rows current state (toggle display) */
-  tableStyleFlags?: { firstRow: boolean; bandRow: boolean; rtl?: boolean } | null
-  /** Cell being edited in the selected table; shading applies to just this cell */
-  tableActiveCell?: { row: number; col: number } | null
+  /** Selected table's current style, toggles, geometry and cell cursor (Table Design / Layout tabs) */
+  tableTabInfo?: TableTabInfo | null
+  /** The table tabs' commands */
+  tableTabActions?: TableTabActions | null
   /** Execute a chart edit operation */
   onEditChart?: (op: Omit<EditChartOp, 'slideIndex' | 'sourceId'>) => void
   /** Open the chart data edit dialog */
@@ -726,6 +843,7 @@ export interface RibbonTabCtx extends Pick<
   | 'layouts'
   | 'layoutSize'
   | 'onAddSection'
+  | 'sectionMenu'
   | 'onAddSlide'
   | 'onAddSlideWithLayout'
   | 'onAiPreset'
@@ -770,6 +888,7 @@ export interface RibbonTabCtx extends Pick<
   | 'onTextColor'
   | 'onNotesDefaultColor'
   | 'onTextDirection'
+  | 'onTextColumns'
   | 'onTextToggle'
   | 'onToggleAi'
   | 'onToggleFormat'
@@ -811,6 +930,7 @@ export interface RibbonTabCtx extends Pick<
   renderQuickStyles: (variant?: 'big' | 'small', label?: string) => ReactNode
   renderShapeFill: (variant?: 'big' | 'small', label?: string) => ReactNode
   renderShapeOutline: (variant?: 'big' | 'small', label?: string) => ReactNode
+  renderShapeEffects: (variant?: 'big' | 'small', label?: string) => ReactNode
   fontOpen: boolean
   iconColor: string
   lastBulletColor: string

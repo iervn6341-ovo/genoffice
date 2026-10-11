@@ -15,6 +15,7 @@ import type { RenderFill, RenderNode, RenderSlide } from '@genoffice/pptx-render
 import type { AnimationItem, ShapeKey, ShowSyncState, TransitionKind } from '../../shared/ipc'
 import { AnimatedSlideStage, useAnimPlayer } from './AnimatedSlide'
 import { useI18n } from '../i18n/locale'
+import { syncPrivateFonts } from '../doc-fonts'
 import { MorphStage } from './MorphStage'
 import { applyInkEvent, DEFAULT_PEN_COLOR, InkBoard, InkLayer, useInkPointer } from './ShowInk'
 import { CameraBubble } from './ShowCamera'
@@ -120,6 +121,13 @@ export function AudienceView() {
       }),
     [],
   )
+
+  // Text positions are baked with the Office-private faces (PowerPoint's DFonts, embedded
+  // fonts) resolved in main; this window has to register the same FontFaces or the glyphs
+  // draw with a fallback face at the baked offsets (words run together or overlap)
+  useEffect(() => {
+    if (slides) void syncPrivateFonts()
+  }, [slides])
 
   useEffect(() => {
     if (!slides) return

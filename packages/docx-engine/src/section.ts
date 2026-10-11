@@ -121,6 +121,11 @@ function pageBorderPropsOf(xml: string): SectionSettings['pageBorderProps'] {
   }
 }
 
+/** w:cols w:sep: draw a rule between the columns */
+function colSepOn(colsTag: string): boolean {
+  return /\sw:sep="(?:1|true|on)"/.test(colsTag)
+}
+
 /** Page setup from one w:sectPr XML slice. */
 export function sectionSettingsFromXml(
   xml: string,
@@ -181,6 +186,7 @@ export function sectionSettingsFromXml(
     ...(pageBorderProps ? { pageBorderProps } : {}),
     columns: intAttr(/<w:cols[^>]*\/?>/.exec(xml)?.[0] ?? '', 'w:num', 1),
     colSpace: intAttr(/<w:cols[^>]*\/?>/.exec(xml)?.[0] ?? '', 'w:space', 720),
+    ...(colSepOn(/<w:cols[^>]*\/?>/.exec(xml)?.[0] ?? '') ? { colSep: true } : {}),
     ...(colWidths.length >= 2 ? { colWidths } : {}),
     ...(lineNumbers ? { lineNumbers } : {}),
     ...(/<w:bidi\s*\/>/.test(xml) ? { bidi: true } : {}),
@@ -314,6 +320,10 @@ export function applyPageNumType(
 /** CT_SectPr children that follow pgNumType / titlePg, in schema order */
 const PG_NUM_TYPE_FOLLOWERS =
   /<w:(?:cols|formProt|vAlign|noEndnote|titlePg|textDirection|bidi|rtlGutter|docGrid|printerSettings)[\s/>]/
+/** CT_SectPr children after w:lnNumType (pgNumType, cols, ...) */
+const LN_NUM_FOLLOWERS =
+  /<w:(?:pgNumType|cols|formProt|vAlign|noEndnote|titlePg|textDirection|bidi|rtlGutter|docGrid|printerSettings)[\s/>]/
+
 const TITLE_PG_FOLLOWERS = /<w:(?:textDirection|bidi|rtlGutter|docGrid|printerSettings)[\s/>]/
 
 function insertBefore(sectPrXml: string, tag: string, followers: RegExp): string {
@@ -343,6 +353,28 @@ export function readSections(parsed: ParsedDoc): SectionInfo[] {
     sections.push(sectionFromSectPr('', 0, last))
   }
   return sections
+}
+
+/** w:pgBorders for a page border model; no details = the single-line box from the page edge */
+function pageBordersXml(props: SectionSettings['pageBorderProps']): string {
+  const sides = props?.sides
+  const declared = sides && Object.keys(sides).length > 0 ? sides : undefined
+  const line = (name: 'top' | 'left' | 'bottom' | 'right'): string => {
+    if (!declared) return `<w:${name} w:val="single" w:sz="4" w:space="24" w:color="auto"/>`
+    const side = declared[name]
+    if (!side) return ''
+    const sz = side.art ? Math.round(side.widthPt) : Math.max(2, Math.round(side.widthPt * 8))
+    return (
+      `<w:${name} w:val="${side.val}" w:sz="${sz}" w:space="${Math.round(side.spacePt)}"` +
+      ` w:color="${side.color ?? 'auto'}"/>`
+    )
+  }
+  const attrs =
+    ` w:offsetFrom="${props?.offsetFrom ?? 'page'}"` +
+    (props?.display ? ` w:display="${props.display}"` : '') +
+    (props?.zOrder ? ` w:zOrder="${props.zOrder}"` : '')
+  // CT_PageBorders order: top, left, bottom, right
+  return `<w:pgBorders${attrs}>${line('top')}${line('left')}${line('bottom')}${line('right')}</w:pgBorders>`
 }
 
 /** Rewrite pgSz / pgMar inside a w:sectPr XML slice, preserving everything else. */
@@ -396,15 +428,18 @@ export function applySectionSettings(sectPrXml: string, settings: SectionSetting
 
   // page border: single-line box measured from the page edge (pgBorders sits
   // between pgMar and cols in CT_SectPr)
-  xml = xml.replace(/<w:pgBorders[^>]*\/>|<w:pgBorders[\s\S]*?<\/w:pgBorders>/, '')
-  if (settings.pageBorder) {
-    const side = (name: string) =>
-      `<w:${name} w:val="single" w:sz="4" w:space="24" w:color="auto"/>`
-    const pgBorders =
-      '<w:pgBorders w:offsetFrom="page">' +
-      `${side('top')}${side('left')}${side('bottom')}${side('right')}` +
-      '</w:pgBorders>'
-    xml = xml.replace(/(<w:pgMar[^>]*\/>)/, `$1${pgBorders}`)
+  // a box whose details match the file's own is kept byte for byte (art / double / per-side
+  // lines survive a margin edit); otherwise it is rebuilt from the model
+  const keepBorders =
+    settings.pageBorder &&
+    settings.pageBorderProps !== undefined &&
+    JSON.stringify(pageBorderPropsOf(xml) ?? null) === JSON.stringify(settings.pageBorderProps)
+  if (!keepBorders) {
+    xml = xml.replace(/<w:pgBorders[^>]*\/>|<w:pgBorders[\s\S]*?<\/w:pgBorders>/, '')
+    if (settings.pageBorder) {
+      const pgBorders = pageBordersXml(settings.pageBorderProps)
+      xml = xml.replace(/(<w:pgMar[^>]*\/>)/, `$1${pgBorders}`)
+    }
   }
 
   // columns (w:cols may be self-closing or carry explicit <w:col> children)
@@ -446,9 +481,13 @@ export function applySectionSettings(sectPrXml: string, settings: SectionSetting
     const openTag = /^<w:cols[^>]*>/.exec(colsMatch[0])?.[0] ?? colsMatch[0]
     const selfClosing = colsMatch[0].endsWith('/>')
     const currentNum = / w:num="(\d+)"/.exec(openTag)?.[1] ?? '1'
-    if (selfClosing || currentNum !== String(settings.columns)) {
-      // explicit per-column widths only stay valid while the count is unchanged
-      let tag = openTag.replace(/ w:num="\d+"/, '').replace(/\/?>$/, '/>')
+    // explicit per-column widths only stay valid while the count is unchanged and they are still modelled
+    const droppedWidths = settings.colWidths === undefined && /<w:col\b/.test(colsMatch[0])
+    if (selfClosing || currentNum !== String(settings.columns) || droppedWidths) {
+      let tag = openTag
+        .replace(/ w:num="\d+"/, '')
+        .replace(/ w:equalWidth="[^"]*"/, '')
+        .replace(/\/?>$/, '/>')
       if (numAttr) tag = tag.replace(/^<w:cols/, `<w:cols${numAttr}`)
       // honor an explicitly different column gap (720 = OOXML default); equal
       // values leave the tag byte-identical for round-trip safety
@@ -461,6 +500,35 @@ export function applySectionSettings(sectPrXml: string, settings: SectionSetting
     }
   } else if (numAttr) {
     xml = colsAnchor(`<w:cols${numAttr} w:space="${settings.colSpace ?? 425}"/>`)
+  }
+
+  // vertical rule between the columns: undefined keeps the file's value
+  if (settings.colSep !== undefined) {
+    xml = xml.replace(/<w:cols\b[^>]*>/, (tag) => {
+      if (colSepOn(tag) === settings.colSep) return tag
+      const without = tag.replace(/\sw:sep="[^"]*"/, '')
+      return settings.colSep ? without.replace(/(\/?>)$/, ' w:sep="1"$1') : without
+    })
+  }
+
+  // line numbering (w:lnNumType sits between pgBorders and pgNumType/cols in CT_SectPr):
+  // undefined keeps the file's element, null removes it, a value rewrites it when different
+  if (settings.lineNumbers !== undefined) {
+    const current = lineNumberingOf(xml)
+    const next = settings.lineNumbers ?? undefined
+    if (JSON.stringify(current ?? null) !== JSON.stringify(next ?? null)) {
+      xml = xml.replace(/<w:lnNumType\b[^>]*\/>|<w:lnNumType\b[^>]*>[\s\S]*?<\/w:lnNumType>/, '')
+      if (next) {
+        const tag =
+          `<w:lnNumType w:countBy="${Math.max(1, Math.round(next.countBy))}"` +
+          (next.start > 1 ? ` w:start="${Math.round(next.start) - 1}"` : '') +
+          (next.distance !== undefined
+            ? ` w:distance="${Math.max(0, Math.round(next.distance))}"`
+            : '') +
+          ` w:restart="${next.restart}"/>`
+        xml = insertBefore(xml, tag, LN_NUM_FOLLOWERS)
+      }
+    }
   }
 
   // section direction (w:bidi, after cols in CT_SectPr): undefined = keep the

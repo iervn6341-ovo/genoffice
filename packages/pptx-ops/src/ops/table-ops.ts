@@ -9,6 +9,7 @@ import {
   editChartElement,
   editTableCellText,
   editTableStructure,
+  ensureBuiltinTableStylePart,
   ensureTableStylePart,
   markChartEditable,
   mergeTableCells,
@@ -189,6 +190,29 @@ register({
 // (built-in GUIDs track theme colors, so colors would drift), and applying a
 // preset clears direct cell formatting like PowerPoint's style gallery does.
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/
+const BORDER_MODES = new Set([
+  'top',
+  'bottom',
+  'left',
+  'right',
+  'insideH',
+  'insideV',
+  'outside',
+  'inside',
+  'all',
+  'none',
+  'diagDown',
+  'diagUp',
+])
+const BORDER_DASHES = new Set([
+  'solid',
+  'dash',
+  'sysDash',
+  'sysDot',
+  'dashDot',
+  'lgDash',
+  'lgDashDot',
+])
 const STYLE_FIELDS = [
   'styleId',
   'firstRow',
@@ -202,6 +226,7 @@ const STYLE_FIELDS = [
   'borderColor',
   'borderWidthPt',
   'borderPreset',
+  'borderMode',
   'cells',
 ] as const
 
@@ -269,6 +294,16 @@ function resolveTableStyle(op: Op): ResolvedTableStyle {
   if (op.borderPreset != null && op.borderPreset !== 'all' && op.borderPreset !== 'none') {
     throw new GuidedError('op "setTableStyle": borderPreset must be "all" or "none".')
   }
+  if (op.borderMode != null && !BORDER_MODES.has(String(op.borderMode))) {
+    throw new GuidedError(
+      `op "setTableStyle": borderMode must be one of ${[...BORDER_MODES].join(', ')}.`,
+    )
+  }
+  if (op.borderDash != null && !BORDER_DASHES.has(String(op.borderDash))) {
+    throw new GuidedError(
+      `op "setTableStyle": borderDash must be one of ${[...BORDER_DASHES].join(', ')}.`,
+    )
+  }
   return {
     edit: {
       ...(styleId ? { styleId } : {}),
@@ -287,6 +322,10 @@ function resolveTableStyle(op: Op): ResolvedTableStyle {
         ? { borderWidthEmu: Math.round(Number(op.borderWidthPt) * EMU_PER_PT) }
         : {}),
       ...(op.borderPreset != null ? { borderPreset: op.borderPreset as 'all' | 'none' } : {}),
+      ...(op.borderMode != null
+        ? { borderMode: op.borderMode as TableStyleEdit['borderMode'] }
+        : {}),
+      ...(op.borderDash != null ? { borderDash: String(op.borderDash) } : {}),
       ...(op.cells != null ? { cells: op.cells as TableStyleEdit['cells'] } : {}),
     },
   }
@@ -302,6 +341,7 @@ register({
     const { slide, el } = resolveElement(ctx, op, { types: ['table'] })
     const { edit, stylePart } = resolveTableStyle(op)
     if (stylePart) ensureTableStylePart(ctx.opened, stylePart.styleId, stylePart.styleDefXml)
+    if (edit.styleId) ensureBuiltinTableStylePart(ctx.opened, edit.styleId, slide.path)
     if (!editTableStyle(slide, el.id, edit)) {
       throw new GuidedError(`op "setTableStyle": table "${el.id}" rejected the style edit.`)
     }

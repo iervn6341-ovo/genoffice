@@ -84,6 +84,25 @@ const desktopApi: DesktopApi = {
     ipcRenderer.on('app:chrome-pressed', listener)
     return () => ipcRenderer.removeListener('app:chrome-pressed', listener)
   },
+  async getRecentWorkbooks() {
+    const page: unknown = await ipcRenderer.invoke('home:recents', { limit: 50 })
+    const entries = (page as { entries?: unknown } | null)?.entries
+    if (!Array.isArray(entries)) return []
+    return entries
+      .filter(
+        (e): e is { path: string; name: string; ext: string; missing?: boolean } =>
+          typeof e?.path === 'string' && typeof e?.name === 'string' && !e.missing,
+      )
+      .filter((e) => ['xlsx', 'xlsm', 'xls', 'csv'].includes(String(e.ext)))
+      .slice(0, 20)
+      .map((e) => ({ path: e.path, name: e.name }))
+  },
+  async openPathInShell(path) {
+    await ipcRenderer.invoke('home:open-path', path)
+  },
+  async newBlankWorkbookTab() {
+    await ipcRenderer.invoke('home:new-sheet')
+  },
   async selectWorkbook() {
     const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.selectWorkbook)
     return result === null ? null : parseWorkbookFile(result)
@@ -283,9 +302,14 @@ const desktopApi: DesktopApi = {
     }
     return result as { canceled: true } | { canceled: false; path: string }
   },
-  async printWorkbook(request) {
+  async listPrinters() {
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.listPrinters)
+    if (!Array.isArray(result)) throw new Error('Invalid printer list response.')
+    return result as Array<{ name: string; displayName: string; isDefault: boolean }>
+  },
+  async printWorkbook(request, job) {
     if (!isPdfExportRequest(request)) throw new Error('Invalid print request.')
-    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.printWorkbook, request)
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.printWorkbook, request, job)
     if (
       !isRecord(result) ||
       typeof result.ok !== 'boolean' ||

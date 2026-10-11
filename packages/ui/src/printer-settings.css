@@ -1,0 +1,178 @@
+/* Printer block of the print sheets (Docs / Sheets / Slides) */
+/* Collapsible group (Printer / Settings / Page Setup / Options) of the print pane */
+.print-section {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0;
+  overflow: hidden;
+}
+.print-section-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: var(--hover);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+.print-section-head svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  transition: transform 0.12s;
+}
+.print-section.open .print-section-head svg {
+  transform: rotate(90deg);
+}
+.print-section-body {
+  padding: 8px 10px 4px;
+}
+.print-section-body .ps-select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  height: 28px;
+  margin: 0 0 7px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.print-section-body .ps-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 7px;
+  font-size: 13px;
+  color: var(--text);
+}
+.print-section-body .ps-field .ps-select {
+  width: auto;
+  flex: 1;
+  max-width: 170px;
+  margin: 0;
+}
+.print-section-body .ps-num {
+  width: 64px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.print-section-body .ps-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.print-section-body .ps-check input {
+  width: auto;
+  height: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.print-section-body .ps-sub {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.print-section-body :disabled {
+  opacity: 0.45;
+}
+.printer-settings {
+  margin: 0;
+}
+.printer-settings .ps-select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  height: 28px;
+  margin: 0 0 7px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.printer-settings .ps-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 7px;
+  font-size: 13px;
+  color: var(--text);
+}
+.printer-settings .ps-field .ps-select {
+  width: auto;
+  flex: 1;
+  max-width: 150px;
+  margin: 0;
+}
+.printer-settings .ps-num {
+  width: 64px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.printer-settings .ps-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.printer-settings .ps-check input {
+  width: auto;
+  height: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.printer-settings :disabled {
+  opacity: 0.45;
+}
+.print-section-body .ps-link {
+  display: block;
+  margin: 2px 0 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+.print-section-body .ps-link:hover {
+  text-decoration: underline;
+}
+.print-section-body .ps-pages {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.print-section-body .ps-pages .ps-num {
+  width: 56px;
+}

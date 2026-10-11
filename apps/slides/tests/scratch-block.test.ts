@@ -122,6 +122,17 @@ describe('anti hand-building from scratch', () => {
     expect(r.isError).toBe(true)
     expect((window as any).slidesApi.applyTxn).not.toHaveBeenCalled()
   })
+  it('empty deck + addTable → allowed: a table asked for by name is not a hand-built page', async () => {
+    const r = await createSlidesSkill(mkAccess([blankDeck])).executeTool!({
+      id: 't',
+      name: 'apply_ops',
+      input: {
+        ops: [{ op: 'addTable', target: { slide: 0 }, rows: 2, cols: 2 }],
+      },
+    })
+    expect(r.isError).toBeUndefined()
+    expect((window as any).slidesApi.applyTxn).toHaveBeenCalledOnce()
+  })
   it('existing rich deck (lots of content) + addElement → allowed (fine-tuning is legitimate)', async () => {
     const r = await createSlidesSkill(mkAccess([richDeck])).executeTool!(insert('addElement'))
     expect(r.isError).toBeUndefined()

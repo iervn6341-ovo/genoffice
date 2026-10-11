@@ -232,7 +232,10 @@ describe('maxOutputTokensOf', () => {
 describe('clampMaxOutputTokens', () => {
   it('floors, bounds and defaults whatever the settings field or the input box held', () => {
     expect(clampMaxOutputTokens(16384.9)).toBe(16384)
-    expect(clampMaxOutputTokens(0)).toBe(MIN_MAX_OUTPUT_TOKENS)
+    // 0 is the explicit "no limit"; other values below the floor are raised to it
+    expect(clampMaxOutputTokens(0)).toBe(0)
+    expect(clampMaxOutputTokens(500)).toBe(MIN_MAX_OUTPUT_TOKENS)
+    expect(clampMaxOutputTokens(-5)).toBe(MIN_MAX_OUTPUT_TOKENS)
     expect(clampMaxOutputTokens(5e6)).toBe(MAX_MAX_OUTPUT_TOKENS)
     expect(clampMaxOutputTokens(Number.POSITIVE_INFINITY)).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
     expect(clampMaxOutputTokens(undefined)).toBe(DEFAULT_MAX_OUTPUT_TOKENS)

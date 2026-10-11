@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { Editor, JSONContent } from '@tiptap/core'
 import { TextSelection } from '@tiptap/pm/state'
 import {
+  RibbonFoldGroup,
   SHAPE_GALLERY_GROUPS,
   useDismissablePopover,
   wordArtSolidColor,
@@ -32,6 +33,7 @@ import {
   IconComment,
   IconComments,
   IconCompare,
+  IconTranslate,
   IconCursor,
   IconEraser,
   IconHighlighterPen,
@@ -130,13 +132,17 @@ export function clearParagraphFormatting(editor: Editor): void {
 }
 
 /** apply a gallery paragraph style; not for textbox sub-editors (no docHeading in their schema) */
-export function applyParagraphStyle(editor: Editor, key: 'p' | 'h1' | 'h2' | 'h3'): void {
+export function applyParagraphStyle(
+  editor: Editor,
+  key: 'p' | 'h1' | 'h2' | 'h3' | { styleId: string },
+): void {
   let c = editor.chain().focus()
   // setNode keeps the block's other attrs, including the styleId it was opened with: a
   // reopened Heading 2 switched to Heading 3 / Normal kept styleId "Heading2" and saved as
   // Heading 2 again. Dropping it lets the save pick the document's own style for the level
   // (its heading style ids may be localized) or Normal.
   if (key === 'p') c = c.setNode('docParagraph', { styleId: null })
+  else if (typeof key === 'object') c = c.setNode('docParagraph', { styleId: key.styleId })
   else
     c = c.setNode('docHeading', { level: Number(key.slice(1)), styleId: null, outlineOnly: null })
   // Word-like: applying a paragraph style sheds the runs' direct font/size/color.
@@ -715,347 +721,365 @@ export function ReviewTab({
   return (
     <>
       {/* Word: Proofing (Editor) sits leftmost */}
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={`${t('ribbonEditorTip')} — ${t('ribbonAiCreditNote')}`}
-            onClick={() => {
-              if (hasRangeSelection()) onAiPreset(t('ribbonEditorSelectionPrompt'))
-              else if (confirmAiRewrite()) onAiPreset(t('ribbonEditorPrompt'))
-            }}
-          >
-            <span className="rb-big-icon">
-              <span className="ai-feature-icon" aria-hidden="true">
-                <img src={iconEditor} width={22} height={22} alt="" />
-              </span>
+      <RibbonFoldGroup
+        label={t('ribbonGroupProofing')}
+        icon={<IconSpellcheck size={BIG} />}
+        caret={<IconCaret />}
+        priority={3}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={`${t('ribbonEditorTip')} — ${t('ribbonAiCreditNote')}`}
+          onClick={() => {
+            if (hasRangeSelection()) onAiPreset(t('ribbonEditorSelectionPrompt'))
+            else if (confirmAiRewrite()) onAiPreset(t('ribbonEditorPrompt'))
+          }}
+        >
+          <span className="rb-big-icon">
+            <span className="ai-feature-icon" aria-hidden="true">
+              <img src={iconEditor} width={22} height={22} alt="" />
             </span>
-            <span>{t('ribbonEditorBtn')}</span>
-          </button>
-          <button
-            className={`rb-big ${spellcheck ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonSpellcheckTip')}
-            onClick={() => onSpellcheck(!spellcheck)}
-          >
-            <span className="rb-big-icon">
-              <IconSpellcheck size={BIG} />
-            </span>
-            <span>{t('ribbonSpellcheckBtn')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupProofing')}</div>
-      </div>
+          </span>
+          <span>{t('ribbonEditorBtn')}</span>
+        </button>
+        <button
+          className={`rb-big ${spellcheck ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonSpellcheckTip')}
+          onClick={() => onSpellcheck(!spellcheck)}
+        >
+          <span className="rb-big-icon">
+            <IconSpellcheck size={BIG} />
+          </span>
+          <span>{t('ribbonSpellcheckBtn')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={`${t('ribbonTranslateTip')} — ${t('ribbonAiCreditNote')}`}
-              onClick={() => toggleDropdown(setDropdown, 'translate')}
-            >
-              <span className="rb-big-icon">
-                <span className="ai-feature-icon" aria-hidden="true">
-                  <img src={iconTranslate} width={22} height={22} alt="" />
-                </span>
-                <IconCaret />
-              </span>
-              <span>{t('ribbonTranslate')}</span>
-            </button>
-            {dropdown === 'translate' && (
-              <div data-rb-panel="" className="layout-menu">
-                {TRANSLATE_TARGETS.map((lang) => (
-                  <button
-                    key={lang.labelKey}
-                    onClick={() => {
-                      setDropdown(() => null)
-                      if (hasRangeSelection()) {
-                        onAiPreset(t('ribbonTranslateSelectionPrompt', { lang: t(lang.labelKey) }))
-                      } else if (confirmAiRewrite()) {
-                        onAiPreset(t('ribbonTranslatePrompt', { lang: t(lang.labelKey) }))
-                      }
-                    }}
-                  >
-                    {t('ribbonTranslateTo', { lang: t(lang.labelKey) })}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupLanguage')}</div>
-      </div>
-
-      <div className="ribbon-sep" />
-
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className="rb-big"
-            disabled={!hasDoc || !canComment || (isProtected && !commentsAllowed)}
-            data-tip={canComment ? t('ribbonNewCommentTip') : t('ribbonNewCommentSelectTip')}
-            onClick={onNewComment}
-          >
-            <span className="rb-big-icon">
-              <IconComment size={BIG} />
-            </span>
-            <span>{t('ribbonNewComment')}</span>
-          </button>
+      <RibbonFoldGroup
+        label={t('ribbonGroupLanguage')}
+        icon={<IconTranslate size={BIG} />}
+        caret={<IconCaret />}
+        priority={1}
+        caption
+      >
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
             disabled={!hasDoc}
-            data-tip={t('ribbonShowCommentsTip', { count: commentCount })}
-            onClick={onShowComments}
-          >
-            <span className="rb-big-icon">
-              <IconComments size={BIG} />
-            </span>
-            <span>{t('ribbonShowComments')}</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc || openCommentCount === 0}
-            data-tip={`${t('ribbonAiCommentsTip', { count: openCommentCount })} — ${t('ribbonAiCreditNote')}`}
-            onClick={() => onAiPreset(t('ribbonAiCommentsPrompt'))}
+            data-tip={`${t('ribbonTranslateTip')} — ${t('ribbonAiCreditNote')}`}
+            onClick={() => toggleDropdown(setDropdown, 'translate')}
           >
             <span className="rb-big-icon">
               <span className="ai-feature-icon" aria-hidden="true">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
+                <img src={iconTranslate} width={22} height={22} alt="" />
+              </span>
+              <IconCaret />
+            </span>
+            <span>{t('ribbonTranslate')}</span>
+          </button>
+          {dropdown === 'translate' && (
+            <div data-rb-panel="" className="layout-menu">
+              {TRANSLATE_TARGETS.map((lang) => (
+                <button
+                  key={lang.labelKey}
+                  onClick={() => {
+                    setDropdown(() => null)
+                    if (hasRangeSelection()) {
+                      onAiPreset(t('ribbonTranslateSelectionPrompt', { lang: t(lang.labelKey) }))
+                    } else if (confirmAiRewrite()) {
+                      onAiPreset(t('ribbonTranslatePrompt', { lang: t(lang.labelKey) }))
+                    }
+                  }}
+                >
+                  {t('ribbonTranslateTo', { lang: t(lang.labelKey) })}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </RibbonFoldGroup>
+
+      <div className="ribbon-sep" />
+
+      <RibbonFoldGroup
+        label={t('ribbonGroupComments')}
+        icon={<IconComments size={BIG} />}
+        caret={<IconCaret />}
+        priority={5}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc || !canComment || (isProtected && !commentsAllowed)}
+          data-tip={canComment ? t('ribbonNewCommentTip') : t('ribbonNewCommentSelectTip')}
+          onClick={onNewComment}
+        >
+          <span className="rb-big-icon">
+            <IconComment size={BIG} />
+          </span>
+          <span>{t('ribbonNewComment')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonShowCommentsTip', { count: commentCount })}
+          onClick={onShowComments}
+        >
+          <span className="rb-big-icon">
+            <IconComments size={BIG} />
+          </span>
+          <span>{t('ribbonShowComments')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc || openCommentCount === 0}
+          data-tip={`${t('ribbonAiCommentsTip', { count: openCommentCount })} — ${t('ribbonAiCreditNote')}`}
+          onClick={() => onAiPreset(t('ribbonAiCommentsPrompt'))}
+        >
+          <span className="rb-big-icon">
+            <span className="ai-feature-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 3V11.5a7.5 7.5 0 0 1 7.5-7.5h2A7.5 7.5 0 0 1 20 11.5z" />
+                <path
+                  d="M17 14l.26.7c.34.91.5 1.37.84 1.7.33.33.79.5 1.7.84l.7.26-.7.26c-.91.34-1.37.5-1.7.84-.34.33-.5.79-.84 1.7L17 21l-.26-.7c-.34-.91-.5-1.37-.84-1.7-.33-.34-.79-.5-1.7-.84l-.7-.26.7-.26c.91-.34 1.37-.5 1.7-.84.34-.33.5-.79.84-1.7L17 14z"
                   strokeLinejoin="round"
-                >
-                  <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 3V11.5a7.5 7.5 0 0 1 7.5-7.5h2A7.5 7.5 0 0 1 20 11.5z" />
-                  <path
-                    d="M17 14l.26.7c.34.91.5 1.37.84 1.7.33.33.79.5 1.7.84l.7.26-.7.26c-.91.34-1.37.5-1.7.84-.34.33-.5.79-.84 1.7L17 21l-.26-.7c-.34-.91-.5-1.37-.84-1.7-.33-.34-.79-.5-1.7-.84l-.7-.26.7-.26c.91-.34 1.37-.5 1.7-.84.34-.33.5-.79.84-1.7L17 14z"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
+                />
+              </svg>
             </span>
-            <span>{t('ribbonAiComments')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupComments')}</div>
-      </div>
+          </span>
+          <span>{t('ribbonAiComments')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
+      <RibbonFoldGroup
+        label={t('ribbonGroupTracking')}
+        icon={<IconTrackChanges size={BIG} />}
+        caret={<IconCaret />}
+        priority={6}
+        caption
+      >
+        <button
+          className={`rb-big ${trackChanges ? 'active' : ''}`}
+          disabled={!hasDoc || isProtected || trackChangesForced}
+          data-tip={t('ribbonTrackChangesTip')}
+          onClick={() => onTrackChanges(!trackChanges)}
+        >
+          <span className="rb-big-icon">
+            <IconTrackChanges size={BIG} />
+          </span>
+          <span>{t('ribbonTrackChanges')}</span>
+        </button>
+        <div className="rb-split-wrap">
           <button
-            className={`rb-big ${trackChanges ? 'active' : ''}`}
-            disabled={!hasDoc || isProtected || trackChangesForced}
-            data-tip={t('ribbonTrackChangesTip')}
-            onClick={() => onTrackChanges(!trackChanges)}
+            className={`rb-big ${revisionDisplay !== 'all' ? 'active' : ''}`}
+            disabled={!hasDoc}
+            data-tip={t('ribbonRevDisplayTip')}
+            onClick={() => toggleDropdown(setDropdown, 'revDisplay')}
           >
             <span className="rb-big-icon">
-              <IconTrackChanges size={BIG} />
+              <IconReadMode size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonTrackChanges')}</span>
+            <span>{t('ribbonRevDisplay')}</span>
           </button>
-          <div className="rb-split-wrap">
-            <button
-              className={`rb-big ${revisionDisplay !== 'all' ? 'active' : ''}`}
-              disabled={!hasDoc}
-              data-tip={t('ribbonRevDisplayTip')}
-              onClick={() => toggleDropdown(setDropdown, 'revDisplay')}
-            >
-              <span className="rb-big-icon">
-                <IconReadMode size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonRevDisplay')}</span>
-            </button>
-            {dropdown === 'revDisplay' && (
-              <div data-rb-panel="" className="layout-menu">
-                {(
-                  [
-                    ['all', t('ribbonRevDisplayAll')],
-                    ['none', t('ribbonRevDisplayNone')],
-                    ['original', t('ribbonRevDisplayOriginal')],
-                  ] as Array<[RevisionDisplayMode, string]>
-                ).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    onClick={() => {
-                      onRevisionDisplay(mode)
-                      setDropdown(() => null)
-                    }}
-                  >
-                    {label}
-                    {revisionDisplay === mode ? ' ✓' : ''}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc || revisionCount === 0 || isProtected || trackChangesForced}
-              data-tip={t('ribbonAcceptTip', { count: revisionCount })}
-              onClick={() => toggleDropdown(setDropdown, 'acceptRev')}
-            >
-              <span className="rb-big-icon">
-                <IconAccept size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonAccept')}</span>
-            </button>
-            {dropdown === 'acceptRev' && (
-              <div data-rb-panel="" className="layout-menu">
+          {dropdown === 'revDisplay' && (
+            <div data-rb-panel="" className="layout-menu">
+              {(
+                [
+                  ['all', t('ribbonRevDisplayAll')],
+                  ['none', t('ribbonRevDisplayNone')],
+                  ['original', t('ribbonRevDisplayOriginal')],
+                ] as Array<[RevisionDisplayMode, string]>
+              ).map(([mode, label]) => (
                 <button
+                  key={mode}
                   onClick={() => {
-                    onAcceptRevision(false)
+                    onRevisionDisplay(mode)
                     setDropdown(() => null)
                   }}
                 >
-                  {t('ribbonAcceptOne')}
+                  {label}
+                  {revisionDisplay === mode ? ' ✓' : ''}
                 </button>
-                <button
-                  onClick={() => {
-                    onAcceptRevision(true)
-                    setDropdown(() => null)
-                  }}
-                >
-                  {t('ribbonAcceptAll')}
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc || revisionCount === 0 || isProtected || trackChangesForced}
-              data-tip={t('ribbonRejectTip', { count: revisionCount })}
-              onClick={() => toggleDropdown(setDropdown, 'rejectRev')}
-            >
-              <span className="rb-big-icon">
-                <IconReject size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonReject')}</span>
-            </button>
-            {dropdown === 'rejectRev' && (
-              <div data-rb-panel="" className="layout-menu">
-                <button
-                  onClick={() => {
-                    onRejectRevision(false)
-                    setDropdown(() => null)
-                  }}
-                >
-                  {t('ribbonRejectOne')}
-                </button>
-                <button
-                  onClick={() => {
-                    onRejectRevision(true)
-                    setDropdown(() => null)
-                  }}
-                >
-                  {t('ribbonRejectAll')}
-                </button>
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
-            disabled={!hasDoc || revisionCount === 0}
-            data-tip={t('ribbonPrevChangeTip')}
-            onClick={() => onGotoRevision(-1)}
+            disabled={!hasDoc || revisionCount === 0 || isProtected || trackChangesForced}
+            data-tip={t('ribbonAcceptTip', { count: revisionCount })}
+            onClick={() => toggleDropdown(setDropdown, 'acceptRev')}
           >
             <span className="rb-big-icon">
-              <IconUndo size={BIG} />
+              <IconAccept size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonPrevChange')}</span>
+            <span>{t('ribbonAccept')}</span>
           </button>
+          {dropdown === 'acceptRev' && (
+            <div data-rb-panel="" className="layout-menu">
+              <button
+                onClick={() => {
+                  onAcceptRevision(false)
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonAcceptOne')}
+              </button>
+              <button
+                onClick={() => {
+                  onAcceptRevision(true)
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonAcceptAll')}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
-            disabled={!hasDoc || revisionCount === 0}
-            data-tip={t('ribbonNextChangeTip')}
-            onClick={() => onGotoRevision(1)}
+            disabled={!hasDoc || revisionCount === 0 || isProtected || trackChangesForced}
+            data-tip={t('ribbonRejectTip', { count: revisionCount })}
+            onClick={() => toggleDropdown(setDropdown, 'rejectRev')}
           >
             <span className="rb-big-icon">
-              <IconRedo size={BIG} />
+              <IconReject size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonNextChange')}</span>
+            <span>{t('ribbonReject')}</span>
           </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc || revisionCount === 0}
-            data-tip={`${t('ribbonAiRevisionsTip', { count: revisionCount })} — ${t('ribbonAiCreditNote')}`}
-            onClick={() => onAiPreset(t('ribbonAiRevisionsPrompt'))}
-          >
-            <span className="rb-big-icon">
-              <span className="ai-feature-icon" aria-hidden="true">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
+          {dropdown === 'rejectRev' && (
+            <div data-rb-panel="" className="layout-menu">
+              <button
+                onClick={() => {
+                  onRejectRevision(false)
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonRejectOne')}
+              </button>
+              <button
+                onClick={() => {
+                  onRejectRevision(true)
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonRejectAll')}
+              </button>
+            </div>
+          )}
+        </div>
+        <button
+          className="rb-big"
+          disabled={!hasDoc || revisionCount === 0}
+          data-tip={t('ribbonPrevChangeTip')}
+          onClick={() => onGotoRevision(-1)}
+        >
+          <span className="rb-big-icon">
+            <IconUndo size={BIG} />
+          </span>
+          <span>{t('ribbonPrevChange')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc || revisionCount === 0}
+          data-tip={t('ribbonNextChangeTip')}
+          onClick={() => onGotoRevision(1)}
+        >
+          <span className="rb-big-icon">
+            <IconRedo size={BIG} />
+          </span>
+          <span>{t('ribbonNextChange')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc || revisionCount === 0}
+          data-tip={`${t('ribbonAiRevisionsTip', { count: revisionCount })} — ${t('ribbonAiCreditNote')}`}
+          onClick={() => onAiPreset(t('ribbonAiRevisionsPrompt'))}
+        >
+          <span className="rb-big-icon">
+            <span className="ai-feature-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M4 5h16M4 9h12M4 13h9M4 17h7" />
+                <path
+                  d="M17 14l.26.7c.34.91.5 1.37.84 1.7.33.33.79.5 1.7.84l.7.26-.7.26c-.91.34-1.37.5-1.7.84-.34.33-.5.79-.84 1.7L17 21l-.26-.7c-.34-.91-.5-1.37-.84-1.7-.33-.34-.79-.5-1.7-.84l-.7-.26.7-.26c.91-.34 1.37-.5 1.7-.84.34-.33.5-.79.84-1.7L17 14z"
                   strokeLinejoin="round"
-                >
-                  <path d="M4 5h16M4 9h12M4 13h9M4 17h7" />
-                  <path
-                    d="M17 14l.26.7c.34.91.5 1.37.84 1.7.33.33.79.5 1.7.84l.7.26-.7.26c-.91.34-1.37.5-1.7.84-.34.33-.5.79-.84 1.7L17 21l-.26-.7c-.34-.91-.5-1.37-.84-1.7-.33-.34-.79-.5-1.7-.84l-.7-.26.7-.26c.91-.34 1.37-.5 1.7-.84.34-.33.5-.79.84-1.7L17 14z"
-                    strokeLinejoin="round"
-                  />
-                  <path d="M19.5 4.5l-7 7-2 .5.5-2 7-7z" />
-                </svg>
-              </span>
+                />
+                <path d="M19.5 4.5l-7 7-2 .5.5-2 7-7z" />
+              </svg>
             </span>
-            <span>{t('ribbonAiRevisions')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupTracking')}</div>
-      </div>
+          </span>
+          <span>{t('ribbonAiRevisions')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonCompareTip')}
-            onClick={onCompare}
-          >
-            <span className="rb-big-icon">
-              <IconCompare size={BIG} />
-            </span>
-            <span>{t('ribbonCompare')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonCompare')}</div>
-      </div>
+      <RibbonFoldGroup
+        label={t('ribbonCompare')}
+        icon={<IconCompare size={BIG} />}
+        caret={<IconCaret />}
+        priority={2}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonCompareTip')}
+          onClick={onCompare}
+        >
+          <span className="rb-big-icon">
+            <IconCompare size={BIG} />
+          </span>
+          <span>{t('ribbonCompare')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className={`rb-big ${protectActive ? 'active' : ''}`}
-            disabled={!hasDoc}
-            title={t('ribbonProtectDocTip')}
-            onClick={onProtectDoc}
-          >
-            <span className="rb-big-icon">
-              <IconLock size={BIG} />
-            </span>
-            <span>{t('ribbonProtectDoc')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupProtect')}</div>
-      </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupProtect')}
+        icon={<IconLock size={BIG} />}
+        caret={<IconCaret />}
+        priority={4}
+        caption
+      >
+        <button
+          className={`rb-big ${protectActive ? 'active' : ''}`}
+          disabled={!hasDoc}
+          title={t('ribbonProtectDocTip')}
+          onClick={onProtectDoc}
+        >
+          <span className="rb-big-icon">
+            <IconLock size={BIG} />
+          </span>
+          <span>{t('ribbonProtectDoc')}</span>
+        </button>
+      </RibbonFoldGroup>
     </>
   )
 }
@@ -1134,259 +1158,274 @@ export function ViewTab({
 
   return (
     <>
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className={`rb-big ${viewMode === 'print' && !readMode ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonPrintLayoutTip')}
-            onClick={() => {
-              onViewMode('print')
-              onReadMode(false)
-            }}
-          >
-            <span className="rb-big-icon">
-              <IconPrintLayout size={BIG} />
-            </span>
-            <span>{t('ribbonPrintLayout')}</span>
-          </button>
-          <button
-            className={`rb-big ${viewMode === 'web' ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonWebLayoutTip')}
-            onClick={() => onViewMode(viewMode === 'web' ? 'print' : 'web')}
-          >
-            <span className="rb-big-icon">
-              <IconWebLayout size={BIG} />
-            </span>
-            <span>{t('ribbonWebLayout')}</span>
-          </button>
-          <button
-            className={`rb-big ${viewMode === 'outline' ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonOutlineViewTip')}
-            onClick={() => onViewMode(viewMode === 'outline' ? 'print' : 'outline')}
-          >
-            <span className="rb-big-icon">
-              <IconOutlineView size={BIG} />
-            </span>
-            <span>{t('ribbonOutlineView')}</span>
-          </button>
-          <button
-            className={`rb-big ${readMode ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonReadModeTip')}
-            onClick={() => onReadMode(!readMode)}
-          >
-            <span className="rb-big-icon">
-              <IconReadMode size={BIG} />
-            </span>
-            <span>{t('ribbonReadMode')}</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc || viewMode !== 'print' || readMode}
-            data-tip={t('ribbonPagePreviewTip')}
-            onClick={onPagePreview}
-          >
-            <span className="rb-big-icon">
-              <IconWholePage size={BIG} />
-            </span>
-            <span>{t('ribbonPagePreview')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupViews')}</div>
-      </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupViews')}
+        icon={<IconReadMode size={BIG} />}
+        caret={<IconCaret />}
+        priority={7}
+        caption
+      >
+        <button
+          className={`rb-big ${viewMode === 'print' && !readMode ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonPrintLayoutTip')}
+          onClick={() => {
+            onViewMode('print')
+            onReadMode(false)
+          }}
+        >
+          <span className="rb-big-icon">
+            <IconPrintLayout size={BIG} />
+          </span>
+          <span>{t('ribbonPrintLayout')}</span>
+        </button>
+        <button
+          className={`rb-big ${viewMode === 'web' ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonWebLayoutTip')}
+          onClick={() => onViewMode(viewMode === 'web' ? 'print' : 'web')}
+        >
+          <span className="rb-big-icon">
+            <IconWebLayout size={BIG} />
+          </span>
+          <span>{t('ribbonWebLayout')}</span>
+        </button>
+        <button
+          className={`rb-big ${viewMode === 'outline' ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonOutlineViewTip')}
+          onClick={() => onViewMode(viewMode === 'outline' ? 'print' : 'outline')}
+        >
+          <span className="rb-big-icon">
+            <IconOutlineView size={BIG} />
+          </span>
+          <span>{t('ribbonOutlineView')}</span>
+        </button>
+        <button
+          className={`rb-big ${readMode ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonReadModeTip')}
+          onClick={() => onReadMode(!readMode)}
+        >
+          <span className="rb-big-icon">
+            <IconReadMode size={BIG} />
+          </span>
+          <span>{t('ribbonReadMode')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc || viewMode !== 'print' || readMode}
+          data-tip={t('ribbonPagePreviewTip')}
+          onClick={onPagePreview}
+        >
+          <span className="rb-big-icon">
+            <IconWholePage size={BIG} />
+          </span>
+          <span>{t('ribbonPagePreview')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonZoomOut')}
-            onClick={() => onZoom(Math.max(50, zoom - 10))}
-          >
-            <span className="rb-big-icon">
-              <IconZoomOut size={BIG} />
-            </span>
-            <span>{t('ribbonZoomOut')}</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonZoomIn')}
-            onClick={() => onZoom(Math.min(200, zoom + 10))}
-          >
-            <span className="rb-big-icon">
-              <IconZoomIn size={BIG} />
-            </span>
-            <span>{t('ribbonZoomIn')}</span>
-          </button>
-          <button
-            className={`rb-big ${zoom === 100 ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonZoom100Tip')}
-            aria-label={t('ribbonZoom100Tip')}
-            onClick={() => onZoom(100)}
-          >
-            <span className="rb-big-icon">
-              <IconZoom100 size={BIG} />
-            </span>
-            <span>100%</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonPageWidthTip')}
-            onClick={() => onZoomFit('width')}
-          >
-            <span className="rb-big-icon">
-              <IconPageWidth size={BIG} />
-            </span>
-            <span>{t('ribbonPageWidth')}</span>
-          </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonWholePageTip')}
-            onClick={() => onZoomFit('page')}
-          >
-            <span className="rb-big-icon">
-              <IconWholePage size={BIG} />
-            </span>
-            <span>{t('ribbonWholePage')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupZoom')}</div>
-      </div>
-
-      <div className="ribbon-sep" />
-
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className={`rb-big ${showAi ? 'active' : ''}`}
-            data-tip={t('ribbonAiPanelTip')}
-            onClick={onToggleAi}
-          >
-            <span className="rb-big-icon">
-              <IconAiPanel size={BIG} />
-            </span>
-            <span>{t('ribbonAiPanel')}</span>
-          </button>
-          <button
-            className={`rb-big ${darkPage ? 'active' : ''}`}
-            data-tip={t('ribbonDarkModeTip')}
-            onClick={() => onDarkPage(!darkPage)}
-          >
-            <span className="rb-big-icon">
-              <IconMoon size={BIG} />
-            </span>
-            <span>{t('ribbonDarkMode')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupAppearance')}</div>
-      </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupZoom')}
+        icon={<IconZoomIn size={BIG} />}
+        caret={<IconCaret />}
+        priority={3}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonZoomOut')}
+          onClick={() => onZoom(Math.max(50, zoom - 10))}
+        >
+          <span className="rb-big-icon">
+            <IconZoomOut size={BIG} />
+          </span>
+          <span>{t('ribbonZoomOut')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonZoomIn')}
+          onClick={() => onZoom(Math.min(200, zoom + 10))}
+        >
+          <span className="rb-big-icon">
+            <IconZoomIn size={BIG} />
+          </span>
+          <span>{t('ribbonZoomIn')}</span>
+        </button>
+        <button
+          className={`rb-big ${zoom === 100 ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonZoom100Tip')}
+          aria-label={t('ribbonZoom100Tip')}
+          onClick={() => onZoom(100)}
+        >
+          <span className="rb-big-icon">
+            <IconZoom100 size={BIG} />
+          </span>
+          <span>100%</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonPageWidthTip')}
+          onClick={() => onZoomFit('width')}
+        >
+          <span className="rb-big-icon">
+            <IconPageWidth size={BIG} />
+          </span>
+          <span>{t('ribbonPageWidth')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonWholePageTip')}
+          onClick={() => onZoomFit('page')}
+        >
+          <span className="rb-big-icon">
+            <IconWholePage size={BIG} />
+          </span>
+          <span>{t('ribbonWholePage')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <button
-            className={`rb-big ${showRuler ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonRulerTip')}
-            onClick={() => onShowRuler(!showRuler)}
-          >
-            <span className="rb-big-icon">
-              <IconRuler size={BIG} />
-            </span>
-            <span>{t('ribbonRuler')}</span>
-          </button>
-          <button
-            className={`rb-big ${showGrid ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonGridlinesTip')}
-            onClick={() => onShowGrid(!showGrid)}
-          >
-            <span className="rb-big-icon">
-              <IconGridlines size={BIG} />
-            </span>
-            <span>{t('ribbonGridlines')}</span>
-          </button>
-          <button
-            className={`rb-big ${showNav ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonNavPaneTip')}
-            onClick={() => onShowNav(!showNav)}
-          >
-            <span className="rb-big-icon">
-              <IconNavPane size={BIG} />
-            </span>
-            <span>{t('ribbonNavPane')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupShow')}</div>
-      </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupAppearance')}
+        icon={<IconMoon size={BIG} />}
+        caret={<IconCaret />}
+        priority={1}
+        caption
+      >
+        <button
+          className={`rb-big ${showAi ? 'active' : ''}`}
+          data-tip={t('ribbonAiPanelTip')}
+          onClick={onToggleAi}
+        >
+          <span className="rb-big-icon">
+            <IconAiPanel size={BIG} />
+          </span>
+          <span>{t('ribbonAiPanel')}</span>
+        </button>
+        <button
+          className={`rb-big ${darkPage ? 'active' : ''}`}
+          data-tip={t('ribbonDarkModeTip')}
+          onClick={() => onDarkPage(!darkPage)}
+        >
+          <span className="rb-big-icon">
+            <IconMoon size={BIG} />
+          </span>
+          <span>{t('ribbonDarkMode')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
+      <RibbonFoldGroup
+        label={t('ribbonGroupShow')}
+        icon={<IconRuler size={BIG} />}
+        caret={<IconCaret />}
+        priority={2}
+        caption
+      >
+        <button
+          className={`rb-big ${showRuler ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonRulerTip')}
+          onClick={() => onShowRuler(!showRuler)}
+        >
+          <span className="rb-big-icon">
+            <IconRuler size={BIG} />
+          </span>
+          <span>{t('ribbonRuler')}</span>
+        </button>
+        <button
+          className={`rb-big ${showGrid ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonGridlinesTip')}
+          onClick={() => onShowGrid(!showGrid)}
+        >
+          <span className="rb-big-icon">
+            <IconGridlines size={BIG} />
+          </span>
+          <span>{t('ribbonGridlines')}</span>
+        </button>
+        <button
+          className={`rb-big ${showNav ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonNavPaneTip')}
+          onClick={() => onShowNav(!showNav)}
+        >
+          <span className="rb-big-icon">
+            <IconNavPane size={BIG} />
+          </span>
+          <span>{t('ribbonNavPane')}</span>
+        </button>
+      </RibbonFoldGroup>
+
+      <div className="ribbon-sep" />
+
+      <RibbonFoldGroup
+        label={t('ribbonGroupWindow')}
+        icon={<IconNewWindow size={BIG} />}
+        caret={<IconCaret />}
+        priority={4}
+        caption
+      >
+        <button
+          className="rb-big"
+          data-tip={t('ribbonNewTabTip')}
+          onClick={() => void window.desktop.openNewTab(filePath)}
+        >
+          <span className="rb-big-icon">
+            <IconNewWindow size={BIG} />
+          </span>
+          <span>{t('ribbonNewTab')}</span>
+        </button>
+        <button
+          className={`rb-big ${splitView ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonSplitTip')}
+          onClick={() => onSplitView(!splitView)}
+        >
+          <span className="rb-big-icon">
+            <IconSplit size={BIG} />
+          </span>
+          <span>{t('ribbonSplit')}</span>
+        </button>
+        <div className="rb-split-wrap" ref={winMenuRef}>
           <button
             className="rb-big"
-            data-tip={t('ribbonNewTabTip')}
-            onClick={() => void window.desktop.openNewTab(filePath)}
+            data-tip={t('ribbonSwitchTabsTip')}
+            onClick={() => void toggleWinMenu()}
           >
             <span className="rb-big-icon">
-              <IconNewWindow size={BIG} />
+              <IconSwitchWindows size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonNewTab')}</span>
+            <span>{t('ribbonSwitchTabs')}</span>
           </button>
-          <button
-            className={`rb-big ${splitView ? 'active' : ''}`}
-            disabled={!hasDoc}
-            data-tip={t('ribbonSplitTip')}
-            onClick={() => onSplitView(!splitView)}
-          >
-            <span className="rb-big-icon">
-              <IconSplit size={BIG} />
-            </span>
-            <span>{t('ribbonSplit')}</span>
-          </button>
-          <div className="rb-split-wrap" ref={winMenuRef}>
-            <button
-              className="rb-big"
-              data-tip={t('ribbonSwitchTabsTip')}
-              onClick={() => void toggleWinMenu()}
-            >
-              <span className="rb-big-icon">
-                <IconSwitchWindows size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonSwitchTabs')}</span>
-            </button>
-            {winMenuOpen && (
-              <div className="layout-menu align-right">
-                {windows.map((w) => (
-                  <button
-                    key={w.id}
-                    onClick={() => {
-                      void window.desktop.focusDocsTab(w.id)
-                      setWinMenuOpen(false)
-                    }}
-                  >
-                    {w.focused ? '✓ ' : ''}
-                    {w.title || 'GenOffice Docs'}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {winMenuOpen && (
+            <div className="layout-menu align-right">
+              {windows.map((w) => (
+                <button
+                  key={w.id}
+                  onClick={() => {
+                    void window.desktop.focusDocsTab(w.id)
+                    setWinMenuOpen(false)
+                  }}
+                >
+                  {w.focused ? '✓ ' : ''}
+                  {w.title || 'GenOffice Docs'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupWindow')}</div>
-      </div>
+      </RibbonFoldGroup>
     </>
   )
 }

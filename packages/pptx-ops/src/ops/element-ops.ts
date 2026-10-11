@@ -505,10 +505,16 @@ register({
   validate(op, ctx) {
     resolveElement(ctx, op)
     const props = op.props as TextBodyPropsPatch | undefined
-    if (!props || (!props.vert && !props.autofit && !props.insets && props.wrap === undefined)) {
+    if (
+      !props ||
+      (!props.vert && !props.autofit && !props.insets && !props.columns && props.wrap === undefined)
+    ) {
       throw new GuidedError(
-        'op "setTextBodyProps" needs "props" with at least one of vert/autofit/insets/wrap.',
+        'op "setTextBodyProps" needs "props" with at least one of vert/autofit/insets/wrap/columns.',
       )
+    }
+    if (props.columns && !(Number.isFinite(props.columns.num) && props.columns.num >= 1)) {
+      throw new GuidedError('op "setTextBodyProps": "columns.num" must be a number of at least 1.')
     }
     if (props.vert && !['horz', 'eaVert', 'vert', 'vert270', 'wordArtVert'].includes(props.vert)) {
       throw new GuidedError(

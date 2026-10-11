@@ -41,7 +41,9 @@ import {
   buildPrintableHtml,
   configuredDefaultSaveDir,
   contextMenuLabels,
+  directPrintOptions,
   fetchRemoteImage,
+  listSystemPrinters,
   installContextMenu,
   installNavigationGuard,
   isHeadlessMode,
@@ -89,6 +91,7 @@ import {
   type AiSearchProviderId,
   resolveAiSettings,
   maxOutputTokensOf,
+  listOpenAiCompatibleModels,
   setAiUserAgent,
   setRescueFetch,
   streamForProvider,
@@ -118,7 +121,7 @@ import type {
   MenuCommand,
   OpenDocxResult,
 } from '../shared/ipc'
-import { ATTACHMENT_IMAGE_EXTS } from '../shared/ipc'
+import { ATTACHMENT_IMAGE_EXTS, type PrinterJobSettings } from '../shared/ipc'
 import { findDocxPath } from '../shared/open-file'
 import { atomicWriteFile, looksLikeZip } from './atomic-write'
 import {
@@ -2850,6 +2853,11 @@ export function registerAiIpc(): void {
     writeJson(SETTINGS_PATH(), settings)
   })
 
+  ipcMain.handle('ai:list-models', async (_event, baseUrl: unknown, apiKey: unknown) => {
+    if (typeof baseUrl !== 'string') return { ok: false, error: 'Invalid Base URL' }
+    return listOpenAiCompatibleModels(baseUrl, typeof apiKey === 'string' ? apiKey : undefined)
+  })
+
   ipcMain.handle('ai:codex-models', async (_event, cliPath: unknown) => {
     return listCodexModels(typeof cliPath === 'string' ? cliPath : undefined)
   })
@@ -3840,22 +3848,48 @@ export function registerDocsIpc(): void {
   const printScale = (scale?: number) =>
     scale && scale > 0 && scale !== 1 ? { scaleFactor: Math.round(scale * 100) } : {}
 
-  ipcMain.handle('docs:print', async (event, scale?: number) => {
-    // print the calling tab's own content; zero margins — the docx page padding provides them.
-    // Resolves when the system dialog is dismissed; the print dialog stays open on cancel
-    // (ok=false without error) and surfaces real failures.
-    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      event.sender.print(
-        { margins: { marginType: 'none' }, ...printScale(scale) },
-        (success, failureReason) => {
-          resolve({
-            ok: success,
-            ...(failureReason && !/cancel/i.test(failureReason) ? { error: failureReason } : {}),
-          })
-        },
-      )
-    })
-  })
+  ipcMain.handle('docs:list-printers', (event) => listSystemPrinters(event.sender))
+
+  ipcMain.handle(
+    'docs:print',
+    async (
+      event,
+      scale?: number,
+      job?: PrinterJobSettings,
+      pageSize?: { widthIn: number; heightIn: number },
+    ) => {
+      // print the calling tab's own content; zero margins — the docx page padding provides them.
+      // Resolves when the system dialog is dismissed; the print dialog stays open on cancel
+      // (ok=false without error) and surfaces real failures.
+      return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        // paper in microns; cell shading and highlights are content, not page background
+        const paper =
+          pageSize && pageSize.widthIn > 0 && pageSize.heightIn > 0
+            ? {
+                pageSize: {
+                  width: Math.round(pageSize.widthIn * 25400),
+                  height: Math.round(pageSize.heightIn * 25400),
+                },
+              }
+            : {}
+        event.sender.print(
+          {
+            margins: { marginType: 'none' },
+            printBackground: true,
+            ...paper,
+            ...directPrintOptions(job),
+            ...printScale(scale),
+          },
+          (success, failureReason) => {
+            resolve({
+              ok: success,
+              ...(failureReason && !/cancel/i.test(failureReason) ? { error: failureReason } : {}),
+            })
+          },
+        )
+      })
+    },
+  )
 
   ipcMain.handle(
     'docs:export-pdf',

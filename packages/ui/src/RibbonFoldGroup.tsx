@@ -22,6 +22,7 @@ export function RibbonFoldGroup({
   caret,
   as = 'div',
   itemsRole,
+  caption,
 }: {
   /** group name: the folded button's caption and the accessible name */
   label: string
@@ -39,6 +40,8 @@ export function RibbonFoldGroup({
   as?: 'div' | 'section' | undefined
   /** ARIA role of the items container (e.g. a view switcher's `tablist`) */
   itemsRole?: string | undefined
+  /** show the group name under the items while unfolded (Insert-style groups with a caption row) */
+  caption?: boolean | undefined
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLElement | null>(null)
@@ -92,6 +95,7 @@ export function RibbonFoldGroup({
       >
         {children}
       </div>
+      {caption && <div className="ribbon-group-label rb-fold-caption">{label}</div>}
     </Root>
   )
 }

@@ -104,6 +104,20 @@ const TOL = 1
     wider than the canvas measure); the regression guarded here was a ~5px shift */
 const BULLET_TOL = 1.5
 
+/** Home → Paragraph → Bullets ▾ (the caret half of the split button) */
+const bulletsCaret = (s: Page) =>
+  s.locator('.rb-para-inline .rb-split-icon').first().locator('button').nth(1)
+
+/** pick the second bullet style from the Bullets library, then size it from "Bullet Options" */
+async function bulletWithSize(s: Page, pct: string): Promise<void> {
+  await bulletsCaret(s).click()
+  await s.locator('.rb-bullet-lib .rb-bullet-tile').nth(1).click()
+  await bulletsCaret(s).click()
+  await s.locator('.rb-bullet-more').click()
+  await s.locator('.rb-bullet-hang', { hasText: pct }).click()
+  await bulletsCaret(s).click() // close the library again (Escape would leave the text edit)
+}
+
 async function withDeck<T>(text: string, fn: (s: Page, l: LaunchedApp) => Promise<T>): Promise<T> {
   const launched = await launchShell({ onboardingSeen: true, videoDir: 'slides-text-editing' })
   try {
@@ -116,6 +130,33 @@ async function withDeck<T>(text: string, fn: (s: Page, l: LaunchedApp) => Promis
 }
 
 test.describe('slides text editing: editor matches canvas', () => {
+  test('fixed-width word cells never break a word that measures a hair wider', async () => {
+    await withDeck('Efficient LLM', async (s) => {
+      // leave and re-enter the box: reopening bakes the engine's fixed word cells (typing does not)
+      const rect = await editorRect(s)
+      await s.keyboard.press('Escape')
+      await s.waitForTimeout(400)
+      await s.mouse.dblclick(rect.x + 24, rect.y + 16)
+      // zero line-height cells have no box height, so wait for presence, not visibility
+      await s.waitForSelector('.slide-text-editor [data-layout-fragment]', {
+        state: 'attached',
+        timeout: 5000,
+      })
+      const styles = await s.evaluate(() =>
+        [
+          ...document.querySelectorAll<HTMLElement>('.slide-text-editor [data-layout-fragment]'),
+        ].map((f) => ({
+          ws: getComputedStyle(f).overflowWrap,
+          display: getComputedStyle(f).display,
+        })),
+      )
+      expect(styles.length).toBeGreaterThan(0)
+      for (const st of styles.filter((x) => x.display === 'inline-block')) {
+        expect(st.ws).toBe('normal')
+      }
+    })
+  })
+
   test('plain text', async () => {
     await withDeck('Hi', async (s) => {
       const { dom, canvas } = await domVsCanvas(s)
@@ -137,10 +178,7 @@ test.describe('slides text editing: editor matches canvas', () => {
   for (const pct of ['75%', '100%', '150%']) {
     test(`bullet toggled while editing at ${pct}: text does not shift on commit`, async () => {
       await withDeck('Hi', async (s) => {
-        await tip(s, 'Paragraph').click()
-        await s.locator('.rb-bullet-tile').nth(1).click()
-        await s.locator('.rb-bullet-hang', { hasText: pct }).click()
-        await tip(s, 'Paragraph').click()
+        await bulletWithSize(s, pct)
         await s.waitForTimeout(300)
         const { dom, canvas } = await domVsCanvas(s)
         // the whole run (bullet + text) must end where the canvas ends: a too-narrow preview
@@ -154,10 +192,7 @@ test.describe('slides text editing: editor matches canvas', () => {
 
   test('bullet size chosen while editing survives the commit', async () => {
     await withDeck('Hi', async (s) => {
-      await tip(s, 'Paragraph').click()
-      await s.locator('.rb-bullet-tile').nth(1).click()
-      await s.locator('.rb-bullet-hang', { hasText: '150%' }).click()
-      await tip(s, 'Paragraph').click()
+      await bulletWithSize(s, '150%')
       const bulletSize = () =>
         s.evaluate(
           () =>
@@ -181,10 +216,7 @@ test.describe('slides text editing: editor matches canvas', () => {
 
   test('preview bullet dot stays centred on the text like the canvas dot', async () => {
     await withDeck('Hi', async (s) => {
-      await tip(s, 'Paragraph').click()
-      await s.locator('.rb-bullet-tile').nth(1).click()
-      await s.locator('.rb-bullet-hang', { hasText: '150%' }).click()
-      await tip(s, 'Paragraph').click()
+      await bulletWithSize(s, '150%')
       await s.waitForTimeout(300)
       const shift = await s.evaluate(() =>
         parseFloat(

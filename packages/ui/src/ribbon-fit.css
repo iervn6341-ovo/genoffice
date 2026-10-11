@@ -31,6 +31,10 @@
 .rb-fold-group[data-folded] > .rb-fold-items {
   display: none;
 }
+/* the caption row only belongs to the unfolded group (the folded button carries the name) */
+.rb-fold-group[data-folded] > .rb-fold-caption {
+  display: none;
+}
 .rb-fold-group[data-folded].rb-fold-open > .rb-fold-items {
   display: flex;
   flex-wrap: wrap;

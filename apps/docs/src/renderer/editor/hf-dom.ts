@@ -30,9 +30,16 @@ import { INLINE_RULE_CLASS, inlineRuleDecls } from './inline-rule'
  */
 
 /** w:pBdr line CSS: declared color/width when present, legacy 1px #444 otherwise (document content color) */
-export function paraBorderCss(line?: { color?: string; szPt?: number }): string {
+export function paraBorderCss(line?: { color?: string; szPt?: number; val?: string }): string {
+  const color = `#${line?.color ?? '444'}`
+  // a non-single line style (double / dotted / dashed ...) sizes by the same rules as table borders
+  if (line?.val && line.val !== 'single') {
+    const style = line.val
+    const szEighths = line.szPt ? line.szPt * 8 : 4
+    return `${borderDrawnPx({ style, szEighths })}px ${borderCssStyle(style)} ${color}`
+  }
   const widthPx = line?.szPt ? Math.max(1, Math.round((line.szPt * 96) / 72)) : 1
-  return `${widthPx}px solid #${line?.color ?? '444'}`
+  return `${widthPx}px solid ${color}`
 }
 
 export type ParaBorderPadding = Partial<

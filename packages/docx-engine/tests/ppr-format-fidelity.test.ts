@@ -18,8 +18,8 @@ const RAW =
 const MODEL: ParaFormat = {
   borders: 'tb',
   borderLines: {
-    t: { color: 'FF0000', szPt: 1.5, spacePt: 1 },
-    b: { color: 'FF0000', szPt: 1.5, spacePt: 1 },
+    t: { color: 'FF0000', szPt: 1.5, spacePt: 1, val: 'dashed' },
+    b: { color: 'FF0000', szPt: 1.5, spacePt: 1, val: 'dashed' },
   },
   shadingFill: 'EEEEEE',
   spaceBefore: 240,
@@ -118,6 +118,29 @@ describe('mergePPrFormat keeps unedited groups byte-identical', () => {
       borderLines: { b: { color: '4F81BD', szPt: 1, spacePt: 6 } },
     })
     expect(out).toContain('<w:bottom w:val="single" w:sz="8" w:space="6" w:color="4F81BD"/>')
+  })
+
+  it('w:between and the line style round-trip through the model', async () => {
+    const raw =
+      '<w:pPr><w:pBdr><w:top w:val="double" w:sz="6" w:space="1" w:color="auto"/>' +
+      '<w:between w:val="dotted" w:sz="4" w:space="1" w:color="2E74B5"/></w:pBdr></w:pPr>'
+    const doc = await parseDocx(
+      await buildDocx({ bodyXml: `<w:p>${raw}<w:r><w:t>x</w:t></w:r></w:p>` }),
+    )
+    const format = doc.blocks[0].format!
+    expect(format.borders).toBe('th')
+    expect(format.borderLines?.h).toEqual({ color: '2E74B5', szPt: 0.5, spacePt: 1, val: 'dotted' })
+    expect(format.borderLines?.t?.val).toBe('double')
+    // an untouched model keeps the file's bytes
+    expect(mergePPrFormat(raw, format)).toBe(raw)
+    // a model built by the ribbon writes between after the four sides, with its line style
+    const out = mergePPrFormat('<w:pPr></w:pPr>', {
+      borders: 'tblrh',
+      borderLines: { b: { val: 'dashed', szPt: 1 }, h: { color: 'FF0000', szPt: 0.5 } },
+    })
+    expect(out.indexOf('<w:between')).toBeGreaterThan(out.indexOf('<w:right'))
+    expect(out).toContain('<w:bottom w:val="dashed" w:sz="8"')
+    expect(out).toContain('<w:between w:val="single" w:sz="4" w:space="0" w:color="FF0000"/>')
   })
 
   it('changing indent rebuilds w:ind and drops the char-unit variants', () => {

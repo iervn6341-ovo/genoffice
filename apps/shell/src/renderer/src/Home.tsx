@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, ReactElement } from 'react'
 import logoLockup from './assets/genoffice-logo.svg'
 import iconDocx from './assets/file-docx.svg'
@@ -946,6 +946,22 @@ export function Home() {
   useDismissablePopover(folderMenu !== null, () => setFolderMenu(null), {
     inside: () => [folderMenuWrapRef.current],
   })
+  // The menu is anchored by its right edge to the "…" button, so in a narrow sidebar it ran off the
+  // left of the window (and near the bottom off that edge): once measured, pull it back inside.
+  useLayoutEffect(() => {
+    if (!folderMenu) return
+    const el = document.querySelector<HTMLElement>('.folder-menu')
+    if (!el) return
+    const margin = 8
+    const r = el.getBoundingClientRect()
+    if (r.left < margin) {
+      el.style.right = 'auto'
+      el.style.left = `${margin}px`
+    }
+    if (r.bottom > window.innerHeight - margin) {
+      el.style.top = `${Math.max(margin, window.innerHeight - r.height - margin)}px`
+    }
+  }, [folderMenu])
   // the fixed-position folder menu would detach from its row while the tree scrolls
   useEffect(() => {
     if (!folderMenu) return

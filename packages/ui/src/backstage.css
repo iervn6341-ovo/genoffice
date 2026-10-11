@@ -1,0 +1,278 @@
+/* File tab full-window view (Office "backstage") shared by Docs / Sheets / Slides */
+.backstage {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+/* left drawer over the document: the page stays visible behind a light scrim */
+.bs-drawer {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: 90vw;
+  flex-shrink: 0;
+  overflow: auto;
+  background: var(--surface);
+  border-inline-end: 1px solid var(--border);
+  box-shadow: var(--shadow-menu);
+  animation: bs-slide-in 0.16s ease-out;
+}
+.bs-scrim {
+  flex: 1;
+  background: var(--color-bg-overlay);
+  opacity: 0.35;
+}
+.backstage.closing .bs-drawer {
+  animation: bs-slide-out 0.14s ease-in forwards;
+}
+.backstage.closing .bs-scrim {
+  animation: bs-fade-out 0.14s ease-in forwards;
+}
+.bs-scrim {
+  animation: bs-fade-in 0.16s ease-out;
+}
+@keyframes bs-slide-out {
+  to {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+}
+@keyframes bs-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes bs-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes bs-slide-in {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bs-drawer,
+  .bs-scrim,
+  .backstage.closing .bs-drawer,
+  .backstage.closing .bs-scrim {
+    animation: none;
+  }
+}
+.bs-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+}
+.bs-subhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px -6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bs-subhead:hover {
+  background: var(--hover);
+}
+.bs-subhead svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bs-back {
+  align-self: flex-start;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 8px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.bs-back:hover,
+.bs-nav:hover:not(:disabled) {
+  background: var(--hover);
+}
+.bs-back svg,
+.bs-nav svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bs-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-inline-start: 3px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+}
+.bs-nav.active {
+  background: var(--active-bg);
+  border-inline-start-color: var(--accent);
+  font-weight: 600;
+}
+.bs-nav:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+.bs-sep {
+  width: 100%;
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.bs-body {
+  padding: 14px 18px 24px;
+}
+.bs-title {
+  margin: 0 0 18px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.bs-h {
+  margin: 22px 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.bs-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.bs-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 130px;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.bs-tile:hover {
+  background: var(--hover);
+  border-color: var(--border);
+}
+.bs-tile-thumb {
+  display: grid;
+  place-items: center;
+  width: 100px;
+  height: 128px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+}
+.bs-tile-plus {
+  font-size: 36px;
+  color: var(--accent);
+}
+.bs-tile-label {
+  font-size: 12px;
+  text-align: center;
+}
+.bs-recent {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bs-recent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+}
+.bs-recent-item:hover {
+  background: var(--hover);
+}
+.bs-recent-name {
+  font-weight: 600;
+}
+.bs-recent-dir {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-empty {
+  padding: 8px 2px;
+  color: var(--text-secondary);
+}
+.bs-primary,
+.bs-export {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 9px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+}
+.bs-primary:hover,
+.bs-export:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+.bs-export:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+.bs-info {
+  margin: 0;
+}
+.bs-info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.bs-info-row dt {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.bs-info-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

@@ -86,8 +86,40 @@ export const BUILTIN_LAYOUTS: BuiltinLayoutDef[] = [
       { type: 'body', idx: '2', x: 6172200, y: 1825625, cx: 5181600, cy: 4351338 },
     ],
   },
+  {
+    key: 'comparison',
+    name: 'Comparison',
+    type: 'twoTxTwoObj',
+    placeholders: [
+      { type: 'title', x: 839788, y: 365125, cx: 10515600, cy: 1325563 },
+      { type: 'body', idx: '1', x: 839788, y: 1681163, cx: 5157787, cy: 823912 },
+      { type: 'body', idx: '2', x: 839788, y: 2505075, cx: 5157787, cy: 3684588 },
+      { type: 'body', idx: '3', x: 6172200, y: 1681163, cx: 5183188, cy: 823912 },
+      { type: 'body', idx: '4', x: 6172200, y: 2505075, cx: 5183188, cy: 3684588 },
+    ],
+  },
   { key: 'titleOnly', name: 'Title Only', type: 'titleOnly', placeholders: [TITLE] },
   { key: 'blank', name: 'Blank', type: 'blank', placeholders: [] },
+  {
+    key: 'contentCaption',
+    name: 'Content with Caption',
+    type: 'objTx',
+    placeholders: [
+      { type: 'title', x: 839788, y: 457200, cx: 3932237, cy: 1600200 },
+      { type: 'body', idx: '1', x: 5183188, y: 987425, cx: 6172200, cy: 4873625 },
+      { type: 'body', idx: '2', x: 839788, y: 2057400, cx: 3932237, cy: 3811588 },
+    ],
+  },
+  {
+    key: 'pictureCaption',
+    name: 'Picture with Caption',
+    type: 'picTx',
+    placeholders: [
+      { type: 'title', x: 839788, y: 457200, cx: 3932237, cy: 1600200 },
+      { type: 'pic', idx: '1', x: 5183188, y: 987425, cx: 6172200, cy: 4873625 },
+      { type: 'body', idx: '2', x: 839788, y: 2057400, cx: 3932237, cy: 3811588 },
+    ],
+  },
 ]
 
 function scalePh(ph: BuiltinPh, size: SlideSize): LayoutPlaceholder {

@@ -242,7 +242,9 @@ describe('local endpoints get the long watchdog budget', () => {
     const seen: { signal?: AbortSignal } = {}
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      vi.fn().mockImplementation((url: string, init: RequestInit) => {
+        // the reachability probe (GET /models) is answered at once: the server is up, just busy
+        if (url.endsWith('/models')) return Promise.resolve(new Response('{}', { status: 200 }))
         seen.signal = init.signal as AbortSignal
         return new Promise((_, reject) => {
           seen.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true })

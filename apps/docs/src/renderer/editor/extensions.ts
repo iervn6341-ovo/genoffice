@@ -15,6 +15,7 @@ import {
 } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { ListAutoFormat } from './list-autoformat'
+import { MarkdownShortcut } from './markdown-shortcut'
 import { WordEnterStyle, WordNavigation, WordSelectionDelete } from './word-keys'
 import { DoubleClickLineEnd } from './double-click-line-end'
 import { appendsAtEnd, touchedTopLevelBlocks } from './touched-blocks'
@@ -108,6 +109,7 @@ import {
 } from './inline-rule'
 import {
   DK_SIDE,
+  darkPageBorderCss,
   darkPageColor,
   dkBackground,
   dkBorder,
@@ -765,8 +767,9 @@ function blockAttrs(
   if (ink) attrs['data-ink'] = ink
   if (node.attrs.borders) {
     const borders = String(node.attrs.borders)
-    let borderLines: Partial<Record<string, { color?: string; szPt?: number; spacePt?: number }>> =
-      {}
+    let borderLines: Partial<
+      Record<string, { color?: string; szPt?: number; spacePt?: number; val?: string }>
+    > = {}
     if (node.attrs.borderLines) {
       try {
         borderLines = JSON.parse(String(node.attrs.borderLines))
@@ -781,6 +784,12 @@ function blockAttrs(
       styles.push(`border-${side}:${line}`, dkBorder(key, line))
     }
     styles.push(...paraBorderPaddingDecls(paraBorderPadding(borders, borderLines)))
+    if (borders.includes('h')) {
+      // w:between: the rule between this paragraph and the next one that carries it too (styles.css)
+      const line = paraBorderCss(borderLines.h)
+      styles.push(`--bdr-between:${line}`, `--dk-bdr-between:${darkPageBorderCss(line)}`)
+      attrs['class'] = [attrs['class'], 'bdr-between'].filter(Boolean).join(' ')
+    }
   }
   if (node.attrs.borderReset) {
     for (const side of ['top', 'bottom', 'left', 'right'] as const) {
@@ -6209,6 +6218,7 @@ export const editorExtensions = [
   WordSelectAllDelete,
   AutoLinkOnDelimiter,
   ListAutoFormat,
+  MarkdownShortcut,
   DoubleClickLineEnd,
   WordEditorShortcuts,
   CaretMarksMemory,

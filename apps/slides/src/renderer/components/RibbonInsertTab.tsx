@@ -1,5 +1,5 @@
 /** Insert tab of the slides ribbon. Extracted from Ribbon.tsx. */
-import { WORDART_PRESETS, wordArtStrokePx } from '@genoffice/ui'
+import { WORDART_PRESETS, stableHtml, wordArtStrokePx } from '@genoffice/ui'
 import { CHART_GALLERY, ICON_COLORS, ICON_GALLERY, SMARTART_GALLERY } from '../insert-presets'
 import type { StringKey } from '../i18n/locale'
 import { ChartKindThumb } from './ChartTypeDialog'
@@ -84,7 +84,10 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
   } = rb
   return (
     <>
-      <Group label={t('ribbonGroupSlides')}>
+      <Group
+        label={t('ribbonGroupSlides')}
+        fold={{ icon: <IconNewSlide size={BIG} />, priority: 9 }}
+      >
         <div className="rb-drop-wrap">
           <button
             className="rb-big rb-split"
@@ -129,7 +132,7 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         </div>
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonGroupTable')}>
+      <Group label={t('ribbonGroupTable')} fold={{ icon: <IconTable size={BIG} />, priority: 8 }}>
         <div className="rb-drop-wrap">
           <button
             className={`rb-big ${tableOpen ? 'active' : ''}`}
@@ -192,7 +195,10 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         </div>
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonGroupImages')}>
+      <Group
+        label={t('ribbonGroupImages')}
+        fold={{ icon: <IconPicture size={BIG} />, priority: 7 }}
+      >
         <button
           className="rb-big"
           disabled={!hasDoc}
@@ -243,7 +249,7 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
                     strokeWidth={1.5}
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    dangerouslySetInnerHTML={{ __html: def.body }}
+                    dangerouslySetInnerHTML={stableHtml(def.body)}
                   />
                 </button>
               ))}
@@ -263,7 +269,10 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         </button>
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonGroupIllustrations')}>
+      <Group
+        label={t('ribbonGroupIllustrations')}
+        fold={{ icon: <IconShapes size={BIG} />, priority: 5 }}
+      >
         {dropBig(
           'shapes',
           <IconShapes size={BIG} />,
@@ -322,7 +331,7 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         )}
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonGroupLinks')}>
+      <Group label={t('ribbonGroupLinks')} fold={{ icon: <IconLink size={BIG} />, priority: 4 }}>
         <button
           className="rb-big"
           data-keep-edit=""
@@ -365,7 +374,10 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         )}
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonGroupComments')}>
+      <Group
+        label={t('ribbonGroupComments')}
+        fold={{ icon: <IconComment size={BIG} />, priority: 3 }}
+      >
         <button
           className="rb-big"
           disabled={!hasDoc}
@@ -379,7 +391,10 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         </button>
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonShapeGroupText')}>
+      <Group
+        label={t('ribbonShapeGroupText')}
+        fold={{ icon: <IconTextBox size={BIG} />, priority: 6 }}
+      >
         <button
           className="rb-big"
           disabled={!hasDoc}
@@ -455,7 +470,10 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         </button>
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonGroupSymbols')}>
+      <Group
+        label={t('ribbonGroupSymbols')}
+        fold={{ icon: <IconEquation size={BIG} />, priority: 2 }}
+      >
         <button
           className="rb-big"
           disabled={!hasDoc}
@@ -469,7 +487,7 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
         </button>
       </Group>
       <div className="ribbon-sep" />
-      <Group label={t('ribbonGroupMedia')}>
+      <Group label={t('ribbonGroupMedia')} fold={{ icon: <IconVideo size={BIG} />, priority: 1 }}>
         <button
           className="rb-big"
           disabled={!hasDoc}

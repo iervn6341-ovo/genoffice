@@ -2,6 +2,7 @@ import type { IFunctionInfo } from '@univerjs/engine-formula'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { platformShortcuts } from '@genoffice/i18n'
 import {
+  backstageLabels,
   Dropdown,
   RibbonCollapseButton,
   RibbonFoldGroup,
@@ -14,13 +15,21 @@ import {
 
 import {
   BorderAllIcon,
+  BorderBottomDoubleIcon,
   BorderBottomIcon,
+  BorderBottomThickIcon,
+  BorderInsideHorizontalIcon,
+  BorderInsideIcon,
+  BorderInsideVerticalIcon,
   BorderLeftIcon,
   BorderNoneIcon,
   BorderOuterIcon,
   BorderRightIcon,
   BorderThickOuterIcon,
+  BorderTopBottomIcon,
+  BorderTopDoubleBottomIcon,
   BorderTopIcon,
+  BorderTopThickBottomIcon,
   CaretIcon,
   AssistantMark,
   RIBBON_GLYPH_ICONS,
@@ -43,7 +52,7 @@ import {
 import { InsertCellsDialog } from './InsertCellsDialog'
 import { GoToDialog } from './GoToDialog'
 import { COLOR_SCHEMES, FONT_SCHEMES, THEME_PRESETS } from './themes'
-import { useI18n, type StringKey } from './i18n/locale'
+import { getLang, useI18n, type StringKey } from './i18n/locale'
 import { NameManagerDialog, type DefinedNameAction, type DefinedNameRow } from './NameManagerDialog'
 import { categoryOptionForPattern, numberFormatCategories } from './number-format'
 import { type SelectionFormat } from './selection-format'
@@ -233,6 +242,8 @@ interface ExcelShellProps {
   /// file-backed session (the in-memory demo workbook has nowhere to copy).
   readonly canSaveAs: boolean
   readonly onSaveAs: () => void
+  /// File tab: opens the full-window File view
+  readonly onFileTab?: () => void
   /// QAT redo (workbook history, same path as the app menu's ⇧⌘Z); undo
   /// shares the AI panel's onUndo above.
   readonly onRedo: () => void
@@ -305,6 +316,8 @@ interface ExcelShellProps {
   /// Session page-layout settings of the active sheet, echoed by the Page
   /// Layout tab's controls (untouched fields show the app default).
   readonly pageLayout: PageLayoutEcho
+  /// Bumped by the print pane to open the Header & Footer dialog.
+  readonly headerFooterRequest?: number
   /// Manual-recalc mode echo for the Calculation Options menu.
   readonly calcManual: boolean
   /// Goal Seek solve; rejects with a user-facing Error message.
@@ -393,6 +406,7 @@ export function ExcelShell({
   onSave,
   canSaveAs,
   onSaveAs,
+  onFileTab,
   onRedo,
   canUndo,
   canRedo,
@@ -400,6 +414,7 @@ export function ExcelShell({
   onAutoSaveChange,
   selectedChart,
   pageLayout,
+  headerFooterRequest = 0,
   calcManual,
   onGoalSeek,
 }: ExcelShellProps): React.JSX.Element {
@@ -438,6 +453,9 @@ export function ExcelShell({
   const onGetSelectionShapeRef = useRef(onGetSelectionShape)
   onGetSelectionShapeRef.current = onGetSelectionShape
   const [showHeaderFooter, setShowHeaderFooter] = useState(false)
+  useEffect(() => {
+    if (headerFooterRequest > 0) setShowHeaderFooter(true)
+  }, [headerFooterRequest])
   const [showAllowEditRanges, setShowAllowEditRanges] = useState(false)
   /// Non-null while the Chart Design → Add Chart Element text prompt is open.
   const [chartTextTarget, setChartTextTarget] = useState<ChartTextTarget | null>(null)
@@ -624,6 +642,9 @@ export function ExcelShell({
           aria-label="Workbook commands"
           onDoubleClick={collapse.onTabsDoubleClick}
         >
+          <button type="button" className="ribbon-tab ribbon-tab-file" onClick={onFileTab}>
+            {backstageLabels(getLang()).tabFile}
+          </button>
           <button
             type="button"
             className="qa-btn"
@@ -1606,7 +1627,10 @@ function Ribbon({
   if (activeTab === 'Insert') {
     return (
       <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
-        <RibbonGroup label={t('appGroupTables')}>
+        <RibbonGroup
+          label={t('appGroupTables')}
+          fold={{ priority: 9, icon: <ToolSymbol symbol="⊞" /> }}
+        >
           <RibbonButton
             large
             label={t('appPivotTable')}
@@ -1629,7 +1653,10 @@ function Ribbon({
             onClick={() => onCommand('format-as-table')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupIllustrations')}>
+        <RibbonGroup
+          label={t('appGroupIllustrations')}
+          fold={{ priority: 8, icon: <ToolSymbol symbol="🖼" /> }}
+        >
           <RibbonButton
             large
             label={t('appPictures')}
@@ -1665,7 +1692,10 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupCheckbox')}>
+        <RibbonGroup
+          label={t('appGroupCheckbox')}
+          fold={{ priority: 7, icon: <ToolSymbol symbol="☑" /> }}
+        >
           <RibbonButton
             large
             label={t('appGroupCheckbox')}
@@ -1761,14 +1791,20 @@ function Ribbon({
             ],
           )}
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupSparklines')}>
+        <RibbonGroup
+          label={t('appGroupSparklines')}
+          fold={{ priority: 6, icon: <ToolSymbol symbol="📈" /> }}
+        >
           {largeMenu(t('appGroupSparklines'), '〜', t('appSparklinesTitle'), [
             { value: 'sparkline:line', label: t('appSparkLine') },
             { value: 'sparkline:column', label: t('appSparkColumn') },
             { value: 'sparkline:stacked', label: t('appSparkWinLoss') },
           ])}
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupFilters')}>
+        <RibbonGroup
+          label={t('appGroupFilters')}
+          fold={{ priority: 5, icon: <ToolSymbol symbol="▥" /> }}
+        >
           <div className="row-stack">
             <button
               className="styles-row as-button"
@@ -1788,7 +1824,10 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupLinks')}>
+        <RibbonGroup
+          label={t('appGroupLinks')}
+          fold={{ priority: 4, icon: <ToolSymbol symbol="🔗" /> }}
+        >
           <RibbonButton
             large
             label={t('appLink')}
@@ -1797,7 +1836,10 @@ function Ribbon({
             onClick={() => onCommand('link-open')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupComments')}>
+        <RibbonGroup
+          label={t('appGroupComments')}
+          fold={{ priority: 3, icon: <ToolSymbol symbol="🗨" /> }}
+        >
           <RibbonButton
             large
             label={t('appNewComment')}
@@ -1806,7 +1848,10 @@ function Ribbon({
             onClick={() => onCommand('note-open')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupText')}>
+        <RibbonGroup
+          label={t('appGroupText')}
+          fold={{ priority: 2, icon: <ToolSymbol symbol="A" /> }}
+        >
           <RibbonButton
             large
             label={t('appTextBox')}
@@ -1822,7 +1867,10 @@ function Ribbon({
             onClick={() => onCommand('header-footer-open')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupSymbols')}>
+        <RibbonGroup
+          label={t('appGroupSymbols')}
+          fold={{ priority: 1, icon: <ToolSymbol symbol="π" /> }}
+        >
           <div className="row-stack">
             <button
               className="styles-row as-button"
@@ -1877,7 +1925,10 @@ function Ribbon({
     } as const
     return (
       <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
-        <RibbonGroup label={t('appGroupThemes')}>
+        <RibbonGroup
+          label={t('appGroupThemes')}
+          fold={{ priority: 3, icon: <ToolSymbol symbol="▤" /> }}
+        >
           {largeMenu(
             t('appGroupThemes'),
             '🎨',
@@ -1918,7 +1969,10 @@ function Ribbon({
             </span>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupPageSetup')}>
+        <RibbonGroup
+          label={t('appGroupPageSetup')}
+          fold={{ priority: 4, icon: <ToolSymbol symbol="▭" /> }}
+        >
           {largeMenu(
             t('appMargins'),
             '⿴',
@@ -1982,7 +2036,10 @@ function Ribbon({
             ],
           )}
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupScaleToFit')}>
+        <RibbonGroup
+          label={t('appGroupScaleToFit')}
+          fold={{ priority: 2, icon: <ToolSymbol symbol="↔" /> }}
+        >
           <div className="row-stack">
             <label className="styles-row" data-tip={t('appWidth')}>
               <ToolSymbol symbol="↔" />
@@ -1994,7 +2051,10 @@ function Ribbon({
             </label>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupSheetOptions')}>
+        <RibbonGroup
+          label={t('appGroupSheetOptions')}
+          fold={{ priority: 1, icon: <ToolSymbol symbol="▦" /> }}
+        >
           <div className="check-column">
             <span className="check-head">{t('appGridlines')}</span>
             <button
@@ -2060,7 +2120,10 @@ function Ribbon({
     )
     return (
       <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
-        <RibbonGroup label={t('appGroupFunctionLibrary')}>
+        <RibbonGroup
+          label={t('appGroupFunctionLibrary')}
+          fold={{ priority: 4, icon: <ToolSymbol symbol="ƒx" /> }}
+        >
           <RibbonButton
             large
             label={t('appInsertFunction')}
@@ -2092,7 +2155,10 @@ function Ribbon({
           {functionCategory(t('appFnCatMathTrig'), 'θ', 'Math')}
           {functionCategory(t('appFnCatMore'), '⋯', 'All')}
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupDefinedNames')}>
+        <RibbonGroup
+          label={t('appGroupDefinedNames')}
+          fold={{ priority: 3, icon: <ToolSymbol symbol="🏷" /> }}
+        >
           <RibbonButton
             large
             label={t('appNameManager')}
@@ -2141,7 +2207,10 @@ function Ribbon({
             </span>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupFormulaAuditing')}>
+        <RibbonGroup
+          label={t('appGroupFormulaAuditing')}
+          fold={{ priority: 2, icon: <ToolSymbol symbol="⇢" /> }}
+        >
           <div className="row-stack">
             <button
               className="styles-row as-button"
@@ -2190,7 +2259,10 @@ function Ribbon({
             onClick={() => onCommand('watch-window')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupCalculation')}>
+        <RibbonGroup
+          label={t('appGroupCalculation')}
+          fold={{ priority: 1, icon: <ToolSymbol symbol="⟳" /> }}
+        >
           {largeMenu(t('appCalculationOptions'), '🧮', t('appCalculationOptionsTitle'), [
             { value: 'calc-mode:auto', label: t('appCalcAuto') + (calcManual ? '' : ' ✓') },
             { value: 'calc-mode:manual', label: t('appCalcManual') + (calcManual ? ' ✓' : '') },
@@ -2221,7 +2293,10 @@ function Ribbon({
   if (activeTab === 'Data') {
     return (
       <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
-        <RibbonGroup label={t('appPivotTable')}>
+        <RibbonGroup
+          label={t('appPivotTable')}
+          fold={{ priority: 5, icon: <ToolSymbol symbol="⊞" /> }}
+        >
           <RibbonButton
             large
             label={t('appPivotTable')}
@@ -2240,7 +2315,10 @@ function Ribbon({
             }}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupGetData')}>
+        <RibbonGroup
+          label={t('appGroupGetData')}
+          fold={{ priority: 4, icon: <ToolSymbol symbol="🗎" /> }}
+        >
           <div className="row-stack">
             <button
               className="styles-row as-button"
@@ -2268,7 +2346,10 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupSortFilter')}>
+        <RibbonGroup
+          label={t('appGroupSortFilter')}
+          fold={{ priority: 6, icon: <ToolSymbol symbol="▽" /> }}
+        >
           {largeMenu(t('appSort'), '⇅', t('appSortSelectionTitle'), [
             { value: 'sort:asc', label: t('appSortAToZ') },
             { value: 'sort:desc', label: t('appSortZToA') },
@@ -2308,7 +2389,10 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupDataTools')}>
+        <RibbonGroup
+          label={t('appGroupDataTools')}
+          fold={{ priority: 3, icon: <ToolSymbol symbol="⚡" /> }}
+        >
           {largeMenu(t('appTextToColumns'), '⇶', t('appTextToColumnsTitle'), [
             { value: 'text-to-columns:2', label: t('appSplitByComma') },
             { value: 'text-to-columns:4', label: t('appSplitBySemicolon') },
@@ -2345,12 +2429,18 @@ function Ribbon({
             onClick={() => onCommand('consolidate-open')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupForecast')}>
+        <RibbonGroup
+          label={t('appGroupForecast')}
+          fold={{ priority: 1, icon: <ToolSymbol symbol="📈" /> }}
+        >
           {largeMenu(t('appWhatIfAnalysis'), '❔', t('appWhatIfTitle'), [
             { value: 'goal-seek-open', label: t('appGoalSeek') },
           ])}
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupOutline')}>
+        <RibbonGroup
+          label={t('appGroupOutline')}
+          fold={{ priority: 2, icon: <ToolSymbol symbol="∑" /> }}
+        >
           {largeMenu(t('appOutlineGroup'), '⊟', t('appOutlineGroupTitle'), [
             { value: 'outline-group:rows', label: t('appGroupRows') },
             { value: 'outline-group:cols', label: t('appGroupCols') },
@@ -2378,7 +2468,10 @@ function Ribbon({
   if (activeTab === 'View') {
     return (
       <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
-        <RibbonGroup label={t('appGroupWorkbookViews')}>
+        <RibbonGroup
+          label={t('appGroupWorkbookViews')}
+          fold={{ priority: 4, icon: <ToolSymbol symbol="▦" /> }}
+        >
           <RibbonButton
             large
             label={t('appNormalView')}
@@ -2400,7 +2493,10 @@ function Ribbon({
             }}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupShow')}>
+        <RibbonGroup
+          label={t('appGroupShow')}
+          fold={{ priority: 3, icon: <ToolSymbol symbol="☑" /> }}
+        >
           <div className="check-column">
             <button
               className="check-item"
@@ -2436,7 +2532,10 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appZoomLabel')}>
+        <RibbonGroup
+          label={t('appZoomLabel')}
+          fold={{ priority: 2, icon: <ToolSymbol symbol="⊙" /> }}
+        >
           {largeMenu(t('appZoomLabel'), '🔍', t('appZoomSheetTitle'), [
             { value: 'zoom:50', label: '50%' },
             { value: 'zoom:75', label: '75%' },
@@ -2460,7 +2559,10 @@ function Ribbon({
             onClick={() => onCommand('zoom-to-selection')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupWindow')}>
+        <RibbonGroup
+          label={t('appGroupWindow')}
+          fold={{ priority: 1, icon: <ToolSymbol symbol="⧉" /> }}
+        >
           {largeMenu(t('appFreezePanes'), '❄', t('appFreezeTitle'), [
             { value: 'freeze-here', label: t('appFreezeAtSelection') },
             { value: 'freeze-top-row', label: t('appFreezeTopRow') },
@@ -2475,7 +2577,10 @@ function Ribbon({
   if (activeTab === 'Review') {
     return (
       <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
-        <RibbonGroup label={t('appGroupProofing')}>
+        <RibbonGroup
+          label={t('appGroupProofing')}
+          fold={{ priority: 1, icon: <ToolSymbol symbol="🧮" /> }}
+        >
           <RibbonButton
             large
             label={t('appWorkbookStatsLabel')}
@@ -2484,7 +2589,10 @@ function Ribbon({
             onClick={() => onCommand('workbook-statistics')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupLanguage')}>
+        <RibbonGroup
+          label={t('appGroupLanguage')}
+          fold={{ priority: 2, icon: <ToolSymbol symbol="文" /> }}
+        >
           <div className="ribbon-tool large" data-tip={t('appTranslateTitle')}>
             <span className="tool-icon-row">
               <ToolSymbol symbol="文" />
@@ -2504,7 +2612,10 @@ function Ribbon({
             />
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupComments')}>
+        <RibbonGroup
+          label={t('appGroupComments')}
+          fold={{ priority: 4, icon: <ToolSymbol symbol="🗨" /> }}
+        >
           <RibbonButton
             large
             label={t('appNewComment')}
@@ -2546,7 +2657,10 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupNotes')}>
+        <RibbonGroup
+          label={t('appGroupNotes')}
+          fold={{ priority: 3, icon: <ToolSymbol symbol="🗨" /> }}
+        >
           <RibbonButton
             large
             menu
@@ -2556,7 +2670,10 @@ function Ribbon({
             onClick={() => onCommand('note-open')}
           />
         </RibbonGroup>
-        <RibbonGroup label={t('appGroupProtection')}>
+        <RibbonGroup
+          label={t('appGroupProtection')}
+          fold={{ priority: 5, icon: <ToolSymbol symbol="⬚" /> }}
+        >
           <RibbonButton
             large
             label={t(sheetProtected ? 'appUnprotectSheet' : 'appProtectSheet')}
@@ -2583,7 +2700,8 @@ function Ribbon({
     )
   }
 
-  const fontSizes = [9, 10, 11, 12, 14, 16, 18, 22, 26]
+  // Excel's own preset sizes (any other size can still be typed)
+  const fontSizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72]
   const echoFamily = selectionFormat?.fontFamily ?? 'Calibri'
   const echoSize = selectionFormat?.fontSize ?? 11
   const fontGroups = fontFamilyGroups(systemFontFamilies, echoFamily)
@@ -2778,6 +2896,42 @@ function Ribbon({
                 { value: 'bottom', label: t('appBorderBottom'), icon: <BorderBottomIcon /> },
                 { value: 'left', label: t('appBorderLeft'), icon: <BorderLeftIcon /> },
                 { value: 'right', label: t('appBorderRight'), icon: <BorderRightIcon /> },
+                {
+                  value: 'bottom-double',
+                  label: t('appBorderBottomDouble'),
+                  icon: <BorderBottomDoubleIcon />,
+                },
+                {
+                  value: 'bottom-thick',
+                  label: t('appBorderBottomThick'),
+                  icon: <BorderBottomThickIcon />,
+                },
+                {
+                  value: 'top-bottom',
+                  label: t('appBorderTopBottom'),
+                  icon: <BorderTopBottomIcon />,
+                },
+                {
+                  value: 'top-thick-bottom',
+                  label: t('appBorderTopThickBottom'),
+                  icon: <BorderTopThickBottomIcon />,
+                },
+                {
+                  value: 'top-double-bottom',
+                  label: t('appBorderTopDoubleBottom'),
+                  icon: <BorderTopDoubleBottomIcon />,
+                },
+                { value: 'inside', label: t('appBorderInside'), icon: <BorderInsideIcon /> },
+                {
+                  value: 'inside-h',
+                  label: t('appBorderInsideH'),
+                  icon: <BorderInsideHorizontalIcon />,
+                },
+                {
+                  value: 'inside-v',
+                  label: t('appBorderInsideV'),
+                  icon: <BorderInsideVerticalIcon />,
+                },
                 { value: 'none', label: t('appBorderNone'), icon: <BorderNoneIcon /> },
               ]}
               onPick={(value) => onCommand(`border:${value}:${borderColor}`)}
@@ -2942,15 +3096,28 @@ function Ribbon({
         fold={{ priority: 4, icon: <ToolSymbol symbol="▤" /> }}
       >
         <div className="styles-stack">
-          <button
-            className="styles-row as-button"
-            data-tip={t('appConditionalFormatting')}
-            onClick={() => onCommand('cf-open')}
-          >
+          <div className="styles-row as-button" data-tip={t('appConditionalFormatting')}>
             <ToolSymbol symbol="▤" />
             {t('appConditionalFormatting')}
             <CaretIcon />
-          </button>
+            <MenuSelect
+              cover
+              label={t('appConditionalFormatting')}
+              options={[
+                { value: 'cf-open:1', label: t('appCfHighlight') },
+                { value: 'cf-open:4', label: t('appCfTopBottom') },
+                { value: 'cf-open:7', label: t('appCfDataBars') },
+                { value: 'cf-open:6', label: t('appCfColorScales') },
+                { value: 'cf-open:8', label: t('appCfIconSets') },
+                { value: 'cf-open:5', label: t('appCfFormulaRule') },
+                { value: 'cf-open:3', label: t('appCfNewRule') },
+                { value: 'cf-open:9', label: t('appCfClearSelection') },
+                { value: 'cf-open:10', label: t('appCfClearSheet') },
+                { value: 'cf-open:2', label: t('appCfManage') },
+              ]}
+              onPick={(value) => onCommand(value)}
+            />
+          </div>
           <div className="styles-row as-button" data-tip={t('appFormatAsTableTitle')}>
             <ToolSymbol symbol="▦" />
             {t('appFormatAsTable')}
@@ -2962,7 +3129,7 @@ function Ribbon({
                 { value: 'TableStyleLight1', label: t('appTableStyleLight1') },
                 { value: 'TableStyleLight9', label: t('appTableStyleLight9') },
                 { value: 'TableStyleMedium2', label: t('appTableStyleMedium2') },
-                { value: 'TableStyleMedium4', label: t('appTableStyleMedium4') },
+                { value: 'TableStyleMedium3', label: t('appTableStyleMedium3') },
                 { value: 'TableStyleMedium7', label: t('appTableStyleMedium7') },
                 { value: 'TableStyleDark2', label: t('appTableStyleDark2') },
               ]}
@@ -3542,17 +3709,27 @@ function NumberFormatSelect({
       data-tip={pattern || t('dlgFcNumGeneral')}
       value={current}
       display={localized(current)}
-      options={numberFormatCategories().map((category) => ({
-        value: category.label,
-        label: localized(category.label),
-      }))}
+      options={[
+        ...numberFormatCategories().map((category) => ({
+          value: category.label,
+          label: localized(category.label),
+        })),
+        { value: MORE_NUMBER_FORMATS, label: t('appNumberFormatMore') },
+      ]}
       onPick={(value) => {
+        if (value === MORE_NUMBER_FORMATS) {
+          onCommand('format-cells')
+          return
+        }
         const category = numberFormatCategories().find((candidate) => candidate.label === value)
         if (category) onCommand(`format:${category.pattern}`)
       }}
     />
   )
 }
+
+/// Number-format menu entry that opens the Format Cells dialog instead of applying a category
+const MORE_NUMBER_FORMATS = '__more-number-formats'
 
 function RibbonGroup({
   label,

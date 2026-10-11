@@ -9,6 +9,7 @@ import { EquationGallery, EquationModal } from './EquationModal'
 import { COVER_PRESETS, insertCoverPage, type CoverPreset } from '../editor/cover-pages'
 import { startShapeDrawMode } from '../editor/shape-draw'
 import { useI18n, type StringKey } from '../i18n/locale'
+import { RibbonFoldGroup } from '@genoffice/ui'
 import { useModalKeys } from './modal-keys'
 import {
   IconBook,
@@ -767,593 +768,615 @@ export function InsertTab({
   return (
     <>
       {/* Word: Pages (cover page / blank page / page break) sits leftmost */}
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonCoverPageTip')}
-              onClick={() => toggleDropdown(setDropdown, 'cover')}
-            >
-              <span className="rb-big-icon">
-                <IconDoc size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonCoverPage')}</span>
-            </button>
-            {dropdown === 'cover' && (
-              <div data-rb-panel="" className="cover-gallery">
-                {COVER_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    className="cover-card"
-                    data-tip={t('ribbonInsertCoverTip', { name: preset.name })}
-                    onClick={() => {
-                      insertCoverPage(editor, preset)
-                      setDropdown(() => null)
-                    }}
-                  >
-                    <CoverThumb preset={preset} />
-                    <span className="cover-card-name">{preset.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupPages')}
+        icon={<IconDoc size={BIG} />}
+        caret={<IconCaret />}
+        priority={8}
+        caption
+      >
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
             disabled={!hasDoc}
-            data-tip={t('ribbonBlankPageTip')}
-            onClick={() => insertBlankPageAt(editor)}
+            data-tip={t('ribbonCoverPageTip')}
+            onClick={() => toggleDropdown(setDropdown, 'cover')}
           >
             <span className="rb-big-icon">
               <IconDoc size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonBlankPage')}</span>
+            <span>{t('ribbonCoverPage')}</span>
           </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonPageBreakTip')}
-            onClick={() => insertPageBreakAt(editor)}
-          >
-            <span className="rb-big-icon">
-              <IconPageBreak size={BIG} />
-            </span>
-            <span>{t('ribbonPageBreak')}</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">{t('ribbonGroupPages')}</div>
-      </div>
-
-      <div className="ribbon-sep" />
-
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonTableTip')}
-              onClick={() => toggleDropdown(setDropdown, 'table')}
-            >
-              <span className="rb-big-icon">
-                <IconTable size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonTable')}</span>
-            </button>
-            {dropdown === 'table' && (
-              <div
-                data-rb-panel=""
-                className="table-picker"
-                onMouseLeave={() => setGrid({ r: 0, c: 0 })}
-              >
-                <div className="table-picker-title">
-                  {grid.r > 0
-                    ? t('ribbonTableSize', { r: grid.r, c: grid.c })
-                    : t('ribbonTablePickSize')}
-                </div>
-                <div className="table-picker-grid">
-                  {Array.from({ length: 8 }, (_, ri) =>
-                    Array.from({ length: 10 }, (_, ci) => (
-                      <button
-                        key={`${ri}-${ci}`}
-                        className={`table-cell ${ri < grid.r && ci < grid.c ? 'hot' : ''}`}
-                        onMouseEnter={() => setGrid({ r: ri + 1, c: ci + 1 })}
-                        onClick={() => insertTable(ri + 1, ci + 1)}
-                      />
-                    )),
-                  )}
-                </div>
+          {dropdown === 'cover' && (
+            <div data-rb-panel="" className="cover-gallery">
+              {COVER_PRESETS.map((preset) => (
                 <button
-                  className="table-picker-custom"
+                  key={preset.id}
+                  className="cover-card"
+                  data-tip={t('ribbonInsertCoverTip', { name: preset.name })}
                   onClick={() => {
+                    insertCoverPage(editor, preset)
                     setDropdown(() => null)
-                    setTableDialogOpen(true)
                   }}
                 >
-                  {t('ribbonTableInsertDialog')}
+                  <CoverThumb preset={preset} />
+                  <span className="cover-card-name">{preset.name}</span>
                 </button>
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupTables')}</div>
-      </div>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonBlankPageTip')}
+          onClick={() => insertBlankPageAt(editor)}
+        >
+          <span className="rb-big-icon">
+            <IconDoc size={BIG} />
+          </span>
+          <span>{t('ribbonBlankPage')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonPageBreakTip')}
+          onClick={() => insertPageBreakAt(editor)}
+        >
+          <span className="rb-big-icon">
+            <IconPageBreak size={BIG} />
+          </span>
+          <span>{t('ribbonPageBreak')}</span>
+        </button>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
+      <RibbonFoldGroup
+        label={t('ribbonGroupTables')}
+        icon={<IconTable size={BIG} />}
+        caret={<IconCaret />}
+        priority={7}
+        caption
+      >
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
             disabled={!hasDoc}
-            data-tip={t('ribbonPictureTip')}
-            onClick={() => void insertImageViaDialog(editor)}
+            data-tip={t('ribbonTableTip')}
+            onClick={() => toggleDropdown(setDropdown, 'table')}
           >
             <span className="rb-big-icon">
-              <IconPicture size={BIG} />
+              <IconTable size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonPicture')}</span>
+            <span>{t('ribbonTable')}</span>
           </button>
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonChartTip')}
-            onClick={() => setChartOpen(true)}
-          >
-            <span className="rb-big-icon">
-              <IconChart size={BIG} />
-            </span>
-            <span>{t('ribbonChart')}</span>
-          </button>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonShapesTip')}
-              onClick={() => toggleDropdown(setDropdown, 'shape')}
+          {dropdown === 'table' && (
+            <div
+              data-rb-panel=""
+              className="table-picker"
+              onMouseLeave={() => setGrid({ r: 0, c: 0 })}
             >
-              <span className="rb-big-icon">
-                <IconShapes size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonShapes')}</span>
-            </button>
-            {dropdown === 'shape' && (
-              <div data-rb-panel="" className="shape-palette rb-shape-gallery">
-                {DOC_SHAPE_GROUPS.map((group) => (
-                  <div key={group.groupKey}>
-                    <div className="rb-drop-title">{t(group.groupKey as StringKey)}</div>
-                    <div className="rb-shape-grid">
-                      {group.shapes.map((s) => (
-                        <button
-                          key={s.prst}
-                          className="rb-shape-cell"
-                          data-tip={t(s.labelKey as StringKey)}
-                          aria-label={t(s.labelKey as StringKey)}
-                          onClick={() => {
-                            // Word parity: arm crosshair draw mode (click = default 1in
-                            // square, drag = custom size, Shift = square, Esc = cancel)
-                            startShapeDrawMode(editor, s.prst, (opts) =>
-                              insertShapeAt(editor, s.prst, opts),
-                            )
-                            setDropdown(() => null)
-                          }}
-                        >
-                          <ShapePreview prst={s.prst} size={18} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              <div className="table-picker-title">
+                {grid.r > 0
+                  ? t('ribbonTableSize', { r: grid.r, c: grid.c })
+                  : t('ribbonTablePickSize')}
               </div>
-            )}
-          </div>
+              <div className="table-picker-grid">
+                {Array.from({ length: 8 }, (_, ri) =>
+                  Array.from({ length: 10 }, (_, ci) => (
+                    <button
+                      key={`${ri}-${ci}`}
+                      className={`table-cell ${ri < grid.r && ci < grid.c ? 'hot' : ''}`}
+                      onMouseEnter={() => setGrid({ r: ri + 1, c: ci + 1 })}
+                      onClick={() => insertTable(ri + 1, ci + 1)}
+                    />
+                  )),
+                )}
+              </div>
+              <button
+                className="table-picker-custom"
+                onClick={() => {
+                  setDropdown(() => null)
+                  setTableDialogOpen(true)
+                }}
+              >
+                {t('ribbonTableInsertDialog')}
+              </button>
+            </div>
+          )}
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupIllustrations')}</div>
-      </div>
+      </RibbonFoldGroup>
+
+      <div className="ribbon-sep" />
+
+      <RibbonFoldGroup
+        label={t('ribbonGroupIllustrations')}
+        icon={<IconShapes size={BIG} />}
+        caret={<IconCaret />}
+        priority={5}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonPictureTip')}
+          onClick={() => void insertImageViaDialog(editor)}
+        >
+          <span className="rb-big-icon">
+            <IconPicture size={BIG} />
+          </span>
+          <span>{t('ribbonPicture')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonChartTip')}
+          onClick={() => setChartOpen(true)}
+        >
+          <span className="rb-big-icon">
+            <IconChart size={BIG} />
+          </span>
+          <span>{t('ribbonChart')}</span>
+        </button>
+        <div className="rb-split-wrap">
+          <button
+            className="rb-big"
+            disabled={!hasDoc}
+            data-tip={t('ribbonShapesTip')}
+            onClick={() => toggleDropdown(setDropdown, 'shape')}
+          >
+            <span className="rb-big-icon">
+              <IconShapes size={BIG} />
+              <IconCaret />
+            </span>
+            <span>{t('ribbonShapes')}</span>
+          </button>
+          {dropdown === 'shape' && (
+            <div data-rb-panel="" className="shape-palette rb-shape-gallery">
+              {DOC_SHAPE_GROUPS.map((group) => (
+                <div key={group.groupKey}>
+                  <div className="rb-drop-title">{t(group.groupKey as StringKey)}</div>
+                  <div className="rb-shape-grid">
+                    {group.shapes.map((s) => (
+                      <button
+                        key={s.prst}
+                        className="rb-shape-cell"
+                        data-tip={t(s.labelKey as StringKey)}
+                        aria-label={t(s.labelKey as StringKey)}
+                        onClick={() => {
+                          // Word parity: arm crosshair draw mode (click = default 1in
+                          // square, drag = custom size, Shift = square, Esc = cancel)
+                          startShapeDrawMode(editor, s.prst, (opts) =>
+                            insertShapeAt(editor, s.prst, opts),
+                          )
+                          setDropdown(() => null)
+                        }}
+                      >
+                        <ShapePreview prst={s.prst} size={18} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
       {/* Text group: text box + WordArt + drop cap */}
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
+      <RibbonFoldGroup
+        label={t('ribbonGroupText')}
+        icon={<IconTextBox size={BIG} />}
+        caret={<IconCaret />}
+        priority={4}
+        caption
+      >
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={t('ribbonTextBoxTip')}
+          onClick={() => insertTextboxAt(editor)}
+        >
+          <span className="rb-big-icon">
+            <IconTextBox size={BIG} />
+          </span>
+          <span>{t('ribbonTextBox')}</span>
+        </button>
+        <div className="rb-split-wrap">
           <button
             className="rb-big"
             disabled={!hasDoc}
-            data-tip={t('ribbonTextBoxTip')}
-            onClick={() => insertTextboxAt(editor)}
+            data-tip={t('ribbonWordArtTip')}
+            onClick={() => toggleDropdown(setDropdown, 'wordArt')}
           >
             <span className="rb-big-icon">
-              <IconTextBox size={BIG} />
+              <IconWordArt size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonTextBox')}</span>
+            <span>{t('ribbonWordArt')}</span>
           </button>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonWordArtTip')}
-              onClick={() => toggleDropdown(setDropdown, 'wordArt')}
-            >
-              <span className="rb-big-icon">
-                <IconWordArt size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonWordArt')}</span>
-            </button>
-            {dropdown === 'wordArt' && (
-              <div data-rb-panel="" className="wordart-palette">
-                {WORDART_PRESETS.map((p) => (
-                  <button
-                    key={p.id}
-                    className="wordart-cell"
-                    data-tip={t(p.nameKey as StringKey)}
-                    style={{
-                      color: p.fill,
-                      WebkitTextStroke: p.outline
-                        ? `${wordArtStrokePx(p.outline.widthEmu)}px ${p.outline.color}`
-                        : undefined,
-                      fontWeight: p.bold ? 800 : 400,
-                      fontStyle: p.italic ? 'italic' : undefined,
-                    }}
-                    onClick={() => {
-                      insertWordArtAt(editor, p)
-                      setDropdown(() => null)
-                    }}
-                  >
-                    {t('ribbonWordArtPreviewChar')}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonDropCap')}
-              onClick={() => toggleDropdown(setDropdown, 'dropCap')}
-            >
-              <span
-                className="rb-big-icon"
-                style={{ fontSize: 20, lineHeight: 1, fontWeight: 'bold' }}
-              >
-                A̲
-                <IconCaret />
-              </span>
-              <span>{t('ribbonDropCap')}</span>
-            </button>
-            {dropdown === 'dropCap' && (
-              <div data-rb-panel="" className="dropcap-menu">
-                {(
-                  [
-                    { val: null, label: t('ribbonNone'), desc: t('ribbonDropCapNoneDesc') },
-                    {
-                      val: 'drop',
-                      label: t('ribbonDropCapDropped'),
-                      desc: t('ribbonDropCapDroppedDesc'),
-                    },
-                    {
-                      val: 'margin',
-                      label: t('ribbonDropCapMargin'),
-                      desc: t('ribbonDropCapMarginDesc'),
-                    },
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.label}
-                    className="dropcap-option"
-                    data-tip={opt.desc}
-                    onClick={() => {
-                      setDropdown(() => null)
-                      const newDropCap = opt.val
-                        ? JSON.stringify({ type: opt.val, lines: 3 })
-                        : null
-                      setParaAttrs(editor, { dropCap: newDropCap })
-                    }}
-                  >
-                    <span className="dropcap-preview">{opt.val ? 'A' : '—'}</span>
-                    <span>{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonFieldTip')}
-              onClick={() => toggleDropdown(setDropdown, 'field')}
-            >
-              <span className="rb-big-icon" style={{ fontSize: 15, lineHeight: 1.2 }}>
-                {'{ }'}
-                <IconCaret />
-              </span>
-              <span>{t('ribbonField')}</span>
-            </button>
-            {dropdown === 'field' && (
-              <div data-rb-panel="" className="layout-menu">
-                {(
-                  [
-                    ['DATE', t('ribbonFieldDate')],
-                    ['TIME', t('ribbonFieldTime')],
-                    ['PAGE', t('ribbonFieldPage')],
-                    ['NUMPAGES', t('ribbonFieldNumPages')],
-                    ['FILENAME', t('ribbonFieldFileName')],
-                  ] as const
-                ).map(([instr, label]) => (
-                  <button
-                    key={instr}
-                    onClick={() => {
-                      onInsertField(instr)
-                      setDropdown(() => null)
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {dropdown === 'wordArt' && (
+            <div data-rb-panel="" className="wordart-palette">
+              {WORDART_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  className="wordart-cell"
+                  data-tip={t(p.nameKey as StringKey)}
+                  style={{
+                    color: p.fill,
+                    WebkitTextStroke: p.outline
+                      ? `${wordArtStrokePx(p.outline.widthEmu)}px ${p.outline.color}`
+                      : undefined,
+                    fontWeight: p.bold ? 800 : 400,
+                    fontStyle: p.italic ? 'italic' : undefined,
+                  }}
+                  onClick={() => {
+                    insertWordArtAt(editor, p)
+                    setDropdown(() => null)
+                  }}
+                >
+                  {t('ribbonWordArtPreviewChar')}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupText')}</div>
-      </div>
+        <div className="rb-split-wrap">
+          <button
+            className="rb-big"
+            disabled={!hasDoc}
+            data-tip={t('ribbonDropCap')}
+            onClick={() => toggleDropdown(setDropdown, 'dropCap')}
+          >
+            <span
+              className="rb-big-icon"
+              style={{ fontSize: 20, lineHeight: 1, fontWeight: 'bold' }}
+            >
+              A̲
+              <IconCaret />
+            </span>
+            <span>{t('ribbonDropCap')}</span>
+          </button>
+          {dropdown === 'dropCap' && (
+            <div data-rb-panel="" className="dropcap-menu">
+              {(
+                [
+                  { val: null, label: t('ribbonNone'), desc: t('ribbonDropCapNoneDesc') },
+                  {
+                    val: 'drop',
+                    label: t('ribbonDropCapDropped'),
+                    desc: t('ribbonDropCapDroppedDesc'),
+                  },
+                  {
+                    val: 'margin',
+                    label: t('ribbonDropCapMargin'),
+                    desc: t('ribbonDropCapMarginDesc'),
+                  },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.label}
+                  className="dropcap-option"
+                  data-tip={opt.desc}
+                  onClick={() => {
+                    setDropdown(() => null)
+                    const newDropCap = opt.val ? JSON.stringify({ type: opt.val, lines: 3 }) : null
+                    setParaAttrs(editor, { dropCap: newDropCap })
+                  }}
+                >
+                  <span className="dropcap-preview">{opt.val ? 'A' : '—'}</span>
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rb-split-wrap">
+          <button
+            className="rb-big"
+            disabled={!hasDoc}
+            data-tip={t('ribbonFieldTip')}
+            onClick={() => toggleDropdown(setDropdown, 'field')}
+          >
+            <span className="rb-big-icon" style={{ fontSize: 15, lineHeight: 1.2 }}>
+              {'{ }'}
+              <IconCaret />
+            </span>
+            <span>{t('ribbonField')}</span>
+          </button>
+          {dropdown === 'field' && (
+            <div data-rb-panel="" className="layout-menu">
+              {(
+                [
+                  ['DATE', t('ribbonFieldDate')],
+                  ['TIME', t('ribbonFieldTime')],
+                  ['PAGE', t('ribbonFieldPage')],
+                  ['NUMPAGES', t('ribbonFieldNumPages')],
+                  ['FILENAME', t('ribbonFieldFileName')],
+                ] as const
+              ).map(([instr, label]) => (
+                <button
+                  key={instr}
+                  onClick={() => {
+                    onInsertField(instr)
+                    setDropdown(() => null)
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
       {/* Word: Link/Bookmark/Cross-reference are small vertical buttons */}
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <div className="rb-col">
-            <button
-              className="rb-small"
-              disabled={!hasDoc}
-              data-tip={t('ribbonLinkTip')}
-              onClick={() => setLinkOpen(true)}
-            >
-              <IconLink size={14} /> {t('ribbonLink')}
-            </button>
-            <button
-              className="rb-small"
-              disabled={!hasDoc}
-              data-tip={t('ribbonBookmarkTip')}
-              onClick={() => setBookmarkOpen(true)}
-            >
-              <IconBook size={14} /> {t('ribbonBookmark')}
-            </button>
-            <button
-              className="rb-small"
-              disabled={!hasDoc}
-              data-tip={t('ribbonCrossRefTip')}
-              onClick={() => setCrossRefOpen(true)}
-            >
-              <IconRefresh size={14} /> {t('ribbonCrossRef')}
-            </button>
-          </div>
+      <RibbonFoldGroup
+        label={t('ribbonGroupLinks')}
+        icon={<IconLink size={BIG} />}
+        caret={<IconCaret />}
+        priority={2}
+        caption
+      >
+        <div className="rb-col">
+          <button
+            className="rb-small"
+            disabled={!hasDoc}
+            data-tip={t('ribbonLinkTip')}
+            onClick={() => setLinkOpen(true)}
+          >
+            <IconLink size={14} /> {t('ribbonLink')}
+          </button>
+          <button
+            className="rb-small"
+            disabled={!hasDoc}
+            data-tip={t('ribbonBookmarkTip')}
+            onClick={() => setBookmarkOpen(true)}
+          >
+            <IconBook size={14} /> {t('ribbonBookmark')}
+          </button>
+          <button
+            className="rb-small"
+            disabled={!hasDoc}
+            data-tip={t('ribbonCrossRefTip')}
+            onClick={() => setCrossRefOpen(true)}
+          >
+            <IconRefresh size={14} /> {t('ribbonCrossRef')}
+          </button>
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupLinks')}</div>
-      </div>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          {/* Word: Insert → Comment starts a new comment; the pane toggle stays on Review.
+      <RibbonFoldGroup
+        label={t('ribbonGroupComments')}
+        icon={<IconComment size={BIG} />}
+        caret={<IconCaret />}
+        priority={3}
+        caption
+      >
+        {/* Word: Insert → Comment starts a new comment; the pane toggle stays on Review.
               Deliberately not gated on this tab's hasDoc (= canEdit): under the comments-only
               restriction the body is read-only yet commenting stays allowed, matching the
               Review tab's New Comment. Without a document canComment is false anyway. */}
+        <button
+          className="rb-big"
+          disabled={!canComment || (isProtected && !commentsAllowed)}
+          data-tip={canComment ? t('ribbonNewCommentTip') : t('ribbonNewCommentSelectTip')}
+          onClick={onNewComment}
+        >
+          <span className="rb-big-icon">
+            <IconComment size={BIG} />
+          </span>
+          <span>{t('ribbonComment')}</span>
+        </button>
+      </RibbonFoldGroup>
+
+      <div className="ribbon-sep" />
+
+      <RibbonFoldGroup
+        label={t('ribbonGroupHeaderFooter')}
+        icon={<IconHeader size={BIG} />}
+        caret={<IconCaret />}
+        priority={6}
+        caption
+      >
+        <div className="rb-split-wrap">
           <button
-            className="rb-big"
-            disabled={!canComment || (isProtected && !commentsAllowed)}
-            data-tip={canComment ? t('ribbonNewCommentTip') : t('ribbonNewCommentSelectTip')}
-            onClick={onNewComment}
+            className={`rb-big ${header?.text ? 'active' : ''}`}
+            disabled={!hasDoc}
+            data-tip={t('ribbonHeaderTip')}
+            onClick={() => toggleDropdown(setDropdown, 'header')}
           >
             <span className="rb-big-icon">
-              <IconComment size={BIG} />
+              <IconHeader size={BIG} />
+              <IconCaret />
             </span>
-            <span>{t('ribbonComment')}</span>
+            <span>{t('ribbonHeader')}</span>
+          </button>
+          {dropdown === 'header' && (
+            <HfEditor
+              label={t('ribbonHeader')}
+              current={header?.text ?? ''}
+              onApply={(text) => onHeader({ text })}
+              onClose={() => setDropdown(() => null)}
+            />
+          )}
+        </div>
+        <div className="rb-split-wrap">
+          <button
+            className={`rb-big ${footer?.text ? 'active' : ''}`}
+            disabled={!hasDoc}
+            data-tip={t('ribbonFooterTip')}
+            onClick={() => toggleDropdown(setDropdown, 'footer')}
+          >
+            <span className="rb-big-icon">
+              <IconFooter size={BIG} />
+              <IconCaret />
+            </span>
+            <span>{t('ribbonFooter')}</span>
+          </button>
+          {dropdown === 'footer' && (
+            <HfEditor
+              label={t('ribbonFooter')}
+              current={footer?.text ?? ''}
+              onApply={(text) => onFooter({ text, pageNumber: footer?.pageNumber ?? false })}
+              onClose={() => setDropdown(() => null)}
+            />
+          )}
+        </div>
+        <div className="rb-split-wrap">
+          <button
+            className={`rb-big ${footer?.pageNumber ? 'active' : ''}`}
+            disabled={!hasDoc}
+            data-tip={t('ribbonPageNumber')}
+            onClick={() => toggleDropdown(setDropdown, 'pagenum')}
+          >
+            <span className="rb-big-icon">
+              <IconPageNumber size={BIG} />
+              <IconCaret />
+            </span>
+            <span>{t('ribbonPageNumber')}</span>
+          </button>
+          {dropdown === 'pagenum' && (
+            <div data-rb-panel="" className="layout-menu">
+              {(
+                [
+                  [t('ribbonPnTopLeft'), 'header', 'left'],
+                  [t('ribbonPnTopCenter'), 'header', 'center'],
+                  [t('ribbonPnTopRight'), 'header', 'right'],
+                  [t('ribbonPnBottomLeft'), 'footer', 'left'],
+                  [t('ribbonPnBottomCenter'), 'footer', 'center'],
+                  [t('ribbonPnBottomRight'), 'footer', 'right'],
+                ] as Array<[string, 'header' | 'footer', 'left' | 'center' | 'right']>
+              ).map(([label, kind, align]) => (
+                <button
+                  key={label}
+                  onClick={() => {
+                    // Word gallery semantics: replace the area's content with a single page-number paragraph
+                    const hf: HeaderFooter = {
+                      text: '#',
+                      pageNumber: true,
+                      paras: [{ align, runs: [{ text: '#' }] }],
+                    }
+                    ;(kind === 'header' ? onHeader : onFooter)(hf)
+                    setDropdown(() => null)
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  onPageNumFormat()
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonPnFormat')}
+              </button>
+              <button
+                onClick={() => {
+                  if (hfHasPageField(footer)) onFooter(hfWithoutPageMarks(footer!))
+                  if (hfHasPageField(header)) onHeader(hfWithoutPageMarks(header!))
+                  setDropdown(() => null)
+                }}
+              >
+                {t('ribbonPnRemove')}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="rb-col">
+          <button
+            className={`rb-small ${titlePg ? 'active' : ''}`}
+            disabled={!hasDoc}
+            data-tip={t('ribbonDiffFirstPageTip')}
+            onClick={() => onTitlePg(!titlePg)}
+          >
+            {titlePg ? <IconCheckboxChecked /> : <IconCheckbox />} {t('ribbonDiffFirstPage')}
+          </button>
+          <button
+            className={`rb-small ${evenOddHf ? 'active' : ''}`}
+            disabled={!hasDoc}
+            data-tip={t('ribbonDiffOddEvenTip')}
+            onClick={() => onEvenOddHf(!evenOddHf)}
+          >
+            {evenOddHf ? <IconCheckboxChecked /> : <IconCheckbox />} {t('ribbonDiffOddEven')}
           </button>
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupComments')}</div>
-      </div>
+      </RibbonFoldGroup>
 
       <div className="ribbon-sep" />
 
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <div className="rb-split-wrap">
-            <button
-              className={`rb-big ${header?.text ? 'active' : ''}`}
-              disabled={!hasDoc}
-              data-tip={t('ribbonHeaderTip')}
-              onClick={() => toggleDropdown(setDropdown, 'header')}
-            >
-              <span className="rb-big-icon">
-                <IconHeader size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonHeader')}</span>
-            </button>
-            {dropdown === 'header' && (
-              <HfEditor
-                label={t('ribbonHeader')}
-                current={header?.text ?? ''}
-                onApply={(text) => onHeader({ text })}
-                onClose={() => setDropdown(() => null)}
-              />
-            )}
-          </div>
-          <div className="rb-split-wrap">
-            <button
-              className={`rb-big ${footer?.text ? 'active' : ''}`}
-              disabled={!hasDoc}
-              data-tip={t('ribbonFooterTip')}
-              onClick={() => toggleDropdown(setDropdown, 'footer')}
-            >
-              <span className="rb-big-icon">
-                <IconFooter size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonFooter')}</span>
-            </button>
-            {dropdown === 'footer' && (
-              <HfEditor
-                label={t('ribbonFooter')}
-                current={footer?.text ?? ''}
-                onApply={(text) => onFooter({ text, pageNumber: footer?.pageNumber ?? false })}
-                onClose={() => setDropdown(() => null)}
-              />
-            )}
-          </div>
-          <div className="rb-split-wrap">
-            <button
-              className={`rb-big ${footer?.pageNumber ? 'active' : ''}`}
-              disabled={!hasDoc}
-              data-tip={t('ribbonPageNumber')}
-              onClick={() => toggleDropdown(setDropdown, 'pagenum')}
-            >
-              <span className="rb-big-icon">
-                <IconPageNumber size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonPageNumber')}</span>
-            </button>
-            {dropdown === 'pagenum' && (
-              <div data-rb-panel="" className="layout-menu">
-                {(
-                  [
-                    [t('ribbonPnTopLeft'), 'header', 'left'],
-                    [t('ribbonPnTopCenter'), 'header', 'center'],
-                    [t('ribbonPnTopRight'), 'header', 'right'],
-                    [t('ribbonPnBottomLeft'), 'footer', 'left'],
-                    [t('ribbonPnBottomCenter'), 'footer', 'center'],
-                    [t('ribbonPnBottomRight'), 'footer', 'right'],
-                  ] as Array<[string, 'header' | 'footer', 'left' | 'center' | 'right']>
-                ).map(([label, kind, align]) => (
-                  <button
-                    key={label}
-                    onClick={() => {
-                      // Word gallery semantics: replace the area's content with a single page-number paragraph
-                      const hf: HeaderFooter = {
-                        text: '#',
-                        pageNumber: true,
-                        paras: [{ align, runs: [{ text: '#' }] }],
-                      }
-                      ;(kind === 'header' ? onHeader : onFooter)(hf)
-                      setDropdown(() => null)
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
+      <RibbonFoldGroup
+        label={t('ribbonGroupSymbols')}
+        icon={<IconSymbol size={BIG} />}
+        caret={<IconCaret />}
+        priority={1}
+        caption
+      >
+        <div className="rb-split-wrap">
+          <button
+            className="rb-big"
+            disabled={!hasDoc}
+            data-tip={t('ribbonSymbolTip')}
+            onClick={() => toggleDropdown(setDropdown, 'symbol')}
+          >
+            <span className="rb-big-icon">
+              <IconSymbol size={BIG} />
+              <IconCaret />
+            </span>
+            <span>{t('ribbonSymbol')}</span>
+          </button>
+          {dropdown === 'symbol' && (
+            <div data-rb-panel="" className="symbol-palette">
+              {SYMBOLS.map((s) => (
                 <button
+                  key={s}
+                  className="symbol-cell"
                   onClick={() => {
-                    onPageNumFormat()
+                    editor.chain().focus().insertContent(s).run()
                     setDropdown(() => null)
                   }}
                 >
-                  {t('ribbonPnFormat')}
+                  {s}
                 </button>
-                <button
-                  onClick={() => {
-                    if (hfHasPageField(footer)) onFooter(hfWithoutPageMarks(footer!))
-                    if (hfHasPageField(header)) onHeader(hfWithoutPageMarks(header!))
-                    setDropdown(() => null)
-                  }}
-                >
-                  {t('ribbonPnRemove')}
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="rb-col">
-            <button
-              className={`rb-small ${titlePg ? 'active' : ''}`}
-              disabled={!hasDoc}
-              data-tip={t('ribbonDiffFirstPageTip')}
-              onClick={() => onTitlePg(!titlePg)}
-            >
-              {titlePg ? <IconCheckboxChecked /> : <IconCheckbox />} {t('ribbonDiffFirstPage')}
-            </button>
-            <button
-              className={`rb-small ${evenOddHf ? 'active' : ''}`}
-              disabled={!hasDoc}
-              data-tip={t('ribbonDiffOddEvenTip')}
-              onClick={() => onEvenOddHf(!evenOddHf)}
-            >
-              {evenOddHf ? <IconCheckboxChecked /> : <IconCheckbox />} {t('ribbonDiffOddEven')}
-            </button>
-          </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupHeaderFooter')}</div>
-      </div>
-
-      <div className="ribbon-sep" />
-
-      <div className="ribbon-group">
-        <div className="ribbon-group-items">
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonSymbolTip')}
-              onClick={() => toggleDropdown(setDropdown, 'symbol')}
-            >
-              <span className="rb-big-icon">
-                <IconSymbol size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonSymbol')}</span>
-            </button>
-            {dropdown === 'symbol' && (
-              <div data-rb-panel="" className="symbol-palette">
-                {SYMBOLS.map((s) => (
-                  <button
-                    key={s}
-                    className="symbol-cell"
-                    onClick={() => {
-                      editor.chain().focus().insertContent(s).run()
-                      setDropdown(() => null)
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="rb-split-wrap">
-            <button
-              className="rb-big"
-              disabled={!hasDoc}
-              data-tip={t('ribbonEquationTip')}
-              onClick={() => toggleDropdown(setDropdown, 'equation')}
-            >
-              <span className="rb-big-icon">
-                <IconEquation size={BIG} />
-                <IconCaret />
-              </span>
-              <span>{t('ribbonEquation')}</span>
-            </button>
-            {dropdown === 'equation' && (
-              <EquationGallery
-                editor={editor}
-                onPick={() => setDropdown(() => null)}
-                onCustom={() => {
-                  setDropdown(() => null)
-                  setEquationOpen(true)
-                }}
-              />
-            )}
-          </div>
+        <div className="rb-split-wrap">
+          <button
+            className="rb-big"
+            disabled={!hasDoc}
+            data-tip={t('ribbonEquationTip')}
+            onClick={() => toggleDropdown(setDropdown, 'equation')}
+          >
+            <span className="rb-big-icon">
+              <IconEquation size={BIG} />
+              <IconCaret />
+            </span>
+            <span>{t('ribbonEquation')}</span>
+          </button>
+          {dropdown === 'equation' && (
+            <EquationGallery
+              editor={editor}
+              onPick={() => setDropdown(() => null)}
+              onCustom={() => {
+                setDropdown(() => null)
+                setEquationOpen(true)
+              }}
+            />
+          )}
         </div>
-        <div className="ribbon-group-label">{t('ribbonGroupSymbols')}</div>
-      </div>
+      </RibbonFoldGroup>
 
       {tableDialogOpen && (
         <TableInsertModal editor={editor} onClose={() => setTableDialogOpen(false)} />

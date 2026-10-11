@@ -19,6 +19,7 @@ export default defineConfig({
       '@genoffice/ai-provider/browser': local('../../packages/ai-provider/src/browser.ts'),
       '@genoffice/ai-provider': local('../../packages/ai-provider/src/index.ts'),
       '@genoffice/i18n': local('../../packages/i18n/src/index.ts'),
+      '@genoffice/ui/craft-icons/word': local('../../packages/ui/src/craft-icons/word.ts'),
       '@genoffice/ui': local('../../packages/ui/src/index.ts'),
     },
   },

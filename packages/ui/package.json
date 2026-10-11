@@ -21,7 +21,13 @@
     "./ai-scope-quote.css": "./src/ai-scope-quote.css",
     "./image-dialogs.css": "./src/image-dialogs.css",
     "./image-viewer.css": "./src/image-viewer.css",
-    "./fonts/*": "./src/fonts/*"
+    "./printer-settings.css": "./src/printer-settings.css",
+    "./fonts/*": "./src/fonts/*",
+    "./craft-icons/word": "./src/craft-icons/word.ts",
+    "./craft-icons/deck": "./src/craft-icons/deck.ts",
+    "./craft-icons/grid": "./src/craft-icons/grid.ts",
+    "./craft-icon.css": "./src/craft-icon.css",
+    "./backstage.css": "./src/backstage.css"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

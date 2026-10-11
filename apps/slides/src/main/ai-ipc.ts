@@ -115,10 +115,6 @@ export function registerAiIpc(): void {
     writeJson(AI_SETTINGS_PATH(), settings)
   })
 
-  ipcMain.handle('ai:log-run-failure', (_event, entry: AiRunFailure) => {
-    appendRunFailure(entry)
-  })
-
   ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
     const { requestId, settings, system, messages } = request
     const tools = request.tools ?? []
@@ -230,6 +226,13 @@ export function registerAiIpc(): void {
 // never called; docs does not have these channels, so putting them in the wrong place raises
 // "No handler registered".
 export function registerSlidesOnlyAiIpc(): void {
+  // The panel's run-failure diagnostics: living in registerAiIpc it was never registered in the
+  // shell (that function only runs standalone), so every failed or stopped run logged
+  // "No handler registered for 'ai:log-run-failure'".
+  ipcMain.handle('ai:log-run-failure', (_event, entry: AiRunFailure) => {
+    appendRunFailure(entry)
+  })
+
   ipcMain.handle(
     'ai:generate-image',
     async (

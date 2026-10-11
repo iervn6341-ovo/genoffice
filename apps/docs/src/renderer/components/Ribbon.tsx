@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { DocFlags } from '../editor/layout-history'
 import type { CSSProperties, ReactNode } from 'react'
 import type { ChainedCommands, Editor } from '@tiptap/core'
 import { NodeSelection, type Command } from '@tiptap/pm/state'
@@ -56,7 +57,13 @@ import { applyCase, type CaseMode } from '../editor/case-transform'
 import { setParagraphDirection, setSelectionAlign } from '../editor/direction'
 import { setInactiveSelectionShown } from '../editor/inactive-selection'
 import { stepParagraphIndent } from '../editor/indent'
-import { beginForeignPaste, defaultPasteMode, stashPastePayload } from '../editor/paste-options'
+import {
+  beginForeignPaste,
+  defaultPasteMode,
+  forceNextPasteMode,
+  stashPastePayload,
+  type PasteMode,
+} from '../editor/paste-options'
 import { formatNumber } from '../editor/numbering'
 import type { InkTool } from '../editor/ink'
 import type { RibbonFormatState } from './ribbon-format-state'
@@ -87,8 +94,18 @@ import {
   type ViewMode,
   insertImageFromDataUrl,
   applyParagraphStyle,
+  activeParaAttrs,
   setParaAttrs,
 } from './ribbon-tabs'
+import {
+  hasSide,
+  insertHorizontalLine,
+  presetBorders,
+  toggleSide,
+  type BorderSide as ParaBorderSide,
+} from '../editor/paragraph-borders'
+import { BordersShadingDialog } from './BordersShadingDialog'
+import { builtinStyle } from '../editor/builtin-styles'
 import { WRAP_OPTIONS } from './ContextMenu'
 import { CropDialog, CutoutDialog } from './PictureDialogs'
 import {
@@ -145,6 +162,7 @@ import {
   IconRowInsertAbove,
   IconRowInsertBelow,
   IconShading,
+  IconStylesPane,
   IconChangeCase,
   IconFontColorA,
   IconShrinkFont,
@@ -187,10 +205,13 @@ interface RibbonProps {
   onOpen: () => void
   onSave: () => void
   onSaveAs: () => void
+  /** File tab: opens the full-window File view */
+  onFileTab?: () => void
   showAi: boolean
   onToggleAi: () => void
   section: SectionSettings | null
-  onSection: (next: SectionSettings) => void
+  /** the second argument updates document-wide flags in the same undo step (Mirrored margins) */
+  onSection: (next: SectionSettings, flags?: Partial<DocFlags>) => void
   /** Multi-section documents: index of the cursor's section (0-based); null for single-section */
   activeSection: number | null
   onInsertSectionBreak: (type: 'nextPage' | 'continuous' | 'evenPage' | 'oddPage') => void
@@ -241,6 +262,13 @@ interface RibbonProps {
   /** Different odd & even pages (settings.xml w:evenAndOddHeaders) */
   evenOddHf: boolean
   onEvenOddHf: (v: boolean) => void
+  /** make sure a built-in paragraph style (Title, Quote, ...) exists in the document before it is applied */
+  onEnsureStyle: (styleId: string) => void
+  /** open the Styles pane */
+  onStylesPane: () => void
+  /** document-wide settings.xml switches: automatic hyphenation, mirrored margins */
+  docFlags: DocFlags
+  onDocFlags: (next: Partial<DocFlags>) => void
   showMarks: boolean
   onShowMarks: (v: boolean) => void
   showRuler: boolean
@@ -566,11 +594,22 @@ function previewLevelText(levels: CustomNumberingLevel[], ilvl: number): string 
   )
 }
 
+/** Word's gallery order; `ps:` keys are built-in paragraph styles defined on first use (builtin-styles.ts) */
 const STYLE_GALLERY = [
   { key: 'p', labelKey: 'ribbonStyleNormal', className: 'style-normal' },
+  { key: 'ps:NoSpacing', labelKey: 'ribbonStyleNoSpacing', className: 'style-nospacing' },
   { key: 'h1', labelKey: 'ribbonStyleHeading1', className: 'style-h1' },
   { key: 'h2', labelKey: 'ribbonStyleHeading2', className: 'style-h2' },
   { key: 'h3', labelKey: 'ribbonStyleHeading3', className: 'style-h3' },
+  { key: 'ps:Title', labelKey: 'ribbonStyleTitle', className: 'style-title' },
+  { key: 'ps:Subtitle', labelKey: 'ribbonStyleSubtitle', className: 'style-subtitle' },
+  { key: 'ps:Quote', labelKey: 'ribbonStyleQuote', className: 'style-quote' },
+  { key: 'ps:IntenseQuote', labelKey: 'ribbonStyleIntenseQuote', className: 'style-intense-quote' },
+  {
+    key: 'ps:ListParagraph',
+    labelKey: 'ribbonStyleListParagraph',
+    className: 'style-list-paragraph',
+  },
 ] as const satisfies ReadonlyArray<{ key: string; labelKey: StringKey; className: string }>
 
 /** Fallback character styles shown when the document has no character styles.
@@ -624,6 +663,7 @@ function RibbonInner({
   onOpen,
   onSave,
   onSaveAs,
+  onFileTab,
   showAi,
   onToggleAi,
   section,
@@ -668,6 +708,10 @@ function RibbonInner({
   onTitlePg,
   evenOddHf,
   onEvenOddHf,
+  docFlags,
+  onDocFlags,
+  onEnsureStyle,
+  onStylesPane,
   showMarks,
   onShowMarks,
   showRuler,
@@ -773,10 +817,10 @@ function RibbonInner({
   const inTable = fs.inTable
 
   useEffect(() => {
+    // entering a table makes Table Design / Table Layout available but never switches to them:
+    // the user stays on the tab they were working in
     if (inTable && !wasInTable.current) {
       wasInTable.current = true
-      setDropdown(null)
-      setTab('tableLayout')
     } else if (!inTable && wasInTable.current) {
       wasInTable.current = false
       setDropdown(null)
@@ -1316,13 +1360,15 @@ function RibbonInner({
   const activeStyleKey =
     fs.headingLevel !== null
       ? `h${fs.headingLevel}`
-      : activeCharStyleId
-        ? `char:${activeCharStyleId}`
-        : presetActive('bold')
-          ? 'char:__preset_strong'
-          : presetActive('italic')
-            ? 'char:__preset_emphasis'
-            : 'p'
+      : fs.paraStyleId && builtinStyle(fs.paraStyleId)
+        ? `ps:${fs.paraStyleId}`
+        : activeCharStyleId
+          ? `char:${activeCharStyleId}`
+          : presetActive('bold')
+            ? 'char:__preset_strong'
+            : presetActive('italic')
+              ? 'char:__preset_emphasis'
+              : 'p'
 
   // Style gallery overflow: cards that don't fit wrap onto a second row that
   // the fixed-height gallery clips (whole cards only, never a half-cut one),
@@ -1391,6 +1437,15 @@ function RibbonInner({
     if (canEdit) setParaAttrs(ed, attrs)
     setDropdown(null)
   }
+  /** drawn paragraph border sides of the caret's paragraph ("tblrh" subset) */
+  const paraBordersNow =
+    typeof fs.paraBorders === 'string' && fs.paraBorders ? fs.paraBorders : null
+  const [bordersDialog, setBordersDialog] = useState(false)
+  // Borders ▾ → View Gridlines: dotted cell outlines on the page (never printed, never saved)
+  const [tableGridlines, setTableGridlines] = useState(false)
+  useEffect(() => {
+    editor.view.dom.classList.toggle('show-table-gridlines', tableGridlines)
+  }, [editor, tableGridlines])
 
   const applyStyle = (key: string) => {
     if (key.startsWith('char:')) {
@@ -1418,6 +1473,12 @@ function RibbonInner({
       return
     }
     if (sub || !canEdit) return // textboxes have no heading styles
+    if (key.startsWith('ps:')) {
+      const styleId = key.slice(3)
+      onEnsureStyle(styleId)
+      applyParagraphStyle(editor, { styleId })
+      return
+    }
     applyParagraphStyle(editor, key as 'p' | 'h1' | 'h2' | 'h3')
   }
 
@@ -1790,7 +1851,7 @@ function RibbonInner({
     setDropdown(null)
   }
 
-  const clipboard = async (action: 'cut' | 'copy' | 'paste') => {
+  const clipboard = async (action: 'cut' | 'copy' | 'paste', mode?: PasteMode) => {
     if (action !== 'copy' && !canEdit) return
     if (action === 'paste') {
       // Same pipeline as Ctrl+V: pasteHTML/pasteText run the editor's full
@@ -1816,8 +1877,10 @@ function RibbonInner({
               // arm the foreign-paste handshake exactly like a Ctrl+V — the
               // synthetic pasteHTML never fires the DOM paste handler, so
               // ribbon pastes skipped the paste mode and the r181 fill
+              // Paste ▾ → Keep Source / Merge / Text Only decides this one paste
+              if (mode) forceNextPasteMode(mode)
               if (beginForeignPaste(html)) {
-                stashPastePayload({ html, text, mode: defaultPasteMode() })
+                stashPastePayload({ html, text, mode: mode ?? defaultPasteMode() })
               }
               ed.view.pasteHTML(html, pasteEvent(html, text))
               ed.commands.focus()
@@ -1915,46 +1978,9 @@ function RibbonInner({
         className={`ribbon-tabs ${IN_TAB ? '' : IS_MAC ? 'ribbon-tabs-mac' : 'ribbon-tabs-win'}`}
         onDoubleClick={collapse.onTabsDoubleClick}
       >
-        {!IS_MAC && (
-          <div className="file-tab-wrap">
-            <button
-              className={`ribbon-tab ribbon-tab-file ${dropdown === 'file' ? 'open' : ''}`}
-              onClick={() => setDropdown((v) => (v === 'file' ? null : 'file'))}
-            >
-              {t('ribbonTabFile')}
-            </button>
-            {dropdown === 'file' && (
-              <div data-rb-panel="" className="file-menu">
-                <button
-                  onClick={() => {
-                    setDropdown(null)
-                    onOpen()
-                  }}
-                >
-                  {t('ribbonOpen')} <span className="file-menu-key">Ctrl+O</span>
-                </button>
-                <button
-                  disabled={!hasDoc}
-                  onClick={() => {
-                    setDropdown(null)
-                    onSave()
-                  }}
-                >
-                  {t('ribbonSave')} <span className="file-menu-key">Ctrl+S</span>
-                </button>
-                <button
-                  disabled={!hasDoc}
-                  onClick={() => {
-                    setDropdown(null)
-                    onSaveAs()
-                  }}
-                >
-                  {t('ribbonSaveAs')} <span className="file-menu-key">Ctrl+Shift+S</span>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        <button className="ribbon-tab ribbon-tab-file" onClick={onFileTab}>
+          {t('ribbonTabFile')}
+        </button>
         {quickActions}
         {TABS.filter((tabName) => tabName !== 'file').map((tabName) => (
           <button
@@ -2605,7 +2631,7 @@ function RibbonInner({
             </div>
             <div className="ribbon-sep" />
             <div className="table-tool-group">
-              <div className="table-tool-row">
+              <div className="table-tool-row table-tool-stack">
                 <button disabled={!fs.canMergeCells} onClick={() => runTableCommand(mergeCells)}>
                   <IconMergeCells />
                   {t('ribbonMergeCells')}
@@ -2619,7 +2645,7 @@ function RibbonInner({
             </div>
             <div className="ribbon-sep" />
             <div className="table-tool-group">
-              <div className="table-tool-grid table-tool-grid-two">
+              <div className="table-tool-grid table-tool-stack">
                 <button onClick={() => runTableCommand(deleteRow)}>
                   <IconRowDelete />
                   {t('ribbonDeleteRow')}
@@ -2633,7 +2659,7 @@ function RibbonInner({
             </div>
             <div className="ribbon-sep" />
             <div className="table-tool-group">
-              <div className="table-tool-row">
+              <div className="table-tool-grid table-tool-grid-two">
                 {(
                   [
                     ['top', t('ribbonAlignTop'), IconCellAlignTop],
@@ -2659,7 +2685,7 @@ function RibbonInner({
             </div>
             <div className="ribbon-sep" />
             <div className="table-tool-group">
-              <div className="table-tool-row">
+              <div className="table-tool-grid table-tool-grid-two">
                 {(
                   [
                     ['left', t('appAlignLeft'), IconAlignLeft],
@@ -2833,16 +2859,51 @@ function RibbonInner({
               caret={<IconCaret />}
               priority={4}
             >
-              <button
-                className="rb-big"
-                disabled={!canEdit}
-                onClick={() => void clipboard('paste')}
-              >
-                <span className="rb-big-icon">
-                  <IconPaste size={28} />
-                </span>
-                <span>{t('ribbonPaste')}</span>
-              </button>
+              <div className="rb-split-wrap rb-paste-split">
+                <button
+                  className="rb-big"
+                  disabled={!canEdit}
+                  onClick={() => void clipboard('paste')}
+                >
+                  <span className="rb-big-icon">
+                    <IconPaste size={28} />
+                  </span>
+                  <span>{t('ribbonPaste')}</span>
+                </button>
+                <button
+                  className="rb-paste-caret"
+                  disabled={!canEdit}
+                  data-tip={t('ribbonPasteOptions')}
+                  aria-label={t('ribbonPasteOptions')}
+                  aria-expanded={dropdown === 'paste'}
+                  onClick={() => setDropdown((v) => (v === 'paste' ? null : 'paste'))}
+                >
+                  <IconCaret />
+                </button>
+                {dropdown === 'paste' && (
+                  <div data-rb-panel="" className="spacing-menu paste-menu">
+                    <div className="menu-head">{t('ribbonPasteOptions')}</div>
+                    {(
+                      [
+                        ['source', 'appPasteKeepSource'],
+                        ['merge', 'appPasteMergeFormat'],
+                        ['text', 'appPasteTextOnly'],
+                      ] as Array<[PasteMode, StringKey]>
+                    ).map(([mode, key]) => (
+                      <button
+                        key={mode}
+                        className={defaultPasteMode() === mode ? 'active' : ''}
+                        onClick={() => {
+                          setDropdown(null)
+                          void clipboard('paste', mode)
+                        }}
+                      >
+                        {t(key)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="rb-col">
                 <button
                   className="rb-small"
@@ -3082,6 +3143,9 @@ function RibbonInner({
                         <button onClick={() => changeCase('lower')}>{t('ribbonCaseLower')}</button>
                         <button onClick={() => changeCase('upper')}>{t('ribbonCaseUpper')}</button>
                         <button onClick={() => changeCase('title')}>{t('ribbonCaseTitle')}</button>
+                        <button onClick={() => changeCase('toggle')}>
+                          {t('ribbonCaseToggle')}
+                        </button>
                       </div>
                     )}
                   </div>
@@ -3529,6 +3593,30 @@ function RibbonInner({
                       >
                         {t('ribbonDefault')}
                       </button>
+                      <div className="menu-sep" />
+                      {/* Word: 12 pt added in one click, removed again when already there */}
+                      <button
+                        onClick={() =>
+                          setParaAttr({
+                            spaceBefore: fs.spaceBefore > 0 ? 0 : 240,
+                            spaceBeforeAuto: null,
+                          })
+                        }
+                      >
+                        {fs.spaceBefore > 0
+                          ? t('ribbonSpaceRemoveBefore')
+                          : t('ribbonSpaceAddBefore')}
+                      </button>
+                      <button
+                        onClick={() =>
+                          setParaAttr({
+                            spaceAfter: fs.spaceAfter > 0 ? 0 : 240,
+                            spaceAfterAuto: null,
+                          })
+                        }
+                      >
+                        {fs.spaceAfter > 0 ? t('ribbonSpaceRemoveAfter') : t('ribbonSpaceAddAfter')}
+                      </button>
                       {onParagraphDialog && (
                         <button
                           onClick={() => {
@@ -3591,23 +3679,94 @@ function RibbonInner({
                   </button>
                   {dropdown === 'borders' && (
                     <div data-rb-panel="" className="spacing-menu borders-menu">
-                      <button onClick={() => setParaAttr({ borders: 'b' })}>
-                        {t('ribbonBorderBottom')}
-                      </button>
-                      <button onClick={() => setParaAttr({ borders: 't' })}>
-                        {t('ribbonBorderTop')}
-                      </button>
-                      <button onClick={() => setParaAttr({ borders: 'l' })}>
-                        {t('ribbonBorderLeft')}
-                      </button>
-                      <button onClick={() => setParaAttr({ borders: 'r' })}>
-                        {t('ribbonBorderRight')}
-                      </button>
-                      <button onClick={() => setParaAttr({ borders: 'tblr' })}>
-                        {t('ribbonBorderBox')}
-                      </button>
-                      <button onClick={() => setParaAttr({ borders: null })}>
+                      {(
+                        [
+                          ['b', 'ribbonBorderBottom', <IconBorderBottom key="b" />],
+                          ['t', 'ribbonBorderTop', <IconBorderTop key="t" />],
+                          ['l', 'ribbonBorderLeft', <IconBorderLeft key="l" />],
+                          ['r', 'ribbonBorderRight', <IconBorderRight key="r" />],
+                        ] as Array<[ParaBorderSide, StringKey, ReactNode]>
+                      ).map(([side, key, icon]) => (
+                        <button
+                          key={side}
+                          className={hasSide(paraBordersNow, side) ? 'active' : ''}
+                          onClick={() => setParaAttr({ borders: toggleSide(paraBordersNow, side) })}
+                        >
+                          {icon}
+                          {t(key)}
+                        </button>
+                      ))}
+                      <div className="menu-sep" />
+                      <button
+                        className={!paraBordersNow ? 'active' : ''}
+                        onClick={() => setParaAttr({ borders: null, borderLines: null })}
+                      >
+                        <IconBorderNone />
                         {t('ribbonNoBorders')}
+                      </button>
+                      <button
+                        className={paraBordersNow === 'tblrh' ? 'active' : ''}
+                        onClick={() =>
+                          setParaAttr({ borders: presetBorders(paraBordersNow, 'all') })
+                        }
+                      >
+                        <IconBorderAll />
+                        {t('ribbonAllBorders')}
+                      </button>
+                      <button
+                        className={paraBordersNow === 'tblr' ? 'active' : ''}
+                        onClick={() =>
+                          setParaAttr({ borders: presetBorders(paraBordersNow, 'outside') })
+                        }
+                      >
+                        <IconBorderOuter />
+                        {t('ribbonOuterBorders')}
+                      </button>
+                      <button
+                        onClick={() =>
+                          setParaAttr({ borders: presetBorders(paraBordersNow, 'inside') })
+                        }
+                      >
+                        <IconBorderInner />
+                        {t('ribbonInnerBorders')}
+                      </button>
+                      <button
+                        className={hasSide(paraBordersNow, 'h') ? 'active' : ''}
+                        onClick={() => setParaAttr({ borders: toggleSide(paraBordersNow, 'h') })}
+                      >
+                        <IconBorderInsideH />
+                        {t('ribbonBorderInsideH')}
+                      </button>
+                      {/* a paragraph has no vertical or diagonal borders: Word greys these out too */}
+                      <button disabled>
+                        <IconBorderInsideV />
+                        {t('ribbonBorderInsideV')}
+                      </button>
+                      <div className="menu-sep" />
+                      <button
+                        onClick={() => {
+                          setDropdown(null)
+                          insertHorizontalLine(ed)
+                        }}
+                      >
+                        {t('ribbonHorizontalLine')}
+                      </button>
+                      <button
+                        className={tableGridlines ? 'active' : ''}
+                        onClick={() => {
+                          setTableGridlines((v) => !v)
+                          setDropdown(null)
+                        }}
+                      >
+                        {t('ribbonViewGridlines')}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDropdown(null)
+                          setBordersDialog(true)
+                        }}
+                      >
+                        {t('ribbonBordersShading')}
                       </button>
                     </div>
                   )}
@@ -3644,6 +3803,16 @@ function RibbonInner({
               {dropdown === 'styleGallery' && (
                 <div data-rb-panel="" className="style-gallery-menu">
                   {renderStyleCards(true)}
+                  <button
+                    className="style-gallery-footer"
+                    onClick={() => {
+                      setDropdown(null)
+                      onStylesPane()
+                    }}
+                  >
+                    <IconStylesPane />
+                    {t('ribbonStylesPane')}
+                  </button>
                 </div>
               )}
             </RibbonFoldGroup>
@@ -3839,6 +4008,8 @@ function RibbonInner({
             hasDoc={canEdit}
             dropdown={dropdown}
             setDropdown={setDropdown}
+            docFlags={docFlags}
+            onDocFlags={onDocFlags}
             pageColor={pageColor}
             onPageColor={onPageColor}
             section={section}
@@ -3859,6 +4030,8 @@ function RibbonInner({
             onSection={onSection}
             activeSection={activeSection}
             onInsertSectionBreak={onInsertSectionBreak}
+            docFlags={docFlags}
+            onDocFlags={onDocFlags}
           />
         ) : tab === 'references' ? (
           <ReferencesTab
@@ -3968,6 +4141,18 @@ function RibbonInner({
           initial={tablePropertiesFromAttrs(tableAttrs)}
           onApply={applyTableProperties}
           onClose={() => setTablePropertiesOpen(false)}
+        />
+      )}
+      {bordersDialog && (
+        <BordersShadingDialog
+          borders={paraBordersNow}
+          borderLines={activeParaAttrs(ed).borderLines}
+          shadingFill={(fs.shadingFill as string | null) ?? null}
+          onApply={(next) => setParaAttrs(ed, { ...next })}
+          onClose={() => {
+            setBordersDialog(false)
+            ed.commands.focus()
+          }}
         />
       )}
     </div>

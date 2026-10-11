@@ -178,7 +178,7 @@ async function geminiTurn(
       // so omit our hard-coded 0.3 for those models via omitTemperature.
       generationConfig: {
         ...(options.omitTemperature ? {} : { temperature: 0.3 }),
-        maxOutputTokens: maxTokens,
+        ...(maxTokens > 0 ? { maxOutputTokens: maxTokens } : {}),
       },
     }),
   })

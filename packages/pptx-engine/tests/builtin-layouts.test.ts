@@ -35,11 +35,41 @@ describe('builtinLayoutInfos', () => {
       'Title and Content',
       'Section Header',
       'Two Content',
+      'Comparison',
       'Title Only',
+      'Content with Caption',
+      'Picture with Caption',
     ])
     expect(infos.every((i) => i.path.startsWith('builtin:'))).toBe(true)
     const title = infos[1]!.placeholders.find((p) => p.type === 'title')!
     expect(title).toMatchObject({ x: 838200, y: 365125, cx: 10515600, cy: 1325563 })
+  })
+})
+
+describe('the PowerPoint caption and comparison layouts', () => {
+  it('Comparison carries a title, two heading slots and two content slots; the caption layouts a title, a main object and a caption', async () => {
+    const opened = await open()
+    const names = (key: string) => {
+      const path = ensureBuiltinLayout(opened.archive, opened.deck.size, key)!
+      const info = listSlideLayouts(opened.archive).find((l) => l.path === path)!
+      return info.placeholders.map((p) => `${p.type}:${p.idx || '-'}`)
+    }
+    expect(names('comparison')).toEqual(['title:-', 'body:1', 'body:2', 'body:3', 'body:4'])
+    expect(names('contentCaption')).toEqual(['title:-', 'body:1', 'body:2'])
+    // the picture slot is a function-type placeholder: written to the layout, not offered as text
+    expect(names('pictureCaption')).toEqual(['title:-', 'body:2'])
+    const picLayout = listSlideLayouts(opened.archive).find(
+      (l) => l.name === 'Picture with Caption',
+    )!
+    expect(opened.archive.readText(picLayout.path)).toContain('<p:ph type="pic" idx="1"/>')
+  })
+
+  it('a Comparison slide gets its four body slots plus the title', async () => {
+    const opened = await open()
+    const path = ensureBuiltinLayout(opened.archive, opened.deck.size, 'comparison')!
+    const fresh = setSlideLayout(opened, 0, path)!
+    const phs = fresh.elements.filter((e) => e.placeholder)
+    expect(phs.map((e) => e.placeholder).sort()).toEqual(['body', 'body', 'body', 'body', 'title'])
   })
 })
 
@@ -118,7 +148,10 @@ describe('applying built-in layouts', () => {
       'Title and Content',
       'Section Header',
       'Two Content',
+      'Comparison',
       'Title Only',
+      'Content with Caption',
+      'Picture with Caption',
     ])
     // A deck with a foreign placeholder-bearing layout keeps its own template untouched
     expect(shouldOfferBuiltinLayouts([{ name: 'Custom', placeholders: [{}] }])).toBe(false)

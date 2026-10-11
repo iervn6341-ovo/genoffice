@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
-import { VIEW_IMAGE_CHANNEL } from '../shared/ipc'
+import { VIEW_IMAGE_CHANNEL, type PrinterJobSettings } from '../shared/ipc'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import type {
   AiChatRequest,
@@ -119,7 +119,12 @@ const api: DesktopApi = {
   getRecentFiles: () => ipcRenderer.invoke('docs:recent'),
   pickImage: () => ipcRenderer.invoke('docs:pick-image'),
   fontMetrics: (family: string) => ipcRenderer.invoke('docs:font-metrics', family),
-  print: (scale?: number) => ipcRenderer.invoke('docs:print', scale),
+  print: (
+    scale?: number,
+    job?: PrinterJobSettings,
+    pageSize?: { widthIn: number; heightIn: number },
+  ) => ipcRenderer.invoke('docs:print', scale, job, pageSize),
+  listPrinters: () => ipcRenderer.invoke('docs:list-printers'),
   exportPdf: (
     defaultName: string,
     pageWidthTwips: number,

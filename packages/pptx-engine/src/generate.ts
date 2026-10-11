@@ -1576,18 +1576,6 @@ const TRANSITION_INNER: Record<Exclude<SlideTransitionKind, 'none' | 'morph'>, s
   random: '<p:random/>',
 }
 
-/**
- * Morph transition: PowerPoint 2019+'s <p159:morph> (2015/main namespace), wrapped
- * in mc:AlternateContent — older PowerPoint uses the Fallback fade without erroring.
- */
-const MORPH_TRANSITION_XML =
-  '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">' +
-  '<mc:Choice xmlns:p159="http://schemas.microsoft.com/office/powerpoint/2015/main" Requires="p159">' +
-  '<p:transition xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" spd="slow" p14:dur="800">' +
-  '<p159:morph option="byObject"/></p:transition></mc:Choice>' +
-  '<mc:Fallback><p:transition spd="slow"><p:fade/></p:transition></mc:Fallback>' +
-  '</mc:AlternateContent>'
-
 const TRANSITION_RE = /<p:transition\b[^>]*\/>|<p:transition\b[^>]*>[\s\S]*?<\/p:transition>/
 /** AlternateContent-wrapped transition (only counts when Choice is immediately followed by p:transition, avoiding other AC blocks). */
 const AC_TRANSITION_RE =
@@ -1609,17 +1597,22 @@ function transitionInsertPos(body: string): number {
  * the new bodySuffix.
  */
 export function patchSlideTransitionXml(bodySuffix: string, kind: SlideTransitionKind): string {
-  const advTm = readSlideAdvanceTimeXml(bodySuffix)
+  const old = readSlideTransitionDetailXml(bodySuffix)
+  const advTm = old.advTm
   const stripped = bodySuffix.replace(AC_TRANSITION_RE, '').replace(TRANSITION_RE, '')
   if (kind === 'none') return advTm == null ? stripped : patchSlideAdvanceTimeXml(stripped, advTm)
-  const xml =
-    kind === 'morph'
-      ? MORPH_TRANSITION_XML
-      : `<p:transition>${TRANSITION_INNER[kind]}</p:transition>`
   const at = transitionInsertPos(stripped)
   if (at < 0) return stripped
-  const out = stripped.slice(0, at) + xml + stripped.slice(at)
-  return advTm == null ? out : patchSlideAdvanceTimeXml(out, advTm)
+  // a fresh effect starts with its own default direction; the duration, on-click flag and any
+  // auto-advance time the user set carry over (PowerPoint keeps them when the effect changes)
+  const xml = buildTransitionXml({
+    kind,
+    // morph's 800 ms is its own default, not a user choice: it never carries to another effect
+    durationMs: old.kind === 'morph' || kind === 'morph' ? null : old.durationMs,
+    advClick: old.advClick,
+    advTm,
+  })
+  return stripped.slice(0, at) + xml + stripped.slice(at)
 }
 
 /** Read the current transition from the bodySuffix (for UI echo; unmodeled effects map to 'none'). */
@@ -1630,6 +1623,190 @@ export function readSlideTransitionXml(bodySuffix: string): SlideTransitionKind 
   if (/<[\w.]+:morph[\s/>]/.test(m[0])) return 'morph'
   const kind = /<p:(fade|push|wipe|split|circle|cover|pull|dissolve|zoom|random)\b/.exec(m[0])?.[1]
   return (kind as SlideTransitionKind | undefined) ?? 'none'
+}
+
+// ── Transition details: direction / duration / advance (Transitions tab) ──────────────────
+
+/**
+ * Everything the Transitions tab edits besides the effect kind. `dir` is the OOXML movement
+ * direction (push/wipe/cover/pull: l r u d; PowerPoint's "From Right" is dir="l"); split uses
+ * `orient` + dir "in" | "out"; fade uses `thruBlk` ("Through Black").
+ */
+export interface SlideTransitionDetail {
+  kind: SlideTransitionKind
+  dir?: string
+  orient?: 'horz' | 'vert'
+  thruBlk?: boolean
+  /** p14:dur in ms (null = the effect's own default) */
+  durationMs: number | null
+  /** advance on mouse click (advClick="0" turns it off) */
+  advClick: boolean
+  /** auto-advance after this many ms (null = off) */
+  advTm: number | null
+}
+
+/** The movement direction a freshly applied effect starts with (PowerPoint's defaults). */
+const DEFAULT_TRANSITION_DIR: Partial<Record<SlideTransitionKind, string>> = {
+  push: 'u',
+  wipe: 'l',
+  cover: 'l',
+  pull: 'l',
+  split: 'out',
+}
+
+/** Valid `dir` values per effect (the Effect Options menu offers exactly these). */
+export const TRANSITION_DIRS: Partial<Record<SlideTransitionKind, readonly string[]>> = {
+  push: ['l', 'r', 'u', 'd'],
+  wipe: ['l', 'r', 'u', 'd'],
+  cover: ['l', 'r', 'u', 'd', 'lu', 'ru', 'ld', 'rd'],
+  pull: ['l', 'r', 'u', 'd', 'lu', 'ru', 'ld', 'rd'],
+  split: ['in', 'out'],
+}
+
+function transitionInnerXml(
+  d: Pick<SlideTransitionDetail, 'kind' | 'dir' | 'orient' | 'thruBlk'>,
+): string {
+  const kind = d.kind as Exclude<SlideTransitionKind, 'none' | 'morph'>
+  const allowed = TRANSITION_DIRS[kind]
+  const dir = d.dir && allowed?.includes(d.dir) ? d.dir : DEFAULT_TRANSITION_DIR[kind]
+  switch (kind) {
+    case 'push':
+    case 'wipe':
+    case 'cover':
+    case 'pull':
+      return `<p:${kind} dir="${dir}"/>`
+    case 'split':
+      return `<p:split orient="${d.orient === 'vert' ? 'vert' : 'horz'}" dir="${dir}"/>`
+    case 'fade':
+      return d.thruBlk ? '<p:fade thruBlk="1"/>' : '<p:fade/>'
+    default:
+      return TRANSITION_INNER[kind]
+  }
+}
+
+/** PowerPoint's speed word for a duration (Fast 0.5 s, Medium 0.75 s, Slow 1 s). */
+function transitionSpd(ms: number | null): string {
+  return ms == null ? 'med' : ms <= 500 ? 'fast' : ms <= 750 ? 'med' : 'slow'
+}
+
+/** The full <p:transition> (AlternateContent-wrapped when it carries a p14 duration or is a morph). */
+function buildTransitionXml(d: SlideTransitionDetail): string {
+  const common = (spd: string, withDur: boolean): string => {
+    const a = [`spd="${spd}"`]
+    if (withDur && d.durationMs != null) a.push(`p14:dur="${Math.round(d.durationMs)}"`)
+    if (!d.advClick) a.push('advClick="0"')
+    if (d.advTm != null) a.push(`advTm="${clampInt(d.advTm, 0, 4294967295)}"`)
+    return a.join(' ')
+  }
+  const AC =
+    '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+  if (d.kind === 'morph') {
+    const dur = d.durationMs ?? 800
+    const withDur = { ...d, durationMs: dur }
+    const attrs = (fallback: boolean) =>
+      (() => {
+        const a = [`spd="slow"`]
+        if (!fallback) a.push(`p14:dur="${Math.round(dur)}"`)
+        if (!withDur.advClick) a.push('advClick="0"')
+        if (withDur.advTm != null) a.push(`advTm="${clampInt(withDur.advTm, 0, 4294967295)}"`)
+        return a.join(' ')
+      })()
+    return (
+      AC +
+      '<mc:Choice xmlns:p159="http://schemas.microsoft.com/office/powerpoint/2015/main" Requires="p159">' +
+      `<p:transition xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" ${attrs(false)}>` +
+      '<p159:morph option="byObject"/></p:transition></mc:Choice>' +
+      `<mc:Fallback><p:transition ${attrs(true)}><p:fade/></p:transition></mc:Fallback></mc:AlternateContent>`
+    )
+  }
+  const inner = transitionInnerXml(d)
+  const spd = transitionSpd(d.durationMs)
+  if (d.durationMs != null) {
+    return (
+      AC +
+      '<mc:Choice xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" Requires="p14">' +
+      `<p:transition ${common(spd, true)}>${inner}</p:transition></mc:Choice>` +
+      `<mc:Fallback><p:transition ${common(spd, false)}>${inner}</p:transition></mc:Fallback></mc:AlternateContent>`
+    )
+  }
+  const plain = common(spd, false)
+  // spd="med" is the schema default: keep plain effects as bare as PowerPoint writes them
+  const attrs = plain.replace(/^spd="med"\s*/, '')
+  return `<p:transition${attrs ? ' ' + attrs : ''}>${inner}</p:transition>`
+}
+
+/** Read direction / duration / advance settings of the slide's transition. */
+export function readSlideTransitionDetailXml(bodySuffix: string): SlideTransitionDetail {
+  const kind = readSlideTransitionXml(bodySuffix)
+  const m = AC_TRANSITION_RE.exec(bodySuffix) ?? TRANSITION_RE.exec(bodySuffix)
+  const block = m ? m[0] : ''
+  const first = /<p:transition\b[^>]*>/.exec(block)?.[0] ?? ''
+  const dur = /\bp14:dur="(\d+)"/.exec(block)
+  const adv = /\badvTm="(\d+)"/.exec(first)
+  const detail: SlideTransitionDetail = {
+    kind,
+    durationMs: dur ? Number(dur[1]) : null,
+    advClick: !/\badvClick="(?:0|false)"/.test(first),
+    advTm: adv ? Number(adv[1]) : null,
+  }
+  const inner = /<p:(push|wipe|cover|pull|split|fade)\b([^>]*)\/?>/.exec(block)
+  if (inner) {
+    const dir = /\bdir="(\w+)"/.exec(inner[2]!)
+    if (dir) detail.dir = dir[1]!
+    const orient = /\borient="(horz|vert)"/.exec(inner[2]!)
+    if (orient) detail.orient = orient[1] as 'horz' | 'vert'
+    if (/\bthruBlk="(?:1|true)"/.test(inner[2]!)) detail.thruBlk = true
+  }
+  return detail
+}
+
+export type SlideTransitionDetailPatch = Partial<
+  Pick<SlideTransitionDetail, 'dir' | 'orient' | 'thruBlk' | 'durationMs' | 'advClick'>
+>
+
+/**
+ * Patch the transition's direction / duration / on-click flag, keeping the effect and any
+ * auto-advance time. Slides without a modeled effect only take the on-click flag (written on an
+ * empty <p:transition>, like advTm).
+ */
+export function patchSlideTransitionDetailXml(
+  bodySuffix: string,
+  patch: SlideTransitionDetailPatch,
+): string {
+  const cur = readSlideTransitionDetailXml(bodySuffix)
+  const next: SlideTransitionDetail = { ...cur }
+  if (patch.dir !== undefined) next.dir = patch.dir
+  if (patch.orient !== undefined) next.orient = patch.orient
+  if (patch.thruBlk !== undefined) next.thruBlk = patch.thruBlk
+  if (patch.durationMs !== undefined) next.durationMs = patch.durationMs
+  if (patch.advClick !== undefined) next.advClick = patch.advClick
+  const stripped = bodySuffix.replace(AC_TRANSITION_RE, '').replace(TRANSITION_RE, '')
+  const at = transitionInsertPos(stripped)
+  if (at < 0) return bodySuffix
+  if (cur.kind === 'none') {
+    // no modeled effect (maybe a PowerPoint-only one, which must survive): only the flags
+    if (patch.advClick === undefined) return bodySuffix
+    const m = AC_TRANSITION_RE.exec(bodySuffix) ?? TRANSITION_RE.exec(bodySuffix)
+    const setClick = (tag: string): string => {
+      const cleaned = tag.replace(/\s+advClick="[^"]*"/, '')
+      return next.advClick
+        ? cleaned
+        : cleaned.replace(/(\s*\/)?>$/, (_x, c: string | undefined) => ` advClick="0"${c ?? ''}>`)
+    }
+    if (m) {
+      return (
+        bodySuffix.slice(0, m.index) +
+        m[0].replace(/<p:transition\b[^>]*>/g, setClick) +
+        bodySuffix.slice(m.index + m[0].length)
+      )
+    }
+    if (next.advClick) return bodySuffix
+    const pos = transitionInsertPos(bodySuffix)
+    return pos < 0
+      ? bodySuffix
+      : bodySuffix.slice(0, pos) + '<p:transition advClick="0"/>' + bodySuffix.slice(pos)
+  }
+  return stripped.slice(0, at) + buildTransitionXml(next) + stripped.slice(at)
 }
 
 // ── Auto-advance time patch (<p:transition advTm="ms">, for saving rehearsed timings) ────

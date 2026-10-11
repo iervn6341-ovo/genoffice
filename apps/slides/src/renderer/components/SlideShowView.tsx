@@ -9,9 +9,23 @@
  * - →/space/enter/PgDn/click next step/page; ←/PgUp/right-click previous page; Home/End first/last page;
  *   Esc exits; advancing past the last page shows the "end of show" black screen
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
 import type { RenderNode, RenderSlide, ShapeRenderNode } from '@genoffice/pptx-render'
-import type { AnimationItem, LinkTargetOp, ShapeKey, TransitionKind } from '../../shared/ipc'
+import type {
+  AnimationItem,
+  LinkTargetOp,
+  ShapeKey,
+  TransitionDetail,
+  TransitionKind,
+} from '../../shared/ipc'
 import { AnimatedSlideStage, useAnimPlayer } from './AnimatedSlide'
 import { useI18n } from '../i18n/locale'
 import { MorphStage } from './MorphStage'
@@ -44,7 +58,31 @@ import {
 } from './ShowControls'
 
 /** The control bar and the arrow fade out after this long without mouse movement (PowerPoint) */
+/** Minimum gap between two page paints while pages are turned in quick succession */
+const PAINT_MIN_MS = 90
+
 const IDLE_HIDE_MS = 3000
+
+/** Leading + trailing throttle: the first change applies at once, later ones at most every `ms`. */
+function useThrottledValue<T>(value: T, ms: number): T {
+  const [shown, setShown] = useState(value)
+  const lastRef = useRef(0)
+  useLayoutEffect(() => {
+    if (value === shown) return
+    const wait = lastRef.current + ms - performance.now()
+    if (wait <= 0) {
+      lastRef.current = performance.now()
+      setShown(value)
+      return
+    }
+    const h = window.setTimeout(() => {
+      lastRef.current = performance.now()
+      setShown(value)
+    }, wait)
+    return () => window.clearTimeout(h)
+  }, [value, shown, ms])
+  return shown
+}
 
 const ANIMATED = [
   'fade',
@@ -60,6 +98,33 @@ const ANIMATED = [
 
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
 
+/**
+ * CSS variables the page-transition keyframes read: the page's own duration and where a push /
+ * cover comes from (OOXML `dir` is the direction the effect moves: l = from the right).
+ */
+function transitionStyle(
+  kind: TransitionKind,
+  durMs: number | null | undefined,
+  dir: string | null | undefined,
+): CSSProperties {
+  const style: Record<string, string> = {}
+  if (durMs != null) style['--ss-dur'] = `${durMs}ms`
+  if (kind === 'push' || kind === 'cover') {
+    const from: Record<string, [string, string]> = {
+      l: ['100%', '0%'],
+      r: ['-100%', '0%'],
+      u: ['0%', '100%'],
+      d: ['0%', '-100%'],
+    }
+    const f = from[dir ?? (kind === 'push' ? 'u' : 'l')]
+    if (f) {
+      style['--ss-fx'] = f[0]
+      style['--ss-fy'] = f[1]
+    }
+  }
+  return style as CSSProperties
+}
+
 export function SlideShowView({
   slides,
   images,
@@ -69,7 +134,10 @@ export function SlideShowView({
   rehearseMode,
   onRehearseDone,
   onUsePresenterView,
+  windowed = false,
 }: {
+  /** Reading view: plays inside the editor window (no full screen), sized to its container */
+  windowed?: boolean
   slides: RenderSlide[]
   images: Map<string, HTMLImageElement>
   /** Start page (original index) */
@@ -94,16 +162,37 @@ export function SlideShowView({
   const [pos, setPos] = useState(() => Math.max(0, order.indexOf(startAt)))
   const [ended, setEnded] = useState(false)
   /** Current transition animation: kind + replay nonce (key change re-triggers the CSS animation) */
-  const [anim, setAnim] = useState<{ kind: TransitionKind; nonce: number }>({
+  const [anim, setAnim] = useState<{
+    kind: TransitionKind
+    nonce: number
+    /** the page's own duration / direction (Transitions tab), when it set them */
+    dur?: number | null
+    dir?: string | null
+  }>({
     kind: 'none',
     nonce: 0,
   })
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight })
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const frameRef = useRef<HTMLDivElement | null>(null)
+  // Replay the page transition on every turn WITHOUT remounting the frame: a remount rebuilt the
+  // Konva stage (new HiDPI canvases + GC) per page, which stalled holding an arrow key
+  useLayoutEffect(() => {
+    const el = frameRef.current
+    if (!el || anim.kind === 'none') return
+    el.style.animation = 'none'
+    void el.offsetWidth
+    el.style.animation = ''
+  }, [anim])
   /** False until the window covers the screen: the black root paints alone first so
    *  the window snap / tab-strip bleed relayouts stay invisible (no windowed flash) */
-  const [covered, setCovered] = useState(false)
+  const [covered, setCovered] = useState(windowed)
   /** Per-page transition effects (prefetched once when the show starts, zero IPC on page turns) */
   const transRef = useRef<TransitionKind[]>([])
+  /** Per-page transition settings: direction / duration / on-click / auto-advance (prefetched too) */
+  const transDetailRef = useRef<TransitionDetail[]>([])
+  /** Bumped when the prefetched settings land, so the auto-advance timer re-arms for the first page */
+  const [detailsVersion, setDetailsVersion] = useState(0)
   /** Per-page animation lists (also prefetched once) */
   const [allAnims, setAllAnims] = useState<AnimationItem[][] | null>(null)
   /** Per-page element Morph pairing keys (also prefetched once) */
@@ -122,6 +211,14 @@ export function SlideShowView({
     void Promise.all(slides.map((_, i) => window.slidesApi.getTransition(i))).then((kinds) => {
       if (!cancelled) transRef.current = kinds
     })
+    void Promise.all(slides.map((_, i) => window.slidesApi.getTransitionDetail(i))).then(
+      (details) => {
+        if (!cancelled) {
+          transDetailRef.current = details
+          setDetailsVersion((v) => v + 1)
+        }
+      },
+    )
     void Promise.all(slides.map((_, i) => window.slidesApi.getAnimations(i))).then((lists) => {
       if (!cancelled) setAllAnims(lists)
     })
@@ -149,6 +246,11 @@ export function SlideShowView({
   }, [slides])
 
   const slide = slides[order[pos]!]
+  // The stage repaints at most every PAINT_MIN_MS: a held arrow key turns pages every ~30ms, and
+  // each page's canvas redraw costs the GPU about as much — the queue grew until the whole window
+  // froze for ~200ms around the 10th page. Skipped pages still count (counter, order); only the
+  // intermediate paints are dropped, a single press paints at once.
+  const paintSlide = useThrottledValue(slide, PAINT_MIN_MS)
   const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960)
 
   // ── Rehearsal timing: start timing the first page on entry; accumulate the previous page's dwell on turn; redraw the timer bar every 500ms ──
@@ -190,6 +292,7 @@ export function SlideShowView({
   // shell's WebContentsView the promise can stay pending/reject even though fullscreen engaged, which
   // left the show mounted after Esc (fullscreen gone, show still covering the window).
   useEffect(() => {
+    if (windowed) return
     // already-fullscreen mounts (presenter view handing off to the normal show
     // keeps fullscreen) never get a fullscreenchange, so seed from current state
     let entered = !!document.fullscreenElement
@@ -251,19 +354,29 @@ export function SlideShowView({
       void window.slidesApi.setShowFullScreen?.(false)
       liftShowCurtain()
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The click-time curtain (dropped in show-actions before this component mounted)
   // is only needed until the show reveals — its own black root covers from there on
   useEffect(() => {
-    if (covered) liftShowCurtain()
-  }, [covered])
+    if (covered && !windowed) liftShowCurtain()
+  }, [covered, windowed])
 
   useEffect(() => {
+    if (windowed) {
+      // the page follows its own box (the editor workspace), not the screen
+      const el = rootRef.current
+      if (!el) return
+      const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight })
+      measure()
+      const ro = new ResizeObserver(measure)
+      ro.observe(el)
+      return () => ro.disconnect()
+    }
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight })
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [])
+  }, [windowed])
 
   /** Play-order position shown before the current one ("last slide viewed" action) */
   const lastViewedRef = useRef<number | null>(null)
@@ -287,12 +400,32 @@ export function SlideShowView({
         // Morphs that can't tween (start page/same page) degrade to fade-in
         if (kind === 'morph') kind = 'fade'
         setMorph(null)
-        setAnim((a) => ({ kind, nonce: a.nonce + 1 }))
+        const detail = transDetailRef.current[target]
+        setAnim((a) => ({
+          kind,
+          nonce: a.nonce + 1,
+          dur: detail?.durationMs ?? null,
+          dir: detail?.dir ?? null,
+        }))
       }
       setPos(nextPos)
     },
     [order, pos],
   )
+
+  // "After": a page with an auto-advance time turns itself once it elapses (the timings the
+  // Transitions tab sets and Rehearse Timings records)
+  useEffect(() => {
+    if (ended) return
+    const page = order[pos]
+    const ms = page != null ? (transDetailRef.current[page]?.advTm ?? null) : null
+    if (ms == null) return
+    const h = window.setTimeout(() => {
+      if (pos >= order.length - 1) setEnded(true)
+      else goTo(pos + 1, true)
+    }, ms)
+    return () => window.clearTimeout(h)
+  }, [pos, ended, order, detailsVersion, goTo])
 
   const next = useCallback(() => {
     if (ended) {
@@ -494,7 +627,8 @@ export function SlideShowView({
 
   return (
     <div
-      className={`slideshow${idle && tool !== 'laser' ? ' ss-idle' : ''}${tool !== 'none' ? ` ss-tool-${tool}` : ''}${zoomArmed ? ' ss-zoom-armed' : ''}`}
+      ref={rootRef}
+      className={`slideshow${windowed ? ' ss-windowed' : ''}${idle && tool !== 'laser' ? ' ss-idle' : ''}${tool !== 'none' ? ` ss-tool-${tool}` : ''}${zoomArmed ? ' ss-zoom-armed' : ''}`}
       onPointerMove={wake}
       onClick={(e) => {
         if (tool !== 'none') return
@@ -512,6 +646,9 @@ export function SlideShowView({
           setZoom(null)
           return
         }
+        // the page's "On Mouse Click" is off: only keys / the timer turn the page
+        const page = order[pos]
+        if (page != null && transDetailRef.current[page]?.advClick === false) return
         next()
       }}
       onContextMenu={(e) => {
@@ -541,8 +678,11 @@ export function SlideShowView({
             </div>
           ) : (
             <div
-              key={anim.nonce}
+              ref={frameRef}
               className={`ss-frame${anim.kind !== 'none' ? ` ss-anim-${anim.kind}` : ''}`}
+              style={
+                anim.kind !== 'none' ? transitionStyle(anim.kind, anim.dur, anim.dir) : undefined
+              }
             >
               <div
                 ref={stageRef}
@@ -571,7 +711,7 @@ export function SlideShowView({
                   }
                 >
                   <AnimatedSlideStage
-                    slide={slide}
+                    slide={paintSlide ?? slide}
                     images={images}
                     width={fitW}
                     states={player.states}

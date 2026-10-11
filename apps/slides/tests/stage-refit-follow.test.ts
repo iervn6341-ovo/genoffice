@@ -88,6 +88,9 @@ function makeSlidesApi() {
     getNotes: () => Promise.resolve(''),
     getAnimations: () => Promise.resolve([]),
     getTransition: () => Promise.resolve(null),
+    getShapeKeys: () => Promise.resolve([]),
+    getSlideLinks: () => Promise.resolve([]),
+    getRunLinks: () => Promise.resolve([]),
     listFonts: () => Promise.resolve([]),
   }
   const fallbacks = new Map<string, unknown>()
@@ -241,7 +244,10 @@ describe('stage fit-to-window follow', () => {
     clickByText(container!, 'button.rb-big', /Reading|阅读/)
     await settle()
     expect(container!.querySelector('.stage-wrap')).toBeNull()
-    clickByText(container!, 'button.reading-exit', /./)
+    // Esc ends the windowed show and returns to Normal
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
     await settle()
 
     const wrap2 = container!.querySelector<HTMLElement>('.stage-wrap')

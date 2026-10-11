@@ -72,6 +72,11 @@ export interface SlideAnimation {
   /** flyIn/flyOut/wipe/wipeOut only; unset = the effect's PowerPoint default side (bottom) */
   direction?: AnimDirection
   /**
+   * "After Animation": hide the shape once the next click starts (hideOnNextClick), or as
+   * soon as its own effect has finished (hideAfter). Unset = stays as the effect leaves it.
+   */
+  after?: AnimAfter
+  /**
    * Verbatim effect <p:par> for presets the model has no writer for: read-back keeps
    * the original bytes here (effect holds the closest modeled approximation) and the
    * writer emits them unchanged, so editing another animation never downgrades this one.
@@ -80,6 +85,8 @@ export interface SlideAnimation {
   /** presetID/presetClass/presetSubtype of a kept-verbatim effect (read-back, with presetXml) */
   preset?: { id: number; cls: string; sub: number }
 }
+
+export type AnimAfter = 'hideOnNextClick' | 'hideAfter'
 
 /** Effect → class (entrance/emphasis/exit/motion path). */
 export function animClassOf(effect: AnimEffectKind): AnimClass {
@@ -484,6 +491,29 @@ function placeAnims(
   return groups
 }
 
+/**
+ * "After Animation" hide, PowerPoint's form: a childStyle <p:set> in <p:subTnLst> that sets
+ * visibility to hidden — on the next click (masterRel="nextClick") or right after the effect.
+ */
+function afterSubTnLstXml(a: SlideAnimation): string {
+  if (!a.after) return ''
+  const cond =
+    a.after === 'hideOnNextClick'
+      ? ' masterRel="nextClick" afterEffect="1"/>'
+      : '><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn>'
+  const cTn =
+    a.after === 'hideOnNextClick'
+      ? `<p:cTn dur="1" fill="hold" display="0"${cond}`
+      : `<p:cTn dur="1" fill="hold" display="0" afterEffect="1"${cond}`
+  return (
+    '<p:subTnLst><p:set><p:cBhvr override="childStyle">' +
+    cTn +
+    tgtElXml(a) +
+    '<p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst>' +
+    '</p:cBhvr><p:to><p:strVal val="hidden"/></p:to></p:set></p:subTnLst>'
+  )
+}
+
 /** One effect's <p:par> (cTn with presetID/presetClass + start + behaviors). */
 function effectParXml(gen: IdGen, p: Placed): string {
   if (p.a.presetXml) return placePresetXml(gen, p)
@@ -493,6 +523,7 @@ function effectParXml(gen: IdGen, p: Placed): string {
     `<p:cTn id="${gen.next()}" presetID="${preset.id}" presetClass="${preset.cls}" presetSubtype="${presetSubtypeOf(p.a)}" fill="hold" grpId="${p.grpId}" nodeType="${NODE_TYPE[p.a.trigger]}">` +
     `<p:stCondLst><p:cond delay="${p.startMs}"/></p:stCondLst>` +
     `<p:childTnLst>${effectBehaviorsXml(gen, p.a)}</p:childTnLst>` +
+    afterSubTnLstXml(p.a) +
     '</p:cTn></p:par>'
   )
 }
@@ -787,6 +818,10 @@ export function readSlideTimingXml(bodySuffix: string): SlideAnimation[] {
     }
     const pgM = /<p:pgRg\s[^>]*\bst="(\d+)"/.exec(body)
     if (pgM) anim.paragraph = Number(pgM[1])
+    const sub = /<p:subTnLst>([\s\S]*?)<\/p:subTnLst>/.exec(body)?.[1]
+    if (sub && /<p:strVal val="hidden"\/>/.test(sub)) {
+      anim.after = /\bmasterRel="nextClick"/.test(sub) ? 'hideOnNextClick' : 'hideAfter'
+    }
     if (effect === 'motionPath') {
       // Path read-back: drop the " E" end marker added on write, restoring the user path
       const path = /<p:animMotion\b[^>]*\bpath="([^"]*)"/.exec(body)?.[1]
@@ -809,6 +844,7 @@ function animEq(x: SlideAnimation, y: SlideAnimation): boolean {
     (x.motionPath ?? null) === (y.motionPath ?? null) &&
     (x.paragraph ?? null) === (y.paragraph ?? null) &&
     (x.direction ?? null) === (y.direction ?? null) &&
+    (x.after ?? null) === (y.after ?? null) &&
     (x.presetXml ?? null) === (y.presetXml ?? null)
   )
 }

@@ -64,6 +64,8 @@ export interface RibbonFormatState {
   highlight: string | null
   textColor: string | null
   charStyleId: string | null
+  /** w:pStyle of the caret's paragraph (null = Normal) */
+  paraStyleId: string | null
   fontSizePt: number
   fontFamily: string
   headingLevel: number | null
@@ -120,6 +122,7 @@ export const EMPTY_FORMAT_STATE: RibbonFormatState = {
   highlight: null,
   textColor: null,
   charStyleId: null,
+  paraStyleId: null,
   fontSizePt: 11,
   fontFamily: '',
   headingLevel: null,
@@ -298,6 +301,7 @@ export function computeFormatState(
     highlight: str(textAttrs.highlight),
     textColor: textAttrs.color === 'auto' ? null : str(textAttrs.color),
     charStyleId: str(textAttrs.styleId),
+    paraStyleId: str(mainPara.styleId),
     fontSizePt: (effectiveSizeHalfPoints(ed, styles, docDefaults) ?? 20) / 2,
     fontFamily: displayFont(),
     headingLevel: editor.isActive('docHeading')

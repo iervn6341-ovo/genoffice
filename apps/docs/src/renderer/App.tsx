@@ -6,6 +6,7 @@ import {
   restoredLayout,
   sectionLayouts,
   withRestoreDirty,
+  type DocFlags,
   type LayoutSnapshot,
 } from './editor/layout-history'
 import { justifyShrinkPluginKey } from './editor/justify-shrink'
@@ -23,10 +24,12 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import type { Editor } from '@tiptap/core'
 import { handleDocsControl, type ControlRequest } from './control'
 import { DOMParser as PmDOMParser, type Mark as PmMark, Slice as PmSlice } from '@tiptap/pm/model'
+import type { EditorView } from '@tiptap/pm/view'
 import { NodeSelection, type Transaction } from '@tiptap/pm/state'
-import { Dropdown, ImageViewer, useAutoSavePref } from '@genoffice/ui'
+import { Backstage, backstageLabels, Dropdown, ImageViewer, useAutoSavePref } from '@genoffice/ui'
 import { wordRangeAtCaret } from './editor/comments'
-import { markdownPasteHtml } from './editor/markdown-paste'
+import { isSourceMarkupHtml, markdownPasteHtml } from './editor/markdown-paste'
+import { stashMarkdownPaste } from './editor/markdown-paste-hint'
 import { pasteTextSlice, singleCellPasteText } from './editor/paste-text'
 import {
   imageFilesFromDataTransfer,
@@ -48,9 +51,17 @@ import {
   lastForeignPasteMode,
   mergeFormattingFragment,
   stashPastePayload,
+  takePastePayload,
   takeTextReroute,
 } from './editor/paste-options'
+import { MarkdownPasteChip } from './components/MarkdownPasteChip'
+import {
+  prepareMarkdownBlocks,
+  separateTables,
+  withDefaultTableBorders,
+} from './editor/markdown-blocks'
 import { PasteOptionsChip } from './components/PasteOptionsChip'
+import { SelectionToolbar } from './components/SelectionToolbar'
 import {
   BLANK_BULLET_NUM_ID,
   BLANK_ORDERED_NUM_ID,
@@ -271,7 +282,16 @@ import { InkOverlay } from './components/InkOverlay'
 import { collectRevisions, gotoRevision, type TrackChangesStorage } from './editor/revisions'
 import { NavPane } from './components/NavPane'
 import { Ruler } from './components/Ruler'
-import { docBodyFont, docLineFactor, docThemeCss } from './doc-style-css'
+import { docBodyFont, docLineFactor, docStyleCss, docThemeCss } from './doc-style-css'
+import { builtinStyle, styleInfoOfUpsert } from './editor/builtin-styles'
+import {
+  captureSpacing,
+  spacingPreset,
+  spacingUpsert,
+  writeSpacing,
+  type SpacingFields,
+} from './editor/paragraph-spacing'
+import { StylesPane } from './components/StylesPane'
 import { isDocDirty } from './doc-dirty'
 import {
   EMPTY_HF_VARIANTS,
@@ -395,6 +415,66 @@ function cleanPastedHtml(html: string): string {
       .replace(/<li([^>]*)>\s*<p[^>]*>([\s\S]*?)<\/p>\s*<\/li>/g, '<li$1>$2</li>'),
   )
   return isForeignPasteHtml(html) ? pushDownWebInlineStyles(cleaned) : cleaned
+}
+
+/** Insert converted Markdown HTML at the selection (the "Markdown detected" chip's Convert).
+ *  Block content never lands inside a paragraph's text: onto an empty paragraph it replaces it,
+ *  at a paragraph's start/end it goes before/after it, and mid-paragraph the paragraph is split
+ *  around it — so no surrounding text is ever lost. Lone inline text merges in like a paste. */
+function applyMarkdownHtml(view: EditorView, markdownHtml: string): boolean {
+  try {
+    // cleanPastedHtml unwraps <li><p>…</p></li> from loose lists — docListItem only allows
+    // inline content and would shatter them.
+    const dom = new window.DOMParser().parseFromString(cleanPastedHtml(markdownHtml), 'text/html')
+    const schema = view.state.schema
+    const parser = PmDOMParser.fromSchema(schema)
+    const parsed = parser.parse(dom.body).content
+    if (parsed.childCount === 0) return false
+    const tr = view.state.tr
+    if (!tr.selection.empty) tr.deleteSelection()
+    const $pos = tr.doc.resolve(tr.selection.from)
+    const loneParagraph = parsed.childCount === 1 && parsed.firstChild?.type.name === 'docParagraph'
+    if ($pos.depth === 1 && $pos.parent.isTextblock && !loneParagraph) {
+      const size = $pos.parent.content.size
+      const index = $pos.index(0)
+      const prev = index > 0 ? tr.doc.child(index - 1) : null
+      const next = index + 1 < tr.doc.childCount ? tr.doc.child(index + 1) : null
+      if (size === 0) {
+        tr.replaceWith(
+          $pos.before(1),
+          $pos.after(1),
+          separateTables(prepareMarkdownBlocks(parsed, schema, true), prev, next, schema),
+        )
+      } else if ($pos.parentOffset === 0) {
+        tr.insert(
+          $pos.before(1),
+          separateTables(prepareMarkdownBlocks(parsed, schema, false), prev, $pos.parent, schema),
+        )
+      } else if ($pos.parentOffset === size) {
+        tr.insert(
+          $pos.after(1),
+          separateTables(prepareMarkdownBlocks(parsed, schema, false), $pos.parent, next, schema),
+        )
+      } else {
+        tr.split($pos.pos)
+        tr.insert($pos.pos + 1, prepareMarkdownBlocks(parsed, schema, false))
+      }
+      view.dispatch(tr.scrollIntoView())
+      return true
+    }
+    const slice = parser.parseSlice(dom.body)
+    tr.replaceSelection(
+      new PmSlice(
+        prepareMarkdownBlocks(slice.content, schema, false),
+        slice.openStart,
+        slice.openEnd,
+      ),
+    )
+    view.dispatch(tr.scrollIntoView())
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Plain text for a text-mode paste whose clipboard carries no text/plain
@@ -629,7 +709,8 @@ export function App() {
     value: string
     errorKey: '' | 'appDocPwdWrong'
   } | null>(null)
-  const [_recent, setRecent] = useState<string[]>([])
+  const [recent, setRecent] = useState<string[]>([])
+  const [showBackstage, setShowBackstage] = useState(false)
   const [settings, setSettings] = useState<AiSettings>(DEFAULT_SETTINGS)
   const [showAi, setShowAi] = useState(() => localStorage.getItem('aidocs.showAi') !== '0')
   const [spellcheck, setSpellcheck] = useState(spellcheckEnabled)
@@ -669,6 +750,13 @@ export function App() {
   const [titlePgDirty, setTitlePgDirty] = useState(false)
   const [evenOddHf, setEvenOddHf] = useState(false)
   const [evenOddHfDirty, setEvenOddHfDirty] = useState(false)
+  /** document-wide settings.xml switches (Layout → Hyphenation, Margins → Mirrored) */
+  const [docFlags, setDocFlags] = useState<DocFlags>({
+    autoHyphenation: false,
+    mirrorMargins: false,
+    paragraphSpacing: null,
+  })
+  const [docFlagsDirty, setDocFlagsDirty] = useState(false)
   const [hfView, setHfViewState] = useState<HfView>('default')
   /** false until the user picks a variant (chip/toggle); resting areas then follow their page's variant instead */
   const [hfViewTouched, setHfViewTouched] = useState(false)
@@ -810,8 +898,45 @@ export function App() {
     evenOddHfDirty,
     pgNumEdit,
     pgNumDirtySections,
+    design: {
+      docFlags,
+      docFlagsDirty,
+      pageColor,
+      pageColorDirty,
+      watermark,
+      watermarkDirty,
+      watermarkStyle,
+      watermarkPicture,
+      themeFonts,
+      themeFontsDirty,
+      themeColors,
+      themeColorsDirty,
+      header,
+      headerDirty,
+      footer,
+      footerDirty,
+    },
   })
   const applyLayoutSnapshot = (s: LayoutSnapshot) => {
+    const d = s.design
+    if (d) {
+      if (d.docFlags) setDocFlags(d.docFlags)
+      setDocFlagsDirty(d.docFlagsDirty ?? false)
+      setPageColor(d.pageColor)
+      setPageColorDirty(d.pageColorDirty)
+      setWatermark(d.watermark)
+      setWatermarkDirty(d.watermarkDirty)
+      setWatermarkStyle(d.watermarkStyle as typeof watermarkStyle)
+      setWatermarkPicture(d.watermarkPicture as typeof watermarkPicture)
+      setThemeFonts(d.themeFonts as ThemeFonts | null)
+      setThemeFontsDirty(d.themeFontsDirty)
+      setThemeColors(d.themeColors as ThemeColors | null)
+      setThemeColorsDirty(d.themeColorsDirty)
+      setHeader(d.header as HeaderFooter | null)
+      setHeaderDirty(d.headerDirty)
+      setFooter(d.footer as HeaderFooter | null)
+      setFooterDirty(d.footerDirty)
+    }
     setSection(s.section)
     setSectionDirty(s.sectionDirty)
     setSections((prev) => applySectionLayouts(prev, s.sections))
@@ -830,6 +955,26 @@ export function App() {
     const after: LayoutSnapshot = { ...before, ...change(before) }
     layoutRef.current.apply(after)
     if (editor) recordLayoutChange(editor, before, after)
+  }
+
+  /** Print pane page setup (orientation / paper / margins): Word applies it to the whole document */
+  const applyPageSetupAll = (change: (s: SectionSettings) => SectionSettings) => {
+    commitLayout((before) => {
+      const sectionsNext = before.sections.map((sec) => ({
+        ...sec,
+        settings: change(sec.settings),
+      }))
+      const last = sectionsNext.length - 1
+      const inner = sectionsNext.map((_x, i) => i).filter((i) => i < last)
+      // the final section's sectPr goes through SaveOptions.section (also drives the canvas geometry)
+      const finalSettings =
+        sectionsNext[last]?.settings ?? (before.section ? change(before.section) : null)
+      return {
+        sections: sectionsNext,
+        ...(finalSettings ? { section: finalSettings, sectionDirty: true } : {}),
+        sectionsDirty: [...new Set([...before.sectionsDirty, ...inner])],
+      }
+    })
   }
 
   /** "Different first page" toggle, shared by the ribbon checkbox and the on-page chip */
@@ -884,6 +1029,7 @@ export function App() {
   const [showComments, setShowComments] = useState(false)
   /** Style definitions pending write-back (key = styleId), saved via SaveOptions.styleUpserts */
   const [styleUpserts, setStyleUpserts] = useState<Record<string, StyleUpsert>>({})
+  const [showStyles, setShowStyles] = useState(false)
   const [comments, setCommentsState] = useState<CommentInfo[]>([])
   // Synchronous mirror of the comments state: an agent turn can run several
   // reply_comment calls with no render in between, and each id allocation
@@ -1067,9 +1213,14 @@ export function App() {
       // 'merge' formats the whole fragment like typing at the insertion
       // point, keeping emphasis and structure; 'text' passes through — the
       // handlePaste reroute below sends it down the plain-text lane
-      transformPasted: (slice, view) => {
+      transformPasted: (pasted, view) => {
         const mode = consumeForeignPaste()
-        if (!mode || mode === 'text') return slice
+        if (!mode || mode === 'text') return pasted
+        const slice = new PmSlice(
+          withDefaultTableBorders(pasted.content),
+          pasted.openStart,
+          pasted.openEnd,
+        )
         const schema = view.state.schema
         const markType = schema.marks.docTextStyle
         if (!markType) return slice
@@ -1130,6 +1281,24 @@ export function App() {
             return true
           }
         }
+        // Markdown source (a .md file, an editor, a terminal, LLM output — plain text, or the
+        // colored <div>/<span> soup editors add): paste it as typed and let the chip offer the
+        // conversion, instead of guessing silently or leaving "## Heading" unexplained
+        {
+          const plainText = data.getData('text/plain')
+          if (
+            plainText &&
+            (!html || isSourceMarkupHtml(html)) &&
+            ![...data.items].some((item) => item.type.startsWith('image/')) &&
+            markdownPasteHtml(plainText) !== null
+          ) {
+            takePastePayload() // no paste-options chip for this paste
+            stashMarkdownPaste(plainText)
+            const slice = pasteTextSlice(plainText, view.state.selection.$from, view)
+            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
+            return true
+          }
+        }
         // web-copied images (r139): "Copy image" in a browser puts a bitmap +
         // an <img src="http..."> HTML fragment + often the URL as text/plain
         // on the clipboard. Detect image-only HTML so the bitmap wins over
@@ -1176,6 +1345,7 @@ export function App() {
               // memory lives in storedMarks, caret-marks.ts)
               let content = parsed.content
               if (isForeignPasteHtml(html)) {
+                content = withDefaultTableBorders(content)
                 const schema = view.state.schema
                 const markType = schema.marks.docTextStyle
                 const marks = view.state.storedMarks ?? $from.marks()
@@ -1233,45 +1403,6 @@ export function App() {
             }
           })()
           return true
-        }
-        // text/plain-only Markdown (code blocks, terminals, .md files, LLM
-        // output): convert and insert as formatted content instead of literal
-        // "## Heading" / "**bold**" characters
-        if (!html && text) {
-          const markdownHtml = markdownPasteHtml(text)
-          if (markdownHtml !== null) {
-            try {
-              // cleanPastedHtml unwraps <li><p>…</p></li> from loose lists —
-              // docListItem only allows inline content and would shatter them.
-              const dom = new window.DOMParser().parseFromString(
-                cleanPastedHtml(markdownHtml),
-                'text/html',
-              )
-              const parser = PmDOMParser.fromSchema(view.state.schema)
-              if (
-                selEmpty &&
-                $from.parent.isTextblock &&
-                $from.parent.content.size === 0 &&
-                $from.depth === 1
-              ) {
-                // same wholesale replace as block HTML onto an empty paragraph
-                const parsed = parser.parse(dom.body)
-                if (parsed.content.childCount > 0) {
-                  view.dispatch(
-                    view.state.tr.replaceWith($from.before(1), $from.after(1), parsed.content),
-                  )
-                  return true
-                }
-              } else {
-                view.dispatch(
-                  view.state.tr.replaceSelection(parser.parseSlice(dom.body)).scrollIntoView(),
-                )
-                return true
-              }
-            } catch {
-              /* fall back to default literal paste on parse failure */
-            }
-          }
         }
         return false
       },
@@ -1787,6 +1918,10 @@ export function App() {
     setTitlePgDirty,
     setEvenOddHf,
     setEvenOddHfDirty,
+    docFlags,
+    docFlagsDirty,
+    setDocFlags,
+    setDocFlagsDirty,
     // opening a document resets to the resting per-page variant selection
     setHfView: (v: HfView) => {
       setHfViewState(v)
@@ -2274,6 +2409,44 @@ export function App() {
   }, [editor, fieldValue])
 
   // editorRef: lets the handlePaste closure (the useEditor config exists before the instance) reach the instance
+  // Design → Paragraph Spacing: a preset rewrites the Normal style's spacing (display + the saved
+  // definition); undo / null puts the file's own values back. The originals are captured per document.
+  const originalSpacing = useRef(new WeakMap<object, SpacingFields>())
+  useEffect(() => {
+    if (!doc) return
+    const normal = doc.parsed.styles.get('Normal')
+    if (!normal) return
+    const preset = spacingPreset(docFlags.paragraphSpacing)
+    const originals = originalSpacing.current
+    if (!originals.has(doc.parsed)) {
+      if (!preset) return
+      originals.set(doc.parsed, captureSpacing(normal.display))
+    }
+    normal.display ??= {}
+    if (preset) writeSpacing(normal.display, preset)
+    else writeSpacing(normal.display, originals.get(doc.parsed)!)
+    setStyleUpserts((prev) => {
+      if (preset) return { ...prev, Normal: { ...prev.Normal, ...spacingUpsert(preset) } }
+      const { Normal: _drop, ...rest } = prev
+      return rest
+    })
+    setDocCss(docStyleCss(doc.parsed))
+  }, [doc, docFlags.paragraphSpacing])
+  // Layout → Hyphenation: Chromium only hyphenates under an explicit lang; the data attribute
+  // beats the load-time stylesheet in both directions (styles.css) and a re-measure follows
+  const docLang = doc?.parsed.docDefaults?.lang
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return
+    const dom = editor.view.dom as HTMLElement
+    if (docFlags.autoHyphenation) {
+      dom.setAttribute('data-hyphenate', 'on')
+      dom.setAttribute('lang', docLang ?? 'en')
+    } else {
+      dom.setAttribute('data-hyphenate', 'off')
+      dom.removeAttribute('lang')
+    }
+    document.dispatchEvent(new Event(DOC_CSS_COMMITTED_EVENT))
+  }, [editor, docFlags.autoHyphenation, docLang, doc])
   useEffect(() => {
     editorRef.current = editor
     zoteroControllerRef.current = null
@@ -5536,6 +5709,19 @@ export function App() {
     [editor],
   )
 
+  /**
+   * Styles gallery / Styles pane: define a built-in paragraph style the document lacks. The definition
+   * joins the pending upserts (written to styles.xml on save) and the in-memory style map, and the
+   * document stylesheet is rebuilt so the paragraph looks right immediately.
+   */
+  const ensureBuiltinStyle = (styleId: string) => {
+    const def = builtinStyle(styleId)
+    if (!def || !doc || doc.parsed.styles.has(styleId) || styleUpserts[styleId]) return
+    doc.parsed.styles.set(styleId, styleInfoOfUpsert(def.upsert))
+    setStyleUpserts((prev) => ({ ...prev, [styleId]: def.upsert }))
+    setDocCss(docStyleCss(doc.parsed))
+  }
+
   const ribbonActions = useStableCallbacks({
     allocateNumId: (kind: 'bullet' | 'ordered') => allocateListNumId(kind),
     createListDef: (levels: CustomNumberingLevel[]) => createCustomListDef(levels),
@@ -5543,11 +5729,23 @@ export function App() {
     onOpen: () => void openFile(),
     onSave: () => void save(false),
     onSaveAs: () => void save(true),
+    onFileTab: () => setShowBackstage(true),
     onToggleAi: () => setShowAi((v) => !v),
-    onSection: (next: SectionSettings) => {
+    onSection: (next: SectionSettings, flags?: Partial<DocFlags>) => {
       // layout applies to the cursor's section; the final section's sectPr goes through SaveOptions.section (also drives canvas geometry)
       const isFinal = sections.length <= 1 || activeSection === sections.length - 1
+      // one commit for the section and any document-wide flag that goes with it (Mirrored margins):
+      // a second commitLayout in the same event would snapshot the state from before the first
       commitLayout((before) => ({
+        ...(flags
+          ? {
+              design: {
+                ...before.design!,
+                docFlags: { ...(before.design!.docFlags ?? docFlags), ...flags },
+                docFlagsDirty: true,
+              },
+            }
+          : {}),
         sections: before.sections.map((s, i) =>
           i === activeSection ? { ...s, settings: next } : s,
         ),
@@ -5565,25 +5763,45 @@ export function App() {
     },
     onInsertSectionBreak: (type: 'nextPage' | 'continuous' | 'evenPage' | 'oddPage') =>
       insertSectionBreak(type),
+    /** a built-in paragraph style (Title, Quote ...) the file lacks: queue its definition for the save and show it at once */
+    onEnsureStyle: (styleId: string) => ensureBuiltinStyle(styleId),
+    onStylesPane: () => setShowStyles((v) => !v),
+    onDocFlags: (patch: Partial<DocFlags>) => {
+      commitLayout((before) => ({
+        design: {
+          ...before.design!,
+          docFlags: { ...(before.design!.docFlags ?? docFlags), ...patch },
+          docFlagsDirty: true,
+        },
+      }))
+    },
     onPageColor: (next: string | null) => {
-      setPageColor(next)
-      setPageColorDirty(true)
+      commitLayout((before) => ({
+        design: { ...before.design!, pageColor: next, pageColorDirty: true },
+      }))
     },
     onWatermark: (next: string | null) => {
-      setWatermark(next)
-      setWatermarkDirty(true)
-      setWatermarkStyle(null)
-      setWatermarkPicture(null)
+      commitLayout((before) => ({
+        design: {
+          ...before.design!,
+          watermark: next,
+          watermarkDirty: true,
+          watermarkStyle: null,
+          watermarkPicture: null,
+        },
+      }))
       setStatus(next ? t('appWatermarkSet', { text: next }) : t('appWatermarkRemoved'))
     },
     onThemeFonts: (fonts: ThemeFonts) => {
-      setThemeFonts(fonts)
-      setThemeFontsDirty(true)
+      commitLayout((before) => ({
+        design: { ...before.design!, themeFonts: fonts, themeFontsDirty: true },
+      }))
       setStatus(t('appThemeFontsChanged'))
     },
     onThemeColors: (colors: ThemeColors) => {
-      setThemeColors(colors)
-      setThemeColorsDirty(true)
+      commitLayout((before) => ({
+        design: { ...before.design!, themeColors: colors, themeColorsDirty: true },
+      }))
       setStatus(t('appThemeColorsApplied', { name: colors.name ?? '' }))
     },
     onInkTool: setInkTool,
@@ -5606,14 +5824,16 @@ export function App() {
       setAiPreset({ text, nonce: Date.now(), autoRun: true })
     },
     onHeader: (next: HeaderFooter) => {
-      setHeader(next)
-      setHeaderDirty(true)
+      commitLayout((before) => ({
+        design: { ...before.design!, header: next, headerDirty: true },
+      }))
     },
     onPageNumFormat: openPgNumModal,
     onInsertField: insertField,
     onFooter: (next: HeaderFooter) => {
-      setFooter(next)
-      setFooterDirty(true)
+      commitLayout((before) => ({
+        design: { ...before.design!, footer: next, footerDirty: true },
+      }))
     },
     onTitlePg: toggleTitlePg,
     onEvenOddHf: (on: boolean) => {
@@ -5851,6 +6071,7 @@ export function App() {
         footer={footer}
         titlePg={titlePg}
         evenOddHf={evenOddHf}
+        docFlags={docFlags}
         showMarks={showMarks}
         showRuler={showRuler}
         showNav={showNav}
@@ -5937,6 +6158,8 @@ export function App() {
               />
             )}
             {doc && <PasteOptionsChip editor={editor} />}
+            {doc && <MarkdownPasteChip editor={editor} apply={applyMarkdownHtml} />}
+            {doc && <SelectionToolbar editor={editor} onLink={() => setShowLinkModal(true)} />}
             <div className="editor-area">
               <main
                 className={imageDragOver ? 'editor-scroll image-drop-target' : 'editor-scroll'}
@@ -6151,6 +6374,18 @@ export function App() {
                 {t('appExitReadMode')}
               </button>
             )}
+            {doc && showStyles && (
+              <StylesPane
+                editor={editor}
+                styles={doc.parsed.styles}
+                pending={styleUpserts}
+                paraStyleId={formatState.paraStyleId}
+                charStyleId={formatState.charStyleId}
+                headingLevel={formatState.headingLevel}
+                onEnsureStyle={ensureBuiltinStyle}
+                onClose={() => setShowStyles(false)}
+              />
+            )}
             {doc && showComments && (
               <CommentsPanel
                 comments={comments}
@@ -6310,6 +6545,21 @@ export function App() {
 
       {doc && showPagePreview && section && (
         <PaginationPreview
+          // the preview measures once on mount: a page setup change (the print pane edits it) remounts it
+          key={[section, ...sections.map((x) => x.settings)]
+            .map((x) =>
+              x
+                ? [
+                    x.pageWidth,
+                    x.pageHeight,
+                    x.marginTop,
+                    x.marginRight,
+                    x.marginBottom,
+                    x.marginLeft,
+                  ].join(',')
+                : '-',
+            )
+            .join('|')}
           section={section}
           canvasTop={canvasTop}
           sections={sections}
@@ -6365,7 +6615,43 @@ export function App() {
         />
       )}
 
-      {doc && showPrintDialog && <PrintDialog onClose={closePrintDialog} setStatus={setStatus} />}
+      {showBackstage && (
+        <Backstage
+          lang={lang}
+          kind="doc"
+          docName={doc?.fileName ?? ''}
+          filePath={doc?.filePath ?? null}
+          hasDoc={!!doc}
+          canSave={!!doc}
+          infoRows={[{ label: t('appWordCountTitle'), value: String(wordCount) }]}
+          recent={recent.map((path) => ({ path, name: path.split(/[\\/]/).pop() ?? path }))}
+          exports={[
+            { id: 'pdf', label: backstageLabels(lang).exportPdf, run: () => void exportPdf() },
+            { id: 'html', label: backstageLabels(lang).exportHtml, run: () => void exportHtml() },
+            {
+              id: 'images',
+              label: backstageLabels(lang).exportImages,
+              run: () => void exportImages(),
+            },
+          ]}
+          onClose={() => setShowBackstage(false)}
+          onNew={() => void newFile()}
+          onOpen={() => void openFile()}
+          onOpenRecent={(path) => void openRecent(path)}
+          onSave={() => void save(false)}
+          onSaveAs={() => void save(true)}
+          onPrint={() => void printDoc()}
+        />
+      )}
+
+      {doc && showPrintDialog && (
+        <PrintDialog
+          onClose={closePrintDialog}
+          setStatus={setStatus}
+          section={sections[0]?.settings ?? section}
+          onPageSetup={applyPageSetupAll}
+        />
+      )}
 
       {stats && <WordCountDialog stats={stats} onClose={() => setStats(null)} />}
 

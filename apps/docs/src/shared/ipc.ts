@@ -44,7 +44,7 @@ import type {
 } from '@genoffice/ai-provider'
 import type { HeadlessExportTarget } from '@genoffice/electron-utils/headless-export'
 import type { FaceVerticalMetrics } from '@genoffice/font-metrics'
-import type { AiPanelPrefs } from '@genoffice/ui'
+import type { AiPanelPrefs, PrinterListItem } from '@genoffice/ui'
 
 export type { FaceVerticalMetrics }
 
@@ -245,6 +245,14 @@ export interface McpSaveResult {
   data?: ArrayBuffer
 }
 
+/** Print sheet settings; without `printer` the system dialog opens */
+export interface PrinterJobSettings {
+  printer?: string
+  copies?: number
+  duplex?: 'off' | 'long' | 'short'
+  collate?: boolean
+}
+
 export interface DesktopApi {
   /** current UI language (persisted by the shell in app-settings.json) */
   getLanguage(): Promise<'zh' | 'en' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'th' | 'id' | 'ru' | 'ar'>
@@ -372,7 +380,13 @@ export interface DesktopApi {
   setAiSettings(settings: AiSettings): Promise<void>
   /** system print dialog for the current window; ok=false without error = canceled.
    *  scale: print scale inverting the preview's print zoom (print-zoom.ts) */
-  print(scale?: number): Promise<{ ok: boolean; error?: string }>
+  print(
+    scale?: number,
+    job?: PrinterJobSettings,
+    pageSize?: { widthIn: number; heightIn: number },
+  ): Promise<{ ok: boolean; error?: string }>
+  /** Installed printers for the print sheet */
+  listPrinters(): Promise<PrinterListItem[]>
   /** render the document to PDF and ask where to save; size in twips.
    *  outPath is only honored when a previous export dialog chose that exact path */
   exportPdf(

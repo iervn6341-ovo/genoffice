@@ -36,16 +36,20 @@ import {
   updateTableAdd,
 } from './edit-journal'
 import { t } from './i18n/locale'
+import { trackTable } from './table-sync'
 import type { OoXmlPivotConfig, PivotField } from './PivotDialog'
 import type { PivotDefinition } from '@genoffice/xlsx-gateway/gateway/xlsx-pivot'
 import { applyFormatPatchToRange, nextSessionPivotName, nextSessionTableName } from './univer-sync'
 import type { LazyWorkbookState, UniverRuntime, UniverWorksheet } from './univer-state'
 
+/// distinguishes tables created in the same millisecond (a restyle removes and re-adds at once)
+let tableSerial = 0
+
 export function applyAiTableAdd(
   runtime: UniverRuntime,
   state: LazyWorkbookState,
   op: AddTableOperation,
-): void {
+): { tableId: string; ready: Promise<unknown> } {
   const worksheet = runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(op.sheetId)
   if (!worksheet) throw new Error(`Unknown sheet: ${op.sheetId}`)
   const bounds = parseRange(op.range)
@@ -92,17 +96,21 @@ export function applyAiTableAdd(
   }
   // Rendering is best-effort (the facade call is async); the journal entry
   // below is what the save writes, and the gateway re-checks conflicts.
-  void worksheet.addTable(
-    name,
-    {
-      startRow: bounds.startRow,
-      startColumn: bounds.startColumn,
-      endRow: bounds.endRow,
-      endColumn: bounds.endColumn,
-    },
-    `ai-table-${state.editJournal.tableAdds.length + 1}-${Date.now().toString(36)}`,
+  tableSerial += 1
+  const tableId = `ai-table-${tableSerial}-${Date.now().toString(36)}`
+  const ready = Promise.resolve(
+    worksheet.addTable(
+      name,
+      {
+        startRow: bounds.startRow,
+        startColumn: bounds.startColumn,
+        endRow: bounds.endRow,
+        endColumn: bounds.endColumn,
+      },
+      tableId,
+    ),
   )
-  recordTableAdd(state.editJournal, {
+  const entry = {
     sheetId: op.sheetId,
     area: {
       startRow: bounds.startRow,
@@ -114,7 +122,11 @@ export function applyAiTableAdd(
     columnNames,
     ...(op.style === undefined ? {} : { style: op.style }),
     bandedRows: op.bandedRows ?? true,
-  })
+  }
+  recordTableAdd(state.editJournal, entry)
+  // ⌘Z / ⇧⌘Z run Univer's delete-table / add-table; table-sync keeps the journal in step
+  trackTable(tableId, entry)
+  return { tableId, ready }
 }
 
 /// AI add_table_row: inserts one or more rows into a session-added table.

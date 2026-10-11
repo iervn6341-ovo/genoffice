@@ -18,6 +18,7 @@ export type AiProviderId =
   | 'opper'
   | 'opencode-zen'
   | 'opencode-go'
+  | 'ollama'
   | 'custom'
 
 export interface AiProviderConfig {
@@ -42,6 +43,8 @@ export interface AiProviderMeta {
   defaultModel: string
   keyPlaceholder: string
   needsBaseUrl?: boolean
+  /** base URL a needsBaseUrl provider starts with (a local server's well-known address) */
+  defaultBaseUrl?: string
   needsCliPath?: boolean
 }
 

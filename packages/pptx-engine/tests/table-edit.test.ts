@@ -333,3 +333,61 @@ describe('fill strip matches attributed fill tags (Bugbot: gradFill almost alway
     expect(result).not.toContain('pattFill')
   })
 })
+
+describe('borderMode (Borders gallery)', () => {
+  const tc = (t: string) =>
+    `<a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>${t}</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc>`
+  const frame =
+    '<p:graphicFrame><a:graphic><a:graphicData><a:tbl><a:tblPr/>' +
+    '<a:tblGrid><a:gridCol w="100"/><a:gridCol w="100"/></a:tblGrid>' +
+    `<a:tr h="10">${tc('a')}${tc('b')}</a:tr>` +
+    `<a:tr h="10">${tc('c')}${tc('d')}</a:tr>` +
+    `<a:tr h="10">${tc('e')}${tc('f')}</a:tr>` +
+    '</a:tbl></a:graphicData></a:graphic></p:graphicFrame>'
+  const sidesOf = (xml: string, row: number, col: number): string[] => {
+    const rows = xml.split(/<a:tr[\s>]/).slice(1)
+    const cell = rows[row]!.split(/<a:tc[\s>]/).slice(1)[col]!
+    return [...cell.matchAll(/<a:(ln[A-Za-z]+)[\s>]/g)].map((m) => m[1]!)
+  }
+
+  it('bottom border writes lnB on the last row and lnT on nothing below it', () => {
+    const out = patchTableStyleXml(frame, { borderMode: 'bottom', borderColor: '#FF0000' })
+    expect(sidesOf(out, 2, 0)).toEqual(['lnB'])
+    expect(sidesOf(out, 2, 1)).toEqual(['lnB'])
+    expect(sidesOf(out, 1, 0)).toEqual([])
+    expect(out).toContain('<a:srgbClr val="FF0000"/>')
+  })
+
+  it('an inside horizontal line is stored on both cells that share it, in schema order', () => {
+    const out = patchTableStyleXml(frame, {
+      borderMode: 'insideH',
+      cells: [
+        { row: 0, col: 0 },
+        { row: 1, col: 0 },
+      ],
+      borderDash: 'dash',
+    })
+    expect(sidesOf(out, 0, 0)).toEqual(['lnB'])
+    expect(sidesOf(out, 1, 0)).toEqual(['lnT'])
+    expect(sidesOf(out, 0, 1)).toEqual([])
+    expect(out).toContain('<a:prstDash val="dash"/>')
+  })
+
+  it('outside borders of a sub-range reach the neighbours; none clears them; order stays lnL lnR lnT lnB', () => {
+    const outside = patchTableStyleXml(frame, {
+      borderMode: 'outside',
+      cells: [{ row: 1, col: 1 }],
+    })
+    expect(sidesOf(outside, 1, 1)).toEqual(['lnL', 'lnR', 'lnT', 'lnB'])
+    expect(sidesOf(outside, 1, 0)).toEqual(['lnR'])
+    expect(sidesOf(outside, 0, 1)).toEqual(['lnB'])
+    expect(sidesOf(outside, 2, 1)).toEqual(['lnT'])
+    const cleared = patchTableStyleXml(outside, { borderMode: 'none', cells: [{ row: 1, col: 1 }] })
+    expect(cleared).toContain('<a:lnL w="0"><a:noFill/></a:lnL>')
+  })
+
+  it('diagonals use lnTlToBr / lnBlToTr', () => {
+    const out = patchTableStyleXml(frame, { borderMode: 'diagDown', cells: [{ row: 0, col: 0 }] })
+    expect(sidesOf(out, 0, 0)).toEqual(['lnTlToBr'])
+  })
+})

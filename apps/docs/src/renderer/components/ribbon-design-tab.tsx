@@ -2,9 +2,13 @@ import { useState } from 'react'
 import { type SectionSettings, type ThemeColors, type ThemeFonts } from '@genoffice/docx-engine'
 import { PromptModal } from './PromptModal'
 import { useI18n, type StringKey } from '../i18n/locale'
+import { PageBordersDialog } from './PageBordersDialog'
+import type { DocFlags } from '../editor/layout-history'
+import { PARAGRAPH_SPACING_PRESETS } from '../editor/paragraph-spacing'
 import {
   IconCaret,
   IconPageBorders,
+  IconParaSpacing,
   IconPageColor,
   IconTheme,
   IconThemeColors,
@@ -204,6 +208,8 @@ const WATERMARK_KEYS: StringKey[] = [
 ]
 
 interface DesignTabProps extends TabProps {
+  docFlags: DocFlags
+  onDocFlags: (next: Partial<DocFlags>) => void
   pageColor: string | null
   onPageColor: (hex: string | null) => void
   section: SectionSettings | null
@@ -215,10 +221,22 @@ interface DesignTabProps extends TabProps {
   onThemeColors: (colors: ThemeColors) => void
 }
 
+const SPACING_LABEL = {
+  default: 'ribbonSpacingDefault',
+  none: 'ribbonSpacingNone',
+  compact: 'ribbonSpacingCompact',
+  tight: 'ribbonSpacingTight',
+  open: 'ribbonSpacingOpen',
+  relaxed: 'ribbonSpacingRelaxed',
+  double: 'ribbonSpacingDouble',
+} as const satisfies Record<(typeof PARAGRAPH_SPACING_PRESETS)[number]['id'], StringKey>
+
 export function DesignTab({
   hasDoc,
   dropdown,
   setDropdown,
+  docFlags,
+  onDocFlags,
   pageColor,
   onPageColor,
   section,
@@ -235,6 +253,7 @@ export function DesignTab({
     ...(lang !== 'en' ? ['CONFIDENTIAL', 'DRAFT'] : []),
   ]
   const [watermarkPromptOpen, setWatermarkPromptOpen] = useState(false)
+  const [pageBordersDialog, setPageBordersDialog] = useState(false)
   const applyTheme = (preset: (typeof THEME_PRESETS)[number]) => {
     onThemeFonts(preset.fonts)
     onThemeColors(preset.colors)
@@ -347,6 +366,39 @@ export function DesignTab({
                       ))}
                     </span>
                     {t(p.nameKey)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="rb-split-wrap">
+            <button
+              className="rb-big"
+              disabled={!hasDoc}
+              data-tip={t('ribbonParagraphSpacingTip')}
+              onClick={() => toggleDropdown(setDropdown, 'paraspacing')}
+            >
+              <span className="rb-big-icon">
+                <IconParaSpacing size={BIG} />
+                <IconCaret />
+              </span>
+              <span>{t('ribbonParagraphSpacing')}</span>
+            </button>
+            {dropdown === 'paraspacing' && (
+              <div data-rb-panel="" className="layout-menu">
+                {PARAGRAPH_SPACING_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    className={docFlags.paragraphSpacing === p.id ? 'active' : ''}
+                    onClick={() => {
+                      onDocFlags({ paragraphSpacing: p.id })
+                      setDropdown(() => null)
+                    }}
+                  >
+                    <b>{t(SPACING_LABEL[p.id])}</b>
+                    <span>
+                      {p.after / 20} pt · {p.line}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -477,6 +529,14 @@ export function DesignTab({
                 >
                   {t('ribbonNone')}
                 </button>
+                <button
+                  onClick={() => {
+                    setDropdown(() => null)
+                    setPageBordersDialog(true)
+                  }}
+                >
+                  {t('ribbonPageBordersMore')}
+                </button>
               </div>
             )}
           </div>
@@ -484,6 +544,13 @@ export function DesignTab({
         <div className="ribbon-group-label">{t('ribbonGroupPageBackground')}</div>
       </div>
 
+      {pageBordersDialog && section && (
+        <PageBordersDialog
+          section={section}
+          onApply={onSection}
+          onClose={() => setPageBordersDialog(false)}
+        />
+      )}
       {watermarkPromptOpen && (
         <PromptModal
           title={t('ribbonWatermarkCustomTitle')}

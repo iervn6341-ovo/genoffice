@@ -147,3 +147,116 @@ describe('normalizePrintRatio', () => {
     expect(huge).toContain('@page { size: 37.5in 7.5in; margin: 0; }')
   })
 })
+
+describe('multi-up full layout', () => {
+  const base = { srcs: ['a', 'b', 'c', 'd', 'e'], ratio: 16 / 9, layout: 'full' as const }
+
+  it('counts sheets by slides per sheet', () => {
+    expect(printPageCount(5, 'full', 1)).toBe(5)
+    expect(printPageCount(5, 'full', 4)).toBe(2)
+    expect(printPageCount(17, 'full', 16)).toBe(2)
+  })
+
+  it('tiles 4 slides on a paper-sized page in Z order', () => {
+    const html = buildPrintDocumentHtml({ ...base, perSheet: 4 })
+    expect(html).toContain('size: 8.27in 11.69in')
+    expect(html).toContain('repeat(2, 1fr)')
+    expect(html).toContain('grid-row:1;grid-column:2')
+    expect((html.match(/class="page nup"/g) ?? []).length).toBe(2)
+  })
+
+  it('reverse Z mirrors columns; N fills columns first', () => {
+    const rz = buildPrintDocumentHtml({ ...base, perSheet: 4, direction: 'rz' })
+    expect(rz.split('class="cell"')[1]).toContain('grid-row:1;grid-column:2')
+    const n = buildPrintDocumentHtml({ ...base, perSheet: 4, direction: 'n' })
+    expect(n.split('class="cell"')[2]).toContain('grid-row:2;grid-column:1')
+  })
+
+  it('rotates / flips and honors paper + orientation', () => {
+    const html = buildPrintDocumentHtml({
+      ...base,
+      perSheet: 6,
+      orientation: 'landscape',
+      paper: 'letter',
+      rotate180: true,
+      flipH: true,
+    })
+    expect(html).toContain('size: 11in 8.5in')
+    expect(html).toContain('repeat(3, 1fr)')
+    expect(html).toContain('rotate(180deg) scaleX(-1)')
+  })
+})
+
+describe('PowerPoint print layouts', () => {
+  const base = { srcs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], ratio: 16 / 9 }
+
+  it('counts pages for every handout size', () => {
+    expect(printPageCount(7, 'handout1')).toBe(7)
+    expect(printPageCount(7, 'handout4h')).toBe(2)
+    expect(printPageCount(7, 'handout4v')).toBe(2)
+    expect(printPageCount(7, 'handout6h')).toBe(2)
+    expect(printPageCount(7, 'handout6v')).toBe(2)
+    expect(printPageCount(10, 'handout9h')).toBe(2)
+    expect(printPageCount(10, 'handout9v')).toBe(2)
+  })
+
+  it('horizontal 4-up fills rows first, vertical fills columns first', () => {
+    const h = buildPrintDocumentHtml({ ...base, layout: 'handout4h' })
+    const v = buildPrintDocumentHtml({ ...base, layout: 'handout4v' })
+    // slide #2 (index 1): horizontal → row 1 / column 2; vertical → row 2 / column 1
+    expect(h).toContain('style="grid-row:1;grid-column:2"')
+    expect(v).toContain('style="grid-row:2;grid-column:1"')
+    expect(h).toContain('grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)')
+  })
+
+  it('9 per page is a 3×3 grid; 1 per page is a single cell', () => {
+    const nine = buildPrintDocumentHtml({ ...base, layout: 'handout9h' })
+    expect(nine).toContain('repeat(3,1fr);grid-template-rows:repeat(3,1fr)')
+    const one = buildPrintDocumentHtml({ ...base, layout: 'handout1' })
+    expect(one.match(/class="page handout h1/g)).toHaveLength(7)
+  })
+
+  it('6 slides vertical uses the 2×3 grid column-first', () => {
+    const html = buildPrintDocumentHtml({ ...base, layout: 'handout6v' })
+    expect(html).toContain('grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)')
+    expect(html).toContain('style="grid-row:1;grid-column:2"') // slide #4 → row 1, column 2
+  })
+
+  it('outline layout prints each slide number, title and body lines', () => {
+    const html = buildPrintDocumentHtml({
+      ...base,
+      layout: 'outline',
+      outline: [
+        { number: 1, title: 'A < B', lines: ['one', 'two'] },
+        { number: 3, title: 'Third', lines: [] },
+      ],
+    })
+    expect(html).toContain('class="page flow outline"')
+    expect(html).toContain('<div class="ol-title">A &lt; B</div>')
+    expect(html).toContain('<div class="ol-num">3</div>')
+    expect(html.match(/class="ol-line"/g)).toHaveLength(2)
+    expect(html).toContain('@page flow {')
+  })
+
+  it('comment pages follow the slides and escape the text', () => {
+    const html = buildPrintDocumentHtml({
+      ...base,
+      layout: 'full',
+      comments: [{ number: 2, author: 'Ann', text: 'fix <b>this</b>\nplease' }],
+      commentsTitle: 'Comments',
+    })
+    expect(html).toContain('class="page flow cmts"')
+    expect(html).toContain('fix &lt;b&gt;this&lt;/b&gt;<br>please')
+    expect(html.indexOf('class="page flow cmts"')).toBeGreaterThan(html.lastIndexOf('class="page"'))
+  })
+
+  it('a full-page slide on real paper centers on the paper and can scale to fit', () => {
+    const plain = buildPrintDocumentHtml({ ...base, layout: 'full', paper: 'a4' })
+    expect(plain).toContain('@page { size: 8.27in 11.69in; margin: 0; }')
+    expect(plain).toContain('class="page onpaper"')
+    const fit = buildPrintDocumentHtml({ ...base, layout: 'full', paper: 'a4', scaleFit: true })
+    expect(fit).toContain('class="page onpaper fit"')
+    const slidePaper = buildPrintDocumentHtml({ ...base, layout: 'full', paper: 'slide' })
+    expect(slidePaper).toContain('@page { size: 13.333in 7.5in; margin: 0; }')
+  })
+})

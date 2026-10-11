@@ -50,7 +50,7 @@ const EDGE = 8
 const REVERT_META = 'pasteOptionsRevert'
 
 /** The range a transaction's steps touched, in final-doc coordinates. */
-function changedRangeOf(tr: Transaction): { from: number; to: number } | null {
+export function changedRangeOf(tr: Transaction): { from: number; to: number } | null {
   let from = Infinity
   let to = -Infinity
   const maps = tr.mapping.maps

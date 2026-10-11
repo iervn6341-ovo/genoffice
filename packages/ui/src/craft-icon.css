@@ -1,0 +1,10 @@
+/* Craft glyphs keep their accent colors; disabled controls show them gray and faded */
+.craft-icon {
+  flex-shrink: 0;
+}
+button:disabled .craft-icon,
+[aria-disabled='true'] .craft-icon,
+.disabled .craft-icon {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
