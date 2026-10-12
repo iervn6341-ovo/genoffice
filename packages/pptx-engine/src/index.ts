@@ -3283,6 +3283,8 @@ export interface ParagraphFormatPatch {
   rtl?: boolean
   /** Indent level delta (multi-level list Tab/⇧Tab; clamp 0..8) */
   indentDelta?: 1 | -1
+  /** Backspace at the start of a bullet-less paragraph: no left margin and no first-line indent (marL / indent = 0) */
+  clearIndent?: boolean
 }
 
 /** Hanging indent PowerPoint writes when bulleting a plain text box (0.3125in) */
@@ -3420,6 +3422,13 @@ export function applyParagraphFormat(
     if (patch.rtl != null) {
       p.rtl = patch.rtl
       dirty.rtl = true
+    }
+    if (patch.clearIndent) {
+      p.marL = 0
+      p.indent = 0
+      mark('marL')
+      mark('indent')
+      dirty.indents = true
     }
     if (patch.indentDelta) {
       const lvl = Math.max(0, Math.min(8, (p.level ?? 0) + patch.indentDelta))

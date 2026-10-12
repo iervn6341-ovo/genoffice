@@ -6,6 +6,7 @@
 import type { ActionCtx } from './action-context'
 import type { CustomShow } from './slideshow-utils'
 import { t } from './i18n/locale'
+import { shouldAskScreen } from './show-screen'
 
 /** Instant black curtain under the upcoming show (body::after overlay): painted on the
  *  very next frame after the click, it hides the React mount + window-snap latency.
@@ -30,8 +31,26 @@ export function startSlideShow(ctx: ActionCtx, fromStart: boolean): void {
   }
   dropShowCurtain()
   void window.slidesApi.displayCount().then(
-    (n) => (n > 1 ? startPresenterView(ctx, fromStart) : playFullScreen(ctx, fromStart)),
+    (n) => (n > 1 ? beginPresenterShow(ctx, fromStart) : playFullScreen(ctx, fromStart)),
     () => playFullScreen(ctx, fromStart),
+  )
+}
+
+/**
+ * Presenter-view show with another screen connected: always ask which screen the audience sees
+ * first (the black curtain comes off so the dialog is visible).
+ */
+function beginPresenterShow(ctx: ActionCtx, fromStart: boolean): void {
+  void window.slidesApi.displayList().then(
+    (screens) => {
+      if (!shouldAskScreen(screens)) {
+        startPresenterView(ctx, fromStart)
+        return
+      }
+      liftShowCurtain()
+      ctx.setScreenPicker({ fromStart, screens })
+    },
+    () => startPresenterView(ctx, fromStart),
   )
 }
 

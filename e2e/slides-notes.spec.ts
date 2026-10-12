@@ -1,4 +1,4 @@
-import { closeAndSaveVideo } from './helpers'
+import { closeAndSaveVideo, answerShowScreenDialog } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
@@ -161,6 +161,7 @@ test.describe('notes pane formatting', () => {
       expect(notesXml).toContain('val="C00000"')
       // Force the normal show, then explicitly select presenter view (works on one monitor).
       await page.keyboard.press('F5')
+      await answerShowScreenDialog(page)
       await page.locator('.slideshow, .presenter').first().waitFor()
       if (!(await page.locator('.pv-notes').count())) {
         await page.locator('.ss-controls button').last().click({ force: true })
@@ -337,6 +338,7 @@ test.describe('slide show on two screens', () => {
         .locator('.ribbon-body button', { hasText: /From (Beginning|Start)/ })
         .first()
         .click()
+      await answerShowScreenDialog(s)
 
       const audience = await waitForPageWithUrl(launched.app, 'mode=audience', 20_000)
       await audience.waitForSelector('.slideshow', { timeout: 10_000 })

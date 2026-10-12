@@ -4343,6 +4343,12 @@ export function registerSlidesIpc(): void {
   // presenter→show handoffs flip off→on within a tick, and honoring the off
   // immediately makes the window visibly bounce. ──
   let showFsRelease: ReturnType<typeof setTimeout> | null = null
+  let showFsFocusStop: (() => void) | null = null
+  /** the window's frame before the show took the screen, put back when the show ends */
+  const showFsRestore = new WeakMap<
+    BrowserWindow,
+    { bounds: Electron.Rectangle; maximized: boolean }
+  >()
   ipcMain.handle('slides:show-fullscreen', (e, on: boolean) => {
     const win = BrowserWindow.fromWebContents(e.sender) ?? windowRefs.shellWindow
     if (!win || win.isDestroyed()) return
@@ -4366,6 +4372,9 @@ export function registerSlidesIpc(): void {
         if (!win.isSimpleFullScreen()) {
           // setSimpleFullScreen animates the frame change (~350 ms of black before the
           // show appears); jumping to the display bounds first leaves it nothing to animate
+          // remember the window as it was: simple full screen restores the frame it was entered
+          // with, which is the display's bounds after this jump, so the window would stay maximized
+          showFsRestore.set(win, { bounds: win.getBounds(), maximized: win.isMaximized() })
           win.setBounds(screen.getDisplayMatching(win.getBounds()).bounds, false)
           win.setSimpleFullScreen(true)
         }
@@ -4379,7 +4388,22 @@ export function registerSlidesIpc(): void {
       setTimeout(() => {
         if (!wc.isDestroyed()) wc.focus()
       }, 50)
+      // The responder change can land later than that (a slow display snap, the Dock or another
+      // app taking the key window back): keep handing the page the keyboard while the show runs, so
+      // Esc ends it without a click first.
+      showFsFocusStop?.()
+      const refocus = () => {
+        if (!wc.isDestroyed() && !wc.isFocused()) wc.focus()
+      }
+      const timers = [200, 500, 1000, 2000].map((ms) => setTimeout(refocus, ms))
+      win.on('focus', refocus)
+      showFsFocusStop = () => {
+        timers.forEach(clearTimeout)
+        if (!win.isDestroyed()) win.off('focus', refocus)
+        showFsFocusStop = null
+      }
     } else {
+      showFsFocusStop?.()
       showFsRelease = setTimeout(() => {
         showFsRelease = null
         if (!wc.isDestroyed()) showChrome.setBleed?.(wc, false)
@@ -4390,6 +4414,14 @@ export function registerSlidesIpc(): void {
         if (process.platform === 'darwin') {
           if (win.isSimpleFullScreen()) win.setSimpleFullScreen(false)
           win.setFullScreenable(true)
+          const before = showFsRestore.get(win)
+          showFsRestore.delete(win)
+          // back to the size the window had before the show (not the display-sized frame)
+          if (before && !before.maximized) {
+            // leaving simple full screen from the display-sized frame leaves the window zoomed
+            if (win.isMaximized()) win.unmaximize()
+            win.setBounds(before.bounds, false)
+          }
           // same material the shell creates its window with (apps/shell/src/main/index.ts)
           win.setVibrancy('sidebar')
         }

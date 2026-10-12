@@ -1800,7 +1800,17 @@ export interface SlidesApi {
   /** Open the audience window; `monitor` = preferred display label (Slide Show → Monitor), else automatic */
   presenterStart: (opts?: { monitor?: string | null }) => Promise<{ audience: boolean }>
   /** Connected screens, for the Slide Show → Monitor choice */
-  displayList: () => Promise<Array<{ id: number; label: string; primary: boolean }>>
+  /** `current`: the screen holding this window (where presenter view opens) */
+  displayList: () => Promise<
+    Array<{
+      id: number
+      label: string
+      primary: boolean
+      current: boolean
+      width: number
+      height: number
+    }>
+  >
   /** Audience window: ink drawn with the mouse on the audience screen, mirrored to the presenter */
   audienceInk: (ev: ShowInkEvent) => void
   /** Broadcast show state to the audience window (fire-and-forget) */

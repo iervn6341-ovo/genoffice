@@ -18,6 +18,7 @@ import type {
 import type { BrushFormat } from './format-brush'
 import type { InkTool } from './ink'
 import type { SlidesViewMode } from './components/ribbon-shared'
+import type { ShowScreen } from './show-screen'
 import type { CustomShow } from './slideshow-utils'
 
 type Set<T> = React.Dispatch<React.SetStateAction<T>>
@@ -163,6 +164,8 @@ export interface ActionCtx {
   usePresenterView: boolean
   setCustomShows: Set<CustomShow[]>
   setCustomShowDlgOpen: Set<boolean>
+  /** Choose-the-screen dialog before a presenter-view show (several screens to pick from) */
+  setScreenPicker: Set<{ fromStart: boolean; screens: ShowScreen[] } | null>
   pendingRehearse: number[] | null
   setPendingRehearse: Set<number[] | null>
 

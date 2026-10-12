@@ -257,3 +257,16 @@ export async function setEditorLayoutWidth(
   // let the view resize and the ribbon fit settle
   await new Promise((r) => setTimeout(r, 400))
 }
+
+/**
+ * With presenter view on and a laptop plus two or more external screens, starting a show first asks
+ * which screen the audience sees. Specs that start a show answer it (no-op when it does not appear).
+ */
+export async function answerShowScreenDialog(page: Page): Promise<void> {
+  const dialog = page.locator('.ssd')
+  const shown = await dialog
+    .waitFor({ state: 'visible', timeout: 1500 })
+    .then(() => true)
+    .catch(() => false)
+  if (shown) await dialog.getByRole('button', { name: 'Start Show' }).click()
+}

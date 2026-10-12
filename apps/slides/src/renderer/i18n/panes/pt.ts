@@ -246,6 +246,9 @@ export const pt = {
   panePresenterEndShow: 'Finalizar Apresentação',
   panePresenterEndTip: 'Finalizar a apresentação (Esc)',
   panePresenterSwap: 'Trocar Telas',
+  paneShowScreenTitle: 'Escolher a tela da apresentação',
+  paneShowScreenNote: 'O modo de apresentador fica em “{name}”. Escolha a tela em que o público verá os slides.',
+  paneShowScreenStart: 'Iniciar apresentação',
   panePresenterSwapTip:
     'Trocar as telas que exibem o Modo de Exibição do Apresentador e a apresentação de slides',
   panePresenterNoSecond: 'Nenhuma segunda tela detectada',

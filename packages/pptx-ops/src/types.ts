@@ -54,6 +54,8 @@ export interface EditParagraph {
   lineSpacingPct?: number
   spaceBeforePt?: number
   spaceAfterPt?: number
+  /** marL / indent reset to 0 during this edit session (Backspace at a bullet-less paragraph start) */
+  clearIndent?: boolean
   /** Paragraph base direction toggled during this edit session (false = explicit LTR) */
   rtl?: boolean
 }

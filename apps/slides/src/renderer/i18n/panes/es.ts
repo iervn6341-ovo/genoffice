@@ -245,6 +245,9 @@ export const es = {
   panePresenterEndShow: 'Finalizar presentación',
   panePresenterEndTip: 'Finalizar la presentación (Esc)',
   panePresenterSwap: 'Intercambiar pantallas',
+  paneShowScreenTitle: 'Elegir la pantalla de la presentación',
+  paneShowScreenNote: 'La vista del presentador se queda en «{name}». Elija la pantalla que verá el público.',
+  paneShowScreenStart: 'Iniciar presentación',
   panePresenterSwapTip:
     'Intercambiar las pantallas que muestran la vista Moderador y la presentación',
   panePresenterNoSecond: 'No se detectó una segunda pantalla',

@@ -5,6 +5,8 @@
  * paragraph/run structure (each run's format preserved independently) and go through IPC editText.
  */
 import React, { useEffect, useRef } from 'react'
+import { moveToLineBoundary } from './line-boundary'
+import { createTextHistory, setActiveTextHistory, type TextHistory } from './text-history'
 import type { EditCaret } from './action-context'
 import {
   formatAutoNum,
@@ -251,15 +253,38 @@ function setEditorBullet(
  * written on commit; editing only shows a marginLeft hint — the paragraph's own left margin (a
  * bullet's hanging indent) plus 24px per level, since the canvas lays the real indent out.
  */
+/** fallback indent per list level while editing, when no paragraph of that level exists to copy */
+const LEVEL_STEP_PX = 24
+
 function shiftBlockLevel(blk: HTMLElement, delta: 1 | -1): void {
-  const cur = parseInt(blk.dataset.level ?? '0', 10) || 0
+  const levelOf = (el: HTMLElement) => parseInt(el.dataset.level ?? '0', 10) || 0
+  const cur = levelOf(blk)
   const next = Math.max(0, Math.min(8, cur + delta))
   if (next === cur) return
-  if (blk.dataset.baseMl == null) blk.dataset.baseMl = String(parseFloat(blk.style.marginLeft) || 0)
+  // A loaded paragraph's marginLeft already includes the indent of its own level, so the
+  // level-0 base is that margin minus the steps already taken (not the margin itself).
+  if (blk.dataset.baseMl == null) {
+    blk.dataset.baseMl = String((parseFloat(blk.style.marginLeft) || 0) - cur * LEVEL_STEP_PX)
+  }
   const base = parseFloat(blk.dataset.baseMl) || 0
   if (next) blk.dataset.level = String(next)
   else delete blk.dataset.level
-  blk.style.marginLeft = next || base ? `${base + next * 24}px` : ''
+  if (blk.dataset.indentCleared) {
+    // a level change takes over the margin again
+    delete blk.dataset.indentCleared
+    blk.style.textIndent = ''
+  }
+  // Prefer the margin a sibling paragraph of the target level already has (the real indent
+  // per the master); otherwise fall back to a fixed step.
+  const sibling = [...(blk.parentElement?.children ?? [])].find(
+    (el): el is HTMLElement =>
+      el instanceof HTMLElement && el !== blk && levelOf(el) === next && !!el.style.marginLeft,
+  )
+  blk.style.marginLeft = sibling
+    ? sibling.style.marginLeft
+    : next || base
+      ? `${base + next * LEVEL_STEP_PX}px`
+      : ''
 }
 
 /** Re-derive the ::before after a ribbon bullet toggle on a paragraph div (marks set by applySelectionParagraphFormat). */
@@ -891,6 +916,27 @@ export function TextEditOverlay({
     }
   }, [])
 
+  // ⌘Z / ⇧⌘Z while editing: our own stack, because the browser's only knows what it typed itself
+  const historyRef = useRef<TextHistory | null>(null)
+  useEffect(() => {
+    const div = ref.current
+    if (!div) return
+    const history = createTextHistory(div)
+    historyRef.current = history
+    setActiveTextHistory(history)
+    // a finished IME phrase and a click each end the step in progress
+    const close = () => history.flush()
+    div.addEventListener('compositionend', close)
+    div.addEventListener('mousedown', close)
+    return () => {
+      div.removeEventListener('compositionend', close)
+      div.removeEventListener('mousedown', close)
+      history.dispose()
+      historyRef.current = null
+      setActiveTextHistory(null)
+    }
+  }, [])
+
   // While focus is parked on a keep-edit control the editor is already blurred, so its
   // onBlur can't fire again — a press anywhere else must still commit instead of silently dropping the edit
   const commitRef = useRef(commit)
@@ -976,6 +1022,29 @@ export function TextEditOverlay({
           }
         }}
         onKeyDown={(e) => {
+          // a discrete key closes the typing step in progress, so it undoes on its own
+          // (a space ends the word being typed: undo then takes back one word at a time)
+          if (e.key.length > 1 || e.metaKey || e.ctrlKey || e.key === ' ')
+            historyRef.current?.flush()
+          // Cmd+←/→ and Home/End: the visual line's ends (the browser's stop at word fragments)
+          const lineKey =
+            !e.altKey &&
+            !e.ctrlKey &&
+            (e.metaKey
+              ? e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+              : e.key === 'Home' || e.key === 'End')
+          if (
+            lineKey &&
+            ref.current &&
+            moveToLineBoundary(
+              ref.current,
+              e.key === 'ArrowLeft' || e.key === 'Home' ? 'start' : 'end',
+              e.shiftKey,
+            )
+          ) {
+            e.preventDefault()
+            return
+          }
           if (e.key === 'Escape') {
             // Esc = commit the text and return to shape-selected state (input not lost);
             // when unchanged, commit internally goes through onCancel and produces no history step
@@ -1259,6 +1328,7 @@ export function extractParagraphs(root: HTMLElement, norm: number): EditParagrap
       const sa = num(ds?.spaceAfterPt)
       if (sa != null) curFmt.spaceAfterPt = sa
       if (ds?.rtl === '1' || ds?.rtl === '0') curFmt.rtl = ds.rtl === '1'
+      if (ds?.indentCleared === '1') curFmt.clearIndent = true
     }
     const style = el.style
     const cs = window.getComputedStyle(el)
@@ -1409,7 +1479,8 @@ export function applySelectionLink(target: LinkTargetOp | null): boolean {
  * Backspace with a collapsed caret at the very start of a bulleted/numbered
  * paragraph div: mark the paragraph bullet-less (committed as buNone, like the
  * ribbon toggle) instead of letting the browser join it into the previous
- * paragraph. False = not at a bulleted paragraph start; the default runs.
+ * paragraph; with no bullet but an indent level it takes one level off instead.
+ * False = nothing to take off at the paragraph start; the default runs.
  */
 function removeBulletAtParagraphStart(root: HTMLElement | null): boolean {
   const sel = window.getSelection()
@@ -1422,12 +1493,30 @@ function removeBulletAtParagraphStart(root: HTMLElement | null): boolean {
   while (blk && blk.parentElement !== root) blk = blk.parentElement
   if (!blk || blk.tagName !== 'DIV') return false
   const kind = blk.dataset.bullet ?? blk.dataset.hadBullet
-  if (!kind || kind === 'none') return false
+  const hasBullet = !!kind && kind !== 'none'
+  const level = parseInt(blk.dataset.level ?? '0', 10) || 0
+  const hasMargin =
+    (parseFloat(blk.style.marginLeft) || 0) > 0 || !!parseFloat(blk.style.textIndent)
+  // no bullet, level 0 and no margin left: nothing to take off, the default joins the previous paragraph
+  if (!hasBullet && level === 0 && !hasMargin) return false
   const before = document.createRange()
   before.setStart(blk, 0)
   before.setEnd(range.startContainer, range.startOffset)
   if (before.toString() !== '') return false
-  return applySelectionParagraphFormat({ bullet: 'none' })
+  if (hasBullet) return applySelectionParagraphFormat({ bullet: 'none' })
+  // PowerPoint: Backspace at the start of an indented, bullet-less paragraph outdents one
+  // level, then takes the remaining margin off (0px); only then does it join the previous paragraph
+  if (level > 0) {
+    shiftBlockLevel(blk, -1)
+    return true
+  }
+  blk.style.marginLeft = '0px'
+  blk.style.textIndent = '0px'
+  blk.dataset.indentCleared = '1'
+  // the paragraph may still inherit a bullet the editor does not draw (an empty line): off with it,
+  // or the saved file would put the glyph on top of the text at 0
+  blk.dataset.bullet = 'none'
+  return true
 }
 
 /**

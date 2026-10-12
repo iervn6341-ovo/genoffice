@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { layoutText, makeViewport, HeuristicMetrics } from '@genoffice/pptx-render'
 import {
+  applyParagraphFormat,
   generateParagraphXml,
   patchTextElementXml,
   type Paragraph,
@@ -1213,6 +1214,24 @@ describe('per-paragraph format on the editing selection', () => {
       { index: 1, patch: { bullet: 'char', bulletChar: '○', lineSpacingPct: 150 } },
       { index: 2, patch: { bullet: 'none', spaceAfterPt: 6 } },
     ])
+  })
+
+  it('a cleared indent (Backspace at a bullet-less line start) travels as marL / indent = 0', () => {
+    const out = collectParagraphFormatPatches([
+      { runs: [{ text: 'a' }] },
+      { runs: [{ text: 'b' }], bullet: 'none', clearIndent: true },
+    ])
+    expect(out).toEqual([{ index: 1, patch: { bullet: 'none', clearIndent: true } }])
+    const para = {
+      runs: [],
+      marL: 457200,
+      indent: -285750,
+      pPrExplicit: {},
+    } as unknown as Paragraph
+    const dirty = applyParagraphFormat([para], { clearIndent: true })
+    expect(para.marL).toBe(0)
+    expect(para.indent).toBe(0)
+    expect(dirty.indents).toBe(true)
   })
 
   it('numbering scheme / start number / picture source travel with the marks', () => {

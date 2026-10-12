@@ -247,6 +247,9 @@ export const it = {
   panePresenterEndShow: 'Fine presentazione',
   panePresenterEndTip: 'Termina la presentazione (Esc)',
   panePresenterSwap: 'Scambia schermi',
+  paneShowScreenTitle: 'Scegli lo schermo per la presentazione',
+  paneShowScreenNote: 'La vista relatore resta su «{name}». Scegli lo schermo su cui il pubblico vedrà le slide.',
+  paneShowScreenStart: 'Avvia presentazione',
   panePresenterSwapTip:
     'Scambia gli schermi che mostrano la visualizzazione Relatore e la presentazione',
   panePresenterNoSecond: 'Nessun secondo schermo rilevato',

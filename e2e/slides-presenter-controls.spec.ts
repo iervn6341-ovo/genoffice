@@ -1,10 +1,16 @@
 import { test, expect, type Page } from '@playwright/test'
-import { launchShell, waitForPageWithUrl, closeAndSaveVideo } from './helpers'
+import {
+  answerShowScreenDialog,
+  launchShell,
+  waitForPageWithUrl,
+  closeAndSaveVideo,
+} from './helpers'
 
 async function enterPresenter(page: Page): Promise<void> {
   await expect(page.locator('.notes-editor')).toBeVisible()
   await page.locator('.stage-wrap').click({ position: { x: 6, y: 6 } })
   await page.keyboard.press('F5')
+  await answerShowScreenDialog(page)
   await page.locator('.slideshow, .presenter').first().waitFor()
   if (!(await page.locator('.presenter').count())) {
     await page.locator('.ss-controls button').last().click({ force: true })

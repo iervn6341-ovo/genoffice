@@ -265,6 +265,7 @@ export function collectParagraphFormatPatches(
       ...(p.lineSpacingPct != null ? { lineSpacingPct: p.lineSpacingPct } : {}),
       ...(p.spaceBeforePt != null ? { spaceBeforePt: p.spaceBeforePt } : {}),
       ...(p.spaceAfterPt != null ? { spaceAfterPt: p.spaceAfterPt } : {}),
+      ...(p.clearIndent ? { clearIndent: true } : {}),
       ...(p.rtl != null ? { rtl: p.rtl } : {}),
     }
     if (Object.keys(patch).length) out.push({ index: i, patch })

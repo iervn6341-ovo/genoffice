@@ -79,11 +79,18 @@ function closePresenterShow(presenterId: number): void {
 export function registerPresenterIpc(): void {
   // Show start: with a second screen and "Use Presenter View" on, the show opens presenter view
   ipcMain.handle('slides:display-count', () => screen.getAllDisplays().length)
-  ipcMain.handle('slides:display-list', () => {
+  ipcMain.handle('slides:display-list', (e) => {
     const primary = screen.getPrimaryDisplay().id
-    return screen
-      .getAllDisplays()
-      .map((d) => ({ id: d.id, label: d.label || `Display ${d.id}`, primary: d.id === primary }))
+    const host = presenterHostWindow(e.sender)
+    const hostId = host ? screen.getDisplayMatching(host.getBounds()).id : null
+    return screen.getAllDisplays().map((d) => ({
+      id: d.id,
+      label: d.label || `Display ${d.id}`,
+      primary: d.id === primary,
+      current: d.id === hostId,
+      width: d.bounds.width,
+      height: d.bounds.height,
+    }))
   })
 
   ipcMain.handle('slides:presenter-start', (e, opts?: { monitor?: string | null }) => {

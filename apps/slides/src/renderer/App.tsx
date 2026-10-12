@@ -72,6 +72,8 @@ import {
 import { NotesEditor, readNotesEditor } from './components/NotesEditor'
 import { PresenterView } from './components/PresenterView'
 import { CustomShowDialog } from './components/CustomShowDialog'
+import { ShowScreenDialog } from './components/ShowScreenDialog'
+import { showCandidates, type ShowScreen } from './show-screen'
 import { PrintDialog } from './components/PrintDialog'
 import { FindReplaceDialog } from './components/FindReplaceDialog'
 import { formatClock, type CustomShow } from './slideshow-utils'
@@ -117,6 +119,7 @@ import { AiPanel } from './ai/AiPanel'
 import { ChartDataDialog } from './components/ChartDataDialog'
 import type { BrushFormat } from './format-brush'
 import { isTextUndoTarget, shouldRouteUndoToDeck } from './undo-routing'
+import { redoTextEdit, undoTextEdit } from './text-history'
 import type {
   ActionCtx,
   CropTargetState,
@@ -565,6 +568,10 @@ export function App() {
   // ── Custom shows: document-level list (persisted to localStorage by file path) + management dialog ──
   const [customShows, setCustomShows] = useState<CustomShow[]>([])
   const [customShowDlgOpen, setCustomShowDlgOpen] = useState(false)
+  const [screenPicker, setScreenPicker] = useState<{
+    fromStart: boolean
+    screens: ShowScreen[]
+  } | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   /** Per-page dwell seconds awaiting confirmation after rehearsal (non-null shows the "save?" confirmation dialog) */
   const [pendingRehearse, setPendingRehearse] = useState<number[] | null>(null)
@@ -1097,7 +1104,8 @@ export function App() {
     // Preserve native undo while typing. The cleared AI composer explicitly yields to deck undo.
     const target = document.activeElement as HTMLElement | null
     if (editing || (isTextUndoTarget(target) && !shouldRouteUndoToDeck(target))) {
-      document.execCommand('undo')
+      // the text overlay keeps its own stack (programmatic edits aren't on the native one)
+      if (!undoTextEdit()) document.execCommand('undo')
       return
     }
     applyHistoryResult(await window.slidesApi.undo())
@@ -1105,7 +1113,7 @@ export function App() {
 
   const redo = useCallback(async () => {
     if (editing || inTextField()) {
-      document.execCommand('redo')
+      if (!redoTextEdit()) document.execCommand('redo')
       return
     }
     applyHistoryResult(await window.slidesApi.redo())
@@ -3072,6 +3080,7 @@ export function App() {
     usePresenterView,
     setCustomShows,
     setCustomShowDlgOpen,
+    setScreenPicker,
     pendingRehearse,
     setPendingRehearse,
     sections,
@@ -4543,6 +4552,23 @@ export function App() {
           dataUrl={cutoutTarget.dataUrl}
           onApply={(png) => void applyCutout(png)}
           onCancel={() => setCutoutTarget(null)}
+        />
+      )}
+
+      {screenPicker && (
+        <ShowScreenDialog
+          candidates={showCandidates(screenPicker.screens)}
+          presenterLabel={screenPicker.screens.find((s) => s.current)?.label ?? ''}
+          remembered={showMonitor}
+          onClose={() => setScreenPicker(null)}
+          onStart={(chosen) => {
+            // the pick is remembered as the Monitor: it is what the dialog starts on next time
+            setShowMonitor(chosen.label)
+            writeShowMonitor(chosen.label)
+            const { fromStart } = screenPicker
+            setScreenPicker(null)
+            showActions.startPresenterView(ctxRef.current, fromStart)
+          }}
         />
       )}
 

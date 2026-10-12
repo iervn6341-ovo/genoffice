@@ -1,4 +1,4 @@
-import { closeAndSaveVideo } from './helpers'
+import { closeAndSaveVideo, answerShowScreenDialog } from './helpers'
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { launchShell, setEditorLayoutWidth, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
@@ -56,6 +56,7 @@ test.describe('slide show keys', () => {
         .locator('.ribbon-body button', { hasText: /From (Beginning|Start)/ })
         .first()
         .click()
+      await answerShowScreenDialog(s)
       await s.waitForSelector('.ss-counter', { timeout: 10_000 })
       const counter = () => s.locator('.ss-counter').innerText()
       await expect.poll(counter).toBe('1 / 3')

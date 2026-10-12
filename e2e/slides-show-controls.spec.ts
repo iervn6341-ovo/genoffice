@@ -1,4 +1,4 @@
-import { closeAndSaveVideo } from './helpers'
+import { closeAndSaveVideo, answerShowScreenDialog } from './helpers'
 import { test, expect, type Page } from '@playwright/test'
 import { launchShell, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
@@ -70,6 +70,7 @@ test.describe('presenter view controls (two screens)', () => {
         .locator('.ribbon-body button', { hasText: /From (Beginning|Start)/ })
         .first()
         .click()
+      await answerShowScreenDialog(s)
       const audience = await waitForPageWithUrl(launched.app, 'mode=audience', 20_000)
       await audience.waitForSelector('.slideshow .ss-stagebox')
       await s.waitForSelector('.pv-stagebox')
@@ -143,6 +144,7 @@ test.describe('presenter view controls (two screens)', () => {
         .locator('.ribbon-body button', { hasText: /From (Beginning|Start)/ })
         .first()
         .click()
+      await answerShowScreenDialog(s)
       const audience = await waitForPageWithUrl(launched.app, 'mode=audience', 20_000)
       await audience.waitForSelector('.slideshow .ss-stagebox')
       const stage = s.locator('.pv-stagebox')
@@ -216,6 +218,7 @@ test('full-screen show: bottom-left control bar, pen, zoom and Esc order', async
       .locator('.ribbon-body button', { hasText: /From (Beginning|Start)/ })
       .first()
       .click()
+    await answerShowScreenDialog(s)
     await s.waitForSelector('.slideshow .ss-controls')
     await s.mouse.move(300, 300)
     await s.mouse.move(320, 320)
@@ -277,6 +280,7 @@ test('audience screen: picked Monitor, mouse laser and pen mirror back, camera o
       .locator('.ribbon-body button', { hasText: /From (Beginning|Start)/ })
       .first()
       .click()
+    await answerShowScreenDialog(s)
     const audience = await waitForPageWithUrl(launched.app, 'mode=audience', 20_000)
     await audience.waitForSelector('.slideshow .ss-stagebox')
     await s.waitForSelector('.pv-stagebox')
