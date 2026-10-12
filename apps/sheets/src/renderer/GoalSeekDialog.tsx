@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import type { GoalSeekResult } from './goal-seek'
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Goal Seek: three fields, then an async solve whose guesses are
 /// journaled edits (undo restores everything). The dialog stays open to show
@@ -21,6 +22,7 @@ export function GoalSeekDialog({
   const [toValue, setToValue] = useState('')
   const [byCell, setByCell] = useState('')
   const [busy, setBusy] = useState(false)
+  useDialogEscape(onClose, !busy)
   const [outcome, setOutcome] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 

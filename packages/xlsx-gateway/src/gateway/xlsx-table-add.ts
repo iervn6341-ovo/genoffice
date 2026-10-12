@@ -35,7 +35,28 @@ export interface TableAddition {
   /// Built-in style name; undefined = TableStyleMedium2.
   readonly style?: string | undefined
   readonly bandedRows: boolean
+  /// Table Design → Table Style Options (tableStyleInfo showColumnStripes / showFirstColumn /
+  /// showLastColumn); absent = off.
+  readonly bandedColumns?: boolean | undefined
+  readonly firstColumn?: boolean | undefined
+  readonly lastColumn?: boolean | undefined
+  /// Table Design → Header Row / Total Row / Filter Button. A table without a header row has
+  /// headerRowCount="0" and no autoFilter (`area` then starts at its first data row and
+  /// `columnNames` still name the columns); a totals row is the last row of `area`.
+  readonly headerRow?: boolean | undefined
+  readonly totalsRow?: boolean | undefined
+  readonly filterButton?: boolean | undefined
+  /// per column (when there is a totals row): the label and / or the totals function
+  readonly totals?: readonly (TotalsColumn | null)[] | undefined
 }
+
+export interface TotalsColumn {
+  readonly label?: string | undefined
+  readonly fn?: TotalsFunction | undefined
+}
+
+export type TotalsFunction =
+  'none' | 'sum' | 'min' | 'max' | 'average' | 'count' | 'countNums' | 'stdDev' | 'var' | 'custom'
 
 const TABLE_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
 const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
@@ -82,7 +103,9 @@ export async function applyTableAdditions(
 
 function validateAddition(addition: TableAddition): void {
   const { area, columnNames } = addition
-  if (area.endRow <= area.startRow) {
+  const headerRows = addition.headerRow === false ? 0 : 1
+  const totalsRows = addition.totalsRow === true ? 1 : 0
+  if (area.endRow - area.startRow + 1 - headerRows - totalsRows < 1) {
     throw new TableAddError(
       `Table "${addition.name}" needs a header row plus at least one data row.`,
     )
@@ -192,24 +215,40 @@ function resolveTarget(fromPart: string, target: string): string {
   return base.join('/')
 }
 
-function buildTableXml(id: number, addition: TableAddition): string {
+export function buildTableXml(id: number, addition: TableAddition): string {
   const ref = areaToRef(addition.area)
   const name = escapeAttribute(addition.name)
+  const totalsRow = addition.totalsRow === true
+  const headerRow = addition.headerRow !== false
   const columns = addition.columnNames
-    .map(
-      (columnName, index) =>
-        `<tableColumn id="${index + 1}" name="${escapeAttribute(columnName)}"/>`,
-    )
+    .map((columnName, index) => {
+      const totals = totalsRow ? addition.totals?.[index] : undefined
+      const label = totals?.label ? ` totalsRowLabel="${escapeAttribute(totals.label)}"` : ''
+      const fn = totals?.fn && totals.fn !== 'none' ? ` totalsRowFunction="${totals.fn}"` : ''
+      return `<tableColumn id="${index + 1}" name="${escapeAttribute(columnNameText(columnName))}"${label}${fn}/>`
+    })
     .join('')
   const style = escapeAttribute(addition.style ?? DEFAULT_TABLE_STYLE)
+  // Excel's filter buttons live on the header row and stop above the totals row
+  const filterRef = areaToRef({
+    ...addition.area,
+    endRow: addition.area.endRow - (totalsRow ? 1 : 0),
+  })
+  const autoFilter =
+    headerRow && addition.filterButton !== false ? `<autoFilter ref="${filterRef}"/>` : ''
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
     '<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
-    `id="${id}" name="${name}" displayName="${name}" ref="${ref}" totalsRowShown="0">` +
-    `<autoFilter ref="${ref}"/>` +
+    `id="${id}" name="${name}" displayName="${name}" ref="${ref}"` +
+    (headerRow ? '' : ' headerRowCount="0"') +
+    (totalsRow ? ' totalsRowCount="1"' : ' totalsRowShown="0"') +
+    '>' +
+    autoFilter +
     `<tableColumns count="${addition.columnNames.length}">${columns}</tableColumns>` +
-    `<tableStyleInfo name="${style}" showFirstColumn="0" showLastColumn="0" ` +
-    `showRowStripes="${addition.bandedRows ? 1 : 0}" showColumnStripes="0"/>` +
+    `<tableStyleInfo name="${style}" showFirstColumn="${addition.firstColumn ? 1 : 0}" ` +
+    `showLastColumn="${addition.lastColumn ? 1 : 0}" ` +
+    `showRowStripes="${addition.bandedRows ? 1 : 0}" ` +
+    `showColumnStripes="${addition.bandedColumns ? 1 : 0}"/>` +
     '</table>'
   )
 }
@@ -265,6 +304,15 @@ function areasOverlap(a: TableArea, b: TableArea): boolean {
     b.startRow <= a.endRow &&
     a.startColumn <= b.endColumn &&
     b.startColumn <= a.endColumn
+  )
+}
+
+/// a column name as the table part spells it: Excel writes a line break or a tab in a header as `_xHHHH_`
+/// (an attribute value cannot hold one — the parser turns it into a space)
+function columnNameText(name: string): string {
+  return name.replace(
+    /[\n\r\t]/g,
+    (char) => `_x${char.charCodeAt(0).toString(16).padStart(4, '0')}_`,
   )
 }
 

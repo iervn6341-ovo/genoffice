@@ -23,6 +23,7 @@ import type { HeaderFooterResult } from './HeaderFooterDialog'
 import { t } from './i18n/locale'
 import { effectivePageBreaks } from './page-break-preview'
 import { withPageSetupUndo } from './page-setup-undo'
+import { endThemePreview, startThemePreview, type ThemePreviewKind } from './theme-preview'
 import { withThemeUndo } from './theme-undo'
 import { COLOR_SCHEMES, FONT_SCHEMES, rethemeStyles, THEME_PRESETS } from './themes'
 import { loadVisibleRange } from './univer-sync'
@@ -129,6 +130,18 @@ export function handlePageLayoutCommand(ctx: PageLayoutContext, rest: string): v
   const worksheet = runtime.univerAPI.getActiveWorkbook()?.getActiveSheet()
   const sheetId = worksheet?.getSheetId()
   if (!sheetId || isSheetRemoved(state.editJournal, sheetId)) return
+  // Themes / Colors / Fonts galleries show a choice live while the pointer is on it
+  if (rest === 'theme-preview-end') {
+    endThemePreview(ctx)
+    return
+  }
+  if (rest.startsWith('theme-preview:')) {
+    const [kind, id] = rest.slice('theme-preview:'.length).split(':')
+    if (kind === 'theme' || kind === 'colors' || kind === 'fonts') {
+      startThemePreview(ctx, kind as ThemePreviewKind, id ?? '')
+    }
+    return
+  }
   const recordDirect = (patch: PageSetupJournalState, note: string): void => {
     void withPageSetupUndo(ctx, sheetId, () => {
       recordPageSetup(state.editJournal, sheetId, patch)
@@ -238,12 +251,19 @@ export function handlePageLayoutCommand(ctx: PageLayoutContext, rest: string): v
     case 'theme':
     case 'theme-colors':
     case 'theme-fonts': {
+      // a real pick starts from the workbook's own theme, not from the one being previewed
+      endThemePreview(ctx, false)
       if (!state.file.themeColors || (key === 'theme-fonts' && !state.file.themeFonts)) {
         ctx.setMessage(t('appThemeNeedsThemePart'))
         return
       }
+      // a theme's colors are its own (Excel's built-in themes are not entries of the Colors gallery)
       const colors =
-        key === 'theme-fonts' ? undefined : COLOR_SCHEMES.find((entry) => entry.id === value)
+        key === 'theme-fonts'
+          ? undefined
+          : key === 'theme'
+            ? THEME_PRESETS.find((entry) => entry.id === value)?.colors
+            : COLOR_SCHEMES.find((entry) => entry.id === value)
       // A theme without a rewritable fontScheme keeps its fonts: journaling
       // one would poison every subsequent save.
       const fonts =

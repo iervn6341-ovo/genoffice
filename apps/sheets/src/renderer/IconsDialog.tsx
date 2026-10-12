@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { FluentIcon } from '@fluentui/react-icons'
 import { ICON_CATALOG } from './icon-catalog'
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Insert → Icons: a categorized, searchable gallery. Icons are
 /// vector components on screen; picking one rasterizes it to a transparent
@@ -50,6 +51,7 @@ export function IconsDialog({
   readonly onInsert: (dataUrl: string, size: number, name: string) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [categoryIndex, setCategoryIndex] = useState(0)
   const [query, setQuery] = useState('')

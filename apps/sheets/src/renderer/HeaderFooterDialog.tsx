@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { useI18n, type StringKey } from './i18n/locale'
 
 import type { HeaderFooterParts } from './edit-journal'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Insert → Header & Footer as a dialog (the app has no Page Layout
 /// view): three sections each for the printed header and footer. Field codes
@@ -72,6 +73,7 @@ export function HeaderFooterDialog({
   readonly onApply: (result: HeaderFooterResult) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [values, setValues] = useState<Record<SectionKey, string>>({
     'header-left': initialHeader?.left ?? '',

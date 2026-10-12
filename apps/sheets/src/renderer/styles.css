@@ -47,6 +47,7 @@
   /* content-side constants: charts, shapes and their selection chrome sit on
    * the paper-like grid and never follow the theme */
   --sheets-paper: #ffffff;
+  --sheets-ink: #000000;
   --sheets-on-accent: #ffffff;
   --sheets-knob-dot: #ffffff;
   --sheets-chart-border: #c9cdd1;
@@ -408,7 +409,9 @@ textarea:disabled {
 
 .excel-header {
   position: relative;
-  z-index: 10;
+  /* above the AI panel's resize handle (.ai-panel-resizer, 20): an open ribbon dropdown that reaches over
+   * the panel's edge keeps that 6px column clickable */
+  z-index: 25;
   /* same divider weight as the docs/slides ribbons: their --border-strong, no drop shadow */
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface);
@@ -1502,6 +1505,10 @@ html.genoffice-popover-open .ribbon-tabs {
 
 button.check-item:hover {
   background: var(--surface-hover);
+}
+
+.check-item.locked {
+  opacity: 0.45;
 }
 
 .check-box {
@@ -5614,10 +5621,437 @@ textarea:focus {
   gap: 6px;
 }
 
+/* Fill → Series dialog */
+.fill-series-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.fill-series-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fill-series-groups fieldset {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  margin: 0;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.fill-series-groups fieldset:disabled {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.fill-series-groups legend {
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.fill-series-groups .dialog-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.fill-series-trend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.fill-series-values {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.fill-series-values label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.fill-series-values input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* Themes / Colors / Fonts galleries: cards that preview a choice live on hover */
+.menu-select-drop.theme-gallery {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  max-height: min(380px, calc(100vh - 140px));
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.menu-select-drop.theme-gallery-theme {
+  grid-template-columns: repeat(4, 84px);
+  width: 372px;
+}
+
+.menu-select-drop.theme-gallery-colors,
+.menu-select-drop.theme-gallery-fonts {
+  grid-template-columns: repeat(2, 120px);
+  width: 270px;
+}
+
+.menu-select-drop.theme-gallery .theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: center;
+}
+
+.menu-select-drop.theme-gallery .theme-card:hover,
+.menu-select-drop.theme-gallery .theme-card:focus-visible {
+  border-color: var(--accent);
+  background: var(--ribbon-hover);
+}
+
+.theme-card-sample {
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.theme-card-swatches {
+  display: flex;
+  gap: 2px;
+}
+
+.theme-card-swatches i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+}
+
+.theme-card-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Table Design → Table Name */
+.table-name-field {
+  display: grid;
+  gap: 3px;
+  align-content: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.table-name-field input {
+  width: 130px;
+  height: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* Format as Table gallery: Excel's 60 built-in styles, three groups of thumbnails */
+.menu-select-drop.table-style-gallery {
+  /* 7 cells of 40px + 6 gaps + padding, plus the vertical scrollbar: no sideways scroll */
+  width: 330px;
+  max-height: min(440px, calc(100vh - 140px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.table-style-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 40px);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.menu-select-drop.table-style-gallery .table-style-cell {
+  width: 40px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--sheets-paper);
+  cursor: pointer;
+}
+
+.menu-select-drop.table-style-gallery .table-style-cell:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* the thumbnail's colors are the table style's own and sit on white paper, in both themes */
+.table-style-preview {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.table-style-preview i {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Paste Special dialog */
+.paste-special-dialog {
+  width: min(430px, calc(100vw - 32px));
+}
+
+.paste-special-groups {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 10px;
+}
+
+.paste-special-groups fieldset {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  margin: 0;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.paste-special-groups fieldset:disabled {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.paste-special-groups legend {
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.paste-special-groups .dialog-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.paste-special-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 10px;
+}
+
+.paste-special-checks .dialog-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
 /* print pane: tall on small windows, so the groups scroll inside the dialog */
 .print-sheet-dialog .dialog-body {
   display: grid;
   gap: 8px;
   max-height: calc(100vh - 220px);
   overflow-y: auto;
+}
+
+.resize-table-dialog {
+  width: 360px;
+}
+
+.resize-table-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.resize-table-field input {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+}
+
+.resize-table-dialog .dialog-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.resize-table-dialog .dialog-note.dialog-error {
+  color: var(--sheets-error);
+}
+
+/* New Table Style dialog */
+.new-table-style-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.new-style-name {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.new-style-name input {
+  width: 100%;
+  min-width: 0;
+}
+
+.new-style-body {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.new-style-elements {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.new-style-elements button {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.new-style-elements button:hover {
+  background: var(--hover);
+}
+
+.new-style-elements button.selected {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.new-style-format {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.new-style-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.new-style-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.new-style-row input[type='color'] {
+  width: 36px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.new-style-edges {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+
+.new-style-preview-box {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* the preview's colors are the table style's own and sit on white paper, in both themes */
+.new-style-preview {
+  display: grid;
+  grid-auto-rows: 20px;
+  border: 1px solid var(--border);
+  background: var(--sheets-paper);
+  color: var(--sheets-ink);
+}
+
+.new-style-preview i {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 20px;
+}
+
+.table-style-gallery .table-style-new {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.table-style-gallery .table-style-new:hover {
+  background: var(--hover);
 }

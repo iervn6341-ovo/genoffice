@@ -83,3 +83,24 @@ export function insertHorizontalLine(editor: Editor): void {
   const line = editor.state.doc.nodeAt(after)
   if (line) editor.commands.setTextSelection(after + line.nodeSize + 1)
 }
+
+/**
+ * The gap Word leaves between a paragraph border and its text: Home → Borders writes `w:space`
+ * 1 pt for the top, bottom and the rule between paragraphs, and 4 pt for the left and right
+ * (Word 16, read from a saved .docx). A border without it hugs the text.
+ */
+export const WORD_BORDER_SPACE_PT: Record<BorderSide, number> = { t: 1, b: 1, h: 1, l: 4, r: 4 }
+
+/**
+ * The `borderLines` attribute for a paragraph whose borders are now `borders`: the lines it already
+ * has stay as they are, each side that is new gets Word's gap. Null when no border is drawn.
+ */
+export function linesWithWordSpacing(borders: string | null, raw: unknown): string | null {
+  if (!borders) return null
+  const lines = parseBorderLines(raw)
+  const out: BorderLines = {}
+  for (const side of borders.split('') as BorderSide[]) {
+    out[side] = lines[side] ?? { spacePt: WORD_BORDER_SPACE_PT[side] }
+  }
+  return JSON.stringify(out)
+}

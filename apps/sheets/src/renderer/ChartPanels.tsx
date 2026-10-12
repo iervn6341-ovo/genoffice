@@ -9,6 +9,7 @@ import {
 import { ColorDropdown } from './ColorDropdown'
 import { useI18n, type StringKey, type TFunc } from './i18n/locale'
 import type { ChartEditData, ChartElementRef, ChartVectorRead } from './WorkbookVisuals'
+import { useDialogEscape } from './use-dialog-escape'
 
 const LEGEND_OPTIONS: readonly (readonly [string, StringKey])[] = [
   ['right', 'appLegendRight'],
@@ -380,6 +381,7 @@ export function SelectDataDialog({
   readonly onApply: (edit: ChartEditData) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [rows, setRows] = useState<SeriesRow[]>(
     chart.series.map((series, index) => ({

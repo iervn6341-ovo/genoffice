@@ -3,6 +3,7 @@ import type {
   RecommendedKind,
 } from '@genoffice/xlsx-gateway/domain/chart-recommend'
 import { useI18n, type StringKey } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Insert → Recommended Charts: ranked suggestions with a mini
 /// preview sketched from the actual selection, one click to insert.
@@ -277,6 +278,7 @@ export function RecommendedChartsDialog({
   readonly onPick: (kind: RecommendedKind) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   return (
     <div className="dialog-backdrop" onClick={onClose}>

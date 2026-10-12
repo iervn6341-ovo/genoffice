@@ -25,9 +25,12 @@ import {
 import { isSheetRemoved, journalSize, recordStructuralOp } from './edit-journal'
 import { resolveGoToRef, type GoToNameEntry } from './goto'
 import { getLang, t } from './i18n/locale'
+import { fileTableAt, restyleFileTable } from './file-table-design'
+import { redesignTable } from './table-design-actions'
 import { appendSymbol } from './SymbolDialog'
 import { inferContinuousRegion } from './table-actions'
-import { tableThemeFor, type TableThemeSheet } from './table-styles'
+import { DEFAULT_THEME_COLORS, tableThemeFor, type TableThemeSheet } from './table-styles'
+import { DEFAULT_TABLE_OPTIONS, tableOptionsOf } from './table-design'
 import { tableIdOf } from './table-sync'
 import { runAsOneUndoStepAsync } from './undo-group'
 import {
@@ -651,6 +654,12 @@ export function handleFormatAsTable(ctx: DataToolsContext, style: string): void 
   let startColumn = range.getColumn()
   let endRow = startRow + range.getHeight() - 1
   let endColumn = startColumn + range.getWidth() - 1
+  // a table the file already had, with the selection inside it: restyle it, as Excel does
+  const fileTable = fileTableAt(state, sheetId, startRow, startColumn)
+  if (fileTable && endRow <= fileTable.area.endRow && endColumn <= fileTable.area.endColumn) {
+    void restyleFileTable(ctx, { style })
+    return
+  }
   // fixes #298: single-cell selection → infer continuous region (Excel CurrentRegion)
   if (range.getHeight() === 1 && range.getWidth() === 1) {
     const inferred = inferContinuousRegion(worksheet, startRow, startColumn)
@@ -683,7 +692,14 @@ export function handleFormatAsTable(ctx: DataToolsContext, style: string): void 
     ctx.setMessage(t('appTableOverlapsSession', { name: covering.name }))
     return
   }
+  if (covering && inside) {
+    // restyling a table is Table Design's job: it knows the header / totals rows and their looks
+    void redesignTable(ctx, { style, target: covering.name }, 'appTableRestyled')
+    return
+  }
   const area = covering?.area ?? { startRow, startColumn, endRow, endColumn }
+  // restyling keeps the table's own Table Style Options (banded columns, first / last column …)
+  const options = covering ? tableOptionsOf(covering) : DEFAULT_TABLE_OPTIONS
   const target = `${columnLabel(area.startColumn)}${area.startRow + 1}:${columnLabel(area.endColumn)}${area.endRow + 1}`
   void runAsOneUndoStepAsync(runtime, async () => {
     if (covering && oldTableId) {
@@ -692,16 +708,26 @@ export function handleFormatAsTable(ctx: DataToolsContext, style: string): void 
         oldTableId,
       )
     }
-    const { tableId, ready } = applyAiTableAdd(runtime, state, {
-      op: 'add_table',
-      sheetId,
-      range: target,
-      ...(covering ? { name: covering.name } : {}),
-      style,
-      bandedRows: true,
-    })
+    const { tableId, ready } = applyAiTableAdd(
+      runtime,
+      state,
+      {
+        op: 'add_table',
+        sheetId,
+        range: target,
+        ...(covering ? { name: covering.name } : {}),
+        style,
+        bandedRows: options.bandedRows,
+      },
+      options,
+    )
     await ready
-    const theme = tableThemeFor(style, `genoffice-${tableId}`)
+    const theme = tableThemeFor(
+      style,
+      `genoffice-${tableId}`,
+      state.file.themeColors ?? DEFAULT_THEME_COLORS,
+      options,
+    )
     if (theme) await (worksheet as unknown as TableThemeSheet).addTableTheme(tableId, theme)
   })
     .then(() => {

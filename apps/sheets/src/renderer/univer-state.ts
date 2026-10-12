@@ -11,10 +11,31 @@ import type {
   WorkbookFile,
   WorkbookPagePrintSettings,
   WorkbookPivotDefinition,
+  WorkbookTableInfo,
 } from '../shared/desktop-api'
 import type { createUniver } from './create-univer'
 import type { EditJournal } from './edit-journal'
 import { netAxisDelta } from './view-transform'
+
+/// The Table Style Options and style of a table of the file, as Table Design shows and saves them.
+/// A null style is a table saved without one (Excel's "None").
+export interface FileTableLook {
+  style: string | null
+  bandedRows: boolean
+  bandedColumns: boolean
+  firstColumn: boolean
+  lastColumn: boolean
+}
+
+export interface FileTableShown {
+  look: FileTableLook
+  laid: { name: string; range: IRange }[]
+}
+
+/// File-table descriptors whose baked look (the cell fills / fonts / borders the load paints from
+/// the table part's style) was taken off by Table Design: their cells stream in without it, and the
+/// look is drawn by display-only range themes instead.
+export const restyledFileTables = new WeakSet<object>()
 
 export type UniverRuntime = ReturnType<typeof createUniver>
 export type ActiveWorkbook = NonNullable<
@@ -66,6 +87,20 @@ export interface LazyWorkbookState {
   /// File-side saved print settings (pageSetup / margins / headerFooter),
   /// known once a sheet finishes indexing.
   readonly sheetFilePageSetups: Map<string, WorkbookPagePrintSettings>
+  /// What the table parts of the file say about their style (Table Design shows the options from
+  /// it), by table name in lower case; filled on demand when the active cell enters a file table.
+  readonly fileTableInfos: Map<string, WorkbookTableInfo>
+  /// the tables whose info is being read
+  readonly fileTableInfoRequested: Set<string>
+  /// Tables of the file that Table Design restyled this session, by sheet + name: the look they
+  /// show now, and the display-only range themes that draw it (their names and ranges).
+  readonly fileTableShown: Map<string, FileTableShown>
+  /// The theme the file on disk holds, once a theme edit (or its undo) has needed it: the journal's
+  /// theme is a difference from this. Absent until then (the live palette is the file's).
+  themeBaseline?: {
+    colors: string[] | null
+    fonts: { major: string; minor: string } | null
+  }
   /// File-side allow-edit ranges, known once a sheet finishes indexing.
   readonly sheetProtectedRanges: Map<
     string,

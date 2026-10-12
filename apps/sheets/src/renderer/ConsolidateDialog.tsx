@@ -8,6 +8,7 @@ import {
   type ConsolidateFn,
 } from './consolidate'
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Data → Consolidate: a function, a list of source references, and
 /// an optional "use labels in left column" mode. Output lands at the active
@@ -26,6 +27,7 @@ export function ConsolidateDialog({
   readonly onCreate: (config: ConsolidateConfig) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [fn, setFn] = useState<ConsolidateFn>('sum')
   const [references, setReferences] = useState<string[]>([])

@@ -1515,11 +1515,124 @@ export const workbookTableAddSchema = z
     /// against journaled header-cell edits; blanks become Column1, Column2, …
     columnNames: z.array(z.string().max(255)).min(1).max(1_000),
     /// Built-in table style name; omitted = TableStyleMedium2.
-    style: z
-      .string()
-      .regex(/^TableStyle(?:Light|Medium|Dark)[1-9][0-9]?$/)
-      .optional(),
+    /// a built-in style name, or the name of a custom style (see tableStyleAdditions)
+    style: z.string().min(1).max(255).optional(),
     bandedRows: z.boolean(),
+    /// Table Design → Table Style Options. Omitted = off, which is what every table written
+    /// before the Table Design tab had.
+    bandedColumns: z.boolean().optional(),
+    firstColumn: z.boolean().optional(),
+    lastColumn: z.boolean().optional(),
+    /// Table Design → Header Row / Total Row / Filter Button. Omitted = Excel's default (header
+    /// row shown, no totals row, filter buttons on). Without a header row `area` starts at the
+    /// first data row (the header cells are empty) and `columnNames` still name the columns;
+    /// with a totals row it is the last row of `area`.
+    headerRow: z.boolean().optional(),
+    totalsRow: z.boolean().optional(),
+    filterButton: z.boolean().optional(),
+    /// per column, with a totals row: its label and / or totals function (index = column)
+    totals: z
+      .array(
+        z
+          .object({
+            label: z.string().max(255).optional(),
+            fn: z
+              .enum([
+                'none',
+                'sum',
+                'min',
+                'max',
+                'average',
+                'count',
+                'countNums',
+                'stdDev',
+                'var',
+                'custom',
+              ])
+              .optional(),
+          })
+          .strict()
+          .nullable(),
+      )
+      .max(1_000)
+      .optional(),
+  })
+  .strict()
+
+/// A table style made in the editor (Table Design → New Table Style). The save writes one <dxf> per
+/// formatted element and a <tableStyle> that names them; tables refer to the style by name.
+export const workbookTableStyleAddSchema = z
+  .object({
+    name: z.string().min(1).max(255),
+    elements: z
+      .array(
+        z
+          .object({
+            type: z.enum([
+              'wholeTable',
+              'headerRow',
+              'totalRow',
+              'firstColumn',
+              'lastColumn',
+              'firstRowStripe',
+              'secondRowStripe',
+              'firstColumnStripe',
+              'secondColumnStripe',
+            ]),
+            fill: z
+              .string()
+              .regex(/^#[0-9A-Fa-f]{6}$/)
+              .optional(),
+            font: z
+              .string()
+              .regex(/^#[0-9A-Fa-f]{6}$/)
+              .optional(),
+            bold: z.boolean().optional(),
+            line: z.enum(['thin', 'medium', 'thick', 'double']).optional(),
+            lineColor: z
+              .string()
+              .regex(/^#[0-9A-Fa-f]{6}$/)
+              .optional(),
+            edges: z
+              .array(z.enum(['top', 'bottom', 'left', 'right', 'insideH', 'insideV']))
+              .max(6)
+              .optional(),
+          })
+          .strict(),
+      )
+      .max(9),
+  })
+  .strict()
+
+/// Table Design on a table the file already had: its style and options, by the table's name. The save
+/// patches the table part's tableStyleInfo; an absent field stays as the file has it.
+export const workbookTableEditSchema = z
+  .object({
+    sheetId: z.string().min(1),
+    name: z.string().min(1).max(255),
+    style: z.string().min(1).max(255).optional(),
+    bandedRows: z.boolean().optional(),
+    bandedColumns: z.boolean().optional(),
+    firstColumn: z.boolean().optional(),
+    lastColumn: z.boolean().optional(),
+  })
+  .strict()
+
+/// What the table part of a file's table says about its style (Table Design reads it to show the options).
+export const workbookTableInfoRequestSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    name: z.string().min(1).max(255),
+  })
+  .strict()
+
+export const workbookTableInfoSchema = z
+  .object({
+    style: z.string().optional(),
+    showFirstColumn: z.boolean(),
+    showLastColumn: z.boolean(),
+    showRowStripes: z.boolean(),
+    showColumnStripes: z.boolean(),
   })
   .strict()
 
@@ -1740,6 +1853,10 @@ export const workbookSaveRequestSchema = z
     visualEdits: z.array(workbookVisualEditSchema).max(100),
     visualAdditions: z.array(workbookVisualAddSchema).max(50),
     tableAdditions: z.array(workbookTableAddSchema).max(50),
+    /// custom table styles the tables above name (omitted = none)
+    tableStyleAdditions: z.array(workbookTableStyleAddSchema).max(50).optional(),
+    /// Table Design on the file's own tables (omitted = none)
+    tableEdits: z.array(workbookTableEditSchema).max(500).optional(),
     pivotAdditions: z.array(workbookPivotAddSchema).max(20),
     sheetOps: z.array(workbookSheetOpSchema).max(100),
     /// Final tab order (Univer sheet ids); required with any sheet op.
@@ -1928,6 +2045,7 @@ export const workbookSaveRequestSchema = z
       request.protectedRangeStates.length > 0 ||
       request.visualAdditions.length > 0 ||
       request.tableAdditions.length > 0 ||
+      (request.tableEdits?.length ?? 0) > 0 ||
       request.pivotAdditions.length > 0 ||
       request.sparklineAdditions.length > 0,
     { message: 'A save needs at least one edit.' },
@@ -2193,6 +2311,10 @@ export type ScreenCaptureResult = z.infer<typeof screenCaptureResultSchema>
 export type WorkbookVisualObject = z.infer<typeof visualObjectSchema>
 export type WorkbookVisualAdd = z.infer<typeof workbookVisualAddSchema>
 export type WorkbookTableAdd = z.infer<typeof workbookTableAddSchema>
+export type WorkbookTableStyleAdd = z.infer<typeof workbookTableStyleAddSchema>
+export type WorkbookTableEdit = z.infer<typeof workbookTableEditSchema>
+export type WorkbookTableInfoRequest = z.infer<typeof workbookTableInfoRequestSchema>
+export type WorkbookTableInfo = z.infer<typeof workbookTableInfoSchema>
 export type WorkbookPivotAdd = z.infer<typeof workbookPivotAddSchema>
 export type WorkbookCellStyle = z.infer<typeof cellStyleSchema>
 export type WorkbookConditionalRule = z.infer<typeof conditionalRuleSchema>
@@ -2614,6 +2736,8 @@ export interface DesktopApi {
   recalcWorkbook(request: WorkbookRecalcRequest): Promise<WorkbookRecalcResult>
   readWorkbookMedia(request: WorkbookMediaRequest): Promise<WorkbookMediaResult>
   readPivotDefinition(request: WorkbookPivotRequest): Promise<WorkbookPivotDefinition>
+  /// the style info of a file table's part, for Table Design
+  readTableInfo(request: WorkbookTableInfoRequest): Promise<WorkbookTableInfo>
   readLocalImage(request: LocalImageRequest): Promise<LocalImageResult>
   captureScreenSources(): Promise<ScreenSourcesResult>
   /// null when the source vanished between listing and capture.

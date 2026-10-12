@@ -15,6 +15,9 @@ export class StylesheetEditor {
   private readonly cellXfs: string[]
   private readonly dxfs: string[]
   private readonly hadDxfsSection: boolean
+  /// the <tableStyle> elements, and the attributes of their <tableStyles> section (defaults)
+  private readonly tableStyles: string[]
+  private readonly tableStylesAttributes: string
   private readonly originalCounts: {
     numFmts: number
     fonts: number
@@ -22,6 +25,7 @@ export class StylesheetEditor {
     borders: number
     cellXfs: number
     dxfs: number
+    tableStyles: number
   }
   private readonly cache = new Map<string, number>()
   private nextNumFmtId: number
@@ -47,6 +51,12 @@ export class StylesheetEditor {
     const dxfsInner = sectionInner(stylesXml, 'dxfs')
     this.hadDxfsSection = dxfsInner !== null
     this.dxfs = dxfsInner === null ? [] : extractElements(dxfsInner, 'dxf')
+    const tableStylesInner = sectionInner(stylesXml, 'tableStyles')
+    this.tableStyles =
+      tableStylesInner === null ? [] : extractElements(tableStylesInner, 'tableStyle')
+    this.tableStylesAttributes = (/<tableStyles\b([^>]*?)\/?>/.exec(stylesXml)?.[1] ?? '')
+      .replace(/\bcount="[^"]*"/, '')
+      .trim()
     if (this.fonts.length === 0 || this.cellXfs.length === 0) {
       throw new Error(
         'The workbook stylesheet has no base font or cell format — style edits cannot be saved.',
@@ -59,6 +69,7 @@ export class StylesheetEditor {
       borders: this.borders.length,
       cellXfs: this.cellXfs.length,
       dxfs: this.dxfs.length,
+      tableStyles: this.tableStyles.length,
     }
     this.nextNumFmtId =
       this.numFmts.reduce(
@@ -74,13 +85,30 @@ export class StylesheetEditor {
       this.fills.length !== this.originalCounts.fills ||
       this.borders.length !== this.originalCounts.borders ||
       this.cellXfs.length !== this.originalCounts.cellXfs ||
-      this.dxfs.length !== this.originalCounts.dxfs
+      this.dxfs.length !== this.originalCounts.dxfs ||
+      this.tableStyles.length !== this.originalCounts.tableStyles
     )
   }
 
   /// Conditional-formatting highlight styles; deduped like every other list.
   internDxf(dxfXml: string): number {
     return internElement(this.dxfs, dxfXml)
+  }
+
+  /// A custom table style: each element (wholeTable, headerRow, …) points at its dxf. A style the
+  /// stylesheet already holds under the name — in any case, as Excel compares them — is left alone (a
+  /// second save does not write it twice).
+  addTableStyle(name: string, elements: readonly { type: string; dxfXml: string }[]): void {
+    const wanted = escapeXmlAttribute(name)
+    const lower = wanted.toLowerCase()
+    if (this.tableStyles.some((entry) => readAttribute(entry, 'name')?.toLowerCase() === lower))
+      return
+    const items = elements.map(
+      ({ type, dxfXml }) => `<tableStyleElement type="${type}" dxfId="${this.internDxf(dxfXml)}"/>`,
+    )
+    this.tableStyles.push(
+      `<tableStyle name="${wanted}" pivot="0" count="${items.length}">${items.join('')}</tableStyle>`,
+    )
   }
 
   /// Returns the cellXfs index of a format equal to the base format with the
@@ -162,6 +190,24 @@ export class StylesheetEditor {
       if (anchor) {
         const at = anchor.index + anchor[0].length
         result = result.slice(0, at) + section + result.slice(at)
+      }
+    }
+    if (this.tableStyles.length !== this.originalCounts.tableStyles) {
+      const attributes = this.tableStylesAttributes === '' ? '' : ` ${this.tableStylesAttributes}`
+      const section = `<tableStyles count="${this.tableStyles.length}"${attributes}>${this.tableStyles.join('')}</tableStyles>`
+      const existing = /<tableStyles\b[^>]*>[\s\S]*?<\/tableStyles>|<tableStyles\b[^>]*\/>/
+      if (existing.test(result)) {
+        result = result.replace(existing, () => section)
+      } else {
+        // Schema order: tableStyles follows dxfs, then colors / extLst.
+        const anchor =
+          /<\/dxfs>|<dxfs\b[^>]*\/>/.exec(result) ??
+          /<\/cellStyles>|<cellStyles\b[^>]*\/>/.exec(result) ??
+          /<\/cellXfs>|<cellXfs\b[^>]*\/>/.exec(result)
+        if (anchor) {
+          const at = anchor.index + anchor[0].length
+          result = result.slice(0, at) + section + result.slice(at)
+        }
       }
     }
     if (this.numFmts.length > 0) {

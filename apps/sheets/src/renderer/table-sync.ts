@@ -26,6 +26,12 @@ export function trackTable(tableId: string, entry: WorkbookTableAdd): void {
   live.add(tableId)
 }
 
+/** Drops a table Univer refused to draw, so a later ⌘Z does not bring a ghost back. */
+export function forgetTable(tableId: string): void {
+  entries.delete(tableId)
+  live.delete(tableId)
+}
+
 export function tableIdOf(sheetId: string, name: string): string | undefined {
   const lower = name.toLowerCase()
   for (const id of live) {

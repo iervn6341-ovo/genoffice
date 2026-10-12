@@ -219,22 +219,26 @@ test('Format as Table draws the picked style, restyles in place and ⌘Z walks i
     await activate(p, 'A1:D4')
     const tables = () =>
       p.evaluate(`${api}.getSubTableInfos().map((t) => t.name)`) as Promise<string[]>
-    const look = () => p.screenshot({ clip: { x: 0, y: 60, width: 900, height: 130 } })
-    const formatAsTable = async (label: string) => {
+    // the contextual Table Design tab lingers 700 ms after its table goes: let the ribbon settle before comparing pixels
+    const look = async () => {
+      await p.waitForTimeout(900)
+      return p.screenshot({ clip: { x: 0, y: 60, width: 900, height: 130 } })
+    }
+    const formatAsTable = async (style: string) => {
       await p.locator('[data-ribbon-body] [aria-label="Format as Table"]').first().click()
-      await p.locator('.menu-select-drop button', { hasText: label }).first().click()
+      await p.locator(`.table-style-cell[data-style="${style}"]`).click()
       await p.waitForTimeout(1500)
     }
 
-    await formatAsTable('Light 1 (gray)')
+    await formatAsTable('TableStyleLight1')
     expect(await tables()).toEqual(['Table1'])
     const light = await look()
     // a second style over the same range restyles that table instead of failing on the overlap
-    await formatAsTable('Medium 3 (orange)')
+    await formatAsTable('TableStyleMedium3')
     expect(await tables()).toEqual(['Table1'])
     const orange = await look()
     expect(orange.equals(light), 'the Medium 3 look differs from Light 1').toBe(false)
-    await formatAsTable('Medium 7 (green)')
+    await formatAsTable('TableStyleMedium7')
     expect(await tables()).toEqual(['Table1'])
     expect((await look()).equals(orange), 'the Medium 7 look differs from Medium 3').toBe(false)
 
@@ -247,7 +251,7 @@ test('Format as Table draws the picked style, restyles in place and ⌘Z walks i
     await undo(p)
     expect(await tables()).toEqual([])
     // the undone table is gone from the journal too: the same range takes a new table
-    await formatAsTable('Dark 2 (navy)')
+    await formatAsTable('TableStyleDark2')
     expect(await tables()).toEqual(['Table1'])
   } finally {
     await kill(launched)

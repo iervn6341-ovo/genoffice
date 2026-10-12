@@ -10,6 +10,7 @@ import {
   type FunctionSpec,
 } from './function-catalog'
 import { useI18n, type StringKey } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Insert Function: browse/search the engine's function catalog,
 /// read the syntax, finish the formula in the dialog, apply to the active cell.
@@ -328,6 +329,7 @@ export function InsertFunctionDialog({
   /// Category to open on (the Formulas tab's category buttons pass their own).
   readonly initialCategory?: string
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t, lang } = useI18n()
   const catalog = useMemo(
     () =>

@@ -49,6 +49,22 @@ describe('isLoadArtifact', () => {
     expect(isLoadArtifact(tableArtifact(NEW_UNIT))).toBe(true)
   })
 
+  it('classifies the plain theme registered over a file table as an artifact too', () => {
+    // addTableTheme pushes add-range-theme + set-sheet-table; left as "history" it burned the first undo
+    const themed: CarriedUndoItem = {
+      unitID: NEW_UNIT,
+      undoMutations: [
+        { id: 'sheet.mutation.set-sheet-table' },
+        { id: 'sheet.mutation.remove-range-theme' },
+      ],
+      redoMutations: [
+        { id: 'sheet.mutation.add-range-theme' },
+        { id: 'sheet.mutation.set-sheet-table' },
+      ],
+    }
+    expect(isLoadArtifact(themed)).toBe(true)
+  })
+
   it('keeps cell edits and mixed entries as user history', () => {
     expect(isLoadArtifact(cellItem(NEW_UNIT, 1))).toBe(false)
     const mixed: CarriedUndoItem = {

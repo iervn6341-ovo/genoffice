@@ -50,6 +50,20 @@ import {
   type CellShiftRange,
 } from './cell-shift'
 import { InsertCellsDialog } from './InsertCellsDialog'
+import { FillSeriesDialog, type FillSeriesSeed } from './FillSeriesDialog'
+import { PasteSpecialDialog } from './PasteSpecialDialog'
+import { ResizeTableDialog } from './ResizeTableDialog'
+import { FillAcrossDialog } from './FillAcrossDialog'
+import { NewTableStyleDialog } from './NewTableStyleDialog'
+import { listCustomTableStyles, takenTableStyleNames } from './custom-table-styles'
+import { tableStylePreview } from './table-style-gallery'
+import type { TableDesignOptions } from './table-design'
+import {
+  TABLE_STYLE_GROUPS,
+  tableStyleLabel,
+  type TableStyleFamily,
+  type ThemeColors,
+} from './table-styles'
 import { GoToDialog } from './GoToDialog'
 import { COLOR_SCHEMES, FONT_SCHEMES, THEME_PRESETS } from './themes'
 import { getLang, useI18n, type StringKey } from './i18n/locale'
@@ -79,6 +93,7 @@ import { ConsolidateDialog } from './ConsolidateDialog'
 import type { ConsolidateConfig } from './consolidate'
 import { HeaderFooterDialog, type HeaderFooterResult } from './HeaderFooterDialog'
 import type { HeaderFooterParts } from './edit-journal'
+import { useDialogEscape } from './use-dialog-escape'
 
 // No File tab: file commands live in the macOS
 // application menu (File → Open/Save/Save As) and the toolbar icons.
@@ -86,7 +101,7 @@ const ribbonTabs = ['Home', 'Insert', 'Page Layout', 'Formulas', 'Data', 'Review
 
 /// 'Chart Design' is contextual: it exists only while a chart is selected,
 /// and appears without stealing the active tab.
-type RibbonTab = (typeof ribbonTabs)[number] | 'Chart Design'
+type RibbonTab = (typeof ribbonTabs)[number] | 'Chart Design' | 'Table Design'
 
 // Internal values keep English ids (=== matching, state values unchanged);
 // translated only for display
@@ -99,6 +114,18 @@ const TAB_LABEL: Record<RibbonTab, StringKey> = {
   Review: 'appTabReview',
   View: 'appTabView',
   'Chart Design': 'appTabChartDesign',
+  'Table Design': 'appTabTableDesign',
+}
+
+/// The session-created table under the active cell; its Table Design tab is contextual.
+export interface ActiveTableRibbon {
+  readonly name: string
+  readonly options: TableDesignOptions
+  /// the table's range as A1 text, for Resize Table
+  readonly range: string
+  /// 'file': a table the file already had — its style and banding / column options can be changed, the
+  /// structural controls (name, resize, header / total rows, filter buttons, convert) are for session tables
+  readonly source?: 'session' | 'file'
 }
 
 export interface SelectedChartRibbon {
@@ -255,6 +282,8 @@ interface ExcelShellProps {
   readonly onAutoSaveChange: (on: boolean) => void
   /// Non-null while a floating chart is selected in the grid.
   readonly selectedChart: SelectedChartRibbon | null
+  /// non-null while the active cell is inside a table made in this session
+  readonly activeTable: ActiveTableRibbon | null
   /// Column choices of the active selection, read when the Sort dialog opens.
   readonly onGetSortColumns: () => { label: string; colIndex: number }[]
   /// Effective protection of the active sheet (null = unknown / demo).
@@ -299,6 +328,12 @@ interface ExcelShellProps {
   /// Value of the selection's top-left cell, read when Format Cells opens
   /// (number-format preview).
   readonly onGetAnchorValue: () => number | string | null
+  /// Fill → Series…: the selection's default axis and whether its first cell is a date
+  readonly onGetFillSeriesSeed: () => FillSeriesSeed | null
+  /// the other shown sheets, for Fill → Across Worksheets
+  readonly onGetOtherSheets: () => readonly { id: string; name: string }[]
+  /// the workbook's theme colors, which Format as Table's styles are drawn in
+  readonly onGetThemeColors: () => ThemeColors
   /// A1 label of the active cell, echoed live by the Name Box.
   readonly activeCellA1: string
   /// Name Box / Go To jump; returns an error message, or null on success.
@@ -376,6 +411,9 @@ export function ExcelShell({
   onGetActiveCell,
   onGetSelectionShape,
   onGetAnchorValue,
+  onGetFillSeriesSeed,
+  onGetOtherSheets,
+  onGetThemeColors,
   activeCellA1,
   onGoToReference,
   onListDefinedNames,
@@ -413,6 +451,7 @@ export function ExcelShell({
   autoSave,
   onAutoSaveChange,
   selectedChart,
+  activeTable,
   pageLayout,
   headerFooterRequest = 0,
   calcManual,
@@ -450,6 +489,13 @@ export function ExcelShell({
     mode: CellShiftMode
     initial: CellShiftOption
   } | null>(null)
+  const [fillSeriesSeed, setFillSeriesSeed] = useState<FillSeriesSeed | null>(null)
+  const [showPasteSpecial, setShowPasteSpecial] = useState(false)
+  const [showResizeTable, setShowResizeTable] = useState(false)
+  const [fillAcrossSheets, setFillAcrossSheets] = useState<
+    readonly { id: string; name: string }[] | null
+  >(null)
+  const [showNewTableStyle, setShowNewTableStyle] = useState(false)
   const onGetSelectionShapeRef = useRef(onGetSelectionShape)
   onGetSelectionShapeRef.current = onGetSelectionShape
   const [showHeaderFooter, setShowHeaderFooter] = useState(false)
@@ -589,6 +635,25 @@ export function ExcelShell({
   useEffect(() => {
     if (!selectedChart && activeTab === 'Chart Design') setActiveTab('Home')
   }, [selectedChart, activeTab])
+  // A Table Design change re-creates the table: for an instant there is no table under the cell.
+  // The tab waits a moment before it goes, so the change does not throw the user back to Home.
+  const [lingeringTable, setLingeringTable] = useState<ActiveTableRibbon | null>(null)
+  useEffect(() => {
+    if (activeTable) {
+      setLingeringTable(activeTable)
+      return undefined
+    }
+    const timer = setTimeout(() => setLingeringTable(null), 700)
+    return () => clearTimeout(timer)
+  }, [activeTable])
+  const tableTab = activeTable ?? lingeringTable
+  useEffect(() => {
+    if (!tableTab && activeTab === 'Table Design') setActiveTab('Home')
+  }, [tableTab, activeTab])
+  // a Resize Table dialog left open when the table went must not come back with the next one
+  useEffect(() => {
+    if (!tableTab) setShowResizeTable(false)
+  }, [tableTab])
   // Univer's formula-bar Name Box (the defined-name selector) is the only
   // cell-reference box; the Go To ▾ arrow rides inside the bar next to it.
   // The bar is Univer-owned DOM that can remount with the workbench, so the
@@ -629,9 +694,11 @@ export function ExcelShell({
       document.querySelector('.goto-in-bar')?.remove()
     }
   }, [])
-  const visibleTabs: readonly RibbonTab[] = selectedChart
-    ? [...ribbonTabs, 'Chart Design']
-    : ribbonTabs
+  const visibleTabs: readonly RibbonTab[] = [
+    ...ribbonTabs,
+    ...(selectedChart ? (['Chart Design'] as const) : []),
+    ...(tableTab ? (['Table Design'] as const) : []),
+  ]
   const saveAsTitle = `${t('appSaveAs')} (${platformShortcuts('⇧⌘S')})`
 
   return (
@@ -700,7 +767,7 @@ export function ExcelShell({
           <span className="qa-sep" aria-hidden="true" />
           {visibleTabs.map((tab) => (
             <button
-              className={`${tab === activeTab ? 'active' : ''} ${tab === 'Chart Design' ? 'contextual' : ''}`}
+              className={`${tab === activeTab ? 'active' : ''} ${tab === 'Chart Design' || tab === 'Table Design' ? 'contextual' : ''}`}
               key={tab}
               onClick={() => {
                 collapse.onTabPress(tab === activeTab)
@@ -718,6 +785,7 @@ export function ExcelShell({
 
         <Ribbon
           activeTab={activeTab}
+          themeColors={onGetThemeColors()}
           selectionFormat={selectionFormat}
           sheetHasContent={sheetHasContent}
           sheetProtected={onGetSheetProtection()}
@@ -726,6 +794,7 @@ export function ExcelShell({
           crossHighlightVisible={crossHighlightVisible}
           pageLayout={pageLayout}
           selectedChart={selectedChart}
+          activeTable={tableTab}
           onListNames={() => {
             // Names scoped to another sheet resolve to #NAME? here; only
             // workbook-scoped and active-sheet names are usable in a formula.
@@ -744,7 +813,16 @@ export function ExcelShell({
             else if (command === 'row-height-open') setAxisSizeTarget('row')
             else if (command === 'col-width-open') setAxisSizeTarget('col')
             else if (command === 'link-open') setShowLinkDialog(true)
-            else if (command === 'sort-custom-open') setShowSortDialog(true)
+            else if (command === 'fill-series-open') setFillSeriesSeed(onGetFillSeriesSeed())
+            else if (command === 'fill-across-open') setFillAcrossSheets(onGetOtherSheets())
+            else if (command === 'paste-special-open') setShowPasteSpecial(true)
+            else if (command === 'table-resize-open') setShowResizeTable(true)
+            else if (command === 'table-style-new-open') setShowNewTableStyle(true)
+            else if (command === 'insert-cells-open' || command === 'delete-cells-open') {
+              const mode: CellShiftMode = command === 'insert-cells-open' ? 'insert' : 'delete'
+              const shape = onGetSelectionShapeRef.current()
+              if (shape) setCellShiftDialog({ mode, initial: defaultCellShift(mode, shape.range) })
+            } else if (command === 'sort-custom-open') setShowSortDialog(true)
             else if (command === 'remove-duplicates-open') setShowDedupeDialog(true)
             else if (command === 'name-manager-open') setShowNameManager(true)
             else if (command === 'pivot-open') setShowPivotDialog(true)
@@ -988,6 +1066,66 @@ export function ExcelShell({
           }}
         />
       )}
+      {showPasteSpecial && (
+        <PasteSpecialDialog
+          onApply={(options) =>
+            onCommand(`paste-special-apply:${encodeURIComponent(JSON.stringify(options))}`)
+          }
+          onClose={() => {
+            setShowPasteSpecial(false)
+            // focus returns to the grid so ⌘Z right after OK undoes the paste
+            onCommand('focus-grid')
+          }}
+        />
+      )}
+      {fillAcrossSheets && (
+        <FillAcrossDialog
+          sheets={fillAcrossSheets}
+          onApply={(params) =>
+            onCommand(`fill-across-apply:${encodeURIComponent(JSON.stringify(params))}`)
+          }
+          onClose={() => {
+            setFillAcrossSheets(null)
+            onCommand('focus-grid')
+          }}
+        />
+      )}
+      {showNewTableStyle && (
+        <NewTableStyleDialog
+          taken={takenTableStyleNames()}
+          colors={onGetThemeColors()}
+          onApply={(style) =>
+            onCommand(`table-style-create:${encodeURIComponent(JSON.stringify(style))}`)
+          }
+          onClose={() => {
+            setShowNewTableStyle(false)
+            onCommand('focus-grid')
+          }}
+        />
+      )}
+      {showResizeTable && tableTab && (
+        <ResizeTableDialog
+          range={tableTab.range}
+          onApply={(range) => onCommand(`table-resize:${encodeURIComponent(range)}`)}
+          onClose={() => {
+            setShowResizeTable(false)
+            onCommand('focus-grid')
+          }}
+        />
+      )}
+      {fillSeriesSeed && (
+        <FillSeriesDialog
+          seed={fillSeriesSeed}
+          onApply={(params) =>
+            onCommand(`fill-series:${encodeURIComponent(JSON.stringify(params))}`)
+          }
+          onClose={() => {
+            setFillSeriesSeed(null)
+            // focus returns to the grid so ⌘Z right after OK undoes the series
+            onCommand('focus-grid')
+          }}
+        />
+      )}
       {showGoTo && (
         <GoToDialog
           names={onListDefinedNames()}
@@ -1030,6 +1168,7 @@ function SortDialog({
   readonly onCommand: (command: string) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [hasHeader, setHasHeader] = useState(true)
   const first = columns[0]?.colIndex ?? NO_SORT_LEVEL
@@ -1119,6 +1258,7 @@ function RemoveDuplicatesDialog({
   readonly onCommand: (command: string) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [hasHeader, setHasHeader] = useState(true)
   return (
@@ -1333,6 +1473,7 @@ function LinkDialog({
 }
 
 function Ribbon({
+  themeColors,
   activeTab,
   selectionFormat,
   sheetHasContent,
@@ -1342,6 +1483,7 @@ function Ribbon({
   crossHighlightVisible,
   pageLayout,
   selectedChart,
+  activeTable,
   onCommand,
   onAiRun,
   aiOpen,
@@ -1351,6 +1493,7 @@ function Ribbon({
   onRefreshPivot,
   onIsSelectionInPivot,
 }: {
+  readonly themeColors: ThemeColors
   readonly activeTab: RibbonTab
   readonly selectionFormat: SelectionFormat | null
   readonly sheetHasContent: boolean
@@ -1361,6 +1504,7 @@ function Ribbon({
   readonly crossHighlightVisible: boolean
   readonly pageLayout: PageLayoutEcho
   readonly selectedChart: SelectedChartRibbon | null
+  readonly activeTable: ActiveTableRibbon | null
   readonly onCommand: (command: string) => void
   /** Defined names for the Use in Formula menu. */
   readonly onListNames: () => readonly string[]
@@ -1401,6 +1545,94 @@ function Ribbon({
       <MenuSelect cover label={label} options={options} onPick={onCommand} />
     </div>
   )
+  if (activeTab === 'Table Design' && activeTable) {
+    const fileTable = activeTable.source === 'file'
+    const option = (
+      key: keyof TableDesignOptions,
+      label: StringKey,
+      structural = false,
+    ): React.JSX.Element => (
+      <button
+        key={key}
+        className={`check-item${fileTable && structural ? ' locked' : ''}`}
+        role="checkbox"
+        aria-checked={activeTable.options[key]}
+        disabled={fileTable && structural}
+        data-tip={t(label)}
+        {...(fileTable && structural ? { 'data-tip-detail': t('appFileTableLocked') } : {})}
+        onClick={() => onCommand(`table-option:${key}:${activeTable.options[key] ? '0' : '1'}`)}
+      >
+        <i className="check-box">{activeTable.options[key] ? '✓' : ''}</i>
+        {t(label)}
+      </button>
+    )
+    return (
+      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+        <RibbonGroup label={t('appGroupTableProperties')}>
+          <TableNameField
+            name={activeTable.name}
+            label={t('appTableNameLabel')}
+            disabled={fileTable}
+            onCommit={(name) =>
+              onCommand(
+                `table-rename:${encodeURIComponent(activeTable.name)}:${encodeURIComponent(name)}`,
+              )
+            }
+          />
+          <RibbonButton
+            label={t('appResizeTable')}
+            detail={fileTable ? t('appFileTableLocked') : t('appResizeTableTitle')}
+            symbol="⤡"
+            disabled={fileTable}
+            onClick={() => onCommand('table-resize-open')}
+          />
+        </RibbonGroup>
+        <RibbonGroup label={t('appGroupTableTools')}>
+          <RibbonButton
+            large
+            label={t('appConvertToRange')}
+            detail={fileTable ? t('appFileTableLocked') : t('appConvertToRangeTitle')}
+            symbol="▭"
+            disabled={fileTable}
+            onClick={() => onCommand('table-convert-to-range')}
+          />
+        </RibbonGroup>
+        <RibbonGroup label={t('appGroupTableStyleOptions')}>
+          <div className="check-column">
+            {option('headerRow', 'appTableOptHeaderRow', true)}
+            {option('totalRow', 'appTableOptTotalRow', true)}
+            {option('bandedRows', 'appTableOptBandedRows')}
+          </div>
+          <div className="check-column">
+            {option('firstColumn', 'appTableOptFirstColumn')}
+            {option('lastColumn', 'appTableOptLastColumn')}
+            {option('bandedColumns', 'appTableOptBandedColumns')}
+          </div>
+          <div className="check-column">
+            {option('filterButton', 'appTableOptFilterButton', true)}
+          </div>
+        </RibbonGroup>
+        <RibbonGroup label={t('appGroupTableStyles')}>
+          <div className="ribbon-tool large" data-tip={t('appFormatAsTableTitle')}>
+            <span className="tool-icon-row">
+              <ToolSymbol symbol="▦" />
+              <CaretIcon />
+            </span>
+            <span>
+              <strong>{t('appGroupTableStyles')}</strong>
+            </span>
+            <TableStyleGallerySelect
+              label={t('appGroupTableStyles')}
+              colors={themeColors}
+              custom={listCustomTableStyles().map((style) => style.name)}
+              onPick={(value) => onCommand(`table-style:${value}`)}
+              onNew={() => onCommand('table-style-new-open')}
+            />
+          </div>
+        </RibbonGroup>
+      </div>
+    )
+  }
   if (activeTab === 'Chart Design') {
     const canConvert = Boolean(selectedChart?.convertible && selectedChart.canEdit)
     const canEditChart = Boolean(selectedChart?.canEdit)
@@ -1929,43 +2161,28 @@ function Ribbon({
           label={t('appGroupThemes')}
           fold={{ priority: 3, icon: <ToolSymbol symbol="▤" /> }}
         >
-          {largeMenu(
-            t('appGroupThemes'),
-            '🎨',
-            t('appThemesTitle'),
-            THEME_PRESETS.map((preset) => ({
-              value: `page-layout:theme:${preset.id}`,
-              label: preset.name,
-            })),
-          )}
+          <div className="ribbon-tool large" data-tip={t('appThemesTitle')}>
+            <span className="tool-icon-row">
+              <ToolSymbol symbol="🎨" />
+              <CaretIcon />
+            </span>
+            <span>
+              <strong>{t('appGroupThemes')}</strong>
+            </span>
+            <ThemeGallerySelect kind="theme" label={t('appGroupThemes')} onCommand={onCommand} />
+          </div>
           <div className="row-stack">
             <span className="styles-row" data-tip={t('appThemeColorsTitle')}>
               <ToolSymbol symbol="▤" />
               {t('appColors')}
               <CaretIcon />
-              <MenuSelect
-                cover
-                label={t('appColors')}
-                options={COLOR_SCHEMES.map((scheme) => ({
-                  value: `page-layout:theme-colors:${scheme.id}`,
-                  label: scheme.name,
-                }))}
-                onPick={onCommand}
-              />
+              <ThemeGallerySelect kind="colors" label={t('appColors')} onCommand={onCommand} />
             </span>
             <span className="styles-row" data-tip={t('appThemeFontsTitle')}>
               <ToolSymbol symbol="A" />
               {t('appFonts')}
               <CaretIcon />
-              <MenuSelect
-                cover
-                label={t('appFonts')}
-                options={FONT_SCHEMES.map((scheme) => ({
-                  value: `page-layout:theme-fonts:${scheme.id}`,
-                  label: scheme.name,
-                }))}
-                onPick={onCommand}
-              />
+              <ThemeGallerySelect kind="fonts" label={t('appFonts')} onCommand={onCommand} />
             </span>
           </div>
         </RibbonGroup>
@@ -2740,6 +2957,10 @@ function Ribbon({
           { value: 'paste-special:format', label: t('appPasteFormattingOnly') },
           { value: 'paste-special:col-width', label: t('appPasteColWidths') },
           { value: 'paste-special:besides-border', label: t('appPasteExceptBorders') },
+          { value: 'paste-special:value-numfmt', label: t('appPasteValuesNumFmt') },
+          { value: 'paste-special:formula-numfmt', label: t('appPasteFormulasNumFmt') },
+          { value: 'paste-special:transpose', label: t('appPasteTranspose') },
+          { value: 'paste-special-open', label: t('appPasteSpecialDialog') },
         ])}
         <div className="tool-stack">
           <button
@@ -3122,18 +3343,12 @@ function Ribbon({
             <ToolSymbol symbol="▦" />
             {t('appFormatAsTable')}
             <CaretIcon />
-            <MenuSelect
-              cover
+            <TableStyleGallerySelect
               label="Format as Table"
-              options={[
-                { value: 'TableStyleLight1', label: t('appTableStyleLight1') },
-                { value: 'TableStyleLight9', label: t('appTableStyleLight9') },
-                { value: 'TableStyleMedium2', label: t('appTableStyleMedium2') },
-                { value: 'TableStyleMedium3', label: t('appTableStyleMedium3') },
-                { value: 'TableStyleMedium7', label: t('appTableStyleMedium7') },
-                { value: 'TableStyleDark2', label: t('appTableStyleDark2') },
-              ]}
+              colors={themeColors}
+              custom={listCustomTableStyles().map((style) => style.name)}
               onPick={(value) => onCommand(`format-as-table:${value}`)}
+              onNew={() => onCommand('table-style-new-open')}
             />
           </div>
           <div className="styles-row as-button" data-tip={t('appCellStylesTitle')}>
@@ -3180,34 +3395,40 @@ function Ribbon({
             <CaretIcon />
           </button>
           <div className="inline-tools cell-tools">
-            <button
-              data-tip={t('appInsertRow')}
-              aria-label={t('appInsertRow')}
-              onClick={() => onCommand('insert-row-here')}
-            >
-              <ToolSymbol symbol="⤒" />
-            </button>
-            <button
-              data-tip={t('appDeleteRow')}
-              aria-label={t('appDeleteRow')}
-              onClick={() => onCommand('delete-row-here')}
-            >
-              <ToolSymbol symbol="⤓" />
-            </button>
-            <button
-              data-tip={t('appInsertCol')}
-              aria-label={t('appInsertCol')}
-              onClick={() => onCommand('insert-col-here')}
-            >
-              <ToolSymbol symbol="⇤" />
-            </button>
-            <button
-              data-tip={t('appDeleteCol')}
-              aria-label={t('appDeleteCol')}
-              onClick={() => onCommand('delete-col-here')}
-            >
-              <ToolSymbol symbol="⇥" />
-            </button>
+            <MenuSelect
+              className="select-like compact"
+              label="Insert cells"
+              data-tip={t('appInsertMenuTip')}
+              display={
+                <>
+                  <ToolSymbol symbol="⤒" /> {t('appInsertMenu')}
+                </>
+              }
+              options={[
+                { value: 'insert-cells-open', label: t('appInsertCells') },
+                { value: 'cells-shift:insert:row', label: t('appInsertSheetRows') },
+                { value: 'cells-shift:insert:column', label: t('appInsertSheetColumns') },
+                { value: 'insert-sheet', label: t('appInsertSheet') },
+              ]}
+              onPick={(value) => onCommand(value)}
+            />
+            <MenuSelect
+              className="select-like compact"
+              label="Delete cells"
+              data-tip={t('appDeleteMenuTip')}
+              display={
+                <>
+                  <ToolSymbol symbol="⤓" /> {t('appDeleteMenu')}
+                </>
+              }
+              options={[
+                { value: 'delete-cells-open', label: t('appDeleteCells') },
+                { value: 'cells-shift:delete:row', label: t('appDeleteSheetRows') },
+                { value: 'cells-shift:delete:column', label: t('appDeleteSheetColumns') },
+                { value: 'delete-sheet', label: t('appDeleteSheet') },
+              ]}
+              onPick={(value) => onCommand(value)}
+            />
             <MenuSelect
               className="select-like compact"
               label="Format"
@@ -3277,6 +3498,11 @@ function Ribbon({
               options={[
                 { value: 'down', label: t('appFillDown') },
                 { value: 'right', label: t('appFillRight') },
+                { value: 'up', label: t('appFillUp') },
+                { value: 'left', label: t('appFillLeft') },
+                { value: 'series-open', label: t('appFillSeries') },
+                { value: 'justify', label: t('appFillJustify') },
+                { value: 'across-open', label: t('appFillAcross') },
               ]}
               onPick={(value) => onCommand(`fill-${value}`)}
             />
@@ -3293,6 +3519,9 @@ function Ribbon({
                 { value: 'all', label: t('appClearAll') },
                 { value: 'formats', label: t('appClearFormats') },
                 { value: 'contents', label: t('appClearContents') },
+                { value: 'comments', label: t('appClearComments') },
+                { value: 'hyperlinks', label: t('appClearHyperlinks') },
+                { value: 'remove-hyperlinks', label: t('appRemoveHyperlinks') },
               ]}
               onPick={(value) => onCommand(`clear-${value}`)}
             />
@@ -3566,6 +3795,309 @@ function ShapeGallerySelect({
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/// Table Design → Table Name: Enter or leaving the box commits, Esc puts the old name back.
+function TableNameField({
+  name,
+  label,
+  disabled = false,
+  onCommit,
+}: {
+  readonly name: string
+  readonly label: string
+  readonly disabled?: boolean
+  readonly onCommit: (name: string) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null)
+  // Esc blurs the box, and the blur would commit what was typed: it must not
+  const cancelled = useRef(false)
+  const commit = (): void => {
+    if (cancelled.current) {
+      cancelled.current = false
+      setDraft(null)
+      return
+    }
+    const text = (draft ?? name).trim()
+    setDraft(null)
+    if (text !== name) onCommit(text)
+  }
+  return (
+    <label className="table-name-field">
+      <span>{label}</span>
+      <input
+        value={draft ?? name}
+        aria-label={label}
+        disabled={disabled}
+        spellCheck={false}
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+          else if (event.key === 'Escape') {
+            cancelled.current = true
+            setDraft(null)
+            event.currentTarget.blur()
+          }
+        }}
+      />
+    </label>
+  )
+}
+
+const FAMILY_LABEL: Record<TableStyleFamily, StringKey> = {
+  Light: 'appTableStyleGroupLight',
+  Medium: 'appTableStyleGroupMedium',
+  Dark: 'appTableStyleGroupDark',
+}
+
+/// Page Layout → Themes / Colors / Fonts: a gallery of cards that previews a choice live while the
+/// pointer is on it (the grid recolors), and puts everything back when the pointer leaves, the
+/// gallery closes, or Esc is pressed — only a click applies it (and is one undo step).
+function ThemeGallerySelect({
+  kind,
+  label,
+  onCommand,
+}: {
+  readonly kind: 'theme' | 'colors' | 'fonts'
+  readonly label: string
+  readonly onCommand: (command: string) => void
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const previewing = useRef(false)
+  const clearTimer = (): void => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
+  // moving between cards must not repaint the grid for every card it crosses
+  const preview = (id: string): void => {
+    clearTimer()
+    timerRef.current = setTimeout(() => {
+      previewing.current = true
+      onCommand(`page-layout:theme-preview:${kind}:${id}`)
+    }, 140)
+  }
+  const endPreview = (immediate: boolean): void => {
+    clearTimer()
+    const end = (): void => {
+      if (!previewing.current) return
+      previewing.current = false
+      onCommand('page-layout:theme-preview-end')
+    }
+    if (immediate) end()
+    else timerRef.current = setTimeout(end, 140)
+  }
+  const close = (): void => {
+    setOpen(false)
+    endPreview(true)
+  }
+  // outside press / window blur / shell chrome press — the shared hook
+  useDismissablePopover(open, close, { inside: () => [wrapRef.current] })
+  useEscapeClose(open, close)
+  // a gallery that goes away while open (the ribbon folding on a resize) must not leave its preview on
+  const onCommandRef = useRef(onCommand)
+  onCommandRef.current = onCommand
+  useEffect(
+    () => () => {
+      clearTimer()
+      if (previewing.current) {
+        previewing.current = false
+        onCommandRef.current('page-layout:theme-preview-end')
+      }
+    },
+    [],
+  )
+  const entries =
+    kind === 'theme'
+      ? THEME_PRESETS.map((preset) => ({
+          id: preset.id,
+          name: preset.name,
+          colors: preset.colors.values,
+          font: preset.fonts.minor,
+        }))
+      : kind === 'colors'
+        ? COLOR_SCHEMES.map((scheme) => ({
+            id: scheme.id,
+            name: scheme.name,
+            colors: scheme.values,
+            font: undefined,
+          }))
+        : FONT_SCHEMES.map((scheme) => ({
+            id: scheme.id,
+            name: scheme.name,
+            colors: undefined,
+            font: scheme.minor,
+          }))
+  return (
+    <div ref={wrapRef} className="menu-select menu-select-cover">
+      <button
+        type="button"
+        className="cover-select"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+      />
+      {open && (
+        <div
+          className={`menu-select-drop theme-gallery theme-gallery-${kind}`}
+          role="listbox"
+          aria-label={label}
+          onMouseLeave={() => endPreview(false)}
+        >
+          {entries.map((entry) => (
+            <button
+              type="button"
+              key={entry.id}
+              role="option"
+              aria-selected={false}
+              className="theme-card"
+              data-theme-id={entry.id}
+              data-tip={entry.name}
+              onMouseEnter={() => preview(entry.id)}
+              onFocus={() => preview(entry.id)}
+              onClick={() => {
+                clearTimer()
+                previewing.current = false
+                setOpen(false)
+                onCommand(
+                  `page-layout:${kind === 'theme' ? 'theme' : kind === 'colors' ? 'theme-colors' : 'theme-fonts'}:${entry.id}`,
+                )
+              }}
+            >
+              <span
+                className="theme-card-sample"
+                style={entry.font ? { fontFamily: entry.font } : undefined}
+              >
+                Aa
+              </span>
+              {entry.colors && (
+                <span className="theme-card-swatches" aria-hidden="true">
+                  {entry.colors.slice(4, 10).map((color, index) => (
+                    <i key={index} style={{ background: color }} />
+                  ))}
+                </span>
+              )}
+              <span className="theme-card-name">{entry.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/// Format as Table's gallery: Excel's 60 built-in styles in its three groups, each drawn as the
+/// little table it makes (thumbnail colors come from the workbook's theme, like Excel's).
+function TableStyleGallerySelect({
+  label,
+  colors,
+  custom,
+  onPick,
+  onNew,
+}: {
+  readonly label: string
+  readonly colors: ThemeColors
+  /// the names of the custom styles of this workbook
+  readonly custom: readonly string[]
+  readonly onPick: (style: string) => void
+  readonly onNew: () => void
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  // outside press / window blur / shell chrome press — the shared hook
+  useDismissablePopover(open, () => setOpen(false), { inside: () => [wrapRef.current] })
+  useEscapeClose(open, () => setOpen(false))
+  return (
+    <div ref={wrapRef} className="menu-select menu-select-cover">
+      <button
+        type="button"
+        className="cover-select"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      />
+      {open && (
+        <div className="menu-select-drop table-style-gallery" role="listbox" aria-label={label}>
+          {TABLE_STYLE_GROUPS.map((group) => (
+            <div key={group.family}>
+              <div className="rb-drop-title">{t(FAMILY_LABEL[group.family])}</div>
+              <div className="table-style-grid">
+                {group.names.map((name) => {
+                  const text = `${t(FAMILY_LABEL[group.family])} ${tableStyleLabel(name).split(' ')[1]}`
+                  return (
+                    <button
+                      type="button"
+                      key={name}
+                      role="option"
+                      aria-selected={false}
+                      className="table-style-cell"
+                      data-style={name}
+                      data-tip={text}
+                      aria-label={text}
+                      onClick={() => {
+                        setOpen(false)
+                        onPick(name)
+                      }}
+                    >
+                      <span className="table-style-preview" aria-hidden="true">
+                        {tableStylePreview(name, colors).map((cell, index) => (
+                          <i key={index} style={cell} />
+                        ))}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+          {custom.length > 0 && (
+            <div>
+              <div className="rb-drop-title">{t('appTableStyleCustom')}</div>
+              <div className="table-style-grid">
+                {custom.map((name) => (
+                  <button
+                    type="button"
+                    key={name}
+                    role="option"
+                    aria-selected={false}
+                    className="table-style-cell"
+                    data-style={name}
+                    data-tip={name}
+                    aria-label={name}
+                    onClick={() => {
+                      setOpen(false)
+                      onPick(name)
+                    }}
+                  >
+                    <span className="table-style-preview" aria-hidden="true">
+                      {tableStylePreview(name, colors).map((cell, index) => (
+                        <i key={index} style={cell} />
+                      ))}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            className="table-style-new"
+            onClick={() => {
+              setOpen(false)
+              onNew()
+            }}
+          >
+            {t('appNewTableStyle')}
+          </button>
         </div>
       )}
     </div>

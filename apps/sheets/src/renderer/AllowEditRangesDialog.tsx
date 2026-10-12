@@ -6,6 +6,7 @@
 import { useState } from 'react'
 
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 export interface AllowEditRange {
   readonly name: string
@@ -27,6 +28,7 @@ export function AllowEditRangesDialog({
   readonly onApply: (ranges: readonly AllowEditRange[]) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [working, setWorking] = useState<readonly AllowEditRange[]>(ranges)
   const [name, setName] = useState(() => {

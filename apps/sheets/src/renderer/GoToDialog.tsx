@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useI18n } from './i18n/locale'
 
 import type { GoToNameEntry } from './goto'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Go To (⌘G / Ctrl+G), minimal: a reference input plus the
 /// workbook's defined names. Go (or Enter, or double-clicking a name) hands
@@ -18,6 +19,7 @@ export function GoToDialog({
   readonly onGo: (ref: string) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [reference, setReference] = useState('')
   const [error, setError] = useState<string | null>(null)

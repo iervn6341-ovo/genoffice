@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { useI18n, type StringKey } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Insert → Symbol, minimal: a tabbed grid of common special
 /// characters. Clicking a symbol emits it to App (which appends it to the
@@ -179,6 +180,7 @@ export function SymbolDialog({
   readonly onInsert: (char: string) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [categoryIndex, setCategoryIndex] = useState(0)
   const active = SYMBOL_CATEGORIES[categoryIndex]

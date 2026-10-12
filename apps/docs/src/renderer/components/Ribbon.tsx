@@ -100,6 +100,7 @@ import {
 import {
   hasSide,
   insertHorizontalLine,
+  linesWithWordSpacing,
   presetBorders,
   toggleSide,
   type BorderSide as ParaBorderSide,
@@ -1440,6 +1441,12 @@ function RibbonInner({
   /** drawn paragraph border sides of the caret's paragraph ("tblrh" subset) */
   const paraBordersNow =
     typeof fs.paraBorders === 'string' && fs.paraBorders ? fs.paraBorders : null
+  /** a Borders menu choice: the sides drawn, each new one with Word's gap to the text */
+  const setBorderSides = (next: string | null) =>
+    setParaAttr({
+      borders: next,
+      borderLines: linesWithWordSpacing(next, activeParaAttrs(ed).borderLines),
+    })
   const [bordersDialog, setBordersDialog] = useState(false)
   // Borders ▾ → View Gridlines: dotted cell outlines on the page (never printed, never saved)
   const [tableGridlines, setTableGridlines] = useState(false)
@@ -3690,7 +3697,7 @@ function RibbonInner({
                         <button
                           key={side}
                           className={hasSide(paraBordersNow, side) ? 'active' : ''}
-                          onClick={() => setParaAttr({ borders: toggleSide(paraBordersNow, side) })}
+                          onClick={() => setBorderSides(toggleSide(paraBordersNow, side))}
                         >
                           {icon}
                           {t(key)}
@@ -3706,33 +3713,27 @@ function RibbonInner({
                       </button>
                       <button
                         className={paraBordersNow === 'tblrh' ? 'active' : ''}
-                        onClick={() =>
-                          setParaAttr({ borders: presetBorders(paraBordersNow, 'all') })
-                        }
+                        onClick={() => setBorderSides(presetBorders(paraBordersNow, 'all'))}
                       >
                         <IconBorderAll />
                         {t('ribbonAllBorders')}
                       </button>
                       <button
                         className={paraBordersNow === 'tblr' ? 'active' : ''}
-                        onClick={() =>
-                          setParaAttr({ borders: presetBorders(paraBordersNow, 'outside') })
-                        }
+                        onClick={() => setBorderSides(presetBorders(paraBordersNow, 'outside'))}
                       >
                         <IconBorderOuter />
                         {t('ribbonOuterBorders')}
                       </button>
                       <button
-                        onClick={() =>
-                          setParaAttr({ borders: presetBorders(paraBordersNow, 'inside') })
-                        }
+                        onClick={() => setBorderSides(presetBorders(paraBordersNow, 'inside'))}
                       >
                         <IconBorderInner />
                         {t('ribbonInnerBorders')}
                       </button>
                       <button
                         className={hasSide(paraBordersNow, 'h') ? 'active' : ''}
-                        onClick={() => setParaAttr({ borders: toggleSide(paraBordersNow, 'h') })}
+                        onClick={() => setBorderSides(toggleSide(paraBordersNow, 'h'))}
                       >
                         <IconBorderInsideH />
                         {t('ribbonBorderInsideH')}

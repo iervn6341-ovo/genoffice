@@ -9,6 +9,7 @@
  * would produce.
  */
 import type { WorkbookCellStyle } from '../shared/desktop-api'
+import { BUILT_IN_COLOR_SCHEMES, BUILT_IN_FONT_SCHEMES, BUILT_IN_THEMES } from './theme-defs'
 
 export interface ThemeColorScheme {
   readonly id: string
@@ -47,7 +48,7 @@ const scheme = (
   values: [lt1, dk1, lt2, dk2, ...accents, hlink, '954F72'].map((value) => `#${value}`),
 })
 
-export const COLOR_SCHEMES: readonly ThemeColorScheme[] = [
+const APP_COLOR_SCHEMES: readonly ThemeColorScheme[] = [
   scheme(
     'office',
     'Office',
@@ -130,13 +131,13 @@ export const COLOR_SCHEMES: readonly ThemeColorScheme[] = [
   ),
 ]
 
-export const FONT_SCHEMES: readonly ThemeFontScheme[] = [
+const APP_FONT_SCHEMES: readonly ThemeFontScheme[] = [
   { id: 'office', name: 'Office', major: 'Calibri Light', minor: 'Calibri' },
   { id: 'arial', name: 'Arial', major: 'Arial', minor: 'Arial' },
   { id: 'georgia', name: 'Georgia', major: 'Georgia', minor: 'Georgia' },
   { id: 'candara', name: 'Candara', major: 'Candara', minor: 'Candara' },
   { id: 'segoe', name: 'Segoe UI', major: 'Segoe UI', minor: 'Segoe UI' },
-  { id: 'trebuchet', name: 'Trebuchet MS', major: 'Trebuchet MS', minor: 'Calibri' },
+  { id: 'trebuchet', name: 'Trebuchet MS / Calibri', major: 'Trebuchet MS', minor: 'Calibri' },
 ]
 
 const FONT_BY_THEME: Record<string, string> = {
@@ -150,12 +151,75 @@ const FONT_BY_THEME: Record<string, string> = {
   midnight: 'office',
 }
 
-export const THEME_PRESETS: readonly ThemePreset[] = COLOR_SCHEMES.map((colors) => ({
+const slug = (name: string): string =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+const sameColors = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((value, at) => value.toUpperCase() === b[at]!.toUpperCase())
+
+/// Excel's own schemes follow the app's Office one; those that repeat a scheme already listed are left out
+const BUILT_IN_COLORS: ThemeColorScheme[] = BUILT_IN_COLOR_SCHEMES.filter(
+  (scheme) => !APP_COLOR_SCHEMES.some((own) => sameColors(own.values, scheme.values)),
+).map((scheme) => ({ id: slug(scheme.name), name: scheme.name, values: scheme.values }))
+
+/// the app's classic Office palette first, then Excel's built-in schemes, then the app's own extras
+export const COLOR_SCHEMES: readonly ThemeColorScheme[] = [
+  ...APP_COLOR_SCHEMES.slice(0, 1),
+  ...BUILT_IN_COLORS.filter((scheme) => !APP_COLOR_SCHEMES.some((own) => own.id === scheme.id)),
+  ...APP_COLOR_SCHEMES.slice(1),
+]
+
+const BUILT_IN_FONTS: ThemeFontScheme[] = BUILT_IN_FONT_SCHEMES.filter(
+  (scheme) =>
+    !APP_FONT_SCHEMES.some((own) => own.major === scheme.major && own.minor === scheme.minor),
+).map((scheme) => ({
+  id: slug(scheme.name),
+  name: scheme.name,
+  major: scheme.major,
+  minor: scheme.minor,
+}))
+
+export const FONT_SCHEMES: readonly ThemeFontScheme[] = [
+  ...APP_FONT_SCHEMES.slice(0, 1),
+  ...BUILT_IN_FONTS.filter((scheme) => !APP_FONT_SCHEMES.some((own) => own.id === scheme.id)),
+  ...APP_FONT_SCHEMES.slice(1),
+]
+
+const APP_THEME_PRESETS: readonly ThemePreset[] = APP_COLOR_SCHEMES.map((colors) => ({
   id: colors.id,
   name: colors.name,
   colors,
-  fonts: FONT_SCHEMES.find((fonts) => fonts.id === FONT_BY_THEME[colors.id]) ?? FONT_SCHEMES[0]!,
+  fonts:
+    APP_FONT_SCHEMES.find((fonts) => fonts.id === FONT_BY_THEME[colors.id]) ?? APP_FONT_SCHEMES[0]!,
 }))
+
+/// Excel's built-in themes (the classic Office one is the app's own first preset)
+const BUILT_IN_THEME_PRESETS: readonly ThemePreset[] = BUILT_IN_THEMES.filter(
+  (theme) =>
+    !sameColors(theme.colors.values, APP_COLOR_SCHEMES[0]!.values) ||
+    theme.fonts.major !== APP_FONT_SCHEMES[0]!.major,
+).map((theme) => ({
+  id: slug(theme.name),
+  name: theme.name,
+  colors: { id: slug(theme.colors.name), name: theme.colors.name, values: theme.colors.values },
+  fonts: {
+    id: slug(theme.fonts.name),
+    name: theme.fonts.name,
+    major: theme.fonts.major,
+    minor: theme.fonts.minor,
+  },
+}))
+
+export const THEME_PRESETS: readonly ThemePreset[] = [
+  ...APP_THEME_PRESETS.slice(0, 1),
+  ...BUILT_IN_THEME_PRESETS.filter(
+    (preset) => !APP_THEME_PRESETS.some((own) => own.id === preset.id),
+  ),
+  ...APP_THEME_PRESETS.slice(1),
+]
 
 function hexToRgb(hex: string): [number, number, number] | null {
   const value = hex.replace(/^#/, '')

@@ -18,6 +18,7 @@ import {
   toSaveSparklineAdds,
   toSaveStructuralOps,
   toSaveTableAdds,
+  toSaveTableEdits,
   toSaveVisualAdds,
   toSaveVisualEdits,
 } from './edit-journal'
@@ -32,6 +33,7 @@ import { t } from './i18n/locale'
 import { abortStagedEditsTransfer, stageEditsForSave, type StagedEdits } from './save-edits-staging'
 import { showToast } from './toast-bus'
 import { captureUndoCarry, hasPendingUndoCarry, stashUndoCarry } from './undo-carry'
+import { customStylesUsedBy, saveCustomTableStylesTo, toWireStyle } from './custom-table-styles'
 import {
   collectCfStates,
   getScrollAnchor,
@@ -140,6 +142,15 @@ export async function handleSave(
   const visualEdits = toSaveVisualEdits(state.editJournal)
   const visualAdditions = toSaveVisualAdds(state.editJournal)
   const tableAdditions = toSaveTableAdds(state.editJournal)
+  // the custom table styles those tables name (the gateway leaves one the file already has alone)
+  const tableStyleAdditions = customStylesUsedBy(tableAdditions.map((table) => table.style)).map(
+    toWireStyle,
+  )
+  // Table Design on the file's own tables: the table parts' style info (+ the custom styles it names)
+  const tableEdits = toSaveTableEdits(state.editJournal)
+  const editStyleAdditions = customStylesUsedBy(tableEdits.map((table) => table.style)).map(
+    toWireStyle,
+  )
   const pivotAdditions = toSavePivotAdds(state.editJournal)
   const sparklineAdditions = toSaveSparklineAdds(state.editJournal)
   const sheetOps = toSaveSheetOps(state.editJournal)
@@ -378,6 +389,10 @@ export async function handleSave(
     visualEdits,
     visualAdditions,
     tableAdditions,
+    ...(tableStyleAdditions.length > 0 || editStyleAdditions.length > 0
+      ? { tableStyleAdditions: [...tableStyleAdditions, ...editStyleAdditions] }
+      : {}),
+    ...(tableEdits.length > 0 ? { tableEdits } : {}),
     pivotAdditions,
     sheetOps,
     sheetOrder,
@@ -429,6 +444,14 @@ export async function handleSave(
       visualEdits,
       visualAdditions,
       tableAdditions: splitSave && heldTables.length > 0 ? [] : tableAdditions,
+      ...(() => {
+        const styles =
+          splitSave && heldTables.length > 0
+            ? editStyleAdditions
+            : [...tableStyleAdditions, ...editStyleAdditions]
+        return styles.length > 0 ? { tableStyleAdditions: styles } : {}
+      })(),
+      ...(tableEdits.length > 0 ? { tableEdits } : {}),
       pivotAdditions: splitSave && heldPivots.length > 0 ? [] : pivotAdditions,
       sheetOps,
       sheetOrder,
@@ -481,6 +504,8 @@ export async function handleSave(
           : null,
       )
       ctx.stashViewRestore(viewAtSave)
+      // the reopened file is this one: the custom table styles made so far stay
+      saveCustomTableStylesTo(result.file.path)
       ctx.openLazyWorkbook(result.file)
       const saved = t('appSaved')
       ctx.setMessage(saved)
@@ -501,6 +526,7 @@ export async function handleSave(
         visualEdits: [],
         visualAdditions: [],
         tableAdditions: heldTables,
+        ...(tableStyleAdditions.length > 0 && heldTables.length > 0 ? { tableStyleAdditions } : {}),
         pivotAdditions: heldPivots,
         sheetOps: [],
         sheetOrder: [],
@@ -524,11 +550,14 @@ export async function handleSave(
       if (ctx.lazyWorkbookRef.current !== state) return { ok: false }
       if (second.canceled) {
         ctx.stashViewRestore(viewAtSave)
+        saveCustomTableStylesTo(result.file.path)
         ctx.openLazyWorkbook(result.file)
         ctx.setMessage(t('appSaveSecondCanceled'))
         return { ok: false }
       }
       ctx.stashViewRestore(viewAtSave)
+      // the reopened file is the second phase's: the custom table styles made so far stay
+      saveCustomTableStylesTo(second.file.path)
       ctx.openLazyWorkbook(second.file)
       const saved = t('appSavedTwoPhase')
       ctx.setMessage(saved)
@@ -537,6 +566,7 @@ export async function handleSave(
     } catch (error: unknown) {
       if (ctx.lazyWorkbookRef.current !== state) return { ok: false }
       ctx.stashViewRestore(viewAtSave)
+      saveCustomTableStylesTo(result.file.path)
       ctx.openLazyWorkbook(result.file)
       const failed = t('appSaveSecondFailed', {
         reason: error instanceof Error ? error.message : String(error),

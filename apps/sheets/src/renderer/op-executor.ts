@@ -55,6 +55,7 @@ import {
   structuralDeleteFormulaError,
   type StreamedRefSheet,
 } from './plan-operations'
+import { deleteNotesUndoable, setNoteUndoable } from './note-undo'
 import { aiBulkUndoGate, journalSuppression } from './univer-state'
 import type {
   ActiveWorkbook,
@@ -1501,17 +1502,31 @@ async function executeOp(op: PlannedOp, run: OpRun): Promise<void> {
     const target = sheetById(op.sheetId)
     const noteRange = target.getRange(op.address)
     if (op.text === null) {
-      noteRange.deleteNote()
+      // the facade's deleteNote() pushes no undo entry, so the removal must be pushed by hand
+      const existing = noteRange.getNote()
+      if (existing) await deleteNotesUndoable(runtime, op.sheetId, [existing])
     } else {
       const cell = parseAddress(op.address)
-      noteRange.createOrUpdateNote({
-        id: `note-${op.sheetId}-${cell.row}-${cell.column}`,
-        row: cell.row,
-        col: cell.column,
-        width: 220,
-        height: 90,
-        note: op.text,
-      })
+      // like the delete above, the facade's createOrUpdateNote() pushes no undo entry; an existing
+      // note keeps its id and size, and ⌘Z puts it back
+      const existing = noteRange.getNote()
+      await setNoteUndoable(
+        runtime,
+        op.sheetId,
+        {
+          // unique: a note keeps its id when a row insert moves it, so an id built from this cell could be
+          // another note's (Univer finds a note by id first)
+          id:
+            existing?.id ??
+            `note-${op.sheetId}-${cell.row}-${cell.column}-${crypto.randomUUID().slice(0, 8)}`,
+          row: cell.row,
+          col: cell.column,
+          width: existing?.width ?? 220,
+          height: existing?.height ?? 90,
+          note: op.text,
+        },
+        existing ?? null,
+      )
     }
   } else {
     ctx.chartEditRef.current(

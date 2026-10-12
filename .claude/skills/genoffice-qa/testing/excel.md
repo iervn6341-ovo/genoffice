@@ -488,3 +488,44 @@ Verify at minimum:
   no repair prompt, and the values and formats must match.
 - **Rust sidecar:** run `cargo test` in `apps/sheets/native/xlsx-engine`
   after changing reader code.
+- **Real Excel is scriptable** where it is installed (Windows: `New-Object -ComObject Excel.Application`,
+  headless). Read the behavior through COM first (`Range.DataSeries / FillUp / PasteSpecial / ClearHyperlinks`,
+  `Workbook.TableStyles`, `ListObject.Unlist`), pin it in a unit test, then open the xlsx the app saved
+  (`Workbooks.Open(path, 0, $true)`) and read links / notes / values / `ListObjects` back. Always wrap a
+  probe in try/catch and `Quit()` in `finally`.
+- **Windows runs:** `apps/sheets` `npm run build` needs `cargo`; without it use `npx electron-vite build`
+  (the sidecar is prebuilt) and `npm run build -w @genoffice/shell` after touching `apps/*/src/main`.
+  A new blank workbook is already file-backed ("Streaming … 1 rows available"): bulk edits must go through
+  `ensureRangeResident` (`lazy-resident.ts`). Read raw numbers with `getRawValues()` — `getValues()` returns
+  the display text of formatted cells (`#######` in a narrow column). Univer's `deleteNote()` pushes no undo
+  entry; use `note-undo.ts`. Pointer-location pitfalls: `[aria-label="Themes"]` also matches the ribbon
+  *group* — target `.cover-select[aria-label=…]`; a selection draws a blue wash over cells, so deselect
+  before sampling screenshot pixels.
+- **Specs for the Home / table / theme work:** `sheets-home-gaps` (Fill, Series, Clear, Cells menus),
+  `sheets-home-gaps-save` (save → read xlsx → reopen; `QA_KEEP_DIR=<dir>` keeps the saved files for Excel),
+  `sheets-paste-special`, `sheets-paste-extras`, `sheets-table-gallery`, `sheets-table-design`,
+  `sheets-table-toggles` (Header / Total Row, Filter Button, Resize), `sheets-table-new-style`,
+  `sheets-file-table-design`, `sheets-fill-extras`, `sheets-undo-after-save`, `sheets-theme-gallery`.
+- **Tables across a Save:** a save reopens the workbook, so a table made in the session becomes the *file's*
+  table. To test Table Design on a file table, make the table, Save As, wait for `tableAdds()` to be empty,
+  then continue (see `sheets-file-table-design`). Undo after the save works through the *effective* look
+  (journal over file); assert it by saving again and reading `xl/tables/tableN.xml`, then open the files
+  in Excel (`QA_KEEP_DIR`, `ListObjects(1).TableStyle.Name`, `ShowTableStyle…`, `ShowTotals`, `ShowHeaders`).
+- **Table looks are pixels:** compare the *set of colorful colors* (≥250 px each) before / after a restyle
+  instead of absolute hex — chrome colors are the same in both; move the selection off the table first.
+  Univer draws only the first range-theme rule that hits a cell, so a table's own plain theme must be
+  removed before a laid theme is visible; overlapping rules fail silently.
+- **Open → first undo:** the load-time `addTableTheme` entry once made the first ⌘Z after opening a
+  workbook with a table a no-op; `undo-carry.ts` `DECORATION_MUTATIONS` now lists `add-range-theme` /
+  `remove-range-theme`. If an undo "does nothing" right after open, look at the stack first.
+- **Don't rewrite repo files with Python text mode on Windows** (LF → CRLF); `node tools/format-changed.mjs --write`
+  repairs it, `--check` verifies.
+- **Ribbon sweep** (`e2e/sheets-ribbon-audit.spec.ts`, ~14 min for all seven tabs; `AUDIT_TABS`, `AUDIT_CONTROLS`,
+  `AUDIT_SKIP`, `AUDIT_OUT`): a "failed" click that stops at *scrolling into view* is usually something on top of
+  the item — read `document.elementFromPoint` at its centre before blaming the item (the AI panel's 6px resize
+  handle once covered the Size menu). The sweep restarts the window for each dropdown and each tab; state left by
+  the previous tab's last button (an open note editor) makes the next tab's first dropdown fail spuriously.
+  A dialog that Esc "does not close" must be checked from the ribbon (focus on the grid), not with the focus
+  already inside it; `use-dialog-escape.ts` is the shared rule for modal dialogs.
+- **`QA_KEEP_DIR` must exist** before the run: the specs that keep their saved workbooks `copyFile` into it in a
+  `finally` and fail with `ENOENT` otherwise, which reads like a product failure.

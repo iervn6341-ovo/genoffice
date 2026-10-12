@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Dropdown } from '@genoffice/ui'
 
 import { useI18n, type StringKey } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Native OOXML pivot table dialog: creates a real PivotTable part (not
 /// formula-based) via the same add_pivot pathway the AI assistant uses.
@@ -129,6 +130,7 @@ export function PivotDialog({
   readonly onCreate: (config: OoXmlPivotConfig) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   // Row/column dimensions: ordered multi-select (outer first) with add/remove and
   // move up/down; column dimensions may be empty.

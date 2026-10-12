@@ -162,6 +162,7 @@ import {
   loadAutoHeightSuppression,
   lazyFileSheetId,
   lazySheetMeta,
+  restyledFileTables,
   type ActiveWorkbook,
   type LazyWorkbookState,
   type PinnedClosureCell,
@@ -4763,6 +4764,8 @@ export function applyTableBanding(
     if (!table.styleName && !table.headerFill && !table.headerFontColor && !table.stripeFill) {
       continue
     }
+    // Table Design restyled this table: range themes draw its look now
+    if (restyledFileTables.has(table)) continue
     // Colors are resolved sidecar-side from the workbook's real theme accents
     // (Light/Medium/Dark variant rules) or the file's custom <tableStyle>
     // dxfs; the literals are a last-resort fallback.

@@ -295,6 +295,9 @@ import { installSupportedFunctionProbe } from './function-registry-probe'
 import { installCellFilenameFunction } from './cell-function'
 import { installFormulaLexerFix } from './formula-lexer-fix'
 import { installErrorValueAlignment } from './error-value-align'
+import { installPhantomHeaderInterceptor } from './phantom-header'
+import { openCustomTableStylesFor } from './custom-table-styles'
+import { otherSheets } from './fill-across'
 import { installFormulaNewlineDisplay } from './formula-newline-display'
 import { installCfDisplayKeyCompare } from './cf-duplicate-key'
 import { installCfFormulaFold } from './cf-formula-fold'
@@ -325,6 +328,10 @@ import { registerExcelJumpNav } from './excel-jump-nav'
 import { registerExcelShortcuts } from './excel-shortcuts'
 import { installCopyMaterialize } from './copy-materialize'
 import { CELL_SHIFT_COMMAND_IDS } from './cell-shift'
+import { fillSeriesSeed } from './fill-actions'
+import { DEFAULT_THEME_COLORS } from './table-styles'
+import { sessionTableAt, tableOptionsOf } from './table-design'
+import { readCopiedCells } from './paste-source'
 import { applyUniverLocale, insertRowsBelowLocale, numberAsTextAlertLocale } from './univer-locales'
 import { installRuleDetail } from './univer-rule-detail'
 import { installActiveCellDataValidationChrome } from './data-validation-dropdown'
@@ -395,7 +402,14 @@ import { circularCells, formulaDependencyTrees, type FormulaCell } from './circu
 
 /** formula count above which the circular-reference indicator is not recomputed */
 const CIRCULAR_SCAN_LIMIT = 20_000
-import { ExcelShell } from './ExcelShell'
+import { ExcelShell, type ActiveTableRibbon } from './ExcelShell'
+import {
+  designOptionsOf,
+  effectiveLookOf,
+  fileTableAt,
+  prefetchFileTableInfo,
+  setFileTableRenderer,
+} from './file-table-design'
 import { RecoveryDialog } from './RecoveryDialog'
 import { ToastHost } from './toast'
 import { AdvancedFilterDialog, type AdvancedFilterColumn } from './AdvancedFilterDialog'
@@ -509,6 +523,11 @@ export function App(): React.JSX.Element {
   const [prompt, setPrompt] = useState('')
   const [preview, setPreview] = useState<ChangePlan | null>(null)
   const [_revision, setRevision] = useState(0)
+  // undo / redo of Table Design on a file's table restore asynchronously: they nudge the ribbon through this
+  useEffect(() => {
+    setFileTableRenderer(() => setRevision((value) => value + 1))
+    return () => setFileTableRenderer(null)
+  }, [])
   const [workbookFile, setWorkbookFile] = useState<WorkbookFile | null>(null)
   const [pendingEdits, setPendingEdits] = useState(0)
   /// Whether any cell in the workbook has content — the ribbon's one-click AI
@@ -1682,6 +1701,8 @@ export function App(): React.JSX.Element {
       () => lazyWorkbookRef.current?.file.date1904 === true,
     )
     const errorAlignDisposable = installErrorValueAlignment(runtime)
+    // the empty row above a table without a header row shows no column names
+    const phantomHeaderDisposable = installPhantomHeaderInterceptor(runtime, lazyWorkbookRef)
     // CELL("filename") resolves the session's on-disk path; converted
     // imports (needsSaveAs) count as never-saved, like Excel.
     const cellFilenameDisposable = installCellFilenameFunction(runtime, () => {
@@ -2873,6 +2894,7 @@ export function App(): React.JSX.Element {
       functionProbeDisposable.dispose()
       numberFormatFixDisposable.dispose()
       errorAlignDisposable.dispose()
+      phantomHeaderDisposable.dispose()
       cellFilenameDisposable.dispose()
       rateFallbackDisposable.dispose()
       ifsEmptySetDisposable.dispose()
@@ -3775,6 +3797,45 @@ export function App(): React.JSX.Element {
     }
   }
 
+  /// the session table under the active cell, for the contextual Table Design tab (re-read on
+  /// every render: the cell moving and a journal change both re-render the App)
+  function activeTableRibbon(): ActiveTableRibbon | null {
+    const state = lazyWorkbookRef.current
+    const workbook = univerRef.current?.univerAPI.getActiveWorkbook()
+    const sheetId = workbook?.getActiveSheet()?.getSheetId()
+    const active = workbook?.getActiveRange()
+    if (!state || !sheetId || !active) return null
+    const entry = sessionTableAt(
+      state.editJournal.tableAdds,
+      sheetId,
+      active.getRow(),
+      active.getColumn(),
+    )
+    if (entry) {
+      return {
+        name: entry.name,
+        options: tableOptionsOf(entry),
+        range:
+          `${columnLabel(entry.area.startColumn)}${entry.area.startRow + 1}:` +
+          `${columnLabel(entry.area.endColumn)}${entry.area.endRow + 1}`,
+        source: 'session',
+      }
+    }
+    // a table the file already had: Table Design changes its style and banding / column options
+    const fileTable = fileTableAt(state, sheetId, active.getRow(), active.getColumn())
+    if (!fileTable) return null
+    prefetchFileTableInfo(state, fileTable.name, () => setRevision((value) => value + 1))
+    const { area } = fileTable
+    return {
+      name: fileTable.name,
+      options: designOptionsOf(fileTable, effectiveLookOf(state, fileTable)),
+      range:
+        `${columnLabel(area.startColumn)}${area.startRow + 1}:` +
+        `${columnLabel(area.endColumn)}${area.endRow + 1}`,
+      source: 'file',
+    }
+  }
+
   function selectionLinkTarget(
     range: NonNullable<ReturnType<ActiveWorkbook['getActiveRange']>>,
   ): string | null {
@@ -3836,6 +3897,9 @@ export function App(): React.JSX.Element {
       sheetProtections: new Map(),
       sheetPageBreaks: new Map(),
       sheetFilePageSetups: new Map(),
+      fileTableInfos: new Map(),
+      fileTableInfoRequested: new Set(),
+      fileTableShown: new Map(),
       sheetProtectedRanges: new Map(),
       uninstalledDefinedNames: new Set(),
       appliedCfSheets: new Set(),
@@ -3929,9 +3993,33 @@ export function App(): React.JSX.Element {
         pageSetup: (sheetId: string) => state.editJournal.pageSetup.get(sheetId) ?? null,
         // the document theme edits of this session
         theme: () => state.editJournal.theme,
+        // the workbook's theme colors in theme index order, null when the file has none
+        themeColors: () => state.file.themeColors ?? null,
+        themeFonts: () => state.file.themeFonts ?? null,
+        // the file's streamed link targets and this session's link edits, per sheet
+        hyperlinks: (sheetId: string) => ({
+          targets: [...(state.hyperlinkTargets.get(sheetId) ?? [])],
+          edits: [...(state.editJournal.hyperlinks.get(sheetId) ?? [])],
+        }),
+        // the tables this session made, as the save will write them
+        tableAdds: () => state.editJournal.tableAdds,
+        // Table Design on the file's own tables, as the save will patch the table parts
+        fileTableEdits: () => [...state.editJournal.fileTableEdits.values()],
+        // what Copy last put on the sheet clipboard (Paste Special reads the same cache)
+        copiedCells: () => {
+          const runtime = univerRef.current
+          return runtime ? readCopiedCells(runtime) : null
+        },
       }
     }
     resetTableSync()
+    // another file has no custom table styles of its own (a save reopens the same one)
+    openCustomTableStylesFor(
+      selected.path,
+      selected.sheets.flatMap((sheet) =>
+        (sheet.tables ?? []).map((table) => table.styleName ?? ''),
+      ),
+    )
     setRevision(0)
     setPreview(null)
     lazyPreviewRef.current = null
@@ -4618,6 +4706,16 @@ export function App(): React.JSX.Element {
           }
         }}
         onGetAnchorValue={anchorCellValue}
+        onGetThemeColors={() => lazyWorkbookRef.current?.file.themeColors ?? DEFAULT_THEME_COLORS}
+        activeTable={activeTableRibbon()}
+        onGetFillSeriesSeed={() => {
+          const runtime = univerRef.current
+          return runtime ? fillSeriesSeed(runtime) : null
+        }}
+        onGetOtherSheets={() => {
+          const runtime = univerRef.current
+          return runtime ? otherSheets(runtime) : []
+        }}
         activeCellA1={activeCellA1}
         onGoToReference={(ref) => goToReferenceImpl(dataToolsContext(), ref)}
         onListDefinedNames={() => listDefinedNamesImpl(dataToolsContext())}

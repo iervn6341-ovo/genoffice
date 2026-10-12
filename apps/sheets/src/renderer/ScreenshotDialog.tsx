@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import type { ScreenSourcesResult } from '../shared/desktop-api'
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Insert → Screenshot: a picker over the OS's capturable surfaces.
 /// Screens first, then other windows (our own window is excluded by the main
@@ -20,6 +21,7 @@ export function ScreenshotDialog({
   readonly onInsert: (dataUrl: string, width: number, height: number) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [state, setState] = useState<LoadState>({ phase: 'loading' })
   const [refreshTick, setRefreshTick] = useState(0)

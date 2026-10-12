@@ -89,10 +89,17 @@ import { webSearchTool, imageSearchTool, generateImageTool } from '@genoffice/ai
 import { parseFileToText } from '@genoffice/file-parse'
 import type { CellEdit, SheetStructuralOps } from '@genoffice/xlsx-gateway/gateway/xlsx-gateway'
 import {
+  listArchiveEntryNames,
   readArchiveEntryText,
   saveWorkbookViaSidecar,
 } from '@genoffice/xlsx-gateway/gateway/xlsx-package-io'
 import { parsePivotDefinition } from '@genoffice/xlsx-gateway/gateway/xlsx-pivot'
+import {
+  isTablePartPath,
+  tableKeyOf,
+  tableStyleInfoOf,
+  type TableInfo,
+} from '@genoffice/xlsx-gateway/gateway/xlsx-table-edit'
 import type { SheetEditPlan } from '@genoffice/xlsx-gateway/gateway/xlsx-sheets'
 import type {
   AttachmentAddResult,
@@ -114,6 +121,8 @@ import {
   workbookMediaRequestSchema,
   workbookMediaResultSchema,
   workbookPivotRequestSchema,
+  workbookTableInfoRequestSchema,
+  workbookTableInfoSchema,
   localImageRequestSchema,
   localImageResultSchema,
   screenCaptureRequestSchema,
@@ -2705,6 +2714,24 @@ export function registerSheetsIpc(): void {
     return workbookPivotDefinitionSchema.parse(parsePivotDefinition(pivotXml, cacheXml))
   })
 
+  ipcMain.handle(IPC_CHANNELS.readTableInfo, async (event, input: unknown) => {
+    const entry = sessionFor(event)
+    const request = workbookTableInfoRequestSchema.parse(input)
+    const session = entry.sessions.get(request.sessionId)
+    if (!session) throw new Error('Unknown workbook session.')
+    // from the session snapshot, like the pivot definition: what the renderer shows. Every table part
+    // is read once per snapshot (a workbook asks for each of its tables)
+    let infos = tableInfoCache.get(session.snapshotPath)
+    if (!infos) {
+      infos = readTableInfos(entry.client, session.snapshotPath)
+      tableInfoCache.set(session.snapshotPath, infos)
+      infos.catch(() => tableInfoCache.delete(session.snapshotPath))
+    }
+    const info = (await infos).get(request.name.toLowerCase())
+    if (!info) throw new Error('Unknown table.')
+    return workbookTableInfoSchema.parse(info)
+  })
+
   ipcMain.handle(IPC_CHANNELS.exportPdf, async (event, input: unknown) => {
     sessionFor(event)
     const request = workbookExportPdfRequestSchema.parse(input)
@@ -3688,6 +3715,13 @@ async function writeWorkbookTo(
     columnNames: table.columnNames,
     style: table.style,
     bandedRows: table.bandedRows,
+    bandedColumns: table.bandedColumns ?? false,
+    firstColumn: table.firstColumn ?? false,
+    lastColumn: table.lastColumn ?? false,
+    headerRow: table.headerRow ?? true,
+    totalsRow: table.totalsRow ?? false,
+    filterButton: table.filterButton ?? true,
+    totals: table.totals,
   }))
   const pivotAdditions = request.pivotAdditions.map((pivot) => ({
     sheetName: resolveSheetName(pivot.sheetId),
@@ -3759,6 +3793,8 @@ async function writeWorkbookTo(
     pageSetupStates,
     noteStates,
     tableAdditions,
+    tableStyleAdditions: request.tableStyleAdditions ?? [],
+    tableEdits: (request.tableEdits ?? []).map(({ sheetId: _sheetId, ...edit }) => edit),
     pivotAdditions,
     sparklineAdditions,
     formulaValues,
@@ -4152,4 +4188,22 @@ async function closeAllSessions(entry: {
       })
     }),
   )
+}
+
+/// the style info of the table parts of a session snapshot, by table identity (lower case); a snapshot
+/// never changes, so a session reads its parts once
+const tableInfoCache = new Map<string, Promise<Map<string, TableInfo>>>()
+
+async function readTableInfos(
+  client: Parameters<typeof listArchiveEntryNames>[0],
+  snapshotPath: string,
+): Promise<Map<string, TableInfo>> {
+  const infos = new Map<string, TableInfo>()
+  for (const partName of await listArchiveEntryNames(client, snapshotPath)) {
+    if (!isTablePartPath(partName)) continue
+    const xml = await readArchiveEntryText(client, snapshotPath, partName)
+    const key = tableKeyOf(xml)
+    if (key !== null && !infos.has(key)) infos.set(key, tableStyleInfoOf(xml))
+  }
+  return infos
 }

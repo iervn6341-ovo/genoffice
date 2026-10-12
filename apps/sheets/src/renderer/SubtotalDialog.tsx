@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Dropdown } from '@genoffice/ui'
 import type { PivotField } from './PivotDialog'
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Data → Subtotal, minimal: one "at each change in" column, one
 /// aggregated column, SUBTOTAL rows inserted per group plus a grand total.
@@ -22,6 +23,7 @@ export function SubtotalDialog({
   readonly onCreate: (config: SubtotalConfig) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [groupCol, setGroupCol] = useState(fields[0]?.colIndex ?? 0)
   const [valueCol, setValueCol] = useState(fields[1]?.colIndex ?? fields[0]?.colIndex ?? 0)

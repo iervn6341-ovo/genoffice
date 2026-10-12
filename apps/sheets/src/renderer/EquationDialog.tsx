@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 
 import { latexToOmml, ommlToMathML } from '@genoffice/docx-engine/math'
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's Insert → Equation: LaTeX input with a live MathML preview (docs'
 /// LaTeX→OMML pipeline, rendered natively by Chromium). Inserting rasterizes
@@ -81,6 +82,7 @@ export function EquationDialog({
   readonly onInsert: (dataUrl: string, width: number, height: number) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [latex, setLatex] = useState('')
   const [busy, setBusy] = useState(false)

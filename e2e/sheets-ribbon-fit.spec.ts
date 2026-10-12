@@ -94,3 +94,40 @@ test('nothing folds on a wide window', async () => {
     await kill(launched)
   }
 })
+
+test('a ribbon dropdown reaching over the AI panel edge is clickable all across (the resize handle stays below it)', async () => {
+  const { launched, p } = await openSheets()
+  try {
+    await setEditorLayoutWidth(launched.app, '://sheets/', 2400)
+    await p
+      .locator(TAB, { hasText: /^Page Layout$/ })
+      .first()
+      .click()
+    await p.waitForTimeout(400)
+    await p.locator(`${BODY} [aria-label="Size"]`).first().click()
+    await p.waitForTimeout(300)
+    // the options whose middle is where the panel's 6px resize handle is (the layout puts the
+    // dropdown across the panel's right edge) are still the top element there
+    const options = p.locator('.menu-select-drop button')
+    const count = await options.count()
+    expect(count).toBeGreaterThanOrEqual(7)
+    const covered = await p.evaluate(() => {
+      const handle = document.querySelector('.ai-panel-resizer')?.getBoundingClientRect()
+      if (!handle) return ['no resize handle']
+      const bad: string[] = []
+      for (const button of document.querySelectorAll('.menu-select-drop button')) {
+        const box = button.getBoundingClientRect()
+        // every pixel column of the handle that the option spans
+        for (const x of [handle.x + 1, handle.x + handle.width / 2, handle.x + handle.width - 1]) {
+          if (x < box.x || x > box.x + box.width) continue
+          const top = document.elementFromPoint(x, box.y + box.height / 2)
+          if (top !== button && !button.contains(top)) bad.push(`${button.textContent}@${x}`)
+        }
+      }
+      return bad
+    })
+    expect(covered).toEqual([])
+  } finally {
+    await kill(launched)
+  }
+})

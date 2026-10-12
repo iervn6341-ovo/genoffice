@@ -113,6 +113,9 @@ const DECORATION_MUTATIONS = new Set([
   'sheet.mutation.delete-table',
   'sheet.mutation.set-sheet-table',
   'sheet.mutation.set-table-filter',
+  // the plain theme registered over each file table (addTableTheme) so its own look shows
+  'sheet.mutation.add-range-theme',
+  'sheet.mutation.remove-range-theme',
   'sheet.mutation.update-note',
   'sheet.mutation.update-note-position',
   'sheet.mutation.remove-note',

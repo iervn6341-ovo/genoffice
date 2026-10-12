@@ -27,7 +27,7 @@ import {
   type PivotLayout,
   type PivotLayoutErrorCode,
 } from '@genoffice/xlsx-gateway/domain/pivot-layout'
-import type { WorkbookVisualObject } from '../shared/desktop-api'
+import type { WorkbookTableAdd, WorkbookVisualObject } from '../shared/desktop-api'
 import {
   recordPivotAdd,
   recordPivotCacheRefresh,
@@ -36,6 +36,12 @@ import {
   updateTableAdd,
 } from './edit-journal'
 import { t } from './i18n/locale'
+import {
+  optionFields,
+  tableOptionsOf,
+  univerTableRange,
+  type TableDesignOptions,
+} from './table-design'
 import { trackTable } from './table-sync'
 import type { OoXmlPivotConfig, PivotField } from './PivotDialog'
 import type { PivotDefinition } from '@genoffice/xlsx-gateway/gateway/xlsx-pivot'
@@ -45,15 +51,28 @@ import type { LazyWorkbookState, UniverRuntime, UniverWorksheet } from './univer
 /// distinguishes tables created in the same millisecond (a restyle removes and re-adds at once)
 let tableSerial = 0
 
+/// what a Table Design change brings to a table it re-creates: the names of its columns when no header
+/// row holds them, and what its totals row says
+export interface TableAddExtra {
+  readonly columnNames?: readonly string[]
+  readonly totals?: WorkbookTableAdd['totals']
+}
+
 export function applyAiTableAdd(
   runtime: UniverRuntime,
   state: LazyWorkbookState,
   op: AddTableOperation,
+  /// Table Design → Table Style Options; Format as Table passes none (banded rows only)
+  options?: Partial<TableDesignOptions>,
+  extra?: TableAddExtra,
 ): { tableId: string; ready: Promise<unknown> } {
   const worksheet = runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(op.sheetId)
   if (!worksheet) throw new Error(`Unknown sheet: ${op.sheetId}`)
   const bounds = parseRange(op.range)
-  if (bounds.endRow <= bounds.startRow) {
+  const headerRow = options?.headerRow !== false
+  const totalRow = options?.totalRow === true
+  // a header row (when there is one) and a totals row (when there is one) frame at least one row of data
+  if (bounds.endRow - bounds.startRow + 1 - (headerRow ? 1 : 0) - (totalRow ? 1 : 0) < 1) {
     throw new Error(t('appTableNeedsRows'))
   }
   const width = bounds.endColumn - bounds.startColumn + 1
@@ -75,40 +94,45 @@ export function applyAiTableAdd(
       throw new Error(t('appTableOverlapsSession', { name: table.name }))
     }
   }
-  const headerValues =
-    worksheet.getRange(bounds.startRow, bounds.startColumn, 1, width).getValues()[0] ?? []
   const columnNames: string[] = []
-  const used = new Set<string>()
-  for (let index = 0; index < width; index += 1) {
-    const raw = String(headerValues[index] ?? '')
-      .trim()
-      .slice(0, 255)
-    const base = raw.length === 0 ? `Column${index + 1}` : raw
-    let candidate = base
-    for (let suffix = 2; used.has(candidate.toLowerCase()); suffix += 1) {
-      candidate = `${base}${suffix}`
+  if (headerRow) {
+    const headerValues =
+      worksheet.getRange(bounds.startRow, bounds.startColumn, 1, width).getValues()[0] ?? []
+    const used = new Set<string>()
+    for (let index = 0; index < width; index += 1) {
+      const raw = String(headerValues[index] ?? '')
+        .trim()
+        .slice(0, 255)
+      const base = raw.length === 0 ? `Column${index + 1}` : raw
+      let candidate = base
+      for (let suffix = 2; used.has(candidate.toLowerCase()); suffix += 1) {
+        candidate = `${base}${suffix}`
+      }
+      used.add(candidate.toLowerCase())
+      columnNames.push(candidate)
+      if (candidate !== raw) {
+        worksheet.getRange(bounds.startRow, bounds.startColumn + index).setValue(candidate)
+      }
     }
-    used.add(candidate.toLowerCase())
-    columnNames.push(candidate)
-    if (candidate !== raw) {
-      worksheet.getRange(bounds.startRow, bounds.startColumn + index).setValue(candidate)
-    }
+  } else {
+    // no header row holds the names: they travel with the table
+    if (extra?.columnNames?.length !== width) throw new Error(t('appTableNeedsRows'))
+    columnNames.push(...extra.columnNames)
   }
   // Rendering is best-effort (the facade call is async); the journal entry
   // below is what the save writes, and the gateway re-checks conflicts.
   tableSerial += 1
   const tableId = `ai-table-${tableSerial}-${Date.now().toString(36)}`
+  const shown = univerTableRange(bounds, { headerRow, totalRow })
   const ready = Promise.resolve(
-    worksheet.addTable(
-      name,
-      {
-        startRow: bounds.startRow,
-        startColumn: bounds.startColumn,
-        endRow: bounds.endRow,
-        endColumn: bounds.endColumn,
-      },
-      tableId,
-    ),
+    worksheet.addTable(name, shown, tableId, {
+      // Univer draws a filter button on the header of every table that shows one
+      showHeader: headerRow && options?.filterButton !== false,
+      columns: columnNames.map((displayName, index) => ({
+        id: `${tableId}-col-${index}`,
+        displayName,
+      })),
+    } as never),
   )
   const entry = {
     sheetId: op.sheetId,
@@ -121,7 +145,9 @@ export function applyAiTableAdd(
     name,
     columnNames,
     ...(op.style === undefined ? {} : { style: op.style }),
-    bandedRows: op.bandedRows ?? true,
+    bandedRows: options?.bandedRows ?? op.bandedRows ?? true,
+    ...(options ? optionFields(options) : {}),
+    ...(totalRow && extra?.totals ? { totals: [...extra.totals] } : {}),
   }
   recordTableAdd(state.editJournal, entry)
   // ⌘Z / ⇧⌘Z run Univer's delete-table / add-table; table-sync keeps the journal in step
@@ -143,12 +169,15 @@ export function applyAiTableRowAdd(
   const worksheet = runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(op.sheetId)
   if (!worksheet) throw new Error(`Unknown sheet: ${op.sheetId}`)
   const count = op.count ?? 1
-  const dataRows = tableEntry.area.endRow - tableEntry.area.startRow
-  // row is 1-based within data region; default = append at end
+  const options = tableOptionsOf(tableEntry)
+  const headerRows = options.headerRow ? 1 : 0
+  const dataRows =
+    tableEntry.area.endRow - tableEntry.area.startRow + 1 - headerRows - (options.totalRow ? 1 : 0)
+  // row is 1-based within data region; default = append at end (above a totals row)
   const insertDataRow = op.row ?? dataRows + 1
-  // Absolute sheet row: header is tableEntry.area.startRow (0-based),
-  // data starts at startRow + 1.  Insert before this row in the sheet.
-  const sheetRow = tableEntry.area.startRow + insertDataRow
+  // Absolute sheet row: the data starts below the header row, if the table has one.  Insert
+  // before this row in the sheet.
+  const sheetRow = tableEntry.area.startRow + headerRows - 1 + insertDataRow
   worksheet.insertRowsBefore(sheetRow, count)
   // Expand the journal entry's area
   updateTableAdd(state.editJournal, op.sheetId, op.tableName, {
@@ -169,7 +198,8 @@ export function applyAiTableRowDelete(
   const worksheet = runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(op.sheetId)
   if (!worksheet) throw new Error(`Unknown sheet: ${op.sheetId}`)
   const count = op.count ?? 1
-  const sheetRow = tableEntry.area.startRow + op.row // 1-based data row → absolute
+  // 1-based data row → absolute (a table without a header row starts with its data)
+  const sheetRow = tableEntry.area.startRow + (tableEntry.headerRow === false ? 0 : 1) - 1 + op.row
   worksheet.deleteRows(sheetRow, count)
   updateTableAdd(state.editJournal, op.sheetId, op.tableName, {
     area: { ...tableEntry.area, endRow: tableEntry.area.endRow - count },
@@ -221,11 +251,14 @@ export function applyAiTableColumnAdd(
     const colName = i === 0 ? op.columnName : `${op.columnName}${i + 1}`
     newCols.splice(insertTableCol - 1 + i, 0, colName)
   }
-  // Write the header cell(s) so the worksheet reflects the new name(s)
-  for (let i = 0; i < count; i += 1) {
-    worksheet
-      .getRange(tableEntry.area.startRow, sheetCol + i)
-      .setValue(newCols[insertTableCol - 1 + i] ?? '')
+  // Write the header cell(s) so the worksheet reflects the new name(s) — a table without a header
+  // row keeps the names in the journal only
+  if (tableEntry.headerRow !== false) {
+    for (let i = 0; i < count; i += 1) {
+      worksheet
+        .getRange(tableEntry.area.startRow, sheetCol + i)
+        .setValue(newCols[insertTableCol - 1 + i] ?? '')
+    }
   }
   updateTableAdd(state.editJournal, op.sheetId, op.tableName, {
     area: { ...tableEntry.area, endColumn: tableEntry.area.endColumn + count },

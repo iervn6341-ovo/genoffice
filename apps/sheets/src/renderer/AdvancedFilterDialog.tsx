@@ -5,6 +5,7 @@ import { BooleanNumber } from '@univerjs/core'
 import type { IFilterColumn } from '@univerjs/preset-sheets-filter'
 
 import { t, useI18n, type StringKey } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// Excel's custom auto-filter ("Advanced" in Data → Sort & Filter), minimal:
 /// one column, up to two conditions joined by AND/OR. OK hands the criteria
@@ -87,6 +88,7 @@ export function AdvancedFilterDialog({
   readonly onApply: (criteria: AdvancedFilterCriteria) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [colId, setColId] = useState(columns[0]?.colId ?? 0)
   const [operator1, setOperator1] = useState<AdvancedFilterOperator>('equal')

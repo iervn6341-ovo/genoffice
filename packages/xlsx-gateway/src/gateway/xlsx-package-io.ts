@@ -32,6 +32,8 @@ import type {
 } from './xlsx-gateway'
 import { planCellEditsToXlsx, syncFileBestEffort } from './xlsx-gateway'
 import { normalizeOoxmlPartPrefix } from './xlsx-namespace'
+import type { TableEdit } from './xlsx-table-edit'
+import type { TableStyleAddition } from './xlsx-table-style-add'
 import type { WorkbookThemeState } from './xlsx-theme'
 import type { SheetEditPlan } from './xlsx-sheets'
 
@@ -106,12 +108,25 @@ export interface StreamingSaveRequest {
   readonly themeState?: WorkbookThemeState | null | undefined
   readonly workbookProtectionState?: { readonly lockStructure: boolean } | null | undefined
   readonly protectedRangeStates?: readonly SheetProtectedRangesState[] | undefined
+  /// custom table styles the saved tables name (written into styles.xml)
+  readonly tableStyleAdditions?: readonly TableStyleAddition[] | undefined
+  /// Table Design on tables the file already has
+  readonly tableEdits?: readonly TableEdit[] | undefined
 }
 
 export interface StreamingSaveResult {
   readonly touchedEntries: readonly string[]
   readonly removedEntries: readonly string[]
   readonly addedEntries: readonly string[]
+}
+
+/// The names of the entries of an archive, via the sidecar.
+export async function listArchiveEntryNames(
+  client: ArchiveClient,
+  sourcePath: string,
+): Promise<string[]> {
+  const manifest = manifestResultSchema.parse(await client.archiveManifest(sourcePath))
+  return manifest.entries.map((entry) => entry.name)
 }
 
 /// One-shot text read of an archive entry via the sidecar (extract to a
@@ -173,6 +188,8 @@ export async function saveWorkbookViaSidecar(
       request.workbookProtectionState ?? null,
       request.protectedRangeStates ?? [],
       request.bulkConstantFills ?? [],
+      request.tableStyleAdditions ?? [],
+      request.tableEdits ?? [],
     )
 
     const replacements = await writePlanContents(workDir, 'replace', plan.replaced)

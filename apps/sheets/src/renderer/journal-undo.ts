@@ -33,8 +33,8 @@ interface Params {
   snapshot: unknown
 }
 
-/** the context the registered mutations apply through (refreshed by every edit) */
-let applyContext: JournalUndoContext | null = null
+/** the context each kind's registered mutation applies through (refreshed by every edit of that kind) */
+const applyContexts = new Map<string, JournalUndoContext>()
 const registered = new WeakMap<object, Set<string>>()
 
 function register<S>(runtime: UniverRuntime, kind: JournalUndoKind<S>): void {
@@ -51,7 +51,7 @@ function register<S>(runtime: UniverRuntime, kind: JournalUndoKind<S>): void {
     type: CommandType.MUTATION,
     handler: (_accessor, params) => {
       const { key, snapshot } = params as Params
-      const ctx = applyContext
+      const ctx = applyContexts.get(kind.id)
       const state = ctx?.lazyWorkbookRef.current
       if (!ctx || !state) return false
       kind.restore(state, key, structuredClone(snapshot) as S, ctx)
@@ -84,7 +84,7 @@ export async function withJournalUndo<S>(
   const after = kind.capture(state, key)
   if (JSON.stringify(before) === JSON.stringify(after)) return
   register(runtime, kind)
-  applyContext = ctx
+  applyContexts.set(kind.id, ctx)
   runtime.univer
     .__getInjector()
     .get(IUndoRedoService)

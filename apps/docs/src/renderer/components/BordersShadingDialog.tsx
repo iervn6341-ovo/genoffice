@@ -5,6 +5,7 @@ import {
   hasSide,
   parseBorderLines,
   toggleSide,
+  WORD_BORDER_SPACE_PT,
   type BorderLines,
   type BorderSide,
 } from '../editor/paragraph-borders'
@@ -86,7 +87,10 @@ export function BordersShadingDialog({
       ...(auto ? {} : { color: hex }),
     }
     const out: BorderLines = {}
-    for (const s of (drawn ?? '').split('') as BorderSide[]) out[s] = line
+    // a side that already had a gap keeps it; a new one gets Word's (1 pt above / below, 4 pt beside)
+    for (const s of (drawn ?? '').split('') as BorderSide[]) {
+      out[s] = { ...line, spacePt: lines[s]?.spacePt ?? WORD_BORDER_SPACE_PT[s] }
+    }
     onApply({
       borders: drawn,
       borderLines: drawn ? JSON.stringify(out) : null,

@@ -24,6 +24,7 @@ import type {
   WorkbookMediaResult,
   WorkbookPagePrintSettings,
   WorkbookPivotDefinition,
+  WorkbookTableInfo,
   WorkbookPivotRequest,
   WorkbookRangeRequest,
   WorkbookRangeResult,
@@ -210,6 +211,29 @@ const desktopApi: DesktopApi = {
       validatedRequest,
     )
     return parsePivotDefinitionResult(result)
+  },
+  async readTableInfo(request) {
+    if (!isRecord(request) || !isUuid(request.sessionId)) {
+      throw new Error('Invalid table info request.')
+    }
+    if (
+      typeof request.name !== 'string' ||
+      request.name.length === 0 ||
+      request.name.length > 255
+    ) {
+      throw new Error('Invalid table info request.')
+    }
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.readTableInfo, request)
+    if (
+      !isRecord(result) ||
+      typeof result.showFirstColumn !== 'boolean' ||
+      typeof result.showLastColumn !== 'boolean' ||
+      typeof result.showRowStripes !== 'boolean' ||
+      typeof result.showColumnStripes !== 'boolean'
+    ) {
+      throw new Error('Invalid table info response.')
+    }
+    return result as WorkbookTableInfo
   },
   async saveWorkbookEdits(request) {
     const validatedRequest = parseSaveRequest(request)
@@ -1750,6 +1774,8 @@ function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveRequest {
   cappedArray('visual edits', input.visualEdits, 100)
   cappedArray('visual additions', input.visualAdditions, 100)
   cappedArray('table additions', input.tableAdditions, 50)
+  cappedArray('table style additions', input.tableStyleAdditions ?? [], 50)
+  cappedArray('table edits', input.tableEdits ?? [], 500)
   cappedArray('pivot additions', input.pivotAdditions, 20)
   cappedArray('sheet operations', input.sheetOps, 100)
   cappedArray('sheet order', input.sheetOrder, 1_000)
@@ -1831,6 +1857,7 @@ function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveRequest {
     input.visualEdits.length === 0 &&
     input.visualAdditions.length === 0 &&
     input.tableAdditions.length === 0 &&
+    (input.tableEdits?.length ?? 0) === 0 &&
     input.pivotAdditions.length === 0 &&
     (input.sparklineAdditions?.length ?? 0) === 0 &&
     input.sheetOps.length === 0 &&
@@ -1891,8 +1918,12 @@ function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveRequest {
       table.columnNames.some((name) => typeof name !== 'string' || name.length > 255) ||
       (table.style !== undefined &&
         (typeof table.style !== 'string' ||
-          !/^TableStyle(?:Light|Medium|Dark)[1-9][0-9]?$/.test(table.style))) ||
-      typeof table.bandedRows !== 'boolean'
+          table.style.length === 0 ||
+          table.style.length > 255)) ||
+      typeof table.bandedRows !== 'boolean' ||
+      (table.bandedColumns !== undefined && typeof table.bandedColumns !== 'boolean') ||
+      (table.firstColumn !== undefined && typeof table.firstColumn !== 'boolean') ||
+      (table.lastColumn !== undefined && typeof table.lastColumn !== 'boolean')
     ) {
       throw new Error('Invalid workbook table addition.')
     }

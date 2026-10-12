@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   bordersOf,
   hasSide,
+  linesWithWordSpacing,
   parseBorderLines,
   presetBorders,
   toggleSide,
+  WORD_BORDER_SPACE_PT,
 } from '../src/renderer/editor/paragraph-borders'
 import { paraBorderCss } from '../src/renderer/editor/hf-dom'
 
@@ -46,5 +48,36 @@ describe('paragraph border sides (Word Home → Borders)', () => {
     expect(paraBorderCss({ color: 'FF0000', szPt: 1, val: 'dotted' })).toContain('dotted #FF0000')
     expect(paraBorderCss({ szPt: 1.5, val: 'dashed' })).toMatch(/px dashed #444$/)
     expect(paraBorderCss({ szPt: 3, val: 'double' })).toMatch(/px double #444$/)
+  })
+})
+
+describe("Word's gap between a paragraph border and its text (Home → Borders, Word 16)", () => {
+  it('is 1 pt above, below and between, and 4 pt beside', () => {
+    expect(WORD_BORDER_SPACE_PT).toEqual({ t: 1, b: 1, h: 1, l: 4, r: 4 })
+  })
+
+  it('gives each side a border adds that gap, as a saved Word document has it', () => {
+    // Word saved: bottom → space=1; box → top 1, left 4, bottom 1, right 4; box + between → between 1
+    expect(JSON.parse(linesWithWordSpacing('b', null)!)).toEqual({ b: { spacePt: 1 } })
+    expect(JSON.parse(linesWithWordSpacing('tblr', null)!)).toEqual({
+      t: { spacePt: 1 },
+      b: { spacePt: 1 },
+      l: { spacePt: 4 },
+      r: { spacePt: 4 },
+    })
+    expect(JSON.parse(linesWithWordSpacing('tblrh', null)!).h).toEqual({ spacePt: 1 })
+  })
+
+  it('keeps the line a side already has (its weight, color and its own gap)', () => {
+    const had = JSON.stringify({ b: { szPt: 2, color: 'FF0000', spacePt: 6 } })
+    expect(JSON.parse(linesWithWordSpacing('bt', had)!)).toEqual({
+      b: { szPt: 2, color: 'FF0000', spacePt: 6 },
+      t: { spacePt: 1 },
+    })
+  })
+
+  it('is null when no border is drawn', () => {
+    expect(linesWithWordSpacing(null, JSON.stringify({ b: { spacePt: 1 } }))).toBeNull()
+    expect(linesWithWordSpacing('', null)).toBeNull()
   })
 })

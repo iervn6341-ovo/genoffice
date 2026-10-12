@@ -66,6 +66,16 @@ import { applyShowFormulasView, formulaViewSheets } from './formula-view'
 import { t } from './i18n/locale'
 import { mergeWorkbooksIntoCurrent } from './merge-workbooks'
 import { runAsOneUndoStep } from './undo-group'
+import { clearHyperlinks, clearNotes, clearWithExtras } from './clear-actions'
+import { fillSeries, fillTowards, type FillSeriesParams } from './fill-actions'
+import { DEFAULT_PASTE_SPECIAL } from './paste-special'
+import { parsePasteSpecialOptions, pasteSpecial } from './paste-special-actions'
+import { fillAcrossSheets } from './fill-across'
+import { justifySelection } from './fill-justify'
+import { activeFileTable, restyleActiveTable } from './file-table-design'
+import { activeSessionTable, convertTableToRange, redesignTable } from './table-design-actions'
+import { addCustomTableStyle, styleNameProblem, takenTableStyleNames } from './custom-table-styles'
+import { parseAreaText, type TableDesignOptions } from './table-design'
 import {
   handleOpenSlicerPicker,
   handleOpenTimelinePicker,
@@ -200,6 +210,13 @@ export function parseStyleCommand(command: string): {
   const argumentEnd = rest.indexOf(':')
   if (argumentEnd === -1) return { name, argument: rest, extra: '' }
   return { name, argument: rest.slice(0, argumentEnd), extra: rest.slice(argumentEnd + 1) }
+}
+
+/// A multi-step command runs off the click: a failure it throws is shown, not left unhandled
+function settle(ctx: RibbonCommandContext, work: Promise<unknown>): void {
+  work.catch((error: unknown) => {
+    ctx.setMessage(error instanceof Error && error.message ? error.message : t('appCommandFailed'))
+  })
 }
 
 export function handleRibbonCommand(ctx: RibbonCommandContext, command: string): void {
@@ -362,6 +379,24 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     case 'paste-special:besides-border':
       void runtime.univerAPI.executeCommand('sheet.command.paste-besides-border')
       return
+    case 'paste-special:value-numfmt':
+      settle(
+        ctx,
+        pasteSpecial(ctx, runtime, { ...DEFAULT_PASTE_SPECIAL, what: 'valuesAndNumberFormats' }),
+      )
+      return
+    case 'paste-special:formula-numfmt':
+      settle(
+        ctx,
+        pasteSpecial(ctx, runtime, {
+          ...DEFAULT_PASTE_SPECIAL,
+          what: 'formulasAndNumberFormats',
+        }),
+      )
+      return
+    case 'paste-special:transpose':
+      settle(ctx, pasteSpecial(ctx, runtime, { ...DEFAULT_PASTE_SPECIAL, transpose: true }))
+      return
     case 'insert-sheet': {
       const workbook = runtime.univerAPI.getActiveWorkbook()
       if (!workbook) return
@@ -380,6 +415,24 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
       } catch (error: unknown) {
         ctx.setMessage(error instanceof Error ? error.message : t('appSheetAddFailed'))
       }
+      return
+    }
+    case 'delete-sheet': {
+      // Excel's Delete ▾ → Delete Sheet; the confirm prompt is Univer's, as on the sheet tab's menu
+      const workbook = runtime.univerAPI.getActiveWorkbook()
+      const sheetId = workbook?.getActiveSheet()?.getSheetId()
+      if (!workbook || !sheetId) return
+      if (workbookStructureLocked(ctx.lazyWorkbookRef.current)) {
+        ctx.setMessage(t('appWorkbookStructureLocked'))
+        return
+      }
+      if (workbook.getSheets().filter((sheet) => !sheet.isSheetHidden()).length <= 1) {
+        ctx.setMessage(t('appCannotDeleteLastSheet'))
+        return
+      }
+      void runtime.univerAPI.executeCommand('sheet.command.remove-sheet-confirm', {
+        subUnitId: sheetId,
+      })
       return
     }
     case 'format-painter':
@@ -459,14 +512,32 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
         command === 'fill-down' ? 'sheet.command.copy-down' : 'sheet.command.copy-right',
       )
       return
+    case 'fill-justify':
+      settle(ctx, justifySelection(ctx, runtime))
+      return
+    case 'fill-up':
+    case 'fill-left':
+      fillTowards(ctx, runtime, command === 'fill-up' ? 'up' : 'left')
+      return
+    // Excel's Clear Contents also takes the hyperlink (text, link and nothing else go; the cell
+    // keeps its look and note), Clear All takes notes and links too
     case 'clear-contents':
-      void runtime.univerAPI.executeCommand('sheet.command.clear-selection-content')
+      void clearWithExtras(ctx, runtime, 'contents')
       return
     case 'clear-formats':
       void runtime.univerAPI.executeCommand('sheet.command.clear-selection-format')
       return
     case 'clear-all':
-      void runtime.univerAPI.executeCommand('sheet.command.clear-selection-all')
+      void clearWithExtras(ctx, runtime, 'all')
+      return
+    case 'clear-comments':
+      void clearNotes(ctx, runtime)
+      return
+    case 'clear-hyperlinks':
+      void clearHyperlinks(ctx, runtime, { removeFormat: false })
+      return
+    case 'clear-remove-hyperlinks':
+      void clearHyperlinks(ctx, runtime, { removeFormat: true })
       return
     case 'decimal-inc':
     case 'decimal-dec':
@@ -1040,6 +1111,95 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     }
     default:
       break
+  }
+  if (command === 'table-convert-to-range') {
+    void convertTableToRange(ctx)
+    return
+  }
+  if (command.startsWith('table-rename:')) {
+    // table-rename:<current name>:<new name>, so the table is the one the field showed
+    const [target, name] = command.slice('table-rename:'.length).split(':').map(decodeURIComponent)
+    if (target !== undefined && name !== undefined) {
+      void redesignTable(ctx, { name, target }, 'appTableRenamed')
+    }
+    return
+  }
+  if (command.startsWith('table-style:')) {
+    void restyleActiveTable(
+      ctx,
+      { style: command.slice('table-style:'.length) },
+      'appTableRestyled',
+    )
+    return
+  }
+  if (command.startsWith('table-option:')) {
+    const [, key, flag] = command.split(':')
+    if (
+      key === 'bandedRows' ||
+      key === 'bandedColumns' ||
+      key === 'firstColumn' ||
+      key === 'lastColumn' ||
+      key === 'headerRow' ||
+      key === 'totalRow' ||
+      key === 'filterButton'
+    ) {
+      void restyleActiveTable(
+        ctx,
+        { options: { [key]: flag === '1' } as Partial<TableDesignOptions> },
+        'appTableOptionChanged',
+      )
+    }
+    return
+  }
+  if (command.startsWith('table-style-create:')) {
+    // table-style-create:<the style as JSON>: made in the New Table Style dialog, then used right away
+    try {
+      const style = JSON.parse(decodeURIComponent(command.slice('table-style-create:'.length)))
+      const problem = styleNameProblem(String(style?.name ?? ''), takenTableStyleNames())
+      if (!problem && style && typeof style === 'object') {
+        addCustomTableStyle({ name: style.name.trim(), elements: style.elements ?? {} })
+        ctx.setMessage(t('appTableStyleCreated', { name: style.name.trim() }))
+        // a table under the cell takes the style (Table Design); otherwise the selection becomes one
+        if (activeSessionTable(ctx) || activeFileTable(ctx))
+          void restyleActiveTable(ctx, { style: style.name.trim() }, 'appTableRestyled')
+        else handleFormatAsTable(ctx.dataToolsContext(), style.name.trim())
+      }
+    } catch {
+      // not a style: nothing to make
+    }
+    return
+  }
+  if (command.startsWith('table-resize:')) {
+    // table-resize:<range>, the range typed in the dialog
+    const area = parseAreaText(decodeURIComponent(command.slice('table-resize:'.length)))
+    if (area) void redesignTable(ctx, { area }, 'appTableResized')
+    else ctx.setMessage(t('appTableResizeBadRange'))
+    return
+  }
+  if (command.startsWith('paste-special-apply:')) {
+    const options = parsePasteSpecialOptions(command.slice('paste-special-apply:'.length))
+    if (options) settle(ctx, pasteSpecial(ctx, runtime, options))
+    return
+  }
+  if (command.startsWith('fill-across-apply:')) {
+    try {
+      const params = JSON.parse(decodeURIComponent(command.slice('fill-across-apply:'.length)))
+      if (
+        Array.isArray(params?.sheetIds) &&
+        params.sheetIds.every((id: unknown) => typeof id === 'string') &&
+        (params.what === 'all' || params.what === 'contents' || params.what === 'formats')
+      ) {
+        settle(ctx, fillAcrossSheets(ctx, runtime, params))
+      }
+    } catch {
+      // not a choice the dialog makes
+    }
+    return
+  }
+  if (command.startsWith('fill-series:')) {
+    const params = parseFillSeriesParams(command.slice('fill-series:'.length))
+    if (params) settle(ctx, fillSeries(ctx, runtime, params))
+    return
   }
   if (command.startsWith('format-as-table:')) {
     handleFormatAsTable(ctx.dataToolsContext(), command.slice('format-as-table:'.length))
@@ -1958,5 +2118,30 @@ function runCellShift(
     }
   } catch {
     // A canceled structural command already surfaced its own message.
+  }
+}
+
+const SERIES_TYPES = new Set(['linear', 'growth', 'date', 'autofill'])
+const SERIES_UNITS = new Set(['day', 'weekday', 'month', 'year'])
+
+/// The Series dialog's choice as it travels in the command string; null when it does not read as one
+export function parseFillSeriesParams(encoded: string): FillSeriesParams | null {
+  try {
+    const raw = JSON.parse(decodeURIComponent(encoded)) as Partial<FillSeriesParams>
+    if (
+      (raw.axis !== 'rows' && raw.axis !== 'columns') ||
+      typeof raw.type !== 'string' ||
+      !SERIES_TYPES.has(raw.type) ||
+      typeof raw.dateUnit !== 'string' ||
+      !SERIES_UNITS.has(raw.dateUnit) ||
+      typeof raw.step !== 'number' ||
+      !(raw.stop === null || typeof raw.stop === 'number') ||
+      typeof raw.trend !== 'boolean'
+    ) {
+      return null
+    }
+    return raw as FillSeriesParams
+  } catch {
+    return null
   }
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Dropdown } from '@genoffice/ui'
 import { useI18n } from './i18n/locale'
+import { useDialogEscape } from './use-dialog-escape'
 
 /// The Name Manager dialog, minimal: list, add, edit (name / refers-to), and
 /// delete. Scope is chosen at creation and cannot be changed afterwards.
@@ -36,6 +37,7 @@ export function NameManagerDialog({
   readonly onAction: (action: DefinedNameAction) => string | null
   readonly onClose: () => void
 }): React.JSX.Element {
+  useDialogEscape(onClose)
   const { t } = useI18n()
   const [selected, setSelected] = useState<DefinedNameRow | null>(null)
   const [name, setName] = useState('')

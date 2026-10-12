@@ -31,7 +31,9 @@ import {
   resolveRelTarget,
   type ShapeAdd,
 } from './xlsx-drawing-add'
-import { applyTableAdditions, type TableArea } from './xlsx-table-add'
+import { applyTableAdditions, type TableAddition, type TableArea } from './xlsx-table-add'
+import { applyTableEdits, type TableEdit } from './xlsx-table-edit'
+import { applyTableStyleAdditions, type TableStyleAddition } from './xlsx-table-style-add'
 import type { PivotFilterDef } from '../domain/pivot-filters'
 import {
   applyPivotAdditions,
@@ -629,6 +631,14 @@ export interface SheetTableAddition {
   readonly columnNames: readonly string[]
   readonly style?: string | undefined
   readonly bandedRows: boolean
+  /// Table Design options; absent = off
+  readonly bandedColumns?: boolean | undefined
+  readonly firstColumn?: boolean | undefined
+  readonly lastColumn?: boolean | undefined
+  readonly headerRow?: boolean | undefined
+  readonly totalsRow?: boolean | undefined
+  readonly filterButton?: boolean | undefined
+  readonly totals?: TableAddition['totals']
 }
 
 export interface SheetPivotAddition {
@@ -704,6 +714,8 @@ export async function planCellEditsToXlsx(
   workbookProtectionState: { readonly lockStructure: boolean } | null = null,
   protectedRangeStates: readonly SheetProtectedRangesState[] = [],
   bulkConstantFills: readonly BulkConstantFill[] = [],
+  tableStyleAdditions: readonly TableStyleAddition[] = [],
+  tableEdits: readonly TableEdit[] = [],
 ): Promise<MutationPlan> {
   // A pending pivot pins final coordinates for its source and output; shifts
   // on either sheet, and sheet renames (worksheetSource@sheet), would desync
@@ -1210,20 +1222,46 @@ export async function planCellEditsToXlsx(
     touchedEntries.add(cachePath)
   }
 
+  // Custom table styles (Table Design → New Table Style) are written before the tables that name them
+  await applyTableStyleAdditions(pkg, tableStyleAdditions, touchedEntries)
+  // Table Design on the file's own tables: the style and options of the table part
+  await applyTableEdits(pkg, tableEdits, touchedEntries)
+
   // New tables also run on the flushed worksheet XML: the <tableParts>
   // element and overlap checks see the final sheet content.
   if (tableAdditions.length > 0) {
     const resolvedTables = []
+    const tableSharedStrings = await readSharedStrings(pkg)
     for (const addition of tableAdditions) {
+      const worksheetPath =
+        additionPaths.get(addition.sheetName) ??
+        (await resolveWorksheetPath(pkg, addition.sheetName))
+      // Excel needs every header cell to spell its column's name. The names were captured when the
+      // table was made; a header typed since, or one the unique-ifying below changes, rules.
+      const columnNames =
+        addition.headerRow === false
+          ? addition.columnNames
+          : await reconcileTableHeaders(
+              pkg,
+              worksheetPath,
+              addition,
+              tableSharedStrings,
+              touchedEntries,
+            )
       resolvedTables.push({
-        worksheetPath:
-          additionPaths.get(addition.sheetName) ??
-          (await resolveWorksheetPath(pkg, addition.sheetName)),
+        worksheetPath,
         area: addition.area,
         name: addition.name,
-        columnNames: addition.columnNames,
+        columnNames,
         style: addition.style,
         bandedRows: addition.bandedRows,
+        bandedColumns: addition.bandedColumns,
+        firstColumn: addition.firstColumn,
+        lastColumn: addition.lastColumn,
+        headerRow: addition.headerRow,
+        totalsRow: addition.totalsRow,
+        filterButton: addition.filterButton,
+        totals: addition.totals,
       })
     }
     await applyTableAdditions(pkg, resolvedTables, touchedEntries)
@@ -2005,6 +2043,53 @@ function readHeaderCellText(
   const text = type === 'str' ? decodeCellText(rawValue) : decodeXmlText(rawValue)
   if (text === '') return { kind: 'blank' }
   return { kind: 'text', text, plain: type === 'str' }
+}
+
+/// The column names a new table is saved with, read back from its header cells in the final sheet:
+/// a header typed after the table was made is the name (made unique the way Excel does it — in the
+/// cell too, when it is plain text), a blank header cell gets the name the table was made with, and a
+/// formula or error header keeps it.
+async function reconcileTableHeaders(
+  pkg: PackageEditor,
+  worksheetPath: string,
+  addition: SheetTableAddition,
+  sharedStrings: readonly string[],
+  touchedEntries: Set<string>,
+): Promise<readonly string[]> {
+  let xml = await pkg.readText(worksheetPath)
+  const taken = new Set<string>()
+  const names: string[] = []
+  let changed = false
+  addition.columnNames.forEach((own, index) => {
+    const address = toA1Address(addition.area.startRow, addition.area.startColumn + index)
+    const header = readHeaderCellText(xml, address, sharedStrings)
+    let name = own
+    if (header.kind === 'text' && header.text.trim() !== '') {
+      const unique = uniqueTableColumnName(header.text, taken, '')
+      if (header.plain) {
+        name = unique
+        if (unique !== header.text) {
+          xml = writeHeaderCellText(xml, address, unique)
+          changed = true
+        }
+      } else if (unique === header.text) {
+        // a number or boolean header adopts its text form when that is free; its stored value stays
+        name = unique
+      }
+    } else if (header.kind === 'blank') {
+      name = uniqueTableColumnName(own, taken, '')
+      xml = writeHeaderCellText(xml, address, name)
+      changed = true
+    }
+    if (taken.has(name.toLowerCase())) name = uniqueTableColumnName(name, taken, '')
+    taken.add(name.toLowerCase())
+    names.push(name)
+  })
+  if (changed) {
+    pkg.write(worksheetPath, xml)
+    touchedEntries.add(worksheetPath)
+  }
+  return names
 }
 
 /// Rewrites a cell to hold plain text, keeping its style index (table header

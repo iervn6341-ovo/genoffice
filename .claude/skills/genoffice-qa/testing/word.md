@@ -499,5 +499,11 @@ Before completing the run, verify at minimum:
 - **Save checks:** `unzip -p f.docx word/document.xml`. Verify `w:ind`,
   `w:pStyle`, `w:numPr` and `w:sectPr`, and open the saved file in Word when
   the change touches serialization.
+- **Real Word is scriptable on Windows** (`New-Object -ComObject Word.Application`, headless; UI language
+  zh-TW). Style names are localized — use numeric `wdBuiltinStyle` constants; `SaveAs2` needs `[object]`
+  references. Save the same ribbon choice to .docx and diff `word/document.xml` / `w:sectPr` against what the
+  app writes (`packages/docx-engine/tests/word-parity-sectpr.test.ts`, `e2e/docs-word-parity.spec.ts`). Found
+  this way: Home → Borders leaves `w:space` 1 pt (top / bottom / between) and 4 pt (left / right); Line
+  Numbers' Restart Each Page writes no `restart` attribute; Page Borders ▸ Box is single / sz 4 / space 24.
 - **Known open items:** see `docs/qa/cloud-handoff.md` (character-unit
   indents are saved as twips, not as `w:firstLineChars`).

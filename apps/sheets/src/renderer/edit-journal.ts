@@ -11,6 +11,7 @@ import type {
   WorkbookPivotAdd,
   WorkbookStyleEdit,
   WorkbookTableAdd,
+  WorkbookTableEdit,
   WorkbookVisualAdd,
   WorkbookVisualEdit,
   WorkbookVisualObject,
@@ -146,6 +147,9 @@ export interface EditJournal {
   /// Tables created this session; the save writes each as a new xl/tables
   /// part registered on its worksheet.
   readonly tableAdds: WorkbookTableAdd[]
+  /// Table Design on tables the file already had: table name (lower case) → the style / options the
+  /// save patches into the table part. A field that is absent stays as the file has it.
+  readonly fileTableEdits: Map<string, WorkbookTableEdit>
   /// Pivots created this session; the baked cells ride the normal cell
   /// journal, the save additionally writes native pivot parts.
   readonly pivotAdds: WorkbookPivotAdd[]
@@ -265,6 +269,7 @@ export function createEditJournal(): EditJournal {
     visualAdds: [],
     visualEdits: new Map(),
     tableAdds: [],
+    fileTableEdits: new Map(),
     pivotAdds: [],
     sparklineAdds: [],
     sheets: {
@@ -802,6 +807,18 @@ export function updateVisualAdd(
 }
 
 /// Session table adds for the save request; tables on removed sheets drop.
+/// Merges Table Design edits of a file's table into the journal (the newest value of a field wins).
+export function recordFileTableEdit(journal: EditJournal, patch: WorkbookTableEdit): void {
+  const key = patch.name.toLowerCase()
+  journal.fileTableEdits.set(key, { ...journal.fileTableEdits.get(key), ...patch })
+}
+
+export function toSaveTableEdits(journal: EditJournal): WorkbookTableEdit[] {
+  return [...journal.fileTableEdits.values()].filter(
+    (edit) => !isSheetRemoved(journal, edit.sheetId),
+  )
+}
+
 export function toSaveTableAdds(journal: EditJournal): WorkbookTableAdd[] {
   return journal.tableAdds.filter((table) => !isSheetRemoved(journal, table.sheetId))
 }
@@ -2138,6 +2155,9 @@ export function journalSize(journal: EditJournal): number {
   }
   for (const table of journal.tableAdds) {
     if (!isSheetRemoved(journal, table.sheetId)) total += 1
+  }
+  for (const edit of journal.fileTableEdits.values()) {
+    if (!isSheetRemoved(journal, edit.sheetId)) total += 1
   }
   for (const pivot of journal.pivotAdds) {
     if (!isSheetRemoved(journal, pivot.sheetId) && !isSheetRemoved(journal, pivot.sourceSheetId)) {
