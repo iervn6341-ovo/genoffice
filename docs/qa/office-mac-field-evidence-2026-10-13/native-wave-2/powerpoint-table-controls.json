@@ -1,0 +1,10 @@
+{
+  "app": "Microsoft PowerPoint for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "V2",
+  "source": "Native PowerPoint accessibility tree after selecting an imported table in a scratch presentation",
+  "table_design": ["Header row", "Total row", "Banded rows", "First column", "Last column", "Banded columns", "Table style gallery", "Shading", "Borders", "Effects", "WordArt quick styles", "Text fill/outline/effects", "Pen style/weight/color", "Draw table", "Eraser"],
+  "table_layout": ["Select", "View gridlines", "Delete", "Insert above/below/left/right", "Merge/split cells", "Row height and column width", "Distribute rows/columns", "Horizontal and vertical alignment", "Text direction", "Cell margins", "Table height/width/aspect lock", "Arrange/align", "Format pane"],
+  "observation": "Read-only inspection of existing native table; no presentation change."
+}

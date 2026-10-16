@@ -1,0 +1,18 @@
+{
+  "app": "Microsoft Word for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "D6",
+  "source": "Native Word Insert > Footnote dialog and References ribbon accessibility tree",
+  "ribbon": ["Insert Footnote", "Insert Endnote", "Next Footnote", "Show Footnotes and Endnotes"],
+  "dialog": {
+    "types": ["Footnote", "Endnote"],
+    "footnote_default_position": "Bottom of page",
+    "endnote_positions": ["End of section", "End of document"],
+    "footnote_layout_columns": "Match section layout",
+    "format": ["Number format", "Custom mark and symbol", "Start at", "Numbering continuation, restart each section, restart each page"],
+    "scope": "Apply changes to selected text",
+    "conversion": "Convert control exists but is disabled when the document has no notes"
+  },
+  "observation_limits": ["The dialog was canceled without modifying the test document."]
+}

@@ -1,0 +1,13 @@
+{
+  "producer": "Microsoft Word for Mac 16.113.3",
+  "method": "Created through the Word Mac UI and saved as DOCX on 2026-10-14",
+  "file": "word-mac-two-section-notes-source.docx",
+  "verified_ooxml": {
+    "section_count": 2,
+    "section_1_footnote": { "numFmt": "upperRoman", "numStart": 3 },
+    "section_2_footnote": { "numFmt": "lowerLetter", "numStart": 8 },
+    "settings_footnote": { "numFmt": "upperRoman", "numStart": 3 },
+    "footnote_reference_count": 2
+  },
+  "limitation": "Both footnote references landed in section 2 because of a Word UI insertion-point error; use this native file to verify section property import/preservation, not cross-section numbering previews."
+}

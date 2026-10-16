@@ -1,0 +1,791 @@
+{
+  "date": "2026-10-13",
+  "baseline": "Microsoft 365 Mac desktop",
+  "scope": "Sequential authorized remaining toolbar work; first wave prioritizes field preservation and header/footer details.",
+  "implementer": {
+    "model": "gpt-6-sol",
+    "reasoning": "high"
+  },
+  "verifier": {
+    "model": "gpt-6-luna",
+    "reasoning": "xhigh",
+    "user_label": "Extra"
+  },
+  "tasks": [
+    {
+      "id": "D0",
+      "app": "docs",
+      "priority": "P0",
+      "title": "保留頁首頁尾既有欄位與畫布歷史",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/docs-office-mac-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs/verification.json",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs/final-e2e.log"
+      ],
+      "verification": {
+        "ui": "passed modal/canvas edits, newline split/join, Undo/Redo before and after save, fresh reopen and edit again",
+        "source_fields": "DATE exact XML + PAGE/NUMPAGES native instructions preserved on every inspected save; header table and drawing retained",
+        "pdf": "3 pages; first page visually reviewed, header/body overlap fixed",
+        "independent_review": "Docs field 25 + engine HF/sections 64 + layout 311 tests passed; full engine 1420 passed/1 skipped before narrow final scanner edge, edge focused passed",
+        "limits": [
+          "wrapped fields are read-only and preserve original part XML",
+          "cross-section editor/body navigation alignment follows in D1"
+        ]
+      }
+    },
+    {
+      "id": "D1",
+      "app": "docs",
+      "priority": "P1",
+      "title": "新增頁首頁尾圖片、日期、欄位、版型及節導航",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/docs-hf-authoring-verification.spec.ts",
+        "e2e/docs-office-mac-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-authoring/verification.json"
+      ],
+      "verification": {
+        "ui": "48.5s authoring E2E; 2 legacy section tests passed49.9s/23s; fields/picture/template/navigation, UndoRedo across save, fresh process reedit and SaveAs filename refresh",
+        "native": "DATE/PAGE/NUMPAGES/FILENAME/AUTHOR remain native simple fields; existing AUTHOR XML, DrawingML image and relations preserved",
+        "pdf": "2 pages visually reviewed; tall second-section header retains native fields, no body overlap; filename/author displays currentcontext",
+        "independent_review": "Docs26 + engine27 final tests and both types passed; prior D1 field/layout suites passed",
+        "limits": [
+          "Imported wrapped/complex fields remain protected, cached-preserved",
+          "Date authoring UI currently provides four numeric formats"
+        ]
+      }
+    },
+    {
+      "id": "D2",
+      "app": "docs",
+      "priority": "P1",
+      "title": "字型進階設定",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/docs-font-advanced-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-font-advanced/font-advanced-final.docx",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-font-advanced/font-theme-undo-restored.docx",
+        "/private/tmp/genoffice-d2-theme-ui-e2e-3.log",
+        "/private/tmp/genoffice-d1-after-d2-e2e.log"
+      ],
+      "verification": {
+        "ui": "Main advanced-font E2E passed 45.0s; theme-backed Font dialog E2E passed 22.4s, explicit Arial/color, Save, Undo+Save restored theme refs",
+        "native": "W14 stylistic set aliases and OOXML run-property order retained; saved theme file contains asciiTheme/hAnsiTheme/eastAsiaTheme/themeColor and native DATE fldSimple after Undo",
+        "regression": "D1 header/footer authoring E2E passed 48.8s after D2 build",
+        "independent_review": "Final Luna narrow review: 11 focused tests passed; W14 local alias namespace/order valid and reparsed; inspected Undo DOCX restores original theme font/color refs and native DATE; no blocker"
+      }
+    },
+    {
+      "id": "D3",
+      "app": "docs",
+      "priority": "P1",
+      "title": "段落分頁、定位點與中文排版設定",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/docs-paragraph-advanced-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-paragraph-advanced/paragraph-advanced-final.docx",
+        "/private/tmp/genoffice-d3-final-e2e.log",
+        "/private/tmp/genoffice-d3-hf-regression-e2e.log"
+      ],
+      "verification": {
+        "ui": "Final Docs Electron E2E 1/1 (44.5s): Paragraph dialog pagination/tabs/Asian typography, Save→Undo+Save→Redo+Save, fresh-process reopen; D1 header/footer regression E2E 1/1 (48.3s).",
+        "native": "Saved DOCX retains exact DATE fldSimple, DrawingML image, m:oMath, imported pPr unknown children; authored keepNext, suppressAutoHyphens, kinsoku, topLinePunct, decimal tab and settings.xml defaultTabStop/compression present.",
+        "independent_review": "GPT-6 Luna/Extra no paragraph/XML blocker; Docs focused 13/13, docx-engine focused 20/20, both typechecks passed."
+      },
+      "current_check": "Docs+Shell actual Electron D3 E2E 1/1 passed (44.5s): UI edit, Save→Undo/Redo→Save, fresh-process reopen, native DOCX structure. Luna/Extra final review passed: measureVersion invalidates unchanged-document measurement path; 43/43 focused tests and Docs typecheck passed."
+    },
+    {
+      "id": "D4",
+      "app": "docs",
+      "priority": "P2",
+      "title": "頁碼格式與章節編號",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/docs-page-number-chapters-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-page-number-chapters/page-number-chapters-final.docx"
+      ],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/word-page-number-controls.json",
+      "verification": {
+        "ui": "Docs+Shell built; actual Electron E2E 1/1 passed (43.4s): native chapter page-number format, editor focus, Save, Undo+Save, Redo+Save, fresh-process reopen/re-edit.",
+        "native": "Final DOCX has w:pgNumType fmt=decimalEnclosedCircle/start=7/chapStyle=3/chapSep=period, PAGE/NUMPAGES/DATE header fields and DrawingML image/relation; unknown pgNumType attributes covered by engine tests.",
+        "independent_review": "GPT-6 Luna/Extra D4-specific sign-off; Docs focused 4/4 and 37/37, sections 38/38, both typechecks passed.",
+        "limits": [
+          "E2E does not assert rendered chapter number or no-numbered-heading disabled state; source/unit checks cover those paths.",
+          "Earlier audit evidence describing 7 formats is historical and stale; current native baseline and source expose 15."
+        ]
+      }
+    },
+    {
+      "id": "D5",
+      "app": "docs",
+      "priority": "P2",
+      "title": "自訂目錄與更新模式",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/docs-toc-custom-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-toc-custom/custom-toc-final.docx",
+        "/private/tmp/genoffice-docs-d3-d5-final-results"
+      ],
+      "current_check": "Docs+Shell actual Electron D5 E2E 1/1 passed (44.9s): custom TOC insert, page-only/full update, Save→Undo/Redo→Save, fresh-process reopen. Luna/Extra final review passed; native DOCX retains TOC instruction/custom mapping, DATE field, drawing and image part; 43/43 focused tests and Docs typecheck passed.",
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/word-toc-controls.json",
+      "limits": [
+        "Imported Word TOC inside a content-control wrapper has unit-level but not Electron save/reopen coverage."
+      ]
+    },
+    {
+      "id": "D6",
+      "app": "docs",
+      "priority": "P2",
+      "title": "註腳與章末註設定",
+      "status": "in_progress",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/docs-native-notes-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-native-notes/native-notes-final.docx",
+        "/private/tmp/genoffice-d6-notes-slice1-hover-rerun",
+        "/private/tmp/genoffice-d6-notes-guard-final-results",
+        "e2e/docs-note-settings-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-native-notes/word-mac-footnote-settings-source.docx",
+        "/private/tmp/genoffice-office-e2e-escalated-20261014.vqdmXg/docs-results",
+        "docs/qa/office-mac-concurrent-e2e-2026-10-14.md",
+        "e2e/docs-note-section-preview-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-native-notes/word-mac-two-section-notes-source.docx",
+        "/private/tmp/genoffice-docs-note-section-fixed-results",
+        "docs/qa/office-mac-next-wave-2026-10-14.md",
+        "e2e/docs-note-page-scope-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-native-notes/word-mac-custom-marks-source.docx",
+        "e2e/docs-note-custom-marks-verification.spec.ts",
+        "/private/tmp/genoffice-docs-note-custom-marks-results",
+        "/private/tmp/genoffice-docs-note-custom-marks-preview-results",
+        "docs/qa/office-mac-field-evidence-2026-10-13/docs-native-notes/conversion/source-manifest.json"
+      ],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/word-footnotes-controls.json",
+      "current_check": "Word Mac custom ♠/♥ note native import/edit/save, Save/Undo/Redo/fresh reopen and canvas/Page Preview marks passed Docs+Shell Electron 2/2 with enhanced UI assertions; GPT-6 Luna/Extra engine 39/39, Docs 26/26, no blocker. Word Mac single-note conversion before/both-direction specimens captured; conversion/navigation/true sectEnd implementation remains open.",
+      "limits": [
+        "Different section number formats/starts currently preview using final-section settings; footnote eachPage previews as continuous; endnote sectEnd is not laid out per section, while native XML round-trips.",
+        "Selected-text/section scope, custom symbols, conversion and navigation remain unimplemented in D6.",
+        "Deleting an orphan note without an editable reference remains conservatively refused."
+      ]
+    },
+    {
+      "id": "D7",
+      "app": "docs",
+      "priority": "P2",
+      "title": "表格進階工具",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/word-table-advanced-controls.json"
+    },
+    {
+      "id": "S0",
+      "app": "sheets",
+      "priority": "P1",
+      "title": "頁首頁尾原生格式代碼與預覽保留",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/sheets-office-mac-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets/final-e2e.log"
+      ],
+      "verification": {
+        "ui": "passed: edit, Undo/Redo before and after save, four saves, fresh process reopen; three variants",
+        "pdf": "4 pages: signed page offsets, total pages, date/time/file/sheet fields; page 1 visually reviewed",
+        "source_fields": "raw XLSX control codes preserved",
+        "limits": [
+          "native system print custom header/footer not implemented",
+          "theme font selectors unresolved"
+        ],
+        "independent_review": "quote-aware opening attributes fix reviewed; XLSX page-setup 45 tests passed",
+        "final_integrated_ui": "passed 2026-10-13: rebuilt Shell with quote-aware gateway, same native code edit/history/reopen/PDF acceptance"
+      }
+    },
+    {
+      "id": "S1",
+      "app": "sheets",
+      "priority": "P1",
+      "title": "頁首頁尾新增圖片",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/sheets-hf-picture-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-pictures/verification.json",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-pictures/final-e2e.log",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-pictures/pdf-all-pages.png"
+      ],
+      "verification": {
+        "ui": "passed actual PNG/JPEG odd/first/even insert/replace/resize/remove, UndoRedo before/after Save,fresh process reopen and reedit",
+        "native": "18-slot sparse VML/media/relationship writer; native ExcelMac fixture shared relationship+orphan preserved",
+        "pdf": "4 pages image counts1,0,1,0; actual image header21.75pt/footer21.63pt frompaperedge vs21.6pt configured; visually reviewed all4 pages no overlap",
+        "independent_review": "76Vitest+3RustHFtests,typespass; implementer190Rusttests passed",
+        "limits": [
+          "PDF HTML request existing20MB cap",
+          "native system print customHF remains S0 limit"
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "app": "sheets",
+      "priority": "P1",
+      "title": "Locked / Hidden 狀態回填",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/sheets-format-protection-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-protection/verification.json",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-protection/format-protection-saved.xlsx",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-protection/format-protection-reopened.xlsx"
+      ],
+      "verification": {
+        "ui": "Format Cells Locked/Hidden default, inherited, styled-blank, mixed and >10k disable cases; actual Playwright 1 passed 11.4s",
+        "history": "Undo/Redo before and after Save preserved sparse flags; fresh Electron reopened and reedited",
+        "native": "XLSX protection flags per-cell preserved; SUM(C1:C2) formula and cached value5 remained native XML across saves",
+        "review": "GPT-6 Luna/Extra focused source review passed; GPT-6 Sol/High gateway regression fixed test-only XF extractor",
+        "limits": [
+          "Selections over 10,000 cells show disabled protection controls with explanation; native whole-column/row selection remains later scope",
+          "Editor states that locked/hidden flags apply when worksheet protection is enabled; this task does not turn protection on"
+        ]
+      }
+    },
+    {
+      "id": "S3",
+      "app": "sheets",
+      "priority": "P1",
+      "title": "儲存格進階對齊與旋轉",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/sheets-advanced-alignment-verification.spec.ts",
+        "e2e/sheets-vertical-distribution-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-alignment/advanced-alignment-reopened.xlsx",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-vertical-distribution/vertical-distribution-pixels.json",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-inherited-blank/InheritedBlank-final.xlsx",
+        "/private/tmp/genoffice-s3-general-e2e.log",
+        "/private/tmp/genoffice-s3-vertical-e2e-3.log",
+        "/private/tmp/genoffice-s3-runtime-final-results",
+        "/private/tmp/genoffice-s3-barrier-final-results",
+        "docs/qa/sheets-cellstyle-alignment-evidence-2026-10-13/cellstyle-alignment-saved.xlsx",
+        "/private/tmp/genoffice-s3-preload-final-results"
+      ],
+      "verification": {
+        "ui": "Advanced alignment E2E passed 18.4s; Left→General→Center, edit, Save Undo/Redo, fresh reopen. Vertical pixel E2E passed14.7s and verified Top/Justify/Distributed positions after edit/reopen.",
+        "native": "Native OOXML alignment values preserved, formula/cache unchanged, namespace-prefixed values not promoted to core, internal renderer marker absent in XLSX",
+        "independent_review": "Core/carry Luna review 169/169 focused tests + typechecks passed; final vertical-render hook Luna review pending; follow-up open: row/column inherited Justify/Distributed rendering",
+        "limits": [
+          "Rotated text and complex document layouts use existing renderer fallback"
+        ]
+      },
+      "current_check": "Final Sheets+Shell actual Electron S3 suite 5/5 passed (1.2m): advanced alignment, named-style XF and three vertical distribution cases all cover UI editing, Save→Undo/Redo→Save and fresh-process reopen. Native XLSX retains original named cellStyleXfs, correct cell XF references and `<f>SUM(C1:C2)</f><v>5</v>`. Luna/Extra independent sign-off: 87/87 focused tests plus Sheets typecheck passed; preload now accepts styleReference-only journal edits and Save waits for pending carry.",
+      "limits": [
+        "Pending carry waits time out after 10 seconds; a slow reopen can reject Undo or Save with retry required.",
+        "Undo carry remains disabled for sheet-management and two-phase saves.",
+        "Later derived XFs may omit unsupported vendor child XML; exact original XF reference restoration remains safe."
+      ]
+    },
+    {
+      "id": "S4",
+      "app": "sheets",
+      "priority": "P1",
+      "title": "字型效果與逐邊框線",
+      "status": "in_progress",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/sheets-font-effects-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-font-effects/font-effects-final.xlsx",
+        "/private/tmp/genoffice-s4-font-final-results",
+        "e2e/sheets-border-effects-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-border-effects/excel-mac-border-source.xlsx",
+        "/private/tmp/genoffice-sheets-border-final-results",
+        "docs/qa/office-mac-concurrent-e2e-2026-10-14.md",
+        "e2e/sheets-merged-border-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-merged-border/excel-mac-merged-border-source.xlsx",
+        "/private/tmp/genoffice-sheets-merged-border-final9-results",
+        "docs/qa/office-mac-next-wave-2026-10-14.md",
+        "e2e/sheets-accounting-underline-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-accounting-underline/excel-mac-accounting-underline-source.xlsx",
+        "/private/tmp/genoffice-sheets-accounting-underline-guard-results3",
+        "/private/tmp/genoffice-sheets-accounting-rollback-results"
+      ],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/excel-font-border-controls.json",
+      "current_check": "Plain unrotated accounting rendering and rich/rotated guard signed off. Attempted document-line extension rendering for rich/rotated clipped to 4.5/3px vs Excel Mac ~119/~75px, rolled back. Sheets+Shell Electron rollback 1/1, focused 25/25, Luna/Extra independent 68/68, native <u>/runs/rotation preserved. Full rich/rotated canvas rendering blocked pending new architecture.",
+      "limits": [
+        "Border editing requires any included merged range to be fully selected; a lone merged range has no Inside Horizontal/Vertical borders, matching Excel Mac.",
+        "Accounting underline remains exact in native OOXML and Format Cells, while Univer canvas preview uses its single/double underline rendering.",
+        "Generic Univer mutation data cannot reconstruct accounting subtype; exact editing uses the Format Cells journal path."
+      ]
+    },
+    {
+      "id": "S5",
+      "app": "sheets",
+      "priority": "P2",
+      "title": "資料剖析精靈",
+      "status": "in_progress",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "docs/qa/office-mac-field-evidence-2026-10-13/sheets-text-to-columns/source-manifest.json"
+      ],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/excel-text-to-columns-controls.json",
+      "current_check": "Excel Mac native before/after Text to Columns fixture captured with quoted commas, second column Text preserving 003/005, destination A1 and overwrite warning for existing B1 formula. GenOffice safe three-step Delimited wizard implementation is in progress; no product E2E pass yet."
+    },
+    {
+      "id": "S6",
+      "app": "sheets",
+      "priority": "P2",
+      "title": "分開註解與備註及討論串保存",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/excel-comments-notes-controls.json"
+    },
+    {
+      "id": "S7",
+      "app": "sheets",
+      "priority": "P2",
+      "title": "填滿圖樣與特殊數字格式",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/excel-fill-special-format-controls.json"
+    },
+    {
+      "id": "L0",
+      "app": "slides",
+      "priority": "P1",
+      "title": "備忘稿／講義頁首頁尾與起始編號",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/slides-notes-handouts-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides/verification.json",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides/final-e2e.log",
+        "/private/tmp/genoffice-l0-clipping-e2e-2.log"
+      ],
+      "verification": {
+        "ui": "passed native dialog, start=0, Undo/Redo before/after save, fresh reopen/edit/save",
+        "source_fields": "dynamic date/page IDs and type preserved; local disabled native field XML protected; disable-save-reopen-reenable engine regression passed",
+        "pdf": "Notes 5 pages numbers 0..4; handouts 3 sheets numbers 1..3; time field output validated; all page header/footer bands visually reviewed",
+        "native_mac": "PowerPoint Mac opened generated PPTX without repair and printed notes/handouts PDFs; native numbering verified",
+        "independent_review": "50 focused tests passed, no blocker; full engine 1111 passed/1 skipped and ops 36 before final narrow fixes; final narrow tests passed",
+        "limits": [
+          "full imported master geometry/theme/layout fidelity continues in L1"
+        ],
+        "regression_2026_10_13": "After fresh reopen and footer edit, PDF prints full edited native footer; Electron E2E passed 11.9s; page overflow fixed."
+      }
+    },
+    {
+      "id": "L1",
+      "app": "slides",
+      "priority": "P1",
+      "title": "母片格式工具及備忘稿／講義母片",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/slides-master-format-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-masters/master-format-iOWceu/master-notes-artwork.pdf",
+        "/private/tmp/genoffice-l1-tabs-e2e-2.log"
+      ],
+      "verification": {
+        "ui": "E2E passed 26.5s: native master and notes/handout format edit, Undo/Redo, save/fresh reopen/reedit",
+        "native": "Imported field IDs, master visibility flags, notes body styles and local overrides preserved",
+        "pdf": "Rendered notes PDF visually reviewed; LTR and RTL tab columns separated, PDF text-item spatial assertions passed, footer/date visible",
+        "independent_review": "70 focused tests across 4 files plus Slides typecheck passed; Luna no blocker",
+        "limits": [
+          "Tab advances estimate glyph widths, so unusual or proportional fonts may differ from PowerPoint"
+        ]
+      }
+    },
+    {
+      "id": "L2",
+      "app": "slides",
+      "priority": "P1",
+      "title": "自訂放映寫入 PPTX",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/slides-custom-shows-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-custom-shows/",
+        "/private/tmp/genoffice-l2-deleteall-e2e.log"
+      ],
+      "verification": {
+        "ui": "Final rebuilt Electron E2E 3/3 passed (20.1s): native show edit/Undo/Redo/Save/fresh reopen, legacy migration, and delete-all Undo/Redo/Save/fresh reopen.",
+        "native": "ppt/presentation.xml custom show ids and slide relationship references retained; nested p:sldLst extension children preserved; legacy localStorage retired only after successful native Save.",
+        "independent_review": "GPT-6 Luna/Extra final source review no blockers; 38 focused tests across 5 files passed.",
+        "limits": [
+          "Existing native custom shows take precedence over legacy localStorage; inert legacy backup remains if native list already exists."
+        ]
+      }
+    },
+    {
+      "id": "L3",
+      "app": "slides",
+      "priority": "P2",
+      "title": "動畫進階設定",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/slides-animation-advanced-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-animation/motion-path-final.pptx",
+        "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/powerpoint-animation-controls.json"
+      ],
+      "verification": {
+        "ui": "Built Slides+Shell; actual Electron E2E 2/2 passed for imported effects and Arc/Spiral native motion paths, preview, Undo/Redo, Save, fresh-process reopen and re-edit.",
+        "native": "Unsupported imported effect subtree, cTn IDs 10/11 and presetID 77 retained; final Spiral persisted as native p:animMotion with target spid 2, replacing Arc without flattening.",
+        "independent_review": "GPT-6 Luna/Extra no blocker; 79 focused tests across eight files and typechecks of PPTX engine, ops and Slides passed.",
+        "limits": [
+          "Shape-click trigger and Animation Painter remain unsupported.",
+          "Positive-exponent API-authored custom motion paths may preview differently from serialized OOXML; curated presets unaffected."
+        ]
+      }
+    },
+    {
+      "id": "L4",
+      "app": "slides",
+      "priority": "P2",
+      "title": "放映設定與自訂投影片大小",
+      "status": "completed",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/slides-show-setup-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-show-setup/configured-show-final.pptx"
+      ],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/powerpoint-show-setup-controls.json",
+      "verification": {
+        "ui": "Slides+Shell built; actual Electron E2E 1/1 passed (5.2s): Show Setup, custom size, browse playback, Undo/Redo, Save, fresh-process reopen/re-edit kiosk/custom show.",
+        "native": "Final PPTX has linked ppt/presProps.xml, content type override, kiosk/custom-show settings and p:sldSz 10800000×6480000 EMU type=custom; imported self-closing roots and unrelated attributes/children preserved in focused tests.",
+        "independent_review": "GPT-6 Luna/Extra source/native sign-off, 90 focused tests across five files and PPTX engine/ops/Slides typechecks passed.",
+        "limits": [
+          "showNarration is preserved in PPTX and UI, but GenOffice has no narration-audio playback path.",
+          "Kiosk playback was source-reviewed; E2E reopened/re-edited kiosk without playing it."
+        ]
+      }
+    },
+    {
+      "id": "L5",
+      "app": "slides",
+      "priority": "P2",
+      "title": "圖片與圖表進階情境工具",
+      "status": "in_progress",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [
+        "e2e/slides-picture-format-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-picture-format/picture-format-final.pptx",
+        "e2e/slides-chart-native-format-verification.spec.ts",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-chart-native/legend-native-final.pptx",
+        "/private/tmp/genoffice-l5-second-slice-results",
+        "/private/tmp/genoffice-l5-legend-rerun",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-chart-native/legend-none-reopened.pptx",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-chart-native/chart-plot-reopened.pptx",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-picture-format/picture-reset-final.pptx",
+        "/private/tmp/genoffice-l5-reset-rerun-results",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-chart-native/powerpoint-mac-quick-layout-source.pptx",
+        "/private/tmp/genoffice-office-e2e-rerun-20261014.6PsW2Q/slides-results",
+        "docs/qa/office-mac-concurrent-e2e-2026-10-14.md",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-chart-native/quick-layout-mac/manifest.json",
+        "docs/qa/office-mac-field-evidence-2026-10-13/slides-chart-native/quick-layout-mac/genoffice-layout-3-reopened.pptx",
+        "/private/tmp/genoffice-slides-quick-layout-fixed-results",
+        "docs/qa/office-mac-next-wave-2026-10-14.md",
+        "/private/tmp/genoffice-slides-layout11-final-results",
+        "/private/tmp/genoffice-slides-layout9-final-results",
+        "/private/tmp/genoffice-slides-layout10-final-results",
+        "/private/tmp/genoffice-slides-layout7-final-results",
+        "/private/tmp/genoffice-slides-layout7-legend-rerun-results"
+      ],
+      "current_check": "PowerPoint Mac Quick Layouts 1,3,11,9,10,7 implemented and signed off; Layout7 Electron new case passed, transient unrelated launchShell helper failure recovered on isolated rerun. Layout8 source in progress. Other Mac layouts 2/4/5/6 and broader tools remain open.",
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/powerpoint-picture-format-controls.json",
+      "additional_baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/powerpoint-chart-format-controls.json",
+      "limits": [
+        "Only Layouts 1 and 3 of the eleven observed PowerPoint Mac clustered-column Quick Layouts are implemented as Mac presets; three prior generic presets remain separate.",
+        "Chart Format slice covers only chart/plot solid/no-fill and outline color/width/none; fuller elements/layout/style pending.",
+        "Reset Corrections is brightness/contrast only; separate full picture correction controls still pending.",
+        "Picture Reset recovery-draft to disk-baseline path was source-reviewed but lacks direct recovery integration coverage."
+      ]
+    },
+    {
+      "id": "L6",
+      "app": "slides",
+      "priority": "P3",
+      "title": "原生 SmartArt 與 Zoom 語意",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/powerpoint-smartart-zoom-controls.json"
+    },
+    {
+      "id": "L7",
+      "app": "slides",
+      "priority": "P3",
+      "title": "錄製投影片放映",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/powerpoint-record-controls.json"
+    },
+    {
+      "id": "M0",
+      "app": "shared",
+      "priority": "P2",
+      "title": "方程式情境工具列與完整轉換模式",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "M1",
+      "app": "shared",
+      "priority": "P2",
+      "title": "更多範本與匯入方程式可編輯範圍",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "M2",
+      "app": "shared",
+      "priority": "P2",
+      "title": "特殊字元分頁與字型字形範圍",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "M3",
+      "app": "slides",
+      "priority": "P3",
+      "title": "PDF 向量方程式輸出",
+      "status": "queued",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "V0",
+      "app": "docs",
+      "priority": "verify",
+      "title": "補圖片／圖表、審閱與列印細項 Mac 比對",
+      "status": "pending_audit",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "V1",
+      "app": "sheets",
+      "priority": "verify",
+      "title": "補驗證下拉、排序、條件格式、樞紐、圖表與匯入表格 Mac 比對",
+      "status": "pending_audit",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "V2",
+      "app": "slides",
+      "priority": "verify",
+      "title": "補表格、完整字型／段落與轉場細項 Mac 比對",
+      "status": "pending_audit",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": [],
+      "baseline_evidence": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/powerpoint-table-controls.json"
+    },
+    {
+      "id": "V3",
+      "app": "all",
+      "priority": "verify",
+      "title": "跨 Microsoft 365 Mac 保存後回 GenOffice 往返",
+      "status": "pending_audit",
+      "acceptance": [
+        "實際 UI 編輯",
+        "Undo / Redo",
+        "存檔與新程序重開",
+        "原生欄位／物件結構檢查"
+      ],
+      "evidence": []
+    }
+  ],
+  "current_wave": [
+    "L5",
+    "D6",
+    "S4",
+    "S5"
+  ],
+  "last_completed_wave": [
+    "D0",
+    "S0",
+    "L0"
+  ],
+  "native_baseline_versions": {
+    "Word": {
+      "version": "16.113.3",
+      "build": "16.113.26092714"
+    },
+    "Excel": {
+      "version": "16.113.3",
+      "build": "16.113.26092714"
+    },
+    "PowerPoint": {
+      "version": "16.113.3",
+      "build": "16.113.26092714"
+    }
+  },
+  "last_verified_task": "D6,S4,L5"
+}

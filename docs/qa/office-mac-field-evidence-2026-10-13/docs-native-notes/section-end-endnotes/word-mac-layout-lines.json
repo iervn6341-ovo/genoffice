@@ -1,0 +1,716 @@
+{
+ "word-mac-probe-settings-sectend-next-page": {
+  "pageCount": 4,
+  "pages": [
+   [
+    {
+     "yPt": 79,
+     "text": "i"
+    },
+    {
+     "yPt": 83,
+     "text": "Section one paragraph 1."
+    },
+    {
+     "yPt": 104,
+     "text": "ii"
+    },
+    {
+     "yPt": 108,
+     "text": "Section one paragraph 2."
+    },
+    {
+     "yPt": 129,
+     "text": "iii"
+    },
+    {
+     "yPt": 133,
+     "text": "Section one paragraph 3."
+    },
+    {
+     "yPt": 154,
+     "text": "iv"
+    },
+    {
+     "yPt": 158,
+     "text": "Section one paragraph 4."
+    },
+    {
+     "yPt": 179,
+     "text": "v"
+    },
+    {
+     "yPt": 183,
+     "text": "Section one paragraph 5."
+    },
+    {
+     "yPt": 204,
+     "text": "vi"
+    },
+    {
+     "yPt": 208,
+     "text": "Section one paragraph 6."
+    },
+    {
+     "yPt": 229,
+     "text": "vii"
+    },
+    {
+     "yPt": 233,
+     "text": "Section one paragraph 7."
+    },
+    {
+     "yPt": 254,
+     "text": "viii"
+    },
+    {
+     "yPt": 258,
+     "text": "Section one paragraph 8."
+    },
+    {
+     "yPt": 279,
+     "text": "ix"
+    },
+    {
+     "yPt": 283,
+     "text": "Section one paragraph 9."
+    },
+    {
+     "yPt": 304,
+     "text": "x"
+    },
+    {
+     "yPt": 308,
+     "text": "Section one paragraph 10."
+    },
+    {
+     "yPt": 329,
+     "text": "xi"
+    },
+    {
+     "yPt": 333,
+     "text": "Section one paragraph 11."
+    },
+    {
+     "yPt": 354,
+     "text": "xii"
+    },
+    {
+     "yPt": 358,
+     "text": "Section one paragraph 12."
+    },
+    {
+     "yPt": 379,
+     "text": "xiii"
+    },
+    {
+     "yPt": 383,
+     "text": "Section one paragraph 13."
+    },
+    {
+     "yPt": 404,
+     "text": "xiv"
+    },
+    {
+     "yPt": 408,
+     "text": "Section one paragraph 14."
+    },
+    {
+     "yPt": 433,
+     "text": "Section one last."
+    },
+    {
+     "yPt": 469,
+     "text": "i"
+    },
+    {
+     "yPt": 473,
+     "text": "Endnote 1 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 561,
+     "text": "ii"
+    },
+    {
+     "yPt": 565,
+     "text": "Endnote 2 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 654,
+     "text": "iii"
+    },
+    {
+     "yPt": 658,
+     "text": "Endnote 3 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 747,
+     "text": "iv"
+    },
+    {
+     "yPt": 751,
+     "text": "Endnote 4 sentence 1 is deliberately lon"
+    }
+   ],
+   [
+    {
+     "yPt": 170,
+     "text": "v"
+    },
+    {
+     "yPt": 174,
+     "text": "Endnote 5 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 263,
+     "text": "vi"
+    },
+    {
+     "yPt": 267,
+     "text": "Endnote 6 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 356,
+     "text": "vii"
+    },
+    {
+     "yPt": 360,
+     "text": "Endnote 7 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 448,
+     "text": "viii"
+    },
+    {
+     "yPt": 452,
+     "text": "Endnote 8 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 541,
+     "text": "ix"
+    },
+    {
+     "yPt": 545,
+     "text": "Endnote 9 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 634,
+     "text": "x"
+    },
+    {
+     "yPt": 638,
+     "text": "Endnote 10 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 727,
+     "text": "xi"
+    },
+    {
+     "yPt": 731,
+     "text": "Endnote 11 sentence 1 is deliberately lo"
+    }
+   ],
+   [
+    {
+     "yPt": 136,
+     "text": "xii"
+    },
+    {
+     "yPt": 140,
+     "text": "Endnote 12 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 229,
+     "text": "xiii"
+    },
+    {
+     "yPt": 233,
+     "text": "Endnote 13 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 321,
+     "text": "xiv"
+    },
+    {
+     "yPt": 326,
+     "text": "Endnote 14 sentence 1 is deliberately lo"
+    }
+   ],
+   [
+    {
+     "yPt": 79,
+     "text": "xv"
+    },
+    {
+     "yPt": 83,
+     "text": "Section two paragraph A."
+    },
+    {
+     "yPt": 104,
+     "text": "xvi"
+    },
+    {
+     "yPt": 108,
+     "text": "Section two paragraph B."
+    },
+    {
+     "yPt": 144,
+     "text": "xv"
+    },
+    {
+     "yPt": 148,
+     "text": "Endnote 15 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 237,
+     "text": "xvi"
+    },
+    {
+     "yPt": 241,
+     "text": "Endnote 16 sentence 1 is deliberately lo"
+    }
+   ]
+  ]
+ },
+ "word-mac-probe-settings-sectend-continuous": {
+  "pageCount": 1,
+  "pages": [
+   [
+    {
+     "yPt": 79,
+     "text": "i"
+    },
+    {
+     "yPt": 83,
+     "text": "Section one paragraph 1."
+    },
+    {
+     "yPt": 104,
+     "text": "ii"
+    },
+    {
+     "yPt": 108,
+     "text": "Section one paragraph 2."
+    },
+    {
+     "yPt": 129,
+     "text": "iii"
+    },
+    {
+     "yPt": 133,
+     "text": "Section one paragraph 3."
+    },
+    {
+     "yPt": 158,
+     "text": "Section one last."
+    },
+    {
+     "yPt": 194,
+     "text": "i"
+    },
+    {
+     "yPt": 198,
+     "text": "Endnote 1 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 287,
+     "text": "ii"
+    },
+    {
+     "yPt": 291,
+     "text": "Endnote 2 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 380,
+     "text": "iii"
+    },
+    {
+     "yPt": 384,
+     "text": "Endnote 3 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 472,
+     "text": "iv"
+    },
+    {
+     "yPt": 476,
+     "text": "Section two paragraph A."
+    },
+    {
+     "yPt": 497,
+     "text": "v"
+    },
+    {
+     "yPt": 501,
+     "text": "Section two paragraph B."
+    },
+    {
+     "yPt": 537,
+     "text": "iv"
+    },
+    {
+     "yPt": 541,
+     "text": "Endnote 4 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 630,
+     "text": "v"
+    },
+    {
+     "yPt": 634,
+     "text": "Endnote 5 sentence 1 is deliberately lon"
+    }
+   ]
+  ]
+ },
+ "word-mac-probe-settings-sectend-short": {
+  "pageCount": 2,
+  "pages": [
+   [
+    {
+     "yPt": 79,
+     "text": "i"
+    },
+    {
+     "yPt": 83,
+     "text": "Section one paragraph 1."
+    },
+    {
+     "yPt": 104,
+     "text": "ii"
+    },
+    {
+     "yPt": 108,
+     "text": "Section one paragraph 2."
+    },
+    {
+     "yPt": 133,
+     "text": "Section one last."
+    },
+    {
+     "yPt": 169,
+     "text": "i"
+    },
+    {
+     "yPt": 173,
+     "text": "Endnote 1 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 262,
+     "text": "ii"
+    },
+    {
+     "yPt": 266,
+     "text": "Endnote 2 sentence 1 is deliberately lon"
+    }
+   ],
+   [
+    {
+     "yPt": 79,
+     "text": "iii"
+    },
+    {
+     "yPt": 83,
+     "text": "Section two paragraph A."
+    },
+    {
+     "yPt": 104,
+     "text": "iv"
+    },
+    {
+     "yPt": 108,
+     "text": "Section two paragraph B."
+    },
+    {
+     "yPt": 144,
+     "text": "iii"
+    },
+    {
+     "yPt": 148,
+     "text": "Endnote 3 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 237,
+     "text": "iv"
+    },
+    {
+     "yPt": 241,
+     "text": "Endnote 4 sentence 1 is deliberately lon"
+    }
+   ]
+  ]
+ },
+ "word-mac-probe-sectpr-only-pos-ignored": {
+  "pageCount": 4,
+  "pages": [
+   [
+    {
+     "yPt": 79,
+     "text": "i"
+    },
+    {
+     "yPt": 83,
+     "text": "Section one paragraph 1."
+    },
+    {
+     "yPt": 104,
+     "text": "ii"
+    },
+    {
+     "yPt": 108,
+     "text": "Section one paragraph 2."
+    },
+    {
+     "yPt": 129,
+     "text": "iii"
+    },
+    {
+     "yPt": 133,
+     "text": "Section one paragraph 3."
+    },
+    {
+     "yPt": 154,
+     "text": "iv"
+    },
+    {
+     "yPt": 158,
+     "text": "Section one paragraph 4."
+    },
+    {
+     "yPt": 179,
+     "text": "v"
+    },
+    {
+     "yPt": 183,
+     "text": "Section one paragraph 5."
+    },
+    {
+     "yPt": 204,
+     "text": "vi"
+    },
+    {
+     "yPt": 208,
+     "text": "Section one paragraph 6."
+    },
+    {
+     "yPt": 229,
+     "text": "vii"
+    },
+    {
+     "yPt": 233,
+     "text": "Section one paragraph 7."
+    },
+    {
+     "yPt": 254,
+     "text": "viii"
+    },
+    {
+     "yPt": 258,
+     "text": "Section one paragraph 8."
+    },
+    {
+     "yPt": 279,
+     "text": "ix"
+    },
+    {
+     "yPt": 283,
+     "text": "Section one paragraph 9."
+    },
+    {
+     "yPt": 304,
+     "text": "x"
+    },
+    {
+     "yPt": 308,
+     "text": "Section one paragraph 10."
+    },
+    {
+     "yPt": 329,
+     "text": "xi"
+    },
+    {
+     "yPt": 333,
+     "text": "Section one paragraph 11."
+    },
+    {
+     "yPt": 354,
+     "text": "xii"
+    },
+    {
+     "yPt": 358,
+     "text": "Section one paragraph 12."
+    },
+    {
+     "yPt": 379,
+     "text": "xiii"
+    },
+    {
+     "yPt": 383,
+     "text": "Section one paragraph 13."
+    },
+    {
+     "yPt": 404,
+     "text": "xiv"
+    },
+    {
+     "yPt": 408,
+     "text": "Section one paragraph 14."
+    },
+    {
+     "yPt": 433,
+     "text": "Section one last."
+    }
+   ],
+   [
+    {
+     "yPt": 79,
+     "text": "xv"
+    },
+    {
+     "yPt": 83,
+     "text": "Section two paragraph A."
+    },
+    {
+     "yPt": 104,
+     "text": "xvi"
+    },
+    {
+     "yPt": 108,
+     "text": "Section two paragraph B."
+    },
+    {
+     "yPt": 144,
+     "text": "i"
+    },
+    {
+     "yPt": 148,
+     "text": "Endnote 1 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 237,
+     "text": "ii"
+    },
+    {
+     "yPt": 241,
+     "text": "Endnote 2 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 330,
+     "text": "iii"
+    },
+    {
+     "yPt": 334,
+     "text": "Endnote 3 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 422,
+     "text": "iv"
+    },
+    {
+     "yPt": 427,
+     "text": "Endnote 4 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 515,
+     "text": "v"
+    },
+    {
+     "yPt": 519,
+     "text": "Endnote 5 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 608,
+     "text": "vi"
+    },
+    {
+     "yPt": 612,
+     "text": "Endnote 6 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 701,
+     "text": "vii"
+    },
+    {
+     "yPt": 705,
+     "text": "Endnote 7 sentence 1 is deliberately lon"
+    }
+   ],
+   [
+    {
+     "yPt": 119,
+     "text": "viii"
+    },
+    {
+     "yPt": 123,
+     "text": "Endnote 8 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 212,
+     "text": "ix"
+    },
+    {
+     "yPt": 216,
+     "text": "Endnote 9 sentence 1 is deliberately lon"
+    },
+    {
+     "yPt": 305,
+     "text": "x"
+    },
+    {
+     "yPt": 309,
+     "text": "Endnote 10 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 398,
+     "text": "xi"
+    },
+    {
+     "yPt": 402,
+     "text": "Endnote 11 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 490,
+     "text": "xii"
+    },
+    {
+     "yPt": 494,
+     "text": "Endnote 12 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 583,
+     "text": "xiii"
+    },
+    {
+     "yPt": 587,
+     "text": "Endnote 13 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 676,
+     "text": "xiv"
+    },
+    {
+     "yPt": 680,
+     "text": "Endnote 14 sentence 1 is deliberately lo"
+    },
+    {
+     "yPt": 769,
+     "text": "xv"
+    },
+    {
+     "yPt": 773,
+     "text": "Endnote 15 sentence 1 is deliberately lo"
+    }
+   ],
+   [
+    {
+     "yPt": 170,
+     "text": "xvi"
+    },
+    {
+     "yPt": 174,
+     "text": "Endnote 16 sentence 1 is deliberately lo"
+    }
+   ]
+  ]
+ }
+}

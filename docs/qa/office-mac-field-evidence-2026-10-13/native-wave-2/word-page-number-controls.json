@@ -1,0 +1,16 @@
+{
+  "app": "Microsoft Word for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "D4",
+  "source": "Native Word macOS Insert > Page Numbers > Format dialogs, accessibility tree",
+  "page_number_dialog": ["Location", "Alignment", "Show number on first page", "Format"],
+  "format_dialog": {
+    "number_formats": ["1, 2, 3", "- 1 -, - 2 -, - 3 -", "fullwidth digits", "a, b, c", "A, B, C", "i, ii, iii", "I, II, III", "circled digits", "Chinese 一, 二, 三", "Chinese 一, 十, 百", "Japanese 壱, 弐, 参", "Chinese financial 壹, 貳, 參", "traditional Chinese 一, 二, 三", "甲, 乙, 丙", "子, 丑, 寅"],
+    "include_chapter_number": true,
+    "chapter_start_styles": ["Heading 1", "Heading 2", "Heading 3", "Heading 4", "Heading 5", "Heading 6", "Heading 7", "Heading 8", "Heading 9"],
+    "chapter_separators": ["hyphen", "period", "colon", "em dash", "en dash"],
+    "page_numbering": ["Continue from previous section", "Start at"]
+  },
+  "observation_limits": ["The ribbon Page Number gallery popup produced a computer-use zero-size capture error; the equivalent native dialog was opened via the macOS Insert menu.", "Dialog was canceled; no document modified."]
+}

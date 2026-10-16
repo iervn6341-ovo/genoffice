@@ -1,0 +1,10 @@
+{
+  "app": "Microsoft Excel for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "S6",
+  "source": "Native Excel Review ribbon and Notes menu accessibility tree",
+  "comments": ["New Comment", "Delete Comment", "Previous Comment", "Next Comment", "Show Comments"],
+  "notes": ["New Note", "Previous Note", "Next Note", "Show/Hide Note", "Show All Notes", "Convert to Comments"],
+  "observation_limits": ["With the selected cell having no comment or note, Delete, Previous and Next Comment, Previous and Next Note, Show/Hide Note and Convert to Comments were disabled."]
+}

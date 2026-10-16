@@ -1,0 +1,19 @@
+{
+  "app": "Microsoft Word for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "D7",
+  "source": "Native Word temporary 2-column table, Insert Table dialog, contextual Table Design/Layout ribbons and Table Properties dialog accessibility trees",
+  "insert_table": ["Row/column counts", "Fixed initial width", "AutoFit to contents", "AutoFit to window", "Set default for new tables"],
+  "table_design": ["Header row", "Total row", "Banded rows", "First column", "Last column", "Banded columns", "Table style gallery", "Shading", "Border style", "Pen style/weight/color", "Borders", "Border Painter"],
+  "table_layout": ["Select", "View gridlines", "Properties", "Draw table", "Eraser", "Delete", "Insert rows/columns", "Merge/split cells", "Split table", "AutoFit", "Cell height/width", "Distribute rows/columns", "Nine cell alignments", "Text direction", "Cell margins", "Sort", "Repeat header rows", "Convert to text", "Formula"],
+  "table_properties": {
+    "table": ["Preferred width/units", "Alignment", "Left indent", "Text wrapping", "Position", "Borders and shading", "Options"],
+    "row": ["Specify height", "Minimum/exact height", "Allow row to break across pages", "Repeat as header row at top of each page"],
+    "column": ["Preferred width/units"],
+    "cell": ["Preferred width/units", "Top/center/bottom vertical alignment", "Cell options"],
+    "cell_options": ["Same margins as table", "Top/bottom/left/right cell margins", "Wrap text", "Fit text"],
+    "alt_text_tab": true
+  },
+  "observation_limits": ["Inspected in an unsaved temporary Word document; no project document was modified."]
+}

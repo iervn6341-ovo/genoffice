@@ -1,0 +1,24 @@
+{
+  "sourceApp": "Microsoft Word Mac desktop",
+  "captureDate": "2026-10-14",
+  "method": "Created original Word Mac custom ♠ footnote and ♥ endnote, saved as before.docx, put caret in footnote body, context menu Convert to Endnote, Save As after.docx.",
+  "before": "word-mac-conversion-before.docx",
+  "afterFootnoteToEndnote": "word-mac-conversion-footnote-to-endnote.docx",
+  "observed": {
+    "initialReferenceIds": "footnote 1, endnote 1",
+    "afterReferenceIds": "endnote 1 (converted footnote), endnote 2 (original endnote)",
+    "convertedMarker": "customMarkFollows=1 and Symbol F0AA retained",
+    "convertedBody": "moved to endnotes.xml id=1, pStyle changed from ae to af1, Symbol F0AA/text retained",
+    "untouchedOriginalEndnote": "reindexed to id=2, Symbol F0A9/text retained",
+    "separators": "footnotes.xml and endnotes.xml separator/continuationSeparator id -1/0 retained"
+  },
+  "afterEndnoteToFootnote": "word-mac-conversion-endnote-to-footnote.docx",
+  "reverseMethod": "Opened original before.docx in Word Mac; caret in endnote body, context menu Convert to Footnote, Save As reverse after.docx.",
+  "reverseObserved": {
+    "initialReferenceIds": "footnote 1 ♠, endnote 1 ♥",
+    "afterReferenceIds": "footnote 1 ♠, footnote 2 ♥",
+    "convertedBody": "endnote id1 ♥ moved to footnotes.xml id2, pStyle af1→ae, Symbol F0A9/text retained",
+    "originalFootnote": "footnote id1 ♠ retained",
+    "separators": "both parts retain separator/continuationSeparator id -1/0"
+  }
+}

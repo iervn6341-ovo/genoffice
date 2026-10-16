@@ -1,0 +1,51 @@
+{
+  "app": "MicrosoftWord16.113.3Mac",
+  "method": "ComputerUse Format>Font new scratchblank",
+  "font": [
+    "EastAsianFont",
+    "LatinFont",
+    "style",
+    "size",
+    "fontColor",
+    "underlineStyle",
+    "underlineColor",
+    "emphasisMark",
+    "strike",
+    "doubleStrike",
+    "superscript",
+    "subscript",
+    "smallCaps",
+    "caps",
+    "hidden"
+  ],
+  "advanced": [
+    "scalePercent",
+    "spacingNormalExpandedCondensed+pt",
+    "positionNormalRaisedLowered+pt",
+    "kerning+thresholdPt",
+    "snapToGrid",
+    "ligatures",
+    "numberSpacing",
+    "numberForm",
+    "stylisticSets",
+    "contextualAlternates"
+  ],
+  "ligatures": [
+    "none",
+    "standardOnly",
+    "standardContextual",
+    "historicalDiscretionary",
+    "all"
+  ],
+  "numberSpacing": [
+    "default",
+    "proportional",
+    "tabular"
+  ],
+  "numberForm": [
+    "default",
+    "lining",
+    "oldStyle"
+  ],
+  "status": "readOnlyDialogInventory; no changes applied"
+}

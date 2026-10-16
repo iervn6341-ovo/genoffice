@@ -15,3 +15,6 @@
 *.otf binary
 *.woff binary
 *.woff2 binary
+
+# Native Office chart XML samples are compared byte-for-byte by tests: keep their original (CRLF) line endings.
+docs/qa/office-mac-field-evidence-*/**/*.xml binary

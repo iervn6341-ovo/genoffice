@@ -1,0 +1,9 @@
+{
+  "app": "Microsoft PowerPoint for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "L5",
+  "source": "Native PowerPoint Picture Format contextual ribbon accessibility tree after temporary local JPG insertion",
+  "picture_format": ["Edit Picture", "Remove Background", "Clear", "Corrections", "Color", "Artistic Effects", "Transparency", "Picture Quality", "Change Picture", "Reset Picture", "Picture Styles", "Picture Border", "Picture Effects", "Picture Layout", "Alt Text", "Bring Forward/Send Backward", "Selection Pane", "Reorder Objects", "Align", "Group", "Rotate", "Crop", "Height/Width", "Lock Aspect Ratio", "Format Pane", "Animate as Background"],
+  "observation_limits": ["The insertion into a scratch native presentation was immediately undone and not saved.", "Chart contextual controls remain to be inspected separately for L5."]
+}

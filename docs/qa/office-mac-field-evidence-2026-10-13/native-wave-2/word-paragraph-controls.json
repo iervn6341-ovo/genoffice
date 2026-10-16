@@ -1,0 +1,92 @@
+{
+  "app": "Microsoft Word Mac",
+  "version": "16.113.3",
+  "dialog": "Format > Paragraph",
+  "tabs": {
+    "Indentation and Spacing": [
+      "alignment",
+      "outline level",
+      "left/right indents",
+      "special first/hanging offset",
+      "adjust right indent on document grid",
+      "before/after spacing",
+      "line spacing",
+      "do not add space between same style paragraphs",
+      "snap to document grid",
+      "mirror indents",
+      "collapse by default disabled at body"
+    ],
+    "Line and Page Breaks": [
+      "widow/orphan control",
+      "keep with next",
+      "keep lines together",
+      "page break before",
+      "suppress line numbers",
+      "do not hyphenate",
+      "text box tight wrap option disabled for body"
+    ],
+    "Asian Typography": [
+      "use Asian rules for first/last characters",
+      "allow Latin word breaking",
+      "allow hanging punctuation",
+      "compress punctuation at line start",
+      "adjust Asian-Latin spacing",
+      "adjust Asian-digit spacing",
+      "text alignment"
+    ]
+  },
+  "Tabs dialog": {
+    "position": "text field",
+    "default stops": "2 characters",
+    "alignment": [
+      "left",
+      "center",
+      "right",
+      "decimal",
+      "bar"
+    ],
+    "leader": [
+      "none",
+      "dots",
+      "dashes",
+      "underline",
+      "heavy dots"
+    ],
+    "actions": [
+      "add",
+      "remove",
+      "clear all"
+    ]
+  },
+  "observation": "UI only, no edits to source scratch",
+  "Asian Typography Options dialog": {
+    "characterSpacingAdjustment": [
+      "Latin only",
+      "Latin and punctuation"
+    ],
+    "forbiddenLineStartEnd": [
+      "standard",
+      "strict",
+      "custom",
+      "editable forbidden line-start characters",
+      "editable forbidden line-end characters",
+      "Defaults button"
+    ],
+    "compression": [
+      "none",
+      "punctuation only",
+      "punctuation and Japanese kana"
+    ]
+  },
+  "nativeCompressionSpecimen": {
+    "source": "Microsoft Word for Mac scratch DOCX, Format > Paragraph > Chinese Typography > Options",
+    "path": "docs/qa/office-mac-field-evidence-2026-10-13/native-wave-2/word-paragraph-no-compress.docx",
+    "defaultSetting": "<w:characterSpacingControl w:val=\"compressPunctuation\"/>",
+    "changedSetting": "<w:characterSpacingControl w:val=\"doNotCompress\"/>",
+    "radioOptions": [
+      "不壓縮",
+      "僅壓縮標點符號",
+      "壓縮標點符號及日文假名"
+    ]
+  }
+}

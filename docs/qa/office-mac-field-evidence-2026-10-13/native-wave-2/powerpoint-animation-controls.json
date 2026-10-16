@@ -1,0 +1,32 @@
+{
+  "app": "Microsoft PowerPoint for Mac",
+  "locale": "zh-TW",
+  "surface": "Animation ribbon on a selected title shape in a scratch presentation",
+  "observed": {
+    "ribbonGroups": [
+      "Preview",
+      "Entrance effects",
+      "Emphasis effects",
+      "Exit effects",
+      "Motion paths",
+      "Effect options",
+      "Animation pane",
+      "Trigger",
+      "Animation painter",
+      "Start",
+      "Duration"
+    ],
+    "motionPathGroups": {
+      "custom": ["curve", "freeform polygon", "line", "scribble"],
+      "basic": ["arc", "line", "loop", "shape", "turn"],
+      "complex": ["bounce", "reverse shape", "special curves", "special shapes", "spiral", "star", "wave"]
+    },
+    "fadeSelection": {
+      "effect": "Entrance Fade",
+      "start": "On Click",
+      "duration": "0.50 seconds",
+      "effectOptions": "Order: As One Object"
+    }
+  },
+  "method": "Read native ribbon and popover accessibility state with computer use; applied Fade only to a scratch PPTX."
+}

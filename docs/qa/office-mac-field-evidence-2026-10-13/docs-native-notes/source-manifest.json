@@ -1,0 +1,12 @@
+{
+  "sourceApp": "Microsoft Word Mac desktop",
+  "captureDate": "2026-10-14",
+  "file": "word-mac-custom-marks-source.docx",
+  "creation": "Created via UI: Insert > Footnote dialog > Symbol > Symbol font spade for footnote, heart for endnote; typed note bodies; Save As DOCX.",
+  "verifiedOOXML": {
+    "documentFootnote": "<w:footnoteReference w:customMarkFollows=\"1\" w:id=\"1\"/><w:sym w:font=\"Symbol\" w:char=\"F0AA\"/>",
+    "documentEndnote": "<w:endnoteReference w:customMarkFollows=\"1\" w:id=\"1\"/><w:sym w:font=\"Symbol\" w:char=\"F0A9\"/>",
+    "footnotes": "native note body begins <w:sym w:font=\"Symbol\" w:char=\"F0AA\"/>",
+    "endnotes": "native note body begins <w:sym w:font=\"Symbol\" w:char=\"F0A9\"/>"
+  }
+}

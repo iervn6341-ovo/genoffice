@@ -1,0 +1,327 @@
+{
+  "source": "PowerPoint for Mac 16.113.3 Quick Layout gallery on a clustered-column chart, using the genuine Office-origin source PPTX in the parent directory",
+  "capture": "2026-10-14; each numbered gallery item was clicked in the native UI, saved with Cmd+S to an isolated /private/tmp scratch PPTX, then chart1.xml was extracted",
+  "galleryAccessibility": "11 buttons with descriptions 版面配置 1 through 版面配置 11; native screenshots observed during capture",
+  "scope": "GenOffice enables Layouts 1/2/3/4/7/8/9/10/11 on compatible clustered-column charts. Layout 2 adds three series-local value-label structures, top legend, negative overlap, and a hidden value axis while preserving imported axis formatting. Layout 9 adds native automatic axis-title structures; Layouts 7/11 remove a safe local title, and Layout 11 sets native tick marks. Layouts 1/3/7/8/9/11 require no series-local or point labels; Layout 4 adds native value labels on all three series, while Layout 10 adds in-end labels only on the third. Layout 7 adds native styled value-axis minor gridlines; Layouts 2/4/8 remove only known native major-gridline structures. The remaining Layouts 5/6 need additional native chart structures and are unavailable; all supported layouts require no data table",
+  "layouts": [
+    {
+      "layout": 1,
+      "chartXml": "layout-01-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": false,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": false,
+      "legend": "r",
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 150,
+      "overlapPct": null
+    },
+    {
+      "layout": 2,
+      "chartXml": "layout-02-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": false,
+      "valueMajorGridlines": false,
+      "valueMinorGridlines": false,
+      "legend": "t",
+      "plotValueLabels": true,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 150,
+      "overlapPct": -25
+    },
+    {
+      "layout": 3,
+      "chartXml": "layout-03-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": false,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": false,
+      "legend": "b",
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 75,
+      "overlapPct": -25
+    },
+    {
+      "layout": 4,
+      "chartXml": "layout-04-chart.xml",
+      "chartTitle": false,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": false,
+      "valueMajorGridlines": false,
+      "valueMinorGridlines": false,
+      "legend": "b",
+      "plotValueLabels": true,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 75,
+      "overlapPct": null
+    },
+    {
+      "layout": 5,
+      "chartXml": "layout-05-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": true,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": false,
+      "legend": null,
+      "plotValueLabels": false,
+      "dataTable": true,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": false,
+      "gapWidthPct": 150,
+      "overlapPct": null
+    },
+    {
+      "layout": 6,
+      "chartXml": "layout-06-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": true,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": false,
+      "legend": null,
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 1
+        },
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 1
+        },
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 1
+        }
+      ],
+      "supportedByGenOffice": false,
+      "gapWidthPct": 150,
+      "overlapPct": null
+    },
+    {
+      "layout": 7,
+      "chartXml": "layout-07-chart.xml",
+      "chartTitle": false,
+      "categoryAxisTitle": true,
+      "valueAxisTitle": true,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": true,
+      "legend": "r",
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 300,
+      "overlapPct": null
+    },
+    {
+      "layout": 8,
+      "chartXml": "layout-08-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": true,
+      "valueAxisTitle": true,
+      "valueMajorGridlines": false,
+      "valueMinorGridlines": false,
+      "legend": null,
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 0,
+      "overlapPct": null
+    },
+    {
+      "layout": 9,
+      "chartXml": "layout-09-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": true,
+      "valueAxisTitle": true,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": false,
+      "legend": "r",
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 150,
+      "overlapPct": null
+    },
+    {
+      "layout": 10,
+      "chartXml": "layout-10-chart.xml",
+      "chartTitle": true,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": false,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": false,
+      "legend": "r",
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": true,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 75,
+      "overlapPct": 40
+    },
+    {
+      "layout": 11,
+      "chartXml": "layout-11-chart.xml",
+      "chartTitle": false,
+      "categoryAxisTitle": false,
+      "valueAxisTitle": false,
+      "valueMajorGridlines": true,
+      "valueMinorGridlines": false,
+      "legend": "r",
+      "plotValueLabels": false,
+      "dataTable": false,
+      "seriesLabels": [
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        },
+        {
+          "hasLocalLabels": false,
+          "pointLabelCount": 0
+        }
+      ],
+      "supportedByGenOffice": true,
+      "gapWidthPct": 150,
+      "overlapPct": null
+    }
+  ]
+}

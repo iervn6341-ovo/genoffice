@@ -1,0 +1,10 @@
+{
+  "app": "Microsoft PowerPoint for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "L5",
+  "source": "Native PowerPoint Chart Design and Format contextual ribbon accessibility tree after temporary chart insertion",
+  "chart_design": ["Add Chart Element", "Quick Layout", "Change Colors", "Chart Styles", "Switch Row/Column", "Select Data", "Edit Data in Excel", "Refresh Data", "Change Chart Type"],
+  "chart_format": ["Chart Element selector", "Reset to Match Style", "Shape Fill", "Shape Outline", "Shape Effects", "Shape Styles", "Text Fill", "Text Outline", "Text Effects", "Bring Forward/Send Backward", "Selection Pane", "Reorder Objects", "Align", "Group", "Rotate", "Height/Width", "Lock Aspect Ratio", "Format Pane"],
+  "observation_limits": ["Refresh Data was disabled in the inspected chart state.", "The chart insertion into a scratch native presentation was immediately undone and not saved."]
+}

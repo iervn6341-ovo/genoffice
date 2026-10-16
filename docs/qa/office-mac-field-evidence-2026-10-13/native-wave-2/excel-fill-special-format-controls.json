@@ -1,0 +1,17 @@
+{
+  "app": "Microsoft Excel for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "S7",
+  "source": "Native Excel Format Cells Fill and Number tabs accessibility tree",
+  "fill": {
+    "controls": ["Background color", "Pattern color", "Pattern style", "Sample"],
+    "pattern_styles": ["Solid", "75% Gray", "50% Gray", "25% Gray", "12.5% Gray", "6.25% Gray", "Horizontal Stripe", "Vertical Stripe", "Reverse Diagonal Stripe", "Diagonal Stripe", "Diagonal Crosshatch", "Thick Diagonal Crosshatch", "Thin Horizontal Stripe", "Thin Vertical Stripe", "Thin Reverse Diagonal Stripe", "Thin Diagonal Stripe", "Thin Horizontal Crosshatch", "Thin Diagonal Crosshatch"]
+  },
+  "number": {
+    "categories": ["General", "Number", "Currency", "Accounting", "Date", "Time", "Percentage", "Fraction", "Scientific", "Text", "Special", "Custom"],
+    "special_location": "English (United States)",
+    "special_types": ["ZIP Code", "ZIP Code + 4", "Phone Number", "Social Security Number"]
+  },
+  "observation_limits": ["The Special type list was empty for English (Taiwan) in the inspected workbook, so the locale was switched temporarily to English (United States) inside an unsaved dialog.", "The Format Cells dialog was canceled without changing the workbook."]
+}

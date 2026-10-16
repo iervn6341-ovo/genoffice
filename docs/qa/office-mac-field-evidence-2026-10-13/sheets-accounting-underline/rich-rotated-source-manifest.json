@@ -1,0 +1,11 @@
+{
+  "sourceApp": "Microsoft Excel Mac desktop",
+  "captureDate": "2026-10-14",
+  "file": "excel-mac-rich-rotated-source.xlsx",
+  "screenshot": "excel-mac-rich-rotated-source.png",
+  "cells": {
+    "E1": "Rich text two runs, later run bold, cell font singleAccounting; visual horizontal accounting line extends across nearly full cell width",
+    "F1": "Rotated text at 45 degrees, cell font singleAccounting; visual underline follows diagonal rotated baseline, not horizontal whole-cell line"
+  },
+  "method": "Opened source XLSX in actual Microsoft Excel Mac via native UI; captured visible workbook screen with CUA."
+}

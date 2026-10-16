@@ -1,0 +1,10 @@
+{
+  "app": "Microsoft PowerPoint for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "L6",
+  "source": "Native PowerPoint Insert ribbon SmartArt and Zoom menu accessibility trees",
+  "smartart_categories": ["List", "Process", "Cycle", "Hierarchy", "Relationship", "Matrix", "Pyramid", "Picture", "Timeline", "Meet the Team", "Text Card"],
+  "zoom_types": ["Summary Zoom", "Section Zoom", "Slide Zoom"],
+  "observation_limits": ["Section Zoom was disabled in the inspected five-slide presentation without eligible sections.", "This baseline inventories insertion controls only; it does not assert authoring or OOXML fidelity."]
+}

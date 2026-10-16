@@ -1,0 +1,18 @@
+{
+  "sourceApp": "Microsoft Excel Mac desktop",
+  "captureDate": "2026-10-14",
+  "before": "excel-mac-text-to-columns-before.xlsx",
+  "after": "excel-mac-text-to-columns-after.xlsx",
+  "screenshots": [
+    "excel-mac-text-to-columns-step2.png",
+    "excel-mac-text-to-columns-overwrite-warning.png",
+    "excel-mac-text-to-columns-after.png"
+  ],
+  "method": "Created Book4 in Excel UI. Entered A1 literal apostrophe-prefixed \"A, B\",003,4 and A2 \"C,D\",005,6; B1 formula =10+5; Save As before. Selected A1:A2, Data > Text to Columns > Delimited > Comma, text qualifier double quote > second column Text > destination $A$1 > Finish; accepted Excel warning and Save As after.",
+  "observed": {
+    "step2": "Preview splits quoted comma correctly into 3 columns, default qualifier double quote",
+    "step3": "Default destination $A$1; second column Text preserves 003 and 005",
+    "overwrite": "Excel warns \"There's already data here. Do you want to replace it?\" before replacing B1 formula",
+    "after": "A1=A, B; B1=003 as text; C1=4; A2=C,D; B2=005 as text; C2=6. B1 formula removed only after user accepted warning."
+  }
+}

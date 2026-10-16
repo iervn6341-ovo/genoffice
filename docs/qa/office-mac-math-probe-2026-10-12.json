@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-12",
+  "baselineHead": "6578a439",
+  "method": "Direct call to current latexToOmml; does not exercise UI or save/reopen",
+  "fractionVariantsIdentical": true,
+  "results": [
+    {
+      "latex": "\\frac{a}{b}",
+      "outcome": "converted",
+      "omml": "<m:f><m:num><m:r><m:t xml:space=\"preserve\">a</m:t></m:r></m:num><m:den><m:r><m:t xml:space=\"preserve\">b</m:t></m:r></m:den></m:f>"
+    },
+    {
+      "latex": "\\dfrac{a}{b}",
+      "outcome": "converted",
+      "omml": "<m:f><m:num><m:r><m:t xml:space=\"preserve\">a</m:t></m:r></m:num><m:den><m:r><m:t xml:space=\"preserve\">b</m:t></m:r></m:den></m:f>"
+    },
+    {
+      "latex": "\\tfrac{a}{b}",
+      "outcome": "converted",
+      "omml": "<m:f><m:num><m:r><m:t xml:space=\"preserve\">a</m:t></m:r></m:num><m:den><m:r><m:t xml:space=\"preserve\">b</m:t></m:r></m:den></m:f>"
+    },
+    {
+      "latex": "\\sqrt[3]{x}",
+      "outcome": "converted",
+      "omml": "<m:rad><m:deg><m:r><m:t xml:space=\"preserve\">3</m:t></m:r></m:deg><m:e><m:r><m:t xml:space=\"preserve\">x</m:t></m:r></m:e></m:rad>"
+    },
+    {
+      "latex": "\\begin{bmatrix}a&b\\\\c&d\\end{bmatrix}",
+      "outcome": "converted",
+      "omml": "<m:d><m:dPr><m:begChr m:val=\"[\"/><m:endChr m:val=\"]\"/></m:dPr><m:e><m:m><m:mr><m:e><m:r><m:t xml:space=\"preserve\">a</m:t></m:r></m:e><m:e><m:r><m:t xml:space=\"preserve\">b</m:t></m:r></m:e></m:mr><m:mr><m:e><m:r><m:t xml:space=\"preserve\">c</m:t></m:r></m:e><m:e><m:r><m:t xml:space=\"preserve\">d</m:t></m:r></m:e></m:mr></m:m></m:e></m:d>"
+    },
+    {
+      "latex": "\\boxed{x}",
+      "outcome": "unsupported",
+      "error": "Error: Unsupported command: \\boxed"
+    },
+    {
+      "latex": "\\overset{a}{b}",
+      "outcome": "unsupported",
+      "error": "Error: Unsupported command: \\overset"
+    },
+    {
+      "latex": "\\underset{a}{b}",
+      "outcome": "unsupported",
+      "error": "Error: Unsupported command: \\underset"
+    }
+  ]
+}

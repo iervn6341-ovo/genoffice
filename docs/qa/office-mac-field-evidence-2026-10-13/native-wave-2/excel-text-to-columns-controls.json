@@ -1,0 +1,39 @@
+{
+  "app": "Microsoft Excel for Mac",
+  "locale": "en",
+  "surface": "Data > Text to Columns on a scratch workbook",
+  "wizard": [
+    {
+      "step": 1,
+      "title": "Convert Text to Columns Wizard - Step 1 of 3",
+      "controls": ["Delimited", "Fixed width", "selected-data preview"]
+    },
+    {
+      "step": 2,
+      "title": "Convert Text to Columns Wizard - Step 2 of 3",
+      "controls": [
+        "Tab",
+        "Semicolon",
+        "Comma",
+        "Space",
+        "Other (custom character)",
+        "Treat consecutive delimiters as one",
+        "Text qualifier",
+        "delimiter preview"
+      ]
+    },
+    {
+      "step": 3,
+      "title": "Convert Text to Columns Wizard - Step 3 of 3",
+      "controls": [
+        "Destination range",
+        "per-column General/Text/Date/Skip format",
+        "Date order (YMD shown)",
+        "data preview",
+        "Advanced numeric settings"
+      ]
+    }
+  ],
+  "advanced": ["Decimal separator", "Thousands separator", "Reset"],
+  "method": "Inspected native wizard with computer use, then canceled without changing the scratch workbook."
+}

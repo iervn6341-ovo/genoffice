@@ -1,0 +1,9 @@
+{
+  "app": "Microsoft PowerPoint for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "L7",
+  "source": "Native PowerPoint Record ribbon accessibility tree",
+  "record_ribbon": ["Cameo", "From Beginning", "From Current Slide", "Clear Recordings", "Reset to Cameo", "Learn More"],
+  "observation_limits": ["Clear Recordings and Reset to Cameo were disabled because the selected presentation had no applicable recording.", "Recording was not started; microphone/camera permissions and media output were not inspected."]
+}

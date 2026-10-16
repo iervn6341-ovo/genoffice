@@ -1,0 +1,18 @@
+{
+  "app": "Microsoft Word for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "D5",
+  "source": "Native Word accessibility tree, References ribbon and Insert > Index and Tables > Table of Contents tab",
+  "ribbon": ["Table of Contents gallery", "Add Text", "Update Table of Contents"],
+  "custom_table_of_contents": {
+    "formats": ["From template", "Classic", "Distinctive", "Fancy", "Modern", "Formal", "Simple"],
+    "default_levels": 3,
+    "options": ["Show page numbers", "Right-align page numbers", "Tab leader", "Modify styles", "Use hyperlinks instead of page numbers"],
+    "source_options": ["Styles with per-style TOC levels", "Table entry fields", "Outline levels", "Reset"]
+  },
+  "observation_limits": [
+    "The ribbon gallery popup produced a computer-use zero-size capture error; the native dialog was opened via the macOS Insert menu.",
+    "Update mode and resulting TOC field XML still require a later native fixture; no document was modified during this observation."
+  ]
+}

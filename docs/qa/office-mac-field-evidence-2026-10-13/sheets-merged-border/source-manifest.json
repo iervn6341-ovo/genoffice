@@ -1,0 +1,17 @@
+{
+  "app": "Microsoft Excel for Mac",
+  "version": "16.113.3",
+  "created_on": "2026-10-14",
+  "source": "Excel Mac UI in a new scratch workbook; A1:B2 Merge & Center, Format Cells > Border > Dotted > Outline > Diagonal Up",
+  "merged_file": "excel-mac-merged-border-source.xlsx",
+  "unmerged_comparison": "excel-mac-unmerged-after-border.xlsx",
+  "cells": {
+    "A1": "Merged sample",
+    "C1": "Neighbor, unmerged control"
+  },
+  "observations": [
+    "The merged A1:B2 has four distinct cell style references, one for each corner's outer edges; every corner's border also carries diagonalUp and dotted diagonal.",
+    "After unmerging and Save As, mergeCells is removed but A1/B1/A2/B2 style references and border definitions remain unchanged.",
+    "In Excel Mac Format Cells, Inside, Horizontal and Vertical border controls are disabled when the merged A1:B2 selection is active; outer edges and diagonals remain enabled."
+  ]
+}

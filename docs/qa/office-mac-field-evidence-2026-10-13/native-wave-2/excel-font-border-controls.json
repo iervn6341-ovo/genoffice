@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-13",
+  "baseline": "Microsoft Excel for Mac, Format Cells dialog inspected through native accessibility UI",
+  "scratchWorkbook": "/private/tmp/GenOfficeHeaderImageMacProbe.xlsx",
+  "font": {
+    "family": "scrollable installed font list plus editable field",
+    "style": ["Regular", "Italic", "Bold", "Bold Italic"],
+    "size": "editable field plus standard point-size list",
+    "normalFont": "checkbox",
+    "underline": ["None", "Single", "Double", "Single Accounting", "Double Accounting"],
+    "effects": ["Strikethrough", "Superscript", "Subscript"],
+    "fontColor": "theme and standard color picker"
+  },
+  "border": {
+    "presets": ["None", "Inside (disabled for a single cell)", "Outline"],
+    "edges": ["Left", "Top", "Bottom", "Right", "Horizontal (disabled for a single cell)", "Vertical (disabled for a single cell)", "Diagonal Up", "Diagonal Down"],
+    "lineStyles": ["None", "Hair", "Dotted", "Dash Dot Dot", "Dash Dot", "Dashed", "Thin", "Medium Dash Dot Dot", "Slanted Dash Dot", "Medium Dash Dot", "Medium Dashed", "Medium", "Thick", "Double"],
+    "lineColor": "Automatic; theme palette with tints/shades; standard palette; More Colors"
+  },
+  "observation": "Read-only inspection; Format Cells canceled without editing the workbook."
+}

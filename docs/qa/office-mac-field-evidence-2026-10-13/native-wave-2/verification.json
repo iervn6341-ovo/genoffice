@@ -1,0 +1,21 @@
+{
+  "baseline": "Microsoft 365 Mac 16.113.3",
+  "excel": {
+    "file": "GenOfficeHeaderImageMacProbe.xlsx",
+    "method": "native Page Setup dialogs, Insert Picture, accepted dialogs and Cmd+S",
+    "active_slots": [
+      "LH PNG",
+      "LF JPEG"
+    ],
+    "retained_orphan_slot": "LHFIRST",
+    "flags": "differentFirst and differentOddEven disabled; cached variants retained",
+    "codes": "odd header/footer &G native"
+  },
+  "powerpoint": {
+    "enabled": "GenOfficeNotesMasterEnabled.pptx",
+    "disabled": "GenOfficeNotesMasterDisabled.pptx",
+    "method": "native Notes Master sldImg and body checkboxes, Cmd+S",
+    "result": "enable adds p:sp placeholders, disable removes them; p:hf unchanged",
+    "notes": "source fixture has no notesSlide parts"
+  }
+}

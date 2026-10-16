@@ -1,0 +1,29 @@
+{
+  "app": "Microsoft PowerPoint for Mac",
+  "locale": "zh-TW",
+  "surface": "Slide Show > Set Up Slide Show in a scratch presentation",
+  "ribbon": [
+    "From Beginning",
+    "From Current Slide",
+    "Presenter View",
+    "Custom Slide Show",
+    "Set Up Slide Show",
+    "Hide Slide",
+    "Rehearse Timings",
+    "Record",
+    "Play Narrations",
+    "Use Timings",
+    "Show Media Controls",
+    "Always Use Subtitles",
+    "Subtitle Settings"
+  ],
+  "dialog": {
+    "showType": ["Presented by a speaker (full screen)", "Browsed by an individual (window)", "Browsed at a kiosk (full screen)"],
+    "options": ["Loop continuously until Esc", "Show without narration", "Show without animation"],
+    "slides": ["All", "Range", "Custom show (disabled when none exists)"],
+    "advance": ["Manually", "Use timings, if present"],
+    "display": "Slide show monitor selector"
+  },
+  "designRibbon": "Slide Size dropdown present; its native popover could not be captured by this computer-use session and needs a later inspection.",
+  "method": "Inspected native ribbon and Set Up Slide Show dialog with computer use; canceled without applying changes."
+}

@@ -1,0 +1,12 @@
+{
+  "app": "PowerPoint16.113.3 Mac",
+  "probe": "created native local notes text, enabled master sldImg/body, then disabled both and saved",
+  "xml": "master deleted both shapes; existing notesSlide1 retains both local shapes",
+  "pdf": "5pages; page1 contains slide Q3BusinessReview and NATIVE_LOCAL_NOTES_BODY",
+  "evidence": [
+    "GenOfficeNotesLocalMasterEnabled.pptx",
+    "GenOfficeNotesLocalMasterDisabled.pptx",
+    "GenOfficeNotesLocalMasterDisabled.pdf"
+  ],
+  "rule": "local notes placeholders determine visibility; master absence does not hide existing local ones"
+}

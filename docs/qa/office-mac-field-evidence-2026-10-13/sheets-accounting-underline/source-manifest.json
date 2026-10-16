@@ -1,0 +1,18 @@
+{
+  "source": "Microsoft Excel for Mac desktop",
+  "captureDate": "2026-10-14",
+  "creation": "Entered an A1:D2 text/number comparison in Excel Mac, used Format Cells > Font > Underline on each individual cell, set A:D column width to 24, saved as XLSX, and captured the same open workbook with E4 selected.",
+  "workbook": "excel-mac-accounting-underline-source.xlsx",
+  "screenshot": "excel-mac-accounting-underline-source.png",
+  "cells": {
+    "A1": "text; Single (<u/>)",
+    "B1": "text; Single Accounting",
+    "C1": "number; Single (<u/>)",
+    "D1": "number; Single Accounting",
+    "A2": "text; Double",
+    "B2": "text; Double Accounting",
+    "C2": "number; Double",
+    "D2": "number; Double Accounting"
+  },
+  "observed": "In this wide-column native rendering, ordinary lines follow the text width; accounting lines reach the cell's right inset and sit below the ordinary line."
+}

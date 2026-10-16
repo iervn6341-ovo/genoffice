@@ -1,0 +1,17 @@
+{
+  "app": "Microsoft Excel for Mac",
+  "version": "16.113.3",
+  "observed_on": "2026-10-13",
+  "task": "S3",
+  "source": "Native Excel Format Cells Alignment tab after opening /private/tmp/s3-cellstyle-alignment-probe.xlsx",
+  "fixture": "/private/tmp/s3-cellstyle-alignment-probe.xlsx",
+  "parent_cellStyleXf": {"horizontal": "center", "vertical": "justify", "wrapText": true, "indent": 3},
+  "cells": [
+    {"cell": "A1", "cellXf": "xfId=1 applyAlignment=0, no child alignment", "observed": {"horizontal": "General", "vertical": "Bottom", "wrapText": false, "indent": 0}},
+    {"cell": "B1", "cellXf": "xfId=1 applyAlignment=1, no child alignment", "observed": {"horizontal": "General", "vertical": "Bottom", "wrapText": false, "indent": 0}},
+    {"cell": "C1", "cellXf": "xfId=1 applyAlignment=1, child horizontal=left", "observed": {"horizontal": "Left", "vertical": "Bottom", "wrapText": false, "indent": 0}}
+  ],
+  "reference": "https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/840d73d1-b7ed-45c8-94ca-a0cf2cad4a24",
+  "interpretation": "The named parent style is linked by xfId, but only cell XF defines the currently applied format. Editing a cell alignment must not copy parent wrap/indent into the cell XF merely because xfId points to that style.",
+  "observation_limits": ["The fixture was opened for read-only inspection; no edits were saved in native Excel."]
+}
