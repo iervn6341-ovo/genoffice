@@ -169,6 +169,22 @@ describe('op validation (guided errors)', () => {
     expect(r.failures![0]!.error).toContain('finite number')
   })
 
+  it('setPictureAdjustments rejects non-finite and out-of-range picture values', () => {
+    for (const bright of [Number.NaN, 1.2]) {
+      const r = runTxn(opened, {
+        ops: [
+          {
+            op: 'setPictureAdjustments',
+            target: { slide: 0, el: cardId },
+            adjustments: { lum: { bright, contrast: 0 } },
+          },
+        ],
+      })
+      expect(r.applied).toBe(false)
+      expect(r.failures?.[0]?.error).toMatch(/finite number|between -1 and 1/)
+    }
+  })
+
   it('setPictureSrcRect rejects fractions outside 0..1', () => {
     const r = runTxn(opened, {
       ops: [

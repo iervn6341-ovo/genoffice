@@ -108,6 +108,7 @@ export function AnimationPane({
           <div
             key={i}
             className={`anim-row anim-${animClassOf(it.effect)} ${selected === i ? 'selected' : ''}`}
+            data-testid={`animation-row-${i}`}
             onClick={() => onSelect(selected === i ? -1 : i)}
             data-tip={`${t(TRIGGER_KEY[it.trigger])} · ${t('paneAnimSeconds', { sec: (it.durationMs / 1000).toFixed(2) })}${it.delayMs ? ` · ${t('paneAnimDelaySeconds', { sec: (it.delayMs / 1000).toFixed(2) })}` : ''}`}
           >
@@ -116,7 +117,9 @@ export function AnimationPane({
               {TRIGGER_GLYPH[it.trigger]}
             </span>
             <span className="anim-row-main">
-              <span className="anim-row-effect">{t(EFFECT_KEY[it.effect])}</span>
+              <span className="anim-row-effect">
+                {it.customPreset ? t('paneAnimImportedEffect') : t(EFFECT_KEY[it.effect])}
+              </span>
               <span className="anim-row-target">
                 {it.targetName}
                 {it.paragraph != null && ` · ${t('paneAnimParaN', { n: it.paragraph + 1 })}`}

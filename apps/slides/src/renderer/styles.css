@@ -254,6 +254,24 @@
   --slides-choice-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 6.5l2.5 2.5 4.5-5' fill='none' stroke='%231e1e1e' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
+/* Gray variant of the dark family: the app-scoped chrome tokens above are tuned for the near-black
+   dark theme (the near-black rail / status bar would sink below the lifted gray panels), so re-point the
+   neutral ones at the shared gray chrome tokens. Accent and semantic colors stay as in dark. */
+[data-theme='dark'][data-theme-variant='gray'] {
+  --slides-statusbar-bg: var(--surface);
+  --slides-rail-bg: var(--surface);
+  --slides-statusbar-border: var(--border);
+  --slides-ctl-border: #8a8a8a;
+  --slides-text-disabled: #858585;
+  --slides-stagebar-ink: #dcdcdc;
+  --slides-comment-bg: #46433c;
+  --slides-chip-bg: #3f4650;
+  --slides-att-bg: var(--surface-subtle);
+  --slides-att-border: var(--border);
+  --slides-danger-bg: var(--danger-bg);
+  --slides-shimmer-base: #a0a0a0;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
     --accent: #e8663f;
@@ -3263,6 +3281,15 @@ body.vib .slide-list {
   margin-top: 18px;
 }
 
+.modal-actions .print-error {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  color: var(--danger);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .modal-actions button {
   display: inline-flex;
   align-items: center;
@@ -5044,10 +5071,12 @@ body.vib .slide-list {
 }
 
 .rb-anim-timing {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  grid-auto-rows: 22px;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-content: center;
   font-size: 12px;
   color: var(--text);
   padding: 2px 4px;
@@ -5057,6 +5086,7 @@ body.vib .slide-list {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-height: 22px;
   white-space: nowrap;
 }
 
@@ -6675,6 +6705,76 @@ body.show-curtain::after {
 
 /* ── Custom show management dialog ──────────────────────────────── */
 
+.modal.show-setup-dialog {
+  width: min(650px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.show-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.show-setup-grid fieldset,
+.custom-slide-size-dialog fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.show-setup-grid legend,
+.custom-slide-size-dialog legend {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.show-setup-grid label,
+.custom-slide-size-dialog fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0;
+  color: var(--text);
+}
+
+.show-setup-grid input[type='radio'],
+.show-setup-grid input[type='checkbox'],
+.custom-slide-size-dialog input[type='radio'] {
+  display: inline-block;
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+
+.show-setup-range {
+  display: flex;
+  gap: 12px;
+  margin-left: 24px;
+}
+
+.show-setup-range label {
+  flex: 1;
+}
+
+.show-setup-range input {
+  min-width: 0;
+}
+
+.show-setup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.custom-slide-size-dialog label {
+  color: var(--text);
+}
+
 .modal.csd {
   width: 580px;
 }
@@ -7851,6 +7951,7 @@ body.show-curtain::after {
 }
 
 .modal .dlg-radio input[type='radio'],
+.modal .dlg-check input[type='radio'],
 .modal .dlg-check input[type='checkbox'] {
   display: inline-block;
   width: 14px;
@@ -8787,6 +8888,26 @@ body.show-curtain::after {
   color: var(--text);
   width: 120px;
 }
+/* Chart Format target selector edits either chartSpace or plotArea shape properties. */
+.rb-chart-format-target {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.rb-chart-format-target select {
+  min-width: 118px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 3px 5px;
+}
+
 /* Add-chart-element dropdown (title/axis titles/legend/toggles) */
 .rb-chart-elem-drop {
   display: flex;
@@ -9269,6 +9390,86 @@ body.show-curtain::after {
   font-size: 13px;
   font-weight: 600;
 }
+.master-tool {
+  border: 1px solid var(--slides-on-accent-border);
+  background: var(--slides-on-accent-bg);
+  color: var(--slides-on-accent);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.master-format-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--surface);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.master-format-bar input[type='number'] {
+  width: 64px;
+}
+.master-format-bar input[data-testid='master-font-family'] {
+  width: 150px;
+}
+.master-format-bar button,
+.master-format-bar select,
+.master-format-bar input {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-height: 26px;
+}
+.master-format-bar button:disabled,
+.master-format-bar input:disabled,
+.master-format-bar select:disabled {
+  opacity: 0.45;
+}
+.master-format-bar button[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.master-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.master-handout-preview {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  inset: 15% 12% 16%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3%;
+  opacity: 0.35;
+}
+.master-handout-2,
+.master-handout-3 {
+  grid-template-columns: 1fr;
+}
+.master-handout-9 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.master-slide-slot {
+  border: 1px solid var(--text-dim);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+}
+.master-handout-outline {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.master-outline-line {
+  height: 3%;
+  background: var(--text-dim);
+  margin-bottom: 4%;
+}
 .master-close-btn {
   margin-left: auto;
   padding: 4px 12px;
@@ -9677,6 +9878,21 @@ body.show-curtain::after {
   user-select: none;
   pointer-events: none;
 }
+/* Dark content preview (dark-content.ts): screen-only repaint of the authored inline colors via
+   --dk-* twins; the inline declarations stay authored, so commit still reads the real colors. */
+.slide-text-editor.dk {
+  color: var(--dk-c, inherit) !important;
+  caret-color: var(--dk-c, auto) !important;
+}
+.slide-text-editor.dk [style*='--dk-c'] {
+  color: var(--dk-c) !important;
+}
+.slide-text-editor.dk [style*='--dk-bg'] {
+  background-color: var(--dk-bg) !important;
+}
+.slide-text-editor.dk > div[data-bullet-text]::before {
+  color: var(--bullet-dk-color, var(--bullet-color, inherit));
+}
 .slide-text-editor > div[data-bullet-img] {
   position: relative;
 }
@@ -10052,4 +10268,65 @@ body.show-curtain::after {
   font-weight: 400;
   color: var(--text-dim);
 }
+/* Header/footer dialog tabs and notes/handout placement preview. */
+.hf-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+.hf-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.hf-tabs button[aria-selected='true'] {
+  color: var(--text);
+  border-bottom: 2px solid var(--accent);
+}
+.nh-preview {
+  position: relative;
+  width: 180px;
+  height: 230px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  padding: 12px;
+  box-sizing: border-box;
+  font-size: 10px;
+  overflow: hidden;
+}
+.nh-preview-bottom {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 3px;
+  align-items: end;
+}
+.nh-preview-bottom span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
+/* Equation contextual tab: 11 structure buttons laid out in three rows */
+.rb-eq-structures {
+  display: grid;
+  grid-template-rows: repeat(3, 24px);
+  grid-auto-flow: column;
+  gap: 2px 4px;
+  align-content: center;
+}
+
+.rb-eq-drop-label {
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}

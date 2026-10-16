@@ -2,7 +2,9 @@ import type { ShapeRenderNode } from '@genoffice/pptx-render'
 
 /** Text frames need a full-box hit target because their glyph runs do not cover spacing/insets. */
 export function needsTextFrameHitArea(shape: ShapeRenderNode): boolean {
-  return !!shape.text
+  // A newly enabled master placeholder can have an empty txBody (or no parsed
+  // runs). It still needs a selectable frame for its formatting controls.
+  return !!shape.text || !!shape.placeholder
 }
 
 const PROMPT_PLACEHOLDERS = new Set(['title', 'ctrTitle', 'subTitle', 'body'])

@@ -378,6 +378,8 @@ export async function onEditChart(
     ctx.applySlide(ctx.current, result.slide)
     // Element ids change after reparse: re-select so the "Chart Design" tab doesn't jump away
     if (result.sourceId) ctx.setSelectedIds([result.sourceId])
+  } else if (op.quickLayout) {
+    ctx.setStatus(t('ribbonQuickLayoutUnavailable'))
   }
 }
 

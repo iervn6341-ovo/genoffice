@@ -3,15 +3,24 @@ import {
   addPicture,
   createBlankPptx,
   openPptx,
+  getFirstSlideNumber,
+  materializeSlide,
+  readNotesHandoutsPrintFields,
   replacePictureBytes,
+  resetPictureFromBaseline,
+  savePptx,
+  setPictureAdjustments,
   type PictureElement,
 } from '@genoffice/pptx-engine'
+import { runTxn } from '@genoffice/pptx-ops'
 import type { Session } from '../src/main/session-state'
 import {
   beginHistoryBatch,
   carryHistoryForReplacement,
   endHistoryBatch,
   pushHistory,
+  pictureResetBaseline,
+  refreshPictureResetBaseline,
   registerAiSnapshot,
   restoreAiSnapshot,
   restoreSnapshot,
@@ -51,6 +60,112 @@ function setValue(session: Session, value: string): void {
 }
 
 describe('Slides main-process history batching', () => {
+  it('bases Reset Picture on import/Save, not Undo, and captures newly inserted pictures before first edit', async () => {
+    const opened = await openPptx(await createBlankPptx())
+    const session: Session = { path: '', opened, fitWidthPx: 1280, undoStack: [], redoStack: [] }
+    refreshPictureResetBaseline(session)
+    const png = Uint8Array.from(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    )
+    const slide = opened.deck.slides[0]!
+    const picture = addPicture(opened, slide, {
+      bytes: png,
+      ext: 'png',
+      offset: { x: 914400, y: 914400, cx: 914400, cy: 914400 },
+    })!
+    pushHistory(session)
+    expect(setPictureAdjustments(slide, picture.id, { color: 'sepia' })).toBe(true)
+    const inserted = pictureResetBaseline(session, slide, picture)!
+    expect(inserted.xml).not.toContain('<a:duotone>')
+    expect(resetPictureFromBaseline(opened, 0, picture.id, inserted)).toBe(true)
+    const refreshed = materializeSlide(opened, 0)!
+    const freshPicture = refreshed.elements.find((item) => item.type === 'picture')!
+
+    expect(setPictureAdjustments(refreshed, freshPicture.id, { color: 'sepia' })).toBe(true)
+    materializeSlide(opened, 0)
+    refreshPictureResetBaseline(session) // successful Save or Save As
+    const savedSlide = opened.deck.slides[0]!
+    const savedPicture = savedSlide.elements.find((item) => item.type === 'picture')!
+    pushHistory(session)
+    expect(setPictureAdjustments(savedSlide, savedPicture.id, { color: 'grayscale' })).toBe(true)
+    const grayZip = await import('jszip').then(({ default: JSZip }) =>
+      JSZip.loadAsync(savePptx(opened)),
+    )
+    expect(await grayZip.file('ppt/slides/slide1.xml')!.async('string')).toContain('<a:grayscl/>')
+    const saved = pictureResetBaseline(session, savedSlide, savedPicture)!
+    expect(saved.xml).toContain('<a:duotone>')
+    session.redoStack.push(takeSnapshot(session))
+    restoreSnapshot(session, session.undoStack.pop()!)
+    const undoZip = await import('jszip').then(({ default: JSZip }) =>
+      JSZip.loadAsync(savePptx(opened)),
+    )
+    expect(await undoZip.file('ppt/slides/slide1.xml')!.async('string')).toContain('<a:duotone>')
+    expect(
+      pictureResetBaseline(
+        session,
+        session.opened.deck.slides[0]!,
+        session.opened.deck.slides[0]!.elements.find((item) => item.type === 'picture')!,
+      ),
+    ).toEqual(saved)
+  })
+
+  it('undoes and redoes native notes/handout fields and the presentation number start as one snapshot', async () => {
+    const opened = await openPptx(await createBlankPptx())
+    const session: Session = {
+      path: '',
+      opened,
+      fitWidthPx: 1280,
+      undoStack: [],
+      redoStack: [],
+    }
+    pushHistory(session)
+    const result = runTxn(session.opened, {
+      ops: [
+        {
+          op: 'applyHeaderFooter',
+          settings: { slideNum: true, firstSlideNum: 0 },
+        },
+        {
+          op: 'applyNotesHandoutsHeaderFooter',
+          settings: {
+            headerEnabled: true,
+            header: 'Notes header',
+            footerEnabled: false,
+            footer: '',
+            dateEnabled: true,
+            date: 'Cached date',
+            dateAuto: true,
+            dateFormat: 'datetime8',
+            pageNum: true,
+          },
+        },
+      ],
+    })
+    expect(result.applied).toBe(true)
+    const xml = session.opened.archive.readText('ppt/notesMasters/notesMaster1.xml')!
+    const dateField = xml.match(/<a:fld id="([^"]+)" type="datetime8"/)
+    expect(dateField).toBeTruthy()
+    expect(getFirstSlideNumber(session.opened.archive)).toBe(0)
+    const saved = await openPptx(await savePptx(session.opened))
+    expect(saved.archive.readText('ppt/notesMasters/notesMaster1.xml')).toContain(dateField![0])
+
+    session.redoStack.push(takeSnapshot(session))
+    restoreSnapshot(session, session.undoStack.pop()!)
+    expect(getFirstSlideNumber(session.opened.archive)).toBe(1)
+    expect(readNotesHandoutsPrintFields(session.opened).handout.date).toBeUndefined()
+
+    session.undoStack.push(takeSnapshot(session))
+    restoreSnapshot(session, session.redoStack.pop()!)
+    expect(getFirstSlideNumber(session.opened.archive)).toBe(0)
+    expect(session.opened.archive.readText('ppt/notesMasters/notesMaster1.xml')).toContain(
+      dateField![0],
+    )
+    expect(readNotesHandoutsPrintFields(session.opened).handout.date?.field).toBe('datetime8')
+  })
+
   it('collapses several edits into one pre-run snapshot', () => {
     const session = sessionWith('before')
     beginHistoryBatch(session)

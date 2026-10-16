@@ -17,6 +17,8 @@ export function ChartBody({
 }) {
   return (
     <>
+      {/* Chart frames remain selectable between bars, labels and plot lines. */}
+      <Rect x={0} y={0} width={chart.box.w} height={chart.box.h} fill="transparent" />
       {chart.bgFill && (
         <Rect
           x={0}

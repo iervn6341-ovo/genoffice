@@ -44,6 +44,7 @@ export type InsertDropKey =
   | 'wordart'
   | 'zoom'
   | 'addanim'
+  | 'morepaths'
   // Home tab small dropdowns (Font / Paragraph extras)
   | 'charSpacing'
   | 'changeCase'
@@ -306,7 +307,10 @@ export type RibbonPanelKey =
   | 'layoutPick'
   | 'slideSize'
   | 'transparency'
+  | 'pictureCorrections'
+  | 'pictureColor'
   | 'pictureBorder'
+  | 'pictureStyle'
   | 'changeShape'
   | 'shapeStyle'
   | 'shapeFill'
@@ -599,6 +603,7 @@ export interface Props {
   onResetLayout: () => void
   /** Slide size (EMU) and the current size tag ('16:9'|'4:3'|null for display) */
   onSlideSize: (cx: number, cy: number) => void
+  onCustomSlideSize: () => void
   slideSizeKey: '16:9' | '4:3' | null
   /** Element-level paragraph format (bullets/numbering/line spacing) */
   onParagraphFormat: (patch: {
@@ -654,8 +659,14 @@ export interface Props {
   onAddAnimation: (effect: AnimEffectKind) => void
   /** Append one motion-path animation to the selected shape (moves along a preset path) */
   onApplyMotionPath: (path: string) => void
-  /** Change timingAnim's trigger/duration/delay */
-  onAnimTiming: (patch: { trigger?: AnimTrigger; durationMs?: number; delayMs?: number }) => void
+  /** Change timingAnim's timing and modeled effect options. */
+  onAnimTiming: (patch: {
+    trigger?: AnimTrigger
+    durationMs?: number
+    delayMs?: number
+    direction?: AnimationItem['direction']
+    after?: AnimationItem['after'] | null
+  }) => void
   /** Animation pane (right side) toggle */
   animPaneOpen: boolean
   onToggleAnimPane: () => void
@@ -676,6 +687,7 @@ export interface Props {
   onShowMonitor: (label: string | null) => void
   /** Open the custom show management dialog (create/edit/play page subsets) */
   onCustomShow: () => void
+  onShowSetup: () => void
   /** Start rehearsal timing (plays the show recording each page's dwell time; can be saved as auto-advance times afterwards) */
   onRehearse: () => void
   /** Whether the current page is hidden (hide-slide button display) */
@@ -698,12 +710,17 @@ export interface Props {
   onViewMode: (mode: SlidesViewMode) => void
   /** Enter the slide master editing view */
   onSlideMaster: () => void
+  onNotesMaster: () => void
+  onHandoutMaster: () => void
   /** Zoom to fit the window */
   onZoomFit: () => void
   showRuler: boolean
   onToggleRuler: () => void
   showGrid: boolean
   onToggleGrid: () => void
+  /** Dark content preview (display only; never touches the file, export or show) */
+  darkContent: boolean
+  onToggleDarkContent: () => void
   showGuides: boolean
   onToggleGuides: () => void
   /** Notes pane (below the canvas, reads/writes pptx speaker notes) */
@@ -743,6 +760,13 @@ export interface Props {
   onOpenHeaderFooter: () => void
   /** Open the equation dialog */
   onOpenEquation: () => void
+  onOpenSymbol: () => void
+  /** A native math shape is selected and can be opened for in-place editing. */
+  equationSelected?: boolean
+  /** LaTeX source of the selected editable equation (empty = unsupported imported OMML) */
+  equationLatex?: string
+  /** Commit new LaTeX source into the selected native equation */
+  onEquationApply?: (latex: string) => void
   /** Open a dialog to insert video/audio */
   onInsertMedia: (kind: 'video' | 'audio') => void
   /** Open a dialog to insert a 3D model (embedded glb + poster placeholder) */
@@ -760,6 +784,18 @@ export interface Props {
   /** Chart created by this app (false = passthrough, chart design tab hidden) */
   /** Selected chart's current style (type highlight + chart element toggles display) */
   contextChartStyle?: ChartStyleInfo | null
+  contextChartAreaFormat?: Record<
+    'chart' | 'plot',
+    {
+      fill?: string | null
+      stroke: { color: string; widthPt: number } | null
+    }
+  > | null
+  onChartAreaFormat?: (format: {
+    area?: 'chart' | 'plot'
+    fill?: string | null
+    stroke?: { color: string; widthEmu: number } | null
+  }) => void
   /** Theme-derived chart color schemes (falls back to the fixed palette when missing) */
   chartColorSchemes?: Array<{ key: string; label: string; colors: string[] }> | null
   /** Whether the selected picture supports background removal (audio/video poster frames etc. don't) */
@@ -770,10 +806,31 @@ export interface Props {
   cropActive?: boolean
   /** Picture opacity (1 = opaque) */
   onPictureOpacity?: (opacity: number) => void
+  /** Current native brightness/contrast and recolor effects for the selected picture. */
+  contextPictureAdjustments?: {
+    lum?: { bright: number; contrast: number }
+    duotone?: [string, string]
+    biLevel?: number
+  } | null
+  onPictureAdjustments?: (patch: {
+    lum?: { bright: number; contrast: number } | null
+    color?: 'original' | 'grayscale' | 'blackWhite' | 'sepia' | 'blue'
+  }) => void
   /** Picture: enter cutout (background removal) mode */
   onPictureCutout?: () => void
   /** Picture: pick a file and swap the image in place */
   onPictureReplace?: () => void
+  /** Restore picture formatting and image from its most recent save/import. */
+  onPictureReset?: () => void
+  /** Slide Show > Record: narration recording for the current slide */
+  onRecordNarration?: () => void
+  onClearNarration?: () => void
+  narrationRecording?: boolean
+  hasNarration?: boolean
+  /** Apply a Picture Styles preset (see picture-styles.ts) to the selected picture */
+  onPictureStyle?: (styleId: string) => void
+  onPictureAltText?: () => void
+  onPictureQuality?: () => void
   /** Picture: quarter turn (±90°) around its centre */
   onPictureRotate?: (deltaDeg: -90 | 90) => void
   /** Selected picture's current border (null = none) */
@@ -876,6 +933,8 @@ export interface RibbonTabCtx extends Pick<
   | 'onInsertZoom'
   | 'onNewComment'
   | 'onOpenEquation'
+  | 'onOpenSymbol'
+  | 'equationSelected'
   | 'onOpenHeaderFooter'
   | 'onOpenLink'
   | 'onParagraphFormat'

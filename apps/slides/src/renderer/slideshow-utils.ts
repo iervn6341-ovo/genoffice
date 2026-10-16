@@ -3,11 +3,30 @@
  * Extracted from SlideShowView for unit testing (no React/DOM dependency).
  */
 
-/** Custom show: subset of slides in user-specified order (original indexes). App persists it per document to localStorage. */
-export interface CustomShow {
-  id: string
-  name: string
-  slideIndices: number[]
+/** Native custom show: ordered presentation relationship references exposed as deck indices. */
+export type CustomShow = import('@genoffice/pptx-engine').CustomShowInfo
+export type ShowSetup = import('@genoffice/pptx-engine').ShowSetup
+
+/** Resolve the presentation's native Show Setup selection to source slide indices. */
+export function showSetupOrder(
+  setup: ShowSetup,
+  slideCount: number,
+  customShows: readonly CustomShow[],
+): number[] {
+  if (setup.slides.kind === 'range') {
+    const start = Math.max(0, setup.slides.start - 1)
+    const end = Math.min(slideCount, setup.slides.end)
+    return Array.from({ length: Math.max(0, end - start) }, (_, i) => start + i)
+  }
+  if (setup.slides.kind === 'custom') {
+    const id = setup.slides.id
+    return (
+      customShows
+        .find((show) => show.id === id)
+        ?.slideIndices.filter((i) => i >= 0 && i < slideCount) ?? []
+    )
+  }
+  return Array.from({ length: slideCount }, (_, i) => i)
 }
 
 /**

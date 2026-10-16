@@ -28,6 +28,25 @@ import { userInfo } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { cleanupExpiredGeneratedPages } from './generated-page-temp'
 import { exportSlidesPdf } from './pdf-export'
+import { loadPrintHtmlFile, printErrorMessage } from './print-document'
+import {
+  currentPrintPrefs,
+  loadPrintPrefs,
+  printPdfViaMacPanel,
+  updatePrintPrefs,
+} from './print-native'
+import { printOfficeLabels } from '../../../../packages/ui/src/strings-print-office'
+import {
+  NATIVE_HANDOUT_LAYOUTS,
+  usesMacPrintPanel,
+  type SlidesPrintPrefs,
+} from '../shared/print-prefs'
+import {
+  PRINT_PAPERS,
+  type PrintLayout,
+  type PrintOutput,
+  type PrintPaper,
+} from '../shared/print-html'
 import {
   appMenuLabels,
   configuredDefaultSaveDir,
@@ -76,7 +95,14 @@ import {
   getElementLink,
   getSlideLinks,
   getRunLinks,
-  readHeaderFooter,
+  readDeckHeaderFooter,
+  readNotesHandoutsHeaderFooter,
+  readNotesHandoutsPrintFields,
+  readMasterHeaderFooterFlags,
+  setMasterHeaderFooterFlag,
+  ensureNotesMaster,
+  ensureHandoutMaster,
+  getFirstSlideNumber,
   createBlankPptx,
   copySlide,
   type SlideBundle,
@@ -85,6 +111,11 @@ import {
   getChartElementData,
   materializeSlide,
   listMasterParts,
+  masterPartSize,
+  readNotesMasterPlaceholders,
+  setNotesMasterPlaceholderEnabled,
+  setNotesPageOrientation,
+  setNotesMasterBodyStyle,
   parseMasterPart,
   EMU_PER_PT,
   slideDurableId,
@@ -111,7 +142,11 @@ import {
   shouldOfferBuiltinLayouts,
   BUILTIN_LAYOUT_PREFIX,
   getSections,
+  getCustomShows,
+  getShowSetup,
   type SectionInfo,
+  type CustomShowInfo,
+  type ShowSetup,
   type ElementClipboardItem,
   type OpenedPptx,
   type Paragraph,
@@ -148,6 +183,7 @@ import type {
   AddTableOp,
   ApplyThemeOp,
   HeaderFooterOp,
+  NotesHandoutsHeaderFooterOp,
   SetLinkOp,
   CopyElementsOp,
   DeleteCommentOp,
@@ -175,10 +211,15 @@ import type {
   MasterEditTransformOp,
   MasterEditFillOp,
   MasterEditStrokeOp,
+  MasterEditFontOp,
+  MasterEditParagraphOp,
+  MasterViewKind,
   MasterDeleteElementOp,
   MasterEnterResult,
   PrintSlidesOp,
   EditPictureOpacityOp,
+  EditPictureAdjustmentsOp,
+  ResetPictureOp,
   ExportImagesOp,
   ExportImagesResult,
   ExportPdfOp,
@@ -189,6 +230,7 @@ import type {
   EditTableCellOp,
   EditTableStyleOp,
   EditChartOp,
+  EditChartAreaFormatOp,
   SetTableColWidthOp,
   SetTableRowHeightOp,
   SetTableCellAnchorOp,
@@ -231,6 +273,8 @@ import {
   journalOps,
   makeMediaResolver,
   pushHistory,
+  pictureResetBaseline,
+  refreshPictureResetBaseline,
   rebuildSlide,
   rebuildSlideWithReparse,
   registerAiSnapshot,
@@ -454,6 +498,7 @@ export async function saveSessionDeckTo(session: Session, filePath: string): Pro
   syncAttachedPaths(session, filePath)
   commitSaved(session.opened)
   session.metaDirty = false
+  refreshPictureResetBaseline(session)
 }
 
 const RECENT_PATH = () => join(app.getPath('userData'), 'slides-recent.json')
@@ -815,6 +860,13 @@ async function openAndBuild(
     redoStack: [],
     ...(recovered ? { metaDirty: true } : {}),
   })
+  // Recovery edits are unsaved: Reset Picture still targets the file on disk.
+  if (recovered) {
+    const diskOpened = await openPptx(new Uint8Array(raw))
+    refreshPictureResetBaseline(sessions.get(wc.id)!, diskOpened)
+  } else {
+    refreshPictureResetBaseline(sessions.get(wc.id)!)
+  }
   scheduleHistoryNotify(sessions.get(wc.id)!)
   await pushRecent(path)
   slidesOpenedHook?.(wc, path)
@@ -1202,7 +1254,14 @@ function openExportedPdf(path: string): void {
 
 let ipcRegistered = false
 
+const PRINT_PDF_OPTIONS = {
+  printBackground: true,
+  preferCSSPageSize: true,
+  margins: { top: 0, bottom: 0, left: 0, right: 0 },
+} as const
+
 export function registerSlidesIpc(): void {
+  void loadPrintPrefs()
   if (ipcRegistered) return
   ipcRegistered = true
 
@@ -1944,6 +2003,7 @@ export function registerSlidesIpc(): void {
   ipcMain.handle('slides:new-blank', async (e, fitWidthPx: number): Promise<OpenResult> => {
     const opened = await openPptx(await createBlankPptx())
     sessions.set(e.sender.id, { path: '', opened, fitWidthPx, undoStack: [], redoStack: [] })
+    refreshPictureResetBaseline(sessions.get(e.sender.id)!)
     scheduleHistoryNotify(sessions.get(e.sender.id)!)
     return {
       path: '',
@@ -2553,11 +2613,15 @@ export function registerSlidesIpc(): void {
   const buildMasterRenderSlide = (session: Session): RenderSlide | null => {
     const me = session.masterEdit
     if (!me) return null
-    return buildRenderSlide(me.slide, session.opened.deck.size, {
-      fitWidthPx: session.fitWidthPx,
-      media: makeMediaResolver(session.opened),
-      metrics: getFontMetrics(),
-    })
+    return buildRenderSlide(
+      me.slide,
+      masterPartSize(session.opened.archive, me.partPath, session.opened.deck.size),
+      {
+        fitWidthPx: session.fitWidthPx,
+        media: makeMediaResolver(session.opened),
+        metrics: getFontMetrics(),
+      },
+    )
   }
 
   // Master edits run as part-addressed op transactions seeded with the live
@@ -2572,24 +2636,110 @@ export function registerSlidesIpc(): void {
     return buildMasterRenderSlide(session)
   }
 
-  ipcMain.handle('slides:master-enter', (e, fitWidthPx: number): MasterEnterResult | null => {
-    const session = sessions.get(e.sender.id)
-    if (!session) return null
-    session.fitWidthPx = fitWidthPx
+  const masterViewResult = (
+    session: Session,
+    preferredPath?: string,
+    preserveLiveSelection = false,
+  ): MasterEnterResult | null => {
     const items: MasterEnterResult['items'] = []
+    const parsedParts = new Map<string, Slide>()
     for (const p of listMasterParts(session.opened.archive)) {
-      const slide = parseMasterPart(session.opened.archive, p.partPath)
+      const slide =
+        preserveLiveSelection && session.masterEdit?.partPath === p.partPath
+          ? session.masterEdit.slide
+          : parseMasterPart(session.opened.archive, p.partPath)
       if (!slide) continue
-      const rendered = buildRenderSlide(slide, session.opened.deck.size, {
-        fitWidthPx,
-        media: makeMediaResolver(session.opened),
-        metrics: getFontMetrics(),
+      parsedParts.set(p.partPath, slide)
+      const rendered = buildRenderSlide(
+        slide,
+        masterPartSize(session.opened.archive, p.partPath, session.opened.deck.size),
+        {
+          fitWidthPx: session.fitWidthPx,
+          media: makeMediaResolver(session.opened),
+          metrics: getFontMetrics(),
+        },
+      )
+      const elementStyles: NonNullable<MasterEnterResult['items'][number]['elementStyles']> = {}
+      for (const el of slide.elements) {
+        if ((el.type !== 'shape' && el.type !== 'text') || !el.text) continue
+        const para = el.text.paragraphs[0]
+        const run = para?.runs.find((r) => !!r.text) ?? para?.runs[0]
+        elementStyles[el.id] = {
+          fontFamily: run?.fontFamily,
+          fontSizePt: run?.fontSize,
+          bold: run?.bold,
+          italic: run?.italic,
+          underline: run?.underline,
+          color: run?.color,
+          align: para?.align,
+          lineSpacingPct: para?.lineHeight,
+        }
+      }
+      items.push({
+        partPath: p.partPath,
+        kind: p.kind,
+        name: p.name,
+        slide: rendered,
+        elementStyles,
+        nativeFieldIds: slide.elements
+          .filter((el) => el.anchor.originalXml.includes('<a:fld'))
+          .map((el) => el.id),
+        ...(p.kind === 'notesMaster' || p.kind === 'handoutMaster'
+          ? {
+              headerFooterFlags:
+                readMasterHeaderFooterFlags(session.opened.archive, p.partPath) ?? undefined,
+            }
+          : {}),
+        ...(p.kind === 'notesMaster'
+          ? {
+              notesPlaceholders:
+                readNotesMasterPlaceholders(session.opened.archive, p.partPath) ?? undefined,
+            }
+          : {}),
+        ...(p.kind === 'notesMaster' || p.kind === 'handoutMaster'
+          ? {
+              pageOrientation:
+                masterPartSize(session.opened.archive, p.partPath, session.opened.deck.size).cx >
+                masterPartSize(session.opened.archive, p.partPath, session.opened.deck.size).cy
+                  ? ('landscape' as const)
+                  : ('portrait' as const),
+            }
+          : {}),
       })
-      items.push({ partPath: p.partPath, kind: p.kind, name: p.name, slide: rendered })
-      if (!session.masterEdit) session.masterEdit = { partPath: p.partPath, slide }
     }
-    return items.length ? { items } : null
-  })
+    const selected = items.find((x) => x.partPath === preferredPath) ?? items[0]
+    if (!selected) return null
+    // Rendered source IDs are per-parse UIDs. Keep the exact parsed Slide that
+    // produced the selected item, or every UI operation targets a different ID.
+    session.masterEdit = { partPath: selected.partPath, slide: parsedParts.get(selected.partPath)! }
+    return { items, selectedPartPath: selected.partPath }
+  }
+
+  ipcMain.handle(
+    'slides:master-enter',
+    (e, fitWidthPx: number, kind: MasterViewKind = 'master'): MasterEnterResult | null => {
+      const session = sessions.get(e.sender.id)
+      if (!session) return null
+      session.fitWidthPx = fitWidthPx
+      if (
+        kind === 'notesMaster' &&
+        !listMasterParts(session.opened.archive).some((p) => p.kind === kind)
+      ) {
+        pushHistory(session)
+        ensureNotesMaster(session.opened.archive)
+        session.metaDirty = true
+      } else if (
+        kind === 'handoutMaster' &&
+        !listMasterParts(session.opened.archive).some((p) => p.kind === kind)
+      ) {
+        pushHistory(session)
+        ensureHandoutMaster(session.opened.archive)
+        session.metaDirty = true
+      }
+      const path = listMasterParts(session.opened.archive).find((p) => p.kind === kind)?.partPath
+      return masterViewResult(session, path, session.masterEdit?.partPath === path)
+    },
+  )
 
   ipcMain.handle('slides:master-open', (e, partPath: string) => {
     const session = sessions.get(e.sender.id)
@@ -2612,6 +2762,14 @@ export function registerSlidesIpc(): void {
     const session = sessions.get(e.sender.id)
     const me = session?.masterEdit
     if (!session || !me) return null
+    // Dynamic date/page-number placeholders must keep their native a:fld wrapper,
+    // type and ID. Their cached value is edited through Header/Footer, not setText.
+    if (
+      me.slide.elements
+        .find((x) => matchesElementRef(x, op.sourceId))
+        ?.anchor.originalXml.includes('<a:fld')
+    )
+      return null
     const r = masterTxn(session, me, {
       op: 'setText',
       target: { part: me.partPath, el: op.sourceId },
@@ -2627,7 +2785,9 @@ export function registerSlidesIpc(): void {
     if (!session || !me) return null
     const el = me.slide.elements.find((x) => x.id === op.sourceId)
     if (!el) return null
-    const baseWidthPx = session.opened.deck.size.cx / EMU_PER_PX_96
+    const baseWidthPx =
+      masterPartSize(session.opened.archive, me.partPath, session.opened.deck.size).cx /
+      EMU_PER_PX_96
     const scale = op.fitWidthPx / baseWidthPx
     const toEmu = (px: number) => Math.round((px / scale) * EMU_PER_PX_96)
     if (op.preview) {
@@ -2707,6 +2867,136 @@ export function registerSlidesIpc(): void {
     return masterEditDone(session)
   })
 
+  ipcMain.handle('slides:master-edit-font', (e, op: MasterEditFontOp) => {
+    const session = sessions.get(e.sender.id)
+    const me = session?.masterEdit
+    if (!session || !me) return null
+    const r = masterTxn(session, me, {
+      op: 'setFont',
+      target: { part: me.partPath, el: op.sourceId },
+      font: op.font,
+    })
+    if (
+      r &&
+      /^ppt\/notesMasters\//.test(me.partPath) &&
+      me.slide.elements.some((el) => el.id === op.sourceId && el.placeholder === 'body')
+    )
+      setNotesMasterBodyStyle(session.opened.archive, me.partPath, op.font)
+    return r ? masterEditDone(session) : null
+  })
+
+  ipcMain.handle('slides:master-edit-paragraph', (e, op: MasterEditParagraphOp) => {
+    const session = sessions.get(e.sender.id)
+    const me = session?.masterEdit
+    if (!session || !me) return null
+    const r = masterTxn(session, me, {
+      op: 'setParagraphFormat',
+      target: { part: me.partPath, el: op.sourceId },
+      format: op.format,
+    })
+    if (
+      r &&
+      /^ppt\/notesMasters\//.test(me.partPath) &&
+      me.slide.elements.some((el) => el.id === op.sourceId && el.placeholder === 'body')
+    )
+      setNotesMasterBodyStyle(session.opened.archive, me.partPath, op.format)
+    return r ? masterEditDone(session) : null
+  })
+
+  ipcMain.handle('slides:master-edit-background', (e, color: string) => {
+    const session = sessions.get(e.sender.id)
+    const me = session?.masterEdit
+    if (!session || !me) return null
+    const r = masterTxn(session, me, {
+      op: 'setBackground',
+      target: { part: me.partPath },
+      kind: 'solid',
+      color,
+    })
+    return r ? masterEditDone(session) : null
+  })
+
+  ipcMain.handle(
+    'slides:master-set-hf-flag',
+    (e, kind: 'hdr' | 'ftr' | 'dt' | 'sldNum', enabled: boolean) => {
+      const session = sessions.get(e.sender.id)
+      const me = session?.masterEdit
+      if (!session || !me || !['hdr', 'ftr', 'dt', 'sldNum'].includes(kind)) return null
+      if (!/^ppt\/(?:notesMasters|handoutMasters)\//.test(me.partPath)) return null
+      pushHistory(session)
+      if (!setMasterHeaderFooterFlag(session.opened.archive, me.partPath, kind, enabled)) {
+        session.undoStack.pop()
+        return masterViewResult(session, me.partPath)
+      }
+      session.metaDirty = true
+      scheduleHistoryNotify(session)
+      scheduleDeckBroadcast(session)
+      return masterViewResult(session, me.partPath)
+    },
+  )
+
+  ipcMain.handle(
+    'slides:master-set-notes-placeholder',
+    (e, kind: 'sldImg' | 'body', enabled: boolean) => {
+      const session = sessions.get(e.sender.id)
+      const me = session?.masterEdit
+      if (!session || !me || !['sldImg', 'body'].includes(kind)) return null
+      if (!/^ppt\/notesMasters\//.test(me.partPath)) return null
+      pushHistory(session)
+      if (!setNotesMasterPlaceholderEnabled(session.opened.archive, me.partPath, kind, enabled)) {
+        session.undoStack.pop()
+        return masterViewResult(session, me.partPath)
+      }
+      session.metaDirty = true
+      scheduleHistoryNotify(session)
+      scheduleDeckBroadcast(session)
+      return masterViewResult(session, me.partPath)
+    },
+  )
+
+  ipcMain.handle(
+    'slides:master-set-page-orientation',
+    (e, orientation: 'portrait' | 'landscape') => {
+      const session = sessions.get(e.sender.id)
+      const me = session?.masterEdit
+      if (!session || !me || !['portrait', 'landscape'].includes(orientation)) return null
+      if (!/^ppt\/(?:notesMasters|handoutMasters)\//.test(me.partPath)) return null
+      pushHistory(session)
+      if (!setNotesPageOrientation(session.opened.archive, orientation)) {
+        session.undoStack.pop()
+        return masterViewResult(session, me.partPath)
+      }
+      session.metaDirty = true
+      scheduleHistoryNotify(session)
+      scheduleDeckBroadcast(session)
+      return masterViewResult(session, me.partPath)
+    },
+  )
+
+  const masterHistoryStep = (
+    session: Session,
+    direction: 'undo' | 'redo',
+  ): MasterEnterResult | null => {
+    settleStaleHistoryBatch(session)
+    const from = direction === 'undo' ? session.undoStack : session.redoStack
+    const to = direction === 'undo' ? session.redoStack : session.undoStack
+    if (!from.length) return null
+    const preferred = session.masterEdit?.partPath
+    to.push(takeSnapshot(session))
+    restoreSnapshot(session, from.pop()!)
+    scheduleHistoryNotify(session)
+    scheduleDeckBroadcast(session)
+    return masterViewResult(session, preferred)
+  }
+  ipcMain.handle('slides:master-undo', (e) => {
+    const session = sessions.get(e.sender.id)
+    return session?.masterEdit ? masterHistoryStep(session, 'undo') : null
+  })
+  ipcMain.handle('slides:master-redo', (e) => {
+    const session = sessions.get(e.sender.id)
+    return session?.masterEdit ? masterHistoryStep(session, 'redo') : null
+  })
+
   ipcMain.handle('slides:master-delete-element', (e, op: MasterDeleteElementOp) => {
     const session = sessions.get(e.sender.id)
     const me = session?.masterEdit
@@ -2732,6 +3022,36 @@ export function registerSlidesIpc(): void {
       ],
     })
     return r ? rebuildSlide(session, op.slideIndex) : null
+  })
+
+  ipcMain.handle('slides:edit-picture-adjustments', (e, op: EditPictureAdjustmentsOp) => {
+    const session = sessions.get(e.sender.id)
+    if (!session) return null
+    const r = sessionTxn(session, {
+      ops: [
+        {
+          op: 'setPictureAdjustments',
+          target: { slide: op.slideIndex, el: op.sourceId },
+          adjustments: op.adjustments,
+        },
+      ],
+    })
+    return r ? rebuildSlide(session, op.slideIndex) : null
+  })
+
+  ipcMain.handle('slides:reset-picture', (e, op: ResetPictureOp) => {
+    const session = sessions.get(e.sender.id)
+    const slide = session?.opened.deck.slides[op.slideIndex]
+    const element = slide?.elements.find(
+      (item) => item.type === 'picture' && matchesElementRef(item, op.sourceId),
+    )
+    if (!session || !slide || !element) return null
+    const baseline = pictureResetBaseline(session, slide, element)
+    if (!baseline) return null
+    const result = sessionTxn(session, {
+      ops: [{ op: 'resetPicture', target: { slide: op.slideIndex, el: element.id }, baseline }],
+    })
+    return result ? rebuildSlideWithReparse(session, op.slideIndex) : null
   })
 
   ipcMain.handle('slides:set-slide-size', (e, op: SetSlideSizeOp) => {
@@ -2959,6 +3279,51 @@ export function registerSlidesIpc(): void {
     if (!slide) return null
     // A reparse regenerates element ids: look up the new id by element index; the renderer uses it to keep the selection
     const elIdx = slide.elements.findIndex((el) => matchesElementRef(el, op.sourceId))
+    if (
+      op.quickLayout &&
+      Object.keys(op).every((key) => ['slideIndex', 'sourceId', 'quickLayout'].includes(key))
+    ) {
+      const r = sessionTxn(session, {
+        ops: [
+          {
+            op: 'setChartQuickLayout',
+            target: { slide: op.slideIndex, el: op.sourceId },
+            layout: op.quickLayout,
+          },
+        ],
+      })
+      if (!r) return null
+      const rebuilt = rebuildSlideWithReparse(session, op.slideIndex)
+      return rebuilt
+        ? {
+            slide: rebuilt,
+            sourceId: session.opened.deck.slides[op.slideIndex]?.elements[elIdx]?.id ?? null,
+          }
+        : null
+    }
+    // Repositioning the legend is a focused chart-part edit. Imported chart
+    // formulas, series styling and extension XML remain untouched.
+    if (
+      Object.keys(op).every((key) => ['slideIndex', 'sourceId', 'legendPos'].includes(key)) &&
+      op.legendPos
+    ) {
+      const r = sessionTxn(session, {
+        ops: [
+          {
+            op: 'setChartLegendPosition',
+            target: { slide: op.slideIndex, el: op.sourceId },
+            position: op.legendPos,
+          },
+        ],
+      })
+      if (!r) return null
+      const rebuilt = rebuildSlideWithReparse(session, op.slideIndex)
+      if (!rebuilt) return null
+      return {
+        slide: rebuilt,
+        sourceId: session.opened.deck.slides[op.slideIndex]?.elements[elIdx]?.id ?? null,
+      }
+    }
     // Confirm before the first edit of a chart from an imported file: editing rebuilds it from the template,
     // and unmodeled fine-grained formatting (number formats/trendlines/error bars/per-point styles) is lost
     const chartEl = slide.elements[elIdx] as { type?: string; descr?: string } | undefined
@@ -3008,6 +3373,29 @@ export function registerSlidesIpc(): void {
     if (!rebuilt) return null
     const newId = session.opened.deck.slides[op.slideIndex]?.elements[elIdx]?.id ?? null
     return { slide: rebuilt, sourceId: newId }
+  })
+
+  ipcMain.handle('slides:edit-chart-area-format', (e, op: EditChartAreaFormatOp) => {
+    const session = sessions.get(e.sender.id)
+    const slide = session?.opened.deck.slides[op.slideIndex]
+    if (!session || !slide) return null
+    const elIdx = slide.elements.findIndex((el) => matchesElementRef(el, op.sourceId))
+    const r = sessionTxn(session, {
+      ops: [
+        {
+          op: 'setChartAreaFormat',
+          target: { slide: op.slideIndex, el: op.sourceId },
+          format: op.format,
+        },
+      ],
+    })
+    if (!r) return null
+    const rebuilt = rebuildSlideWithReparse(session, op.slideIndex)
+    if (!rebuilt) return null
+    return {
+      slide: rebuilt,
+      sourceId: session.opened.deck.slides[op.slideIndex]?.elements[elIdx]?.id ?? null,
+    }
   })
 
   // The ribbon's table style gallery: every built-in style as a small painted grid under the
@@ -3731,24 +4119,97 @@ export function registerSlidesIpc(): void {
       ops: [
         {
           op: 'applyHeaderFooter',
+          ...(op.slideIndexes ? { slideIndexes: op.slideIndexes } : {}),
           settings: {
             footer: op.footer ?? null,
             slideNum: !!op.slideNum,
             date: op.date ?? null,
-            ...(op.dateAuto ? { dateAuto: true } : {}),
+            dateAuto: !!op.dateAuto,
+            dateFormat: op.dateFormat,
+            dontShowOnTitleSlide: !!op.dontShowOnTitleSlide,
+            ...(op.firstSlideNum != null ? { firstSlideNum: op.firstSlideNum } : {}),
           },
         },
       ],
     })
     if (!r) return null
+    session.opened = reparseDeck(session.opened)
     session.fitWidthPx = op.fitWidthPx
     return buildAllRenderSlides(session.opened, op.fitWidthPx)
+  })
+
+  ipcMain.handle(
+    'slides:apply-notes-handouts-header-footer',
+    (e, op: NotesHandoutsHeaderFooterOp) => {
+      const session = sessions.get(e.sender.id)
+      if (!session) return null
+      const result = sessionTxn(session, {
+        ops: [{ op: 'applyNotesHandoutsHeaderFooter', settings: op.settings }],
+      })
+      if (!result) return null
+      session.fitWidthPx = op.fitWidthPx
+      return buildAllRenderSlides(session.opened, op.fitWidthPx)
+    },
+  )
+
+  ipcMain.handle('slides:get-notes-handouts-print-fields', (e) => {
+    const session = sessions.get(e.sender.id)
+    if (!session) return { notesPages: [], handout: {} }
+    const fields = readNotesHandoutsPrintFields(session.opened)
+    const paths = new Set(
+      [fields.handout, ...fields.notesPages]
+        .map((page) => page.masterPath)
+        .filter((path): path is string => !!path),
+    )
+    const masterArtwork: Record<string, RenderSlide> = {}
+    for (const path of paths) {
+      const slide = parseMasterPart(session.opened.archive, path)
+      if (!slide) continue
+      const rendered = buildRenderSlide(
+        slide,
+        masterPartSize(session.opened.archive, path, session.opened.deck.size),
+        {
+          fitWidthPx: session.fitWidthPx,
+          media: makeMediaResolver(session.opened),
+          metrics: getFontMetrics(),
+        },
+      )
+      rendered.nodes = rendered.nodes.filter((node) => !('placeholder' in node && node.placeholder))
+      masterArtwork[path] = rendered
+    }
+    return { ...fields, masterArtwork }
   })
 
   ipcMain.handle('slides:get-header-footer', (e, slideIndex: number) => {
     const session = sessions.get(e.sender.id)
     const slide = session?.opened.deck.slides[slideIndex]
-    return slide ? readHeaderFooter(slide) : { footer: null, slideNum: false, date: null }
+    return slide
+      ? {
+          ...readDeckHeaderFooter(session!.opened, slideIndex),
+          notesHandouts: readNotesHandoutsHeaderFooter(session!.opened),
+        }
+      : {
+          footer: null,
+          slideNum: false,
+          date: null,
+          dateAuto: false,
+          dateFormat: 'datetime1',
+          dontShowOnTitleSlide: false,
+          firstSlideNum: 1,
+          isTitleSlide: false,
+          slideNumber: slideIndex + 1,
+          notesHandouts: {
+            headerEnabled: false,
+            header: '',
+            footerEnabled: false,
+            footer: '',
+            dateEnabled: false,
+            date: '',
+            dateAuto: true,
+            dateFormat: 'datetime1',
+            pageNum: false,
+          },
+        }
   })
 
   // Apply a theme (Design tab theme gallery): rewrite theme*.xml colors/fonts (scheme-referenced
@@ -3858,10 +4319,14 @@ export function registerSlidesIpc(): void {
     const slide = session?.opened.deck.slides[slideIndex]
     if (!slide) return []
     const bySpid = new Map<number, (typeof slide.elements)[number]>()
-    for (const el of slide.elements) {
-      const spid = elementSpid(el)
-      if (spid != null && !bySpid.has(spid)) bySpid.set(spid, el)
+    const collectTargets = (elements: typeof slide.elements) => {
+      for (const el of elements) {
+        const spid = elementSpid(el)
+        if (spid != null && !bySpid.has(spid)) bySpid.set(spid, el)
+        if (el.type === 'group') collectTargets(el.children)
+      }
     }
+    collectTargets(slide.elements)
     const typeLabel: Record<string, string> = {
       text: tm('labelTextBox'),
       shape: tm('labelShape'),
@@ -3872,7 +4337,7 @@ export function registerSlidesIpc(): void {
       passthrough: tm('labelObject'),
     }
     const out: AnimationItem[] = []
-    for (const a of getSlideAnimations(slide)) {
+    for (const a of getSlideAnimations(slide, true)) {
       const el = bySpid.get(a.spid)
       if (!el) continue // Leftover animations whose target shape was deleted are not echoed back
       out.push({
@@ -3885,6 +4350,9 @@ export function registerSlidesIpc(): void {
         ...(a.motionPath != null ? { motionPath: a.motionPath } : {}),
         ...(a.paragraph != null ? { paragraph: a.paragraph } : {}),
         ...(a.after ? { after: a.after } : {}),
+        ...(a.direction ? { direction: a.direction } : {}),
+        ...(a.nativeId ? { nativeId: a.nativeId } : {}),
+        ...(a.presetXml ? { customPreset: true } : {}),
       })
     }
     return out
@@ -3921,6 +4389,34 @@ export function registerSlidesIpc(): void {
   })
 
   // ── Section management: presentation.xml surgery, riding on snapshot undo and savePptx ──
+  ipcMain.handle('slides:get-custom-shows', (e) => {
+    const session = sessions.get(e.sender.id)
+    return session ? getCustomShows(session.opened) : []
+  })
+
+  ipcMain.handle('slides:set-custom-shows', (e, shows: CustomShowInfo[]) => {
+    const session = sessions.get(e.sender.id)
+    if (!session) return null
+    const result = sessionTxn(session, { ops: [{ op: 'setCustomShows', shows }] })
+    if (!result) return null
+    session.metaDirty = true
+    return getCustomShows(session.opened)
+  })
+
+  ipcMain.handle('slides:get-show-setup', (e) => {
+    const session = sessions.get(e.sender.id)
+    return session ? getShowSetup(session.opened) : null
+  })
+
+  ipcMain.handle('slides:set-show-setup', (e, setup: ShowSetup) => {
+    const session = sessions.get(e.sender.id)
+    if (!session) return null
+    const result = sessionTxn(session, { ops: [{ op: 'setShowSetup', settings: setup }] })
+    if (!result) return null
+    session.metaDirty = true
+    return getShowSetup(session.opened)
+  })
+
   ipcMain.handle('slides:get-sections', (e) => {
     const session = sessions.get(e.sender.id)
     return session ? getSections(session.opened) : []
@@ -4141,6 +4637,7 @@ export function registerSlidesIpc(): void {
       // but the renderer still expects the render tree in the response.
       commitSaved(session.opened)
       session.metaDirty = false
+      refreshPictureResetBaseline(session)
       return {
         ok: true,
         path: session.path,
@@ -4178,6 +4675,7 @@ export function registerSlidesIpc(): void {
       syncAttachedPaths(session, r.filePath)
       commitSaved(session.opened)
       session.metaDirty = false
+      refreshPictureResetBaseline(session)
       return {
         ok: true,
         path: r.filePath,
@@ -4241,13 +4739,35 @@ export function registerSlidesIpc(): void {
 
   ipcMain.handle(
     'slides:print',
-    async (e, op: PrintSlidesOp): Promise<{ ok: boolean; error?: string }> => {
+    async (e, op: PrintSlidesOp): Promise<{ ok: boolean; path?: string; error?: string }> => {
       // Page assembly is shared with the renderer's print-preview pane (print-html.ts)
+      const session = sessions.get(e.sender.id)
+      const nativeFields = session?.opened ? readNotesHandoutsPrintFields(session.opened) : null
+      const firstSlideNum = session?.opened ? getFirstSlideNumber(session.opened.archive) : 1
       const html = buildPrintDocumentHtml({
         srcs: op.pngsBase64.map((b64) => `data:image/png;base64,${b64}`),
         ratio: op.widthPx / op.heightPx,
         layout: op.layout ?? 'full',
         ...(op.notes ? { notes: op.notes } : {}),
+        ...(nativeFields
+          ? {
+              notesFields: (op.slideIndexes ?? []).map((i) => nativeFields.notesPages[i] ?? {}),
+              handoutFields: nativeFields.handout,
+              slideIndexes: op.slideIndexes,
+              firstSlideNum,
+            }
+          : {}),
+        ...(op.masterArtworkBase64
+          ? {
+              masterArtwork: Object.fromEntries(
+                Object.entries(op.masterArtworkBase64).map(([path, base64]) => [
+                  path,
+                  `data:image/png;base64,${base64}`,
+                ]),
+              ),
+            }
+          : {}),
+        ...(op.dateLocale ? { dateLocale: op.dateLocale } : {}),
         ...(op.orientation ? { orientation: op.orientation } : {}),
         ...(op.frame ? { frame: true } : {}),
         ...(op.output && op.output !== 'color' ? { output: op.output } : {}),
@@ -4276,12 +4796,41 @@ export function registerSlidesIpc(): void {
           : {}),
         webPreferences: { sandbox: true },
       })
+      let cleanupPrintHtml: (() => Promise<void>) | null = null
       try {
-        await win.loadURL('data:text/html;base64,' + Buffer.from(html, 'utf8').toString('base64'))
+        cleanupPrintHtml = await loadPrintHtmlFile(win, html)
         await win.webContents.executeJavaScript(
           'Promise.all([document.fonts.ready, ...Array.from(document.images).map((i) => i.decode().catch(() => {}))])',
           true,
         )
+        if (op.savePdf) {
+          const base = session?.path
+            ? basename(session.path).replace(/\.(pptx|ppsx)$/i, '')
+            : 'Presentation'
+          const result = await showSaveDialogWithMemory(
+            dialog,
+            owner,
+            {
+              title: tm('dlgExportPdf'),
+              defaultPath: `${base}.pdf`,
+              filters: [{ name: 'PDF', extensions: ['pdf'] }],
+            },
+            getDraftsDir(),
+          )
+          if (result.canceled || !result.filePath) return { ok: false }
+          const pdf = await win.webContents.printToPDF(PRINT_PDF_OPTIONS)
+          await writeFile(result.filePath, pdf)
+          return { ok: true, path: result.filePath }
+        }
+        if (usesMacPrintPanel(process.platform, op)) {
+          // Same page assembly as "Export as PDF" (one source of truth for layouts, notes pages,
+          // master artwork and dynamic date fields), then the standard macOS print panel with preview.
+          const pdf = await win.webContents.printToPDF(PRINT_PDF_OPTIONS)
+          const title = session?.path
+            ? basename(session.path).replace(/\.(pptx|ppsx)$/i, '')
+            : 'GenOffice'
+          return await printPdfViaMacPanel(pdf, title)
+        }
         // Chromium attaches the native Windows print dialog to the window being printed.
         // If that owner is hidden, the dialog is hidden too and the layout buttons appear inert.
         if (process.platform === 'win32') {
@@ -4302,14 +4851,19 @@ export function registerSlidesIpc(): void {
         }
         return { ok: true }
       } catch (err) {
-        return { ok: false, error: String(err) }
+        return { ok: false, error: printErrorMessage(err) }
       } finally {
         if (!win.isDestroyed()) win.destroy()
+        if (cleanupPrintHtml) await cleanupPrintHtml()
       }
     },
   )
 
   ipcMain.handle('slides:list-printers', (e) => listSystemPrinters(e.sender))
+  ipcMain.handle('slides:print-prefs-get', () => loadPrintPrefs())
+  ipcMain.handle('slides:print-prefs-set', (_e, patch: Partial<SlidesPrintPrefs>) =>
+    updatePrintPrefs(patch && typeof patch === 'object' ? patch : {}),
+  )
 
   ipcMain.handle('slides:recent', () => readRecent())
 
@@ -4689,6 +5243,79 @@ export function setSlidesCloseTabHook(fn: (() => void) | null): void {
   closeActiveTabHook = fn
 }
 
+/** File-menu entries for the macOS native print route: each layout goes straight to the print panel. */
+function nativePrintMenuItems(send: (cmd: string) => void): Electron.MenuItemConstructorOptions[] {
+  const L = printOfficeLabels(getUiLang())
+  const base = tm('menuPrint').replace(/…$/, '')
+  const prefs = currentPrintPrefs()
+  const handoutLabel: Record<(typeof NATIVE_HANDOUT_LAYOUTS)[number], string> = {
+    handout1: L.h1,
+    handout2: L.h2,
+    handout3: L.h3,
+    handout4h: L.h4h,
+    handout4v: L.h4v,
+    handout6h: L.h6h,
+    handout6v: L.h6v,
+    handout9h: L.h9h,
+    handout9v: L.h9v,
+  }
+  const direct = (layout: PrintLayout) => () => send(`print-layout:${layout}`)
+  const flag = (
+    label: string,
+    key: 'includeHidden' | 'frame' | 'scaleFit' | 'comments',
+  ): Electron.MenuItemConstructorOptions => ({
+    label,
+    type: 'checkbox',
+    checked: prefs[key],
+    click: (item) => void updatePrintPrefs({ [key]: item.checked }),
+  })
+  const outputs: Array<[PrintOutput, string]> = [
+    ['color', L.colColor],
+    ['grayscale', L.colGray],
+    ['bw', L.colBW],
+  ]
+  const papers = (Object.keys(PRINT_PAPERS) as PrintPaper[]).map((k): [PrintPaper, string] => [
+    k,
+    k === 'slide' ? L.slideSizePaper : PRINT_PAPERS[k].label,
+  ])
+  return [
+    { label: `${base} · ${L.plFull}…`, click: direct('full') },
+    {
+      label: `${base} · ${L.plHandouts}`,
+      submenu: NATIVE_HANDOUT_LAYOUTS.map((layout) => ({
+        label: handoutLabel[layout],
+        click: direct(layout),
+      })),
+    },
+    { label: `${base} · ${L.plNotes}…`, click: direct('notes') },
+    { label: `${base} · ${L.plOutline}…`, click: direct('outline') },
+    {
+      label: `${base} · ${L.secOptions}`,
+      submenu: [
+        flag(L.printHiddenSlides, 'includeHidden'),
+        flag(L.frameSlides, 'frame'),
+        flag(L.scaleFit, 'scaleFit'),
+        flag(L.printComments, 'comments'),
+        { type: 'separator' },
+        ...outputs.map(([output, label]): Electron.MenuItemConstructorOptions => ({
+          label,
+          type: 'radio',
+          checked: prefs.output === output,
+          click: () => void updatePrintPrefs({ output }),
+        })),
+        { type: 'separator' },
+        { label: L.paperSize, enabled: false },
+        ...papers.map(([paper, label]): Electron.MenuItemConstructorOptions => ({
+          label,
+          type: 'radio',
+          checked: prefs.paper === paper,
+          click: () => void updatePrintPrefs({ paper }),
+        })),
+      ],
+    },
+  ]
+}
+
 export function buildSlidesMenu(): Menu {
   const send = (cmd: string) =>
     (windowRefs.activeWebContents ?? BrowserWindow.getFocusedWindow()?.webContents)?.send(
@@ -4725,6 +5352,9 @@ export function buildSlidesMenu(): Menu {
         { label: tm('menuExportPdf'), click: () => send('export-pdf') },
         { label: tm('menuExportImages'), click: () => send('export-images') },
         { label: tm('menuPrint'), accelerator: 'CmdOrCtrl+P', click: () => send('print') },
+        // macOS prints through the system panel only, so the layouts and the PowerPoint print
+        // options that the in-app sheet offers elsewhere live here.
+        ...(isMac ? nativePrintMenuItems(send) : []),
         { type: 'separator' },
         closeActiveTabHook
           ? {

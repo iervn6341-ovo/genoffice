@@ -102,10 +102,10 @@ export async function save(getCtx: () => ActionCtx, quiet = false): Promise<bool
   })
 }
 
-export async function saveAs(getCtx: () => ActionCtx): Promise<void> {
+export async function saveAs(getCtx: () => ActionCtx): Promise<boolean> {
   // Same queue as save(): Save + Save As (or double Save As) write through
   // the same main-process pipe and would interleave without it.
-  await runSerialized(async () => {
+  return runSerialized(async () => {
     const ctx = getCtx()
     await flushActiveEdit(ctx)
     await ctx.flushNotes()
@@ -125,6 +125,7 @@ export async function saveAs(getCtx: () => ActionCtx): Promise<void> {
       ctx.setStatus(failed)
       showToast(failed, 'error')
     }
+    return r.ok
   })
 }
 

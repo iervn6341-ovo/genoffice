@@ -21,6 +21,7 @@ import {
   IconScreenRec,
   IconShapes,
   IconSmartArt,
+  IconSymbol,
   IconTable,
   IconTextBox,
   IconVideo,
@@ -63,6 +64,8 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
     onInsertZoom,
     onNewComment,
     onOpenEquation,
+    onOpenSymbol,
+    equationSelected,
     onOpenHeaderFooter,
     onOpenLink,
     onToggleScreenRecord,
@@ -478,12 +481,35 @@ export function RibbonInsertTab({ rb }: { rb: RibbonTabCtx }) {
           className="rb-big"
           disabled={!hasDoc}
           onClick={onOpenEquation}
+          data-testid="ribbon-equation"
           data-tip={t('ribbonEquationTip')}
         >
           <span className="rb-big-icon">
             <IconEquation size={BIG} />
           </span>
           <span>{t('ribbonEquation')}</span>
+        </button>
+        {equationSelected && (
+          <button className="rb-big" onClick={onOpenEquation} data-testid="ribbon-equation-edit">
+            <span className="rb-big-icon">
+              <IconEquation size={BIG} />
+            </span>
+            <span>{t('ribbonEquationEdit')}</span>
+          </button>
+        )}
+        <button
+          className="rb-big"
+          disabled={!hasDoc || !editing}
+          data-keep-edit
+          onMouseDown={saveEditSelection}
+          onClick={onOpenSymbol}
+          data-testid="ribbon-symbol"
+          data-tip={editing ? t('ribbonSymbolTip') : t('ribbonSymbolTipDisabled')}
+        >
+          <span className="rb-big-icon">
+            <IconSymbol size={BIG} />
+          </span>
+          <span>{t('ribbonSymbol')}</span>
         </button>
       </Group>
       <div className="ribbon-sep" />

@@ -23,6 +23,7 @@ import type {
   AddSlideWithLayoutOp,
   AddTableOp,
   HeaderFooterOp,
+  NotesHandoutsHeaderFooterOp,
   SetLinkOp,
   AiSettings,
   CopyElementsOp,
@@ -31,8 +32,11 @@ import type {
   EditTableCellOp,
   EditTableStyleOp,
   EditChartOp,
+  EditChartAreaFormatOp,
   EditPictureSrcRectOp,
   EditPictureOpacityOp,
+  EditPictureAdjustmentsOp,
+  ResetPictureOp,
   GroupElementsOp,
   UngroupElementOp,
   BatchEditTransformOp,
@@ -48,6 +52,8 @@ import type {
   SetTransitionDetailOp,
   SetTransitionOp,
   SectionInfo,
+  CustomShowInfo,
+  ShowSetup,
   AddSectionOp,
   RenameSectionOp,
   RemoveSectionOp,
@@ -77,6 +83,9 @@ import type {
   MasterEditTransformOp,
   MasterEditFillOp,
   MasterEditStrokeOp,
+  MasterEditFontOp,
+  MasterEditParagraphOp,
+  MasterViewKind,
   MasterDeleteElementOp,
   ExportImagesOp,
   ExportPdfOp,
@@ -174,6 +183,9 @@ const api: SlidesApi = {
     ipcRenderer.invoke('slides:edit-picture-src-rect', op),
   editPictureOpacity: (op: EditPictureOpacityOp) =>
     ipcRenderer.invoke('slides:edit-picture-opacity', op),
+  editPictureAdjustments: (op: EditPictureAdjustmentsOp) =>
+    ipcRenderer.invoke('slides:edit-picture-adjustments', op),
+  resetPicture: (op: ResetPictureOp) => ipcRenderer.invoke('slides:reset-picture', op),
   editImageFill: (op: EditFillImageOp) => ipcRenderer.invoke('slides:edit-image-fill', op),
   changeShape: (op: { slideIndex: number; sourceId: string; prst: string; groupId?: string }) =>
     ipcRenderer.invoke('slides:change-shape', op),
@@ -215,7 +227,8 @@ const api: SlidesApi = {
   addSlideWithLayout: (op: AddSlideWithLayoutOp) =>
     ipcRenderer.invoke('slides:add-slide-with-layout', op),
   getLayouts: () => ipcRenderer.invoke('slides:get-layouts'),
-  masterEnter: (fitWidthPx: number) => ipcRenderer.invoke('slides:master-enter', fitWidthPx),
+  masterEnter: (fitWidthPx: number, kind?: MasterViewKind) =>
+    ipcRenderer.invoke('slides:master-enter', fitWidthPx, kind),
   masterOpen: (partPath: string) => ipcRenderer.invoke('slides:master-open', partPath),
   masterClose: () => ipcRenderer.invoke('slides:master-close'),
   masterEditText: (op: MasterEditTextOp) => ipcRenderer.invoke('slides:master-edit-text', op),
@@ -223,6 +236,19 @@ const api: SlidesApi = {
     ipcRenderer.invoke('slides:master-edit-transform', op),
   masterEditFill: (op: MasterEditFillOp) => ipcRenderer.invoke('slides:master-edit-fill', op),
   masterEditStroke: (op: MasterEditStrokeOp) => ipcRenderer.invoke('slides:master-edit-stroke', op),
+  masterEditFont: (op: MasterEditFontOp) => ipcRenderer.invoke('slides:master-edit-font', op),
+  masterEditParagraph: (op: MasterEditParagraphOp) =>
+    ipcRenderer.invoke('slides:master-edit-paragraph', op),
+  masterEditBackground: (color: string) =>
+    ipcRenderer.invoke('slides:master-edit-background', color),
+  masterSetHeaderFooterFlag: (kind: 'hdr' | 'ftr' | 'dt' | 'sldNum', enabled: boolean) =>
+    ipcRenderer.invoke('slides:master-set-hf-flag', kind, enabled),
+  masterSetNotesPlaceholder: (kind: 'sldImg' | 'body', enabled: boolean) =>
+    ipcRenderer.invoke('slides:master-set-notes-placeholder', kind, enabled),
+  masterSetPageOrientation: (orientation: 'portrait' | 'landscape') =>
+    ipcRenderer.invoke('slides:master-set-page-orientation', orientation),
+  masterUndo: () => ipcRenderer.invoke('slides:master-undo'),
+  masterRedo: () => ipcRenderer.invoke('slides:master-redo'),
   masterDeleteElement: (op: MasterDeleteElementOp) =>
     ipcRenderer.invoke('slides:master-delete-element', op),
   editFill: (op: EditFillOp) => ipcRenderer.invoke('slides:edit-fill', op),
@@ -253,6 +279,8 @@ const api: SlidesApi = {
     ipcRenderer.invoke('slides:set-table-cell-anchor', op),
   editTableStyle: (op: EditTableStyleOp) => ipcRenderer.invoke('slides:edit-table-style', op),
   editChart: (op: EditChartOp) => ipcRenderer.invoke('slides:edit-chart', op),
+  editChartAreaFormat: (op: EditChartAreaFormatOp) =>
+    ipcRenderer.invoke('slides:edit-chart-area-format', op),
   getChartColorSchemes: () => ipcRenderer.invoke('slides:chart-color-schemes'),
   getTableStyleGallery: (flags) => ipcRenderer.invoke('slides:table-style-gallery', flags),
   getChartData: (slideIndex: number, sourceId: string) =>
@@ -281,6 +309,9 @@ const api: SlidesApi = {
   getSlideLinks: (slideIndex: number) => ipcRenderer.invoke('slides:get-slide-links', slideIndex),
   getRunLinks: (slideIndex: number) => ipcRenderer.invoke('slides:get-run-links', slideIndex),
   applyHeaderFooter: (op: HeaderFooterOp) => ipcRenderer.invoke('slides:apply-header-footer', op),
+  applyNotesHandoutsHeaderFooter: (op: NotesHandoutsHeaderFooterOp) =>
+    ipcRenderer.invoke('slides:apply-notes-handouts-header-footer', op),
+  getNotesHandoutsPrintFields: () => ipcRenderer.invoke('slides:get-notes-handouts-print-fields'),
   getHeaderFooter: (slideIndex: number) =>
     ipcRenderer.invoke('slides:get-header-footer', slideIndex),
   applyTheme: (op: ApplyThemeOp) => ipcRenderer.invoke('slides:apply-theme', op),
@@ -296,6 +327,10 @@ const api: SlidesApi = {
   setAnimations: (op: SetAnimationsOp) => ipcRenderer.invoke('slides:set-animations', op),
   setSlideHidden: (op: SetSlideHiddenOp) => ipcRenderer.invoke('slides:set-hidden', op),
   getSections: () => ipcRenderer.invoke('slides:get-sections'),
+  getCustomShows: () => ipcRenderer.invoke('slides:get-custom-shows'),
+  setCustomShows: (shows: CustomShowInfo[]) => ipcRenderer.invoke('slides:set-custom-shows', shows),
+  getShowSetup: () => ipcRenderer.invoke('slides:get-show-setup'),
+  setShowSetup: (setup: ShowSetup) => ipcRenderer.invoke('slides:set-show-setup', setup),
   setSections: (sections: SectionInfo[]) => ipcRenderer.invoke('slides:set-sections', sections),
   addSection: (op: AddSectionOp) => ipcRenderer.invoke('slides:add-section', op),
   renameSection: (op: RenameSectionOp) => ipcRenderer.invoke('slides:rename-section', op),
@@ -324,6 +359,9 @@ const api: SlidesApi = {
   exportPdf: (op: ExportPdfOp) => ipcRenderer.invoke('slides:export-pdf', op),
   printSlides: (op: PrintSlidesOp) => ipcRenderer.invoke('slides:print', op),
   listPrinters: () => ipcRenderer.invoke('slides:list-printers'),
+  getPrintPrefs: () => ipcRenderer.invoke('slides:print-prefs-get'),
+  setPrintPrefs: (patch: Record<string, unknown>) =>
+    ipcRenderer.invoke('slides:print-prefs-set', patch),
   save: () => ipcRenderer.invoke('slides:save'),
   saveAs: (defaultName: string) => ipcRenderer.invoke('slides:save-as', defaultName),
   onCloseSaveRequest: (handler: () => void) => {

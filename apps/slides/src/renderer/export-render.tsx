@@ -8,6 +8,7 @@ import { createRoot } from 'react-dom/client'
 import type Konva from 'konva'
 import type { RenderSlide } from '@genoffice/pptx-render'
 import { SlideThumb } from './SlideThumb'
+import { prepareEquationRasters } from './equation-raster'
 
 /** Pixel ratio of the exported bitmap (2x hi-res, 1280 viewport width → 2560px PNG) */
 const EXPORT_PIXEL_RATIO = 2
@@ -31,6 +32,7 @@ export async function renderSlidesToPngBase64(
   const out: string[] = []
   try {
     for (const slide of slides) {
+      await prepareEquationRasters(slide)
       const stage = await new Promise<Konva.Stage>((resolve) => {
         root.render(
           <SlideThumb

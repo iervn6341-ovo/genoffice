@@ -98,6 +98,11 @@ beforeAll(async () => {
   expect(opened.deck.slides).toHaveLength(2)
   expect(slideDurableId(opened.deck.slides[0]!)).toBe('s_1')
   for (const id of Object.values(ids)) expect(id).toBeTruthy()
+  // replaceEquation examples need a real, strictly editable native equation.
+  const inserted = runTxn(opened, {
+    ops: [{ op: 'insertEquation', target: { slide: 0, el: ids.e_TEXT }, latex: 'x^2' }],
+  })
+  expect(inserted.failures ?? []).toEqual([])
 })
 
 function substitute(example: string): string {

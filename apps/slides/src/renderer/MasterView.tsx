@@ -16,12 +16,19 @@ import { t } from './i18n/locale'
 
 interface Props {
   initialItems: MasterPartItem[]
+  initialPartPath: string | null
   onClose: () => void
 }
 
-export function MasterView({ initialItems, onClose }: Props) {
+export function MasterView({ initialItems, initialPartPath, onClose }: Props) {
   const [items, setItems] = useState(initialItems)
-  const [sel, setSel] = useState(0)
+  const [sel, setSel] = useState(
+    Math.max(
+      0,
+      initialItems.findIndex((x) => x.partPath === initialPartPath),
+    ),
+  )
+  const [handoutPreview, setHandoutPreview] = useState<'2' | '3' | '4' | '6' | '9' | 'outline'>('6')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [editing, setEditing] = useState<{
     sourceId: string
@@ -32,9 +39,35 @@ export function MasterView({ initialItems, onClose }: Props) {
   )
   const [images, setImages] = useState<Map<string, HTMLImageElement>>(new Map())
   const colorInputRef = useRef<HTMLInputElement>(null)
-  const colorTargetRef = useRef<{ kind: 'fill' | 'stroke'; sourceId: string } | null>(null)
+  const colorTargetRef = useRef<{
+    kind: 'fill' | 'stroke' | 'font' | 'background'
+    sourceId?: string
+  } | null>(null)
 
   const slide = items[sel]?.slide
+  const selectedNode = slide?.nodes.find((n) => n.sourceId === selectedIds[0])
+  const selectedTextNode =
+    selectedNode && (selectedNode.type === 'shape' || selectedNode.type === 'text')
+      ? selectedNode
+      : null
+  const firstRun = selectedTextNode?.text?.lines.flatMap((line) => line.runs)[0]
+  const selectedStyle = items[sel]?.elementStyles?.[selectedIds[0] ?? '']
+
+  const replaceResult = useCallback(
+    (result: { items: MasterPartItem[]; selectedPartPath: string } | null) => {
+      if (!result) return
+      setItems(result.items)
+      setSel(
+        Math.max(
+          0,
+          result.items.findIndex((x) => x.partPath === result.selectedPartPath),
+        ),
+      )
+      setSelectedIds([])
+      setEditing(null)
+    },
+    [],
+  )
 
   const applyCurrent = useCallback(
     (updated: RenderSlide | null) => {
@@ -127,27 +160,38 @@ export function MasterView({ initialItems, onClose }: Props) {
     setSelectedIds([])
   }, [selectedIds, applyCurrent])
 
-  const pickColor = useCallback((kind: 'fill' | 'stroke', sourceId: string) => {
-    colorTargetRef.current = { kind, sourceId }
-    if (colorInputRef.current) {
-      armColorInput(colorInputRef.current)
-      colorInputRef.current.click()
-    }
-  }, [])
+  const pickColor = useCallback(
+    (kind: 'fill' | 'stroke' | 'font' | 'background', sourceId?: string) => {
+      colorTargetRef.current = { kind, sourceId }
+      if (colorInputRef.current) {
+        armColorInput(colorInputRef.current)
+        colorInputRef.current.click()
+      }
+    },
+    [],
+  )
 
   const onColorPicked = useCallback(
     async (hex: string) => {
       const target = colorTargetRef.current
       if (!target) return
       colorTargetRef.current = null
-      applyCurrent(
-        target.kind === 'fill'
-          ? await window.slidesApi.masterEditFill({ sourceId: target.sourceId, fill: hex })
-          : await window.slidesApi.masterEditStroke({
-              sourceId: target.sourceId,
-              stroke: { color: hex, widthPt: 1 },
-            }),
-      )
+      if (target.kind === 'background')
+        applyCurrent(await window.slidesApi.masterEditBackground(hex))
+      else if (target.sourceId)
+        applyCurrent(
+          target.kind === 'fill'
+            ? await window.slidesApi.masterEditFill({ sourceId: target.sourceId, fill: hex })
+            : target.kind === 'font'
+              ? await window.slidesApi.masterEditFont({
+                  sourceId: target.sourceId,
+                  font: { color: hex },
+                })
+              : await window.slidesApi.masterEditStroke({
+                  sourceId: target.sourceId,
+                  stroke: { color: hex, widthPt: 1 },
+                }),
+        )
     },
     [applyCurrent],
   )
@@ -182,7 +226,7 @@ export function MasterView({ initialItems, onClose }: Props) {
     const node = slide?.nodes.find((n) => n.sourceId === id)
     const textual = node && (node.type === 'text' || node.type === 'shape')
     return [
-      ...(textual
+      ...(textual && !items[sel]?.nativeFieldIds?.includes(id)
         ? [{ label: t('appCtxEditText'), onClick: () => setEditing({ sourceId: id }) } as CtxItem]
         : []),
       ...(textual
@@ -208,17 +252,270 @@ export function MasterView({ initialItems, onClose }: Props) {
       null,
       { label: t('appCtxDelete'), hint: '⌫', danger: true, onClick: () => void deleteSelected() },
     ]
-  }, [ctxMenu, slide, pickColor, applyCurrent, deleteSelected])
+  }, [ctxMenu, slide, items, sel, pickColor, applyCurrent, deleteSelected])
 
   if (!slide) return null
+
+  const current = items[sel]!
+  const notesOrHandout = current.kind === 'notesMaster' || current.kind === 'handoutMaster'
+  const title =
+    current.kind === 'notesMaster'
+      ? t('appNotesMasterTitle')
+      : current.kind === 'handoutMaster'
+        ? t('appHandoutMasterTitle')
+        : t('appMasterTitle')
+  const formatSelected = async (
+    font: Parameters<typeof window.slidesApi.masterEditFont>[0]['font'],
+  ) => {
+    const id = selectedIds[0]
+    if (!id) return
+    const updated = await window.slidesApi.masterEditFont({ sourceId: id, font })
+    applyCurrent(updated)
+    if (updated)
+      setItems((prev) =>
+        prev.map((it, i) =>
+          i === sel
+            ? {
+                ...it,
+                elementStyles: {
+                  ...it.elementStyles,
+                  [id]: { ...it.elementStyles?.[id], ...font },
+                },
+              }
+            : it,
+        ),
+      )
+  }
+  const paragraphSelected = async (
+    format: Parameters<typeof window.slidesApi.masterEditParagraph>[0]['format'],
+  ) => {
+    const id = selectedIds[0]
+    if (!id) return
+    const updated = await window.slidesApi.masterEditParagraph({ sourceId: id, format })
+    applyCurrent(updated)
+    if (updated)
+      setItems((prev) =>
+        prev.map((it, i) =>
+          i === sel
+            ? {
+                ...it,
+                elementStyles: {
+                  ...it.elementStyles,
+                  [id]: { ...it.elementStyles?.[id], ...format },
+                },
+              }
+            : it,
+        ),
+      )
+  }
 
   return (
     <div className="master-view">
       <div className="master-bar">
-        <span className="master-bar-title">{t('appMasterTitle')}</span>
+        <span className="master-bar-title">{title}</span>
+        <button
+          className="master-tool"
+          onClick={() => void window.slidesApi.masterUndo().then(replaceResult)}
+          data-testid="master-undo"
+        >
+          {t('ribbonUndo')}
+        </button>
+        <button
+          className="master-tool"
+          onClick={() => void window.slidesApi.masterRedo().then(replaceResult)}
+          data-testid="master-redo"
+        >
+          {t('ribbonRedo')}
+        </button>
         <button className="master-close-btn" onClick={onClose}>
           {t('appMasterClose')}
         </button>
+      </div>
+      <div className="master-format-bar">
+        <input
+          aria-label={t('appMasterFontFamily')}
+          data-testid="master-font-family"
+          key={`font-${selectedIds[0]}-${selectedStyle?.fontFamily}`}
+          defaultValue={
+            selectedStyle?.fontFamily ?? firstRun?.srcFontFamily ?? firstRun?.fontFamily ?? ''
+          }
+          disabled={!selectedTextNode}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          onBlur={(e) => {
+            const value = e.currentTarget.value.trim()
+            if (value && value !== selectedStyle?.fontFamily)
+              void formatSelected({ fontFamily: value })
+          }}
+        />
+        <input
+          aria-label={t('ribbonFontSizeTip')}
+          data-testid="master-font-size"
+          type="number"
+          min="1"
+          max="400"
+          step="1"
+          key={`size-${selectedIds[0]}-${selectedStyle?.fontSizePt}`}
+          defaultValue={
+            selectedStyle?.fontSizePt ??
+            (firstRun ? Math.round((firstRun.fontSizePx / slide.scale) * 0.75) : 18)
+          }
+          disabled={!selectedTextNode}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          onBlur={(e) => {
+            const value = Number(e.currentTarget.value)
+            if (value > 0 && value <= 400 && value !== selectedStyle?.fontSizePt)
+              void formatSelected({ fontSizePt: value })
+          }}
+        />
+        <button
+          disabled={!selectedTextNode}
+          aria-label={t('ribbonBold')}
+          aria-pressed={!!(selectedStyle?.bold ?? firstRun?.bold)}
+          onClick={() => void formatSelected({ bold: !(selectedStyle?.bold ?? firstRun?.bold) })}
+        >
+          <b>B</b>
+        </button>
+        <button
+          disabled={!selectedTextNode}
+          aria-label={t('ribbonItalic')}
+          aria-pressed={!!(selectedStyle?.italic ?? firstRun?.italic)}
+          onClick={() =>
+            void formatSelected({ italic: !(selectedStyle?.italic ?? firstRun?.italic) })
+          }
+        >
+          <i>I</i>
+        </button>
+        <button
+          disabled={!selectedTextNode}
+          aria-label={t('ribbonUnderline')}
+          aria-pressed={!!(selectedStyle?.underline ?? firstRun?.underline)}
+          onClick={() =>
+            void formatSelected({ underline: !(selectedStyle?.underline ?? firstRun?.underline) })
+          }
+        >
+          <u>U</u>
+        </button>
+        <button
+          disabled={!selectedTextNode}
+          aria-label={t('ribbonFontColor')}
+          onClick={() => pickColor('font', selectedIds[0])}
+        >
+          A ▾
+        </button>
+        <select
+          aria-label={t('ribbonAlignText')}
+          data-testid="master-paragraph-align"
+          disabled={!selectedTextNode}
+          onChange={(e) =>
+            void paragraphSelected({
+              align: e.currentTarget.value as 'left' | 'center' | 'right' | 'justify',
+            })
+          }
+          value={selectedStyle?.align ?? 'left'}
+        >
+          <option value="left">{t('ribbonAlignLeft')}</option>
+          <option value="center">{t('ribbonAlignCenter')}</option>
+          <option value="right">{t('ribbonAlignRight')}</option>
+          <option value="justify">{t('ribbonAlignJustify')}</option>
+        </select>
+        <input
+          aria-label={t('ribbonLineSpacing')}
+          data-testid="master-line-spacing"
+          type="number"
+          min="50"
+          max="400"
+          step="5"
+          key={`line-${selectedIds[0]}-${selectedStyle?.lineSpacingPct}`}
+          defaultValue={selectedStyle?.lineSpacingPct ?? 100}
+          disabled={!selectedTextNode}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          onBlur={(e) => {
+            const value = Number(e.currentTarget.value)
+            if (value >= 50 && value <= 400 && value !== selectedStyle?.lineSpacingPct)
+              void paragraphSelected({ lineSpacingPct: value })
+          }}
+        />
+        <button onClick={() => pickColor('background')} data-testid="master-background">
+          {t('appMasterBackground')}
+        </button>
+        {notesOrHandout && (
+          <select
+            aria-label={t('appPrintOrientation')}
+            data-testid="master-page-orientation"
+            value={current.pageOrientation ?? 'portrait'}
+            onChange={(e) =>
+              void window.slidesApi
+                .masterSetPageOrientation(e.currentTarget.value as 'portrait' | 'landscape')
+                .then(replaceResult)
+            }
+          >
+            <option value="portrait">{t('appPrintPortrait')}</option>
+            <option value="landscape">{t('appPrintLandscape')}</option>
+          </select>
+        )}
+        {current.kind === 'handoutMaster' && (
+          <select
+            aria-label={t('appMasterPreviewOnly')}
+            data-testid="handout-master-preview-layout"
+            value={handoutPreview}
+            onChange={(e) => setHandoutPreview(e.currentTarget.value as typeof handoutPreview)}
+          >
+            <option value="2">2 {t('appPrintSlidesLabel')}</option>
+            <option value="3">3 {t('appPrintSlidesLabel')}</option>
+            <option value="4">4 {t('appPrintSlidesLabel')}</option>
+            <option value="6">6 {t('appPrintSlidesLabel')}</option>
+            <option value="9">9 {t('appPrintSlidesLabel')}</option>
+            <option value="outline">{t('appMasterOutline')}</option>
+          </select>
+        )}
+        {notesOrHandout &&
+          current.headerFooterFlags &&
+          (['hdr', 'ftr', 'dt', 'sldNum'] as const).map((kind) => (
+            <label key={kind} className="master-flag">
+              <input
+                type="checkbox"
+                data-testid={`master-flag-${kind}`}
+                checked={current.headerFooterFlags![kind]}
+                onChange={(e) =>
+                  void window.slidesApi
+                    .masterSetHeaderFooterFlag(kind, e.currentTarget.checked)
+                    .then(replaceResult)
+                }
+              />
+              {t(
+                kind === 'hdr'
+                  ? 'ribbonDlgHeader'
+                  : kind === 'ftr'
+                    ? 'ribbonDlgFooter'
+                    : kind === 'dt'
+                      ? 'ribbonDlgDateTime'
+                      : 'ribbonDlgPageNum',
+              )}
+            </label>
+          ))}
+        {current.kind === 'notesMaster' &&
+          current.notesPlaceholders &&
+          (['sldImg', 'body'] as const).map((kind) => (
+            <label key={kind} className="master-flag">
+              <input
+                type="checkbox"
+                data-testid={`master-placeholder-${kind}`}
+                checked={current.notesPlaceholders![kind]}
+                onChange={(e) =>
+                  void window.slidesApi
+                    .masterSetNotesPlaceholder(kind, e.currentTarget.checked)
+                    .then(replaceResult)
+                }
+              />
+              {t(kind === 'sldImg' ? 'appMasterSlideImage' : 'appMasterNotesBody')}
+            </label>
+          ))}
       </div>
       <div className="master-body">
         <div className="slide-list master-list">
@@ -227,7 +524,15 @@ export function MasterView({ initialItems, onClose }: Props) {
               key={it.partPath}
               className={`thumb master-thumb ${i === sel ? 'active' : ''} ${it.kind === 'layout' ? 'master-thumb-layout' : ''}`}
               onClick={() => void selectPart(i)}
-              data-tip={it.kind === 'master' ? t('appMasterThumbMaster') : it.name}
+              data-tip={
+                it.kind === 'notesMaster'
+                  ? t('appNotesMasterTitle')
+                  : it.kind === 'handoutMaster'
+                    ? t('appHandoutMasterTitle')
+                    : it.kind === 'master'
+                      ? t('appMasterThumbMaster')
+                      : it.name
+              }
             >
               <SlideThumb
                 slide={it.slide}
@@ -235,9 +540,13 @@ export function MasterView({ initialItems, onClose }: Props) {
                 width={it.kind === 'layout' ? 108 : 126}
               />
               <span className="master-thumb-label">
-                {it.kind === 'master'
-                  ? t('appMasterThumbMaster')
-                  : it.name || t('appMasterThumbLayout', { n: i })}
+                {it.kind === 'notesMaster'
+                  ? t('appNotesMasterTitle')
+                  : it.kind === 'handoutMaster'
+                    ? t('appHandoutMasterTitle')
+                    : it.kind === 'master'
+                      ? t('appMasterThumbMaster')
+                      : it.name || t('appMasterThumbLayout', { n: i })}
               </span>
             </div>
           ))}
@@ -258,7 +567,9 @@ export function MasterView({ initialItems, onClose }: Props) {
                   return [id]
                 })
               }
-              onEditText={(sourceId, caret) => setEditing({ sourceId, caret })}
+              onEditText={(sourceId, caret) => {
+                if (!current.nativeFieldIds?.includes(sourceId)) setEditing({ sourceId, caret })
+              }}
               onTransform={onTransform}
               onEditTableCell={() => {}}
               onTableColResize={() => {}}
@@ -272,6 +583,20 @@ export function MasterView({ initialItems, onClose }: Props) {
               images={images}
               editingText={editing ? { sourceId: editing.sourceId } : null}
             />
+            {current.kind === 'handoutMaster' && (
+              <div
+                className={`master-handout-preview master-handout-${handoutPreview}`}
+                aria-hidden="true"
+              >
+                {handoutPreview === 'outline'
+                  ? Array.from({ length: 8 }, (_, i) => (
+                      <span key={i} className="master-outline-line" />
+                    ))
+                  : Array.from({ length: Number(handoutPreview) }, (_, i) => (
+                      <span key={i} className="master-slide-slot" />
+                    ))}
+              </div>
+            )}
             {editing && editNode && (
               <TextEditOverlay
                 node={editNode}

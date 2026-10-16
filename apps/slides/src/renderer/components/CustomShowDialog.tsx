@@ -2,56 +2,61 @@
  * Custom show management dialog — modeled on PowerPoint "Slide Show → Custom Shows".
  *
  * Left column: show list (new/delete/play); right side: the selected show's name, included-page
- * checkboxes and order adjustment. Data is owned by App (persisted per document to localStorage);
- * this only sends back the whole new list.
+ * checkboxes and order adjustment. Changes are committed as one native undoable transaction.
  */
 import React, { useState } from 'react'
 import { useI18n } from '../i18n/locale'
 import type { CustomShow } from '../slideshow-utils'
 
-/** Generate a show id (timestamp + random suffix, avoiding collisions when created in the same millisecond) */
-function newShowId(): string {
-  return `cs-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+/** Allocate an OOXML unsigned-int identity without changing imported IDs. */
+function newShowId(shows: CustomShow[]): string {
+  const used = new Set(shows.map((show) => show.id))
+  for (let id = 0; id <= 0xffffffff; id++) if (!used.has(String(id))) return String(id)
+  throw new Error('No custom-show IDs remain')
 }
 
 export function CustomShowDialog({
   shows,
   slideCount,
-  onChange,
+  onCommit,
   onPlay,
   onClose,
 }: {
   shows: CustomShow[]
   /** Document page count (checkbox list; stale out-of-range indexes filtered at render/show time) */
   slideCount: number
-  onChange: (shows: CustomShow[]) => void
+  onCommit: (shows: CustomShow[]) => Promise<boolean>
   onPlay: (show: CustomShow) => void
   onClose: () => void
 }) {
   const { t } = useI18n()
+  const [draft, setDraft] = useState(() =>
+    shows.map((show) => ({ ...show, slideIndices: [...show.slideIndices] })),
+  )
+  const [saving, setSaving] = useState(false)
   const [selId, setSelId] = useState<string | null>(shows[0]?.id ?? null)
-  const sel = shows.find((s) => s.id === selId) ?? null
+  const sel = draft.find((s) => s.id === selId) ?? null
   // Out-of-range indexes left over after page deletion aren't shown (the show entry filters them too)
   const selIndices = sel ? sel.slideIndices.filter((i) => i >= 0 && i < slideCount) : []
 
   const patchSel = (patch: Partial<CustomShow>) => {
-    if (sel) onChange(shows.map((s) => (s.id === sel.id ? { ...s, ...patch } : s)))
+    if (sel) setDraft(draft.map((s) => (s.id === sel.id ? { ...s, ...patch } : s)))
   }
 
   const addShow = () => {
     const show: CustomShow = {
-      id: newShowId(),
-      name: t('paneCsdDefaultName', { n: shows.length + 1 }),
+      id: newShowId(draft),
+      name: t('paneCsdDefaultName', { n: draft.length + 1 }),
       slideIndices: [],
     }
-    onChange([...shows, show])
+    setDraft([...draft, show])
     setSelId(show.id)
   }
 
   const removeShow = () => {
     if (!sel) return
-    const rest = shows.filter((s) => s.id !== sel.id)
-    onChange(rest)
+    const rest = draft.filter((s) => s.id !== sel.id)
+    setDraft(rest)
     setSelId(rest[0]?.id ?? null)
   }
 
@@ -72,17 +77,28 @@ export function CustomShowDialog({
     patchSel({ slideIndices: arr })
   }
 
+  const finish = async (play = false) => {
+    if (saving || draft.some((show) => !show.name.trim())) return
+    setSaving(true)
+    const ok = await onCommit(draft)
+    setSaving(false)
+    if (!ok) return
+    if (play && sel) onPlay(sel)
+    else onClose()
+  }
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={() => void finish()}>
       <div className="modal csd" onClick={(e) => e.stopPropagation()}>
         <h2>{t('paneCsdTitle')}</h2>
         <div className="csd-body">
           <div className="csd-shows">
             <div className="csd-list" role="listbox">
-              {shows.length === 0 && <div className="csd-empty">{t('paneCsdEmpty')}</div>}
-              {shows.map((s) => (
+              {draft.length === 0 && <div className="csd-empty">{t('paneCsdEmpty')}</div>}
+              {draft.map((s) => (
                 <button
                   key={s.id}
+                  data-testid={`custom-show-${s.id}`}
                   className={`csd-item${s.id === selId ? ' active' : ''}`}
                   onClick={() => setSelId(s.id)}
                 >
@@ -96,8 +112,14 @@ export function CustomShowDialog({
               ))}
             </div>
             <div className="csd-list-actions">
-              <button onClick={addShow}>{t('paneCsdNew')}</button>
-              <button disabled={!sel} onClick={removeShow}>
+              <button data-testid="custom-show-new" disabled={saving} onClick={addShow}>
+                {t('paneCsdNew')}
+              </button>
+              <button
+                data-testid="custom-show-delete"
+                disabled={!sel || saving}
+                onClick={removeShow}
+              >
                 {t('paneCsdDelete')}
               </button>
             </div>
@@ -108,6 +130,7 @@ export function CustomShowDialog({
                 {t('paneCsdName')}
                 <input
                   type="text"
+                  data-testid="custom-show-name"
                   value={sel.name}
                   onChange={(e) => patchSel({ name: e.target.value })}
                   placeholder={t('paneCsdNamePlaceholder')}
@@ -121,6 +144,7 @@ export function CustomShowDialog({
                       <label key={i} className="csd-page">
                         <input
                           type="checkbox"
+                          data-testid={`custom-show-slide-${i}`}
                           checked={selIndices.includes(i)}
                           onChange={() => togglePage(i)}
                         />
@@ -142,7 +166,8 @@ export function CustomShowDialog({
                         </span>
                         <span className="csd-order-btns">
                           <button
-                            disabled={posInShow === 0}
+                            disabled={saving || posInShow === 0}
+                            data-testid={`custom-show-up-${posInShow}`}
                             onClick={() => movePage(posInShow, -1)}
                             data-tip={t('paneMoveUp')}
                             aria-label={t('paneMoveUp')}
@@ -150,7 +175,8 @@ export function CustomShowDialog({
                             ↑
                           </button>
                           <button
-                            disabled={posInShow === selIndices.length - 1}
+                            disabled={saving || posInShow === selIndices.length - 1}
+                            data-testid={`custom-show-down-${posInShow}`}
                             onClick={() => movePage(posInShow, 1)}
                             data-tip={t('paneMoveDown')}
                             aria-label={t('paneMoveDown')}
@@ -169,11 +195,20 @@ export function CustomShowDialog({
           )}
         </div>
         <div className="modal-actions">
-          <button onClick={onClose}>{t('paneCsdClose')}</button>
+          <button
+            data-testid="custom-show-close"
+            disabled={saving || draft.some((show) => !show.name.trim())}
+            onClick={() => void finish()}
+          >
+            {t('paneCsdClose')}
+          </button>
           <button
             className="primary"
-            disabled={!sel || selIndices.length === 0}
-            onClick={() => sel && onPlay(sel)}
+            disabled={
+              !sel || selIndices.length === 0 || saving || draft.some((show) => !show.name.trim())
+            }
+            data-testid="custom-show-play"
+            onClick={() => void finish(true)}
           >
             {t('paneCsdPlay')}
           </button>

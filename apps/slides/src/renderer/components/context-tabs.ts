@@ -4,7 +4,13 @@ import type { RenderNode } from '@genoffice/pptx-render'
 export type ContextElementType =
   'table' | 'chart' | 'picture' | 'shape' | 'textShape' | 'mixed' | null
 export type ContextTab =
-  'tableDesign' | 'tableLayout' | 'chartDesign' | 'pictureFormat' | 'shapeFormat'
+  | 'tableDesign'
+  | 'tableLayout'
+  | 'chartDesign'
+  | 'chartFormat'
+  | 'pictureFormat'
+  | 'shapeFormat'
+  | 'equationTools'
 
 function nodeHasVisibleText(node: RenderNode): boolean {
   if (node.type === 'text' || node.type === 'shape') {
@@ -33,10 +39,17 @@ export function contextTabForElement(type: ContextElementType): ContextTab | nul
 }
 
 /** Every contextual tab a selection reveals, in ribbon order (a table has two, like PowerPoint). */
-export function contextTabsForElement(type: ContextElementType): ContextTab[] {
+export function contextTabsForElement(
+  type: ContextElementType,
+  equationSelected = false,
+): ContextTab[] {
   if (type === 'table') return ['tableDesign', 'tableLayout']
+  if (type === 'chart') return ['chartDesign', 'chartFormat']
   const tab = contextTabForElement(type)
-  return tab ? [tab] : []
+  const tabs: ContextTab[] = tab ? [tab] : []
+  // A native equation shape also reveals the Equation tab (PowerPoint: Shape Format + Equation)
+  if (equationSelected) tabs.push('equationTools')
+  return tabs
 }
 
 /**

@@ -481,6 +481,8 @@ interface Props {
   viewScale?: number
   /** Slide dimensions in viewport px — needed for the position "From: Center" reference */
   slideSizePx?: { w: number; h: number }
+  /** Persist the picture's Lock aspect ratio (a:picLocks noChangeAspect) */
+  onPictureLockAspect?: (id: string, locked: boolean) => void
   onTransform: (
     sourceId: string,
     box: { x: number; y: number; w: number; h: number; rotationDeg: number },
@@ -792,6 +794,7 @@ export function FormatPane({
   node,
   viewScale,
   slideSizePx,
+  onPictureLockAspect,
   onTransform,
   onFill,
   onImageFill,
@@ -862,9 +865,13 @@ export function FormatPane({
   const [relOriginal, setRelOriginal] = useState(true)
   const [naturalSize, setNaturalSize] = useState<{ url: string; w: number; h: number } | null>(null)
   useEffect(() => {
-    setLockRatio(node?.type === 'picture')
+    // pictures default to locked (PowerPoint writes noChangeAspect on insert); a saved value wins
+    setLockRatio(
+      node?.type === 'picture' ? ((node as PictureRenderNode).lockAspect ?? true) : false,
+    )
     setRelOriginal(true)
-  }, [node?.sourceId, node?.type])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node?.sourceId, node?.type, (node as PictureRenderNode | null)?.lockAspect])
   useEffect(() => {
     const url = pic?.dataUrl
     if (!url) return
@@ -1581,7 +1588,11 @@ export function FormatPane({
                     <input
                       type="checkbox"
                       checked={lockRatio}
-                      onChange={(e) => setLockRatio(e.target.checked)}
+                      onChange={(e) => {
+                        setLockRatio(e.target.checked)
+                        if (node && node.type === 'picture')
+                          onPictureLockAspect?.(node.sourceId, e.target.checked)
+                      }}
                     />
                     <span>{t('paneSizeLockRatio')}</span>
                   </label>

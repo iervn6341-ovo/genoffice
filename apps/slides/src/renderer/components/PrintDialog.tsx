@@ -6,14 +6,13 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RenderSlide } from '@genoffice/pptx-render'
-import type { SectionInfo } from '../../shared/ipc'
+import type { NotesHandoutsPrintFields, SectionInfo } from '../../shared/ipc'
 import { useI18n } from '../i18n/locale'
 import { outlineOf } from '../outline-of'
 import {
   buildPrintDocumentHtml,
   parsePrintRange,
   printPageCount,
-  handoutSpec,
   type PrintCommentItem,
   type PrintLayout,
   type PrintOrientation,
@@ -25,6 +24,7 @@ import {
   PRINT_PAPERS,
 } from '../../shared/print-html'
 import { renderSlidesToPngBase64 } from '../export-render'
+import { loadSlidesPrintData } from '../print-data'
 import {
   DEFAULT_PRINTER_SETTINGS,
   PrintCheck,
@@ -70,10 +70,13 @@ export function PrintDialog({
   onClose: () => void
   setStatus: (s: string) => void
 }) {
-  const { t, lang } = useI18n()
+  const { t, lang, dateLocale } = useI18n()
   const L = printOfficeLabels(lang)
   const [pngs, setPngs] = useState<string[] | null>(null)
   const [notes, setNotes] = useState<string[]>([])
+  const [hfPrint, setHfPrint] = useState<NotesHandoutsPrintFields | null>(null)
+  const [artworkBase64, setArtworkBase64] = useState<Record<string, string>>({})
+  const [firstSlideNum, setFirstSlideNum] = useState(1)
   const [layout, setLayout] = useState<PrintLayout>('full')
   const [rangeMode, setRangeMode] = useState<RangeMode>('all')
   const [customRange, setCustomRange] = useState('')
@@ -93,6 +96,7 @@ export function PrintDialog({
   const [flipH, setFlipH] = useState(false)
   const [printerSettings, setPrinterSettings] = useState<PrinterSettings>(DEFAULT_PRINTER_SETTINGS)
   const [printing, setPrinting] = useState(false)
+  const [printError, setPrintError] = useState('')
   const blobUrlsRef = useRef<string[]>([])
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const paneRef = useRef<HTMLDivElement | null>(null)
@@ -117,23 +121,21 @@ export function PrintDialog({
     let alive = true
     void (async () => {
       try {
-        const rendered = await renderSlidesToPngBase64(slides, images)
-        const noteTexts = await Promise.all(slides.map((_s, i) => window.slidesApi.getNotes(i)))
-        const commentLists = await Promise.all(
-          slides.map((_s, i) => window.slidesApi.getComments(i)),
-        )
+        const data = await loadSlidesPrintData(slides, images, current)
         if (!alive) return
-        setComments(
-          commentLists.flatMap((list, i) =>
-            list.map((c) => ({ number: i + 1, author: c.author, text: c.text })),
-          ),
-        )
+        const { rendered, nativeFields } = data
+        setComments(data.comments)
         blobUrlsRef.current = rendered.map((b64) =>
           URL.createObjectURL(
             new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/png' }),
           ),
         )
-        setNotes(noteTexts)
+        setNotes(data.notes)
+        setHfPrint(nativeFields)
+        setArtworkBase64(data.masterArtworkBase64)
+        const notesCanvas = nativeFields.notesPages[0]?.canvas ?? nativeFields.handout.canvas
+        if (notesCanvas) setOrientation(notesCanvas.cx > notesCanvas.cy ? 'landscape' : 'portrait')
+        setFirstSlideNum(data.firstSlideNum)
         setPngs(rendered)
       } catch (err) {
         if (alive) setStatus(t('appPrintFailed', { error: String(err) }))
@@ -205,6 +207,17 @@ export function PrintDialog({
     rotate180,
     flipH,
     scaleFit,
+    notesFields: selected.map((i) => hfPrint?.notesPages[i] ?? {}),
+    handoutFields: hfPrint?.handout,
+    masterArtwork: Object.fromEntries(
+      Object.entries(artworkBase64).map(([path, base64]) => [
+        path,
+        `data:image/png;base64,${base64}`,
+      ]),
+    ),
+    slideIndexes: selected,
+    firstSlideNum,
+    dateLocale,
     ...(layout === 'outline' ? { outline } : {}),
     ...(pageComments.length > 0 ? { comments: pageComments, commentsTitle: L.comments } : {}),
   })
@@ -226,6 +239,10 @@ export function PrintDialog({
     slides,
     layout,
     notes,
+    hfPrint,
+    artworkBase64,
+    firstSlideNum,
+    dateLocale,
     orientation,
     frame,
     output,
@@ -258,9 +275,10 @@ export function PrintDialog({
     return () => ro.disconnect()
   }, [applyZoom])
 
-  const doPrint = async () => {
+  const doPrint = async (savePdf = false) => {
     if (!pngs || selected.length === 0 || printing) return
     setPrinting(true)
+    setPrintError('')
     try {
       const first = slides[selected[0]]
       // "High Quality": re-render the printed slides at a higher pixel ratio
@@ -277,6 +295,10 @@ export function PrintDialog({
         widthPx: first.widthPx,
         heightPx: first.heightPx,
         layout,
+        ...(savePdf ? { savePdf: true } : {}),
+        slideIndexes: selected,
+        dateLocale,
+        masterArtworkBase64: artworkBase64,
         ...(layout === 'notes' ? { notes: selected.map((i) => notes[i] ?? '') } : {}),
         ...(layout === 'outline' ? { outline } : {}),
         ...(pageComments.length > 0 ? { comments: pageComments, commentsTitle: L.comments } : {}),
@@ -290,9 +312,21 @@ export function PrintDialog({
         ...(scaleFit ? { scaleFit: true } : {}),
         ...printerJob(printerSettings),
       })
-      if (r.ok) onClose()
-      else if (r.error) setStatus(t('appPrintFailed', { error: r.error }))
+      if (r.ok) {
+        if (savePdf && r.path) setStatus(t('appExportPdfDone', { path: r.path }))
+        onClose()
+      } else if (r.error) {
+        const message = t(savePdf ? 'appExportPdfFailed' : 'appPrintFailed', { error: r.error })
+        setPrintError(message)
+        setStatus(message)
+      }
       // ok=false without an error = canceled in the system dialog: keep the dialog open
+    } catch (error) {
+      const message = t(savePdf ? 'appExportPdfFailed' : 'appPrintFailed', {
+        error: String(error),
+      })
+      setPrintError(message)
+      setStatus(message)
     } finally {
       setPrinting(false)
     }
@@ -529,7 +563,19 @@ export function PrintDialog({
           </div>
         </div>
         <div className="modal-actions">
+          {printError && (
+            <span className="print-error" role="alert">
+              {printError}
+            </span>
+          )}
           <button onClick={onClose}>{t('appSettingsCancel')}</button>
+          <button
+            data-testid="print-save-pdf"
+            disabled={!pngs || selected.length === 0 || printing}
+            onClick={() => void doPrint(true)}
+          >
+            {t('ribbonFileExportPdf')}
+          </button>
           <button
             className="primary"
             disabled={!pngs || selected.length === 0 || printing}

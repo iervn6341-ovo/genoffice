@@ -1406,6 +1406,9 @@ export function presetToShapeKind(preset: string | undefined): ShapeKind {
 /** Absolute positioning of one glyph run as Konva Text (relative to the text box top-left). */
 export interface GlyphDraw {
   text: string
+  mathML?: string
+  mathWidthPx?: number
+  mathHeightPx?: number
   x: number
   /** Konva Text y = top, derived from the baseline: baselineY - ascent ≈ fontSize*0.8 */
   y: number
@@ -1674,8 +1677,21 @@ export function glyphToDraw(run: GlyphRun): GlyphDraw {
   const family = displayFontFamily(run.fontFamily)
   return {
     text: run.text,
+    ...(run.mathML
+      ? {
+          mathML: run.mathML,
+          mathWidthPx: run.widthPx,
+          mathHeightPx:
+            (run.mathAscentPx ?? run.fontSizePx * 0.8) +
+            (run.mathDescentPx ?? run.fontSizePx * 0.2),
+        }
+      : {}),
     x: run.x,
-    y: run.baselineY - konvaBaselineAscent(family, run.fontSizePx, effectiveBold, run.italic),
+    y:
+      run.baselineY -
+      (run.mathML
+        ? (run.mathAscentPx ?? run.fontSizePx * 0.8)
+        : konvaBaselineAscent(family, run.fontSizePx, effectiveBold, run.italic)),
     fontSize: run.fontSizePx,
     fontFamily: family,
     fill: normalizeColor(run.color),

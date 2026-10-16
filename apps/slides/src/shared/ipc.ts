@@ -1,5 +1,6 @@
 import type { AiPanelPrefs } from '@genoffice/ui'
 import type { PrintCommentItem, PrintLayout, PrintOutlineItem, PrintPaper } from './print-html'
+import type { SlidesPrintPrefs } from './print-prefs'
 /**
  * slides main-process <-> renderer IPC contract (Phase 3: open/save/edit, AI not included yet).
  *
@@ -10,7 +11,16 @@ import type { PrintCommentItem, PrintLayout, PrintOutlineItem, PrintPaper } from
  * them to the model and rebuilds the RenderSlide.
  */
 import type { RenderSlide } from '@genoffice/pptx-render'
-import type { SlideComment, SectionInfo, StyleGalleryEntry } from '@genoffice/pptx-engine'
+import type {
+  SlideComment,
+  SectionInfo,
+  CustomShowInfo,
+  ShowSetup,
+  StyleGalleryEntry,
+  NotesHandoutsHeaderFooterOptions,
+  NotesHandoutsHeaderFooterState,
+  PrintHeaderFooterPage,
+} from '@genoffice/pptx-engine'
 import type { AiSettings, AiStreamChunk, AiStreamRequest } from '@genoffice/ai-provider'
 
 import type {
@@ -34,7 +44,7 @@ export type {
   LinkTargetOp,
 }
 
-export type { SlideComment, SectionInfo } from '@genoffice/pptx-engine'
+export type { SlideComment, SectionInfo, CustomShowInfo, ShowSetup } from '@genoffice/pptx-engine'
 
 // Canonical definitions of AI-related types live in @genoffice/ai-provider / @genoffice/agent-core (shared with docs)
 export type {
@@ -48,7 +58,7 @@ export type {
 export { AI_PROVIDERS } from '@genoffice/ai-provider/browser'
 export type { AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 
-export type UiTheme = 'light' | 'dark' | 'system'
+export type UiTheme = 'light' | 'dark' | 'gray' | 'system'
 
 /** shell-wide AutoSave default; updatedAt is 0 until the user has ever set it */
 export interface AutoSaveDefault {
@@ -272,6 +282,20 @@ export interface EditPictureOpacityOp {
   opacity: number
 }
 
+export interface EditPictureAdjustmentsOp {
+  slideIndex: number
+  sourceId: string
+  adjustments: {
+    lum?: { bright: number; contrast: number } | null
+    color?: 'original' | 'grayscale' | 'blackWhite' | 'sepia' | 'blue'
+  }
+}
+
+export interface ResetPictureOp {
+  slideIndex: number
+  sourceId: string
+}
+
 /** Slide size (EMU; 16:9=12192000×6858000, 4:3=9144000×6858000). */
 export interface SetSlideSizeOp {
   cx: number
@@ -289,15 +313,52 @@ export interface SetSlideLayoutOp {
 export interface MasterPartItem {
   /** Path inside the zip, e.g. ppt/slideMasters/slideMaster1.xml */
   partPath: string
-  kind: 'master' | 'layout'
+  kind: 'master' | 'layout' | 'notesMaster' | 'handoutMaster'
   /** <p:cSld name> (layouts commonly "Title Slide" etc.) */
   name: string
   slide: RenderSlide
+  headerFooterFlags?: { hdr: boolean; ftr: boolean; dt: boolean; sldNum: boolean }
+  notesPlaceholders?: { sldImg: boolean; body: boolean }
+  pageOrientation?: 'portrait' | 'landscape'
+  elementStyles?: Record<
+    string,
+    {
+      fontFamily?: string
+      fontSizePt?: number
+      bold?: boolean
+      italic?: boolean
+      underline?: boolean
+      color?: string
+      align?: 'left' | 'center' | 'right' | 'justify'
+      lineSpacingPct?: number
+    }
+  >
+  nativeFieldIds?: string[]
 }
 
 export interface MasterEnterResult {
   /** master first, its layouts after; on entry the main process has already set items[0] as the edit target */
   items: MasterPartItem[]
+  selectedPartPath: string
+}
+
+export type MasterViewKind = 'master' | 'notesMaster' | 'handoutMaster'
+
+export interface MasterEditFontOp {
+  sourceId: string
+  font: {
+    fontFamily?: string
+    fontSizePt?: number
+    bold?: boolean
+    italic?: boolean
+    underline?: boolean
+    color?: string
+  }
+}
+
+export interface MasterEditParagraphOp {
+  sourceId: string
+  format: { align?: 'left' | 'center' | 'right' | 'justify'; lineSpacingPct?: number }
 }
 
 export interface MasterEditTextOp {
@@ -582,6 +643,12 @@ export interface AnimationItem {
   paragraph?: number
   /** After Animation: hide on the next click / right after the effect (PowerPoint's setting) */
   after?: 'hideOnNextClick' | 'hideAfter'
+  /** Stable native effect cTn id, echoed for lossless edits of imported timelines. */
+  nativeId?: number
+  /** Imported preset without a modeled writer; effect options stay read-only until replaced. */
+  customPreset?: boolean
+  /** Direction of fly/wipe effects, when represented by the native preset subtype. */
+  direction?: 'top' | 'bottom' | 'left' | 'right'
 }
 
 /** Element pairing key for Morph transitions: cNvPr id / name are stable across pages; sourceId is per-page temporary. */
@@ -1013,14 +1080,31 @@ export interface SetLinkOp {
   target: LinkTargetOp | null
 }
 
-/** Header/footer (applied to all pages). */
+/** Slide header/footer settings. */
 export interface HeaderFooterOp {
+  /** Omit for all slides; pass one index for Apply to current slide. */
+  slideIndexes?: number[]
   footer?: string | null
   slideNum?: boolean
   date?: string | null
   /** Write the date as a dynamic datetime field (auto-updates when opened in PowerPoint) */
   dateAuto?: boolean
+  dateFormat?: string
+  dontShowOnTitleSlide?: boolean
+  firstSlideNum?: number
   fitWidthPx: number
+}
+
+export interface NotesHandoutsHeaderFooterOp {
+  settings: NotesHandoutsHeaderFooterOptions
+  fitWidthPx: number
+}
+
+export interface NotesHandoutsPrintFields {
+  notesPages: PrintHeaderFooterPage[]
+  handout: PrintHeaderFooterPage
+  /** Native master background and non-placeholder drawing tree for print rasterization. */
+  masterArtwork?: Record<string, RenderSlide>
 }
 
 /** Table style edit: apply a preset style (whole table) or change header/banding toggles/shading/borders. */
@@ -1097,6 +1181,22 @@ export interface EditChartOp {
   title?: string
   /** Chart element toggles (undefined = unchanged; styles not specified during a rebuild keep the current state) */
   legendPos?: 'b' | 't' | 'r' | 'l' | 'none'
+  /** Native, local chart layout; supported for one bar/line/pie plot. */
+  quickLayout?:
+    | 'bottom-values'
+    | 'right-values'
+    | 'values-only'
+    | 'mac-1'
+    | 'mac-2'
+    | 'mac-3'
+    | 'mac-4'
+    | 'mac-5'
+    | 'mac-6'
+    | 'mac-7'
+    | 'mac-8'
+    | 'mac-9'
+    | 'mac-10'
+    | 'mac-11'
   dataLabels?: boolean
   gridlines?: boolean
   /** Axis title: '' = clear */
@@ -1108,6 +1208,17 @@ export interface EditChartOp {
   switchRowCol?: boolean
   /** Per-point fill overrides, seriesIdx → pointIdx → color (null clears back to the series color) */
   pointColors?: Record<number, Record<number, string | null>>
+}
+
+/** Native chart-space or plot-area shape properties; preserves imported chart data and extensions. */
+export interface EditChartAreaFormatOp {
+  slideIndex: number
+  sourceId: string
+  format: {
+    area?: 'chart' | 'plot'
+    fill?: string | null
+    stroke?: { color: string; widthEmu: number } | null
+  }
 }
 
 // ── Export (PDF / images) ─────────────────────────────────────────────
@@ -1171,6 +1282,14 @@ export interface PrintSlidesOp {
   layout?: PrintLayout
   /** Per-page notes text for the notes layout (same order as pngsBase64) */
   notes?: string[]
+  /** Rendered through the same slide renderer as the editor, keyed by native master part. */
+  masterArtworkBase64?: Record<string, string>
+  /** Original zero-based slide indexes, to resolve notes-page local field overrides. */
+  slideIndexes?: number[]
+  /** Save the assembled print layout as PDF through the system save dialog. */
+  savePdf?: boolean
+  /** Locale used to resolve native dynamic date fields in the print document. */
+  dateLocale?: string
   /** Paper orientation for handout/notes pages (full pages always follow the slide ratio) */
   orientation?: 'portrait' | 'landscape'
   /** Border around full-page slides */
@@ -1191,6 +1310,8 @@ export interface PrintSlidesOp {
   direction?: 'z' | 'rz' | 'n' | 'rn'
   rotate180?: boolean
   flipH?: boolean
+  /** macOS: assemble the PDF and hand it to the system print panel (with preview) */
+  nativePanel?: boolean
   /** Target printer (system name); omitted = system default */
   printer?: string
   copies?: number
@@ -1255,6 +1376,7 @@ export type AudienceNavAction =
   | `goto:${number}`
 
 export type MenuCommand =
+  | `print-layout:${PrintLayout}`
   | 'open'
   | 'save'
   | 'save-as'
@@ -1383,6 +1505,9 @@ export interface SlidesApi {
   editPictureSrcRect: (op: EditPictureSrcRectOp) => Promise<RenderSlide | null>
   /** Whole-picture opacity */
   editPictureOpacity: (op: EditPictureOpacityOp) => Promise<RenderSlide | null>
+  /** Native picture brightness/contrast and color adjustment. */
+  editPictureAdjustments: (op: EditPictureAdjustmentsOp) => Promise<RenderSlide | null>
+  resetPicture: (op: ResetPictureOp) => Promise<RenderSlide | null>
   /** Shape picture fill (the main process shows the image picker dialog; cancel returns null) */
   editImageFill: (op: EditFillImageOp) => Promise<RenderSlide | null>
   /** Change a shape's preset geometry (keeps transform/fill/outline/text); returns the updated page.
@@ -1548,12 +1673,23 @@ export interface SlidesApi {
   ) => Promise<
     Array<{ sourceId: string; paraIndex: number; runIndex: number; target: LinkTargetOp }>
   >
-  /** Apply header/footer to all pages; returns the full RenderSlide set */
+  /** Apply header/footer to selected or all pages; returns the full RenderSlide set */
   applyHeaderFooter: (op: HeaderFooterOp) => Promise<RenderSlide[] | null>
+  applyNotesHandoutsHeaderFooter: (op: NotesHandoutsHeaderFooterOp) => Promise<RenderSlide[] | null>
+  getNotesHandoutsPrintFields: () => Promise<NotesHandoutsPrintFields>
   /** Current page footer state (dialog echo) */
-  getHeaderFooter: (
-    slideIndex: number,
-  ) => Promise<{ footer: string | null; slideNum: boolean; date: string | null }>
+  getHeaderFooter: (slideIndex: number) => Promise<{
+    footer: string | null
+    slideNum: boolean
+    date: string | null
+    dateAuto: boolean
+    dateFormat: string
+    dontShowOnTitleSlide: boolean
+    firstSlideNum: number
+    isTitleSlide: boolean
+    slideNumber: number
+    notesHandouts: NotesHandoutsHeaderFooterState
+  }>
   /** Apply a theme (color/font scheme + per-page background); returns the reparsed full RenderSlide set, null = no-op, { error } = failed (state rolled back) */
   applyTheme: (op: ApplyThemeOp) => Promise<RenderSlide[] | { error: string } | null>
   /** Set the transition effect (takes effect in PowerPoint shows of the saved pptx); returns success */
@@ -1576,6 +1712,12 @@ export interface SlidesApi {
   setSlideHidden: (op: SetSlideHiddenOp) => Promise<RenderSlide | null>
   /** The current document's section list ([] when there are no sections) */
   getSections: () => Promise<SectionInfo[]>
+  /** Native presentation.xml custom shows in playback order. */
+  getCustomShows: () => Promise<CustomShowInfo[]>
+  /** One undoable native transaction replacing the custom-show list. */
+  setCustomShows: (shows: CustomShowInfo[]) => Promise<CustomShowInfo[] | null>
+  getShowSetup: () => Promise<ShowSetup | null>
+  setShowSetup: (setup: ShowSetup) => Promise<ShowSetup | null>
   /** Overwrite-write the section structure; returns the updated section list */
   setSections: (sections: SectionInfo[]) => Promise<SectionInfo[] | null>
   /** Add a section before the given page; returns the updated section list, null on failure */
@@ -1629,6 +1771,9 @@ export interface SlidesApi {
   /** Chart edit (charts created by this app, rebuilds the chart part); returns the updated page */
   /** sourceId: the chart's new element id after reparse (the renderer uses it to keep the selection), null on error */
   editChart: (op: EditChartOp) => Promise<{ slide: RenderSlide; sourceId: string | null } | null>
+  editChartAreaFormat: (
+    op: EditChartAreaFormatOp,
+  ) => Promise<{ slide: RenderSlide; sourceId: string | null } | null>
   /** Theme-derived chart color schemes (colorful + mono gradients; pass key to EditChartOp.colorScheme) */
   getChartColorSchemes: () => Promise<Array<{
     key: string
@@ -1665,9 +1810,12 @@ export interface SlidesApi {
   /** Main process printToPDF via a hidden window, written to disk */
   exportPdf: (op: ExportPdfOp) => Promise<ExportPdfResult>
   /** Print (system dialog; cancel counts as ok=false without an error) */
-  printSlides: (op: PrintSlidesOp) => Promise<{ ok: boolean; error?: string }>
+  printSlides: (op: PrintSlidesOp) => Promise<{ ok: boolean; path?: string; error?: string }>
   /** Installed printers (empty when none are configured) */
   listPrinters: () => Promise<PrinterInfo[]>
+  /** macOS native-print preferences (layout, hidden slides, color, ...) kept by the File menu */
+  getPrintPrefs: () => Promise<SlidesPrintPrefs>
+  setPrintPrefs: (patch: Partial<SlidesPrintPrefs>) => Promise<SlidesPrintPrefs>
   save: () => Promise<{ ok: boolean; path?: string; error?: string; slides?: RenderSlide[] }>
   saveAs: (
     defaultName: string,
@@ -1783,7 +1931,7 @@ export interface SlidesApi {
   getLayouts: () => Promise<GetLayoutsResult | null>
   // ── Master edit view ──────────────────────────────────────────────
   /** Enter master view: returns render trees of [master, ...layouts]; items[0] is the current edit target */
-  masterEnter: (fitWidthPx: number) => Promise<MasterEnterResult | null>
+  masterEnter: (fitWidthPx: number, kind?: MasterViewKind) => Promise<MasterEnterResult | null>
   /** Switch the edit target part (re-parses that part) */
   masterOpen: (partPath: string) => Promise<RenderSlide | null>
   /** Exit master view: returns the full RenderSlide set rebuilt along the new inheritance chain */
@@ -1792,6 +1940,22 @@ export interface SlidesApi {
   masterEditTransform: (op: MasterEditTransformOp) => Promise<RenderSlide | null>
   masterEditFill: (op: MasterEditFillOp) => Promise<RenderSlide | null>
   masterEditStroke: (op: MasterEditStrokeOp) => Promise<RenderSlide | null>
+  masterEditFont: (op: MasterEditFontOp) => Promise<RenderSlide | null>
+  masterEditParagraph: (op: MasterEditParagraphOp) => Promise<RenderSlide | null>
+  masterEditBackground: (color: string) => Promise<RenderSlide | null>
+  masterSetHeaderFooterFlag: (
+    kind: 'hdr' | 'ftr' | 'dt' | 'sldNum',
+    enabled: boolean,
+  ) => Promise<MasterEnterResult | null>
+  masterSetNotesPlaceholder: (
+    kind: 'sldImg' | 'body',
+    enabled: boolean,
+  ) => Promise<MasterEnterResult | null>
+  masterSetPageOrientation: (
+    orientation: 'portrait' | 'landscape',
+  ) => Promise<MasterEnterResult | null>
+  masterUndo: () => Promise<MasterEnterResult | null>
+  masterRedo: () => Promise<MasterEnterResult | null>
   masterDeleteElement: (op: MasterDeleteElementOp) => Promise<RenderSlide | null>
   // ── Presenter-view multi-screen show ────────────────────────────────
   /** Enter presenter view: detects multiple displays and opens a fullscreen audience show window on the external screen (sharing this session's document) */

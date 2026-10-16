@@ -8,12 +8,17 @@ import { BrowserWindow, webContents } from 'electron'
 import type { WebContents } from 'electron'
 import { join } from 'node:path'
 import {
+  copyElementData,
+  elementCNvPrId,
   materializeSlide,
+  getFirstSlideNumber,
   parseClrMap,
   parseTheme,
   resolveSchemeColor,
   type OpenedPptx,
+  type ElementClipboardItem,
   type Slide,
+  type SlideElement,
 } from '@genoffice/pptx-engine'
 import {
   buildRenderSlide,
@@ -75,6 +80,10 @@ export interface Session {
   opSeq?: number
   /** Applied-op journal, capped ring — the attachment point for a future sync transport */
   opLog?: OpLogEntry[]
+  /** Last successful import/save, independent of the undo timeline. */
+  pictureResetSaved?: HistorySnapshot
+  /** Pictures inserted since that save, captured before their first subsequent edit. */
+  pictureResetInserted?: Map<string, ElementClipboardItem>
 }
 export const sessions = new Map<number, Session>()
 
@@ -139,6 +148,68 @@ export function takeSnapshot(session: Session): HistorySnapshot {
     size: { ...session.opened.deck.size },
     metaDirty: !!session.metaDirty,
   }
+}
+
+function pictureResetKey(slide: Slide, element: SlideElement): string {
+  return `${slide.path}\u0000${elementCNvPrId(element) ?? element.id}`
+}
+
+/** A successful Save rebases Reset Picture to exactly the bytes now on disk. */
+export function refreshPictureResetBaseline(session: Session, source = session.opened): void {
+  session.pictureResetSaved = {
+    slides: structuredClone(source.deck.slides),
+    entries: new Map(source.archive.entries),
+    size: { ...source.deck.size },
+    metaDirty: false,
+  }
+  session.pictureResetInserted?.clear()
+}
+
+/** Capture unsaved new pictures before an edit changes them. */
+export function seedInsertedPictureBaselines(session: Session): void {
+  if (!session.pictureResetSaved) return
+  const savedKeys = new Set<string>()
+  for (const slide of session.pictureResetSaved?.slides ?? []) {
+    for (const element of slide.elements) {
+      if (element.type === 'picture') savedKeys.add(pictureResetKey(slide, element))
+    }
+  }
+  const inserted = (session.pictureResetInserted ??= new Map())
+  for (const slide of session.opened.deck.slides) {
+    for (const element of slide.elements) {
+      if (element.type !== 'picture') continue
+      const key = pictureResetKey(slide, element)
+      if (!savedKeys.has(key) && !inserted.has(key)) {
+        inserted.set(key, copyElementData(session.opened, slide, element))
+      }
+    }
+  }
+}
+
+/** Resolve one picture's saved/imported bundle, including its original media relationships. */
+export function pictureResetBaseline(
+  session: Session,
+  slide: Slide,
+  element: SlideElement,
+): ElementClipboardItem | null {
+  if (element.type !== 'picture') return null
+  const key = pictureResetKey(slide, element)
+  const saved = session.pictureResetSaved
+  if (saved) {
+    const sourceSlide = saved.slides.find((item) => item.path === slide.path)
+    const source = sourceSlide?.elements.find(
+      (item) => item.type === 'picture' && pictureResetKey(sourceSlide, item) === key,
+    )
+    if (sourceSlide && source) {
+      const baselineOpened: OpenedPptx = {
+        deck: { ...session.opened.deck, slides: saved.slides },
+        archive: session.opened.archive.viewWithEntries(saved.entries),
+      }
+      return copyElementData(baselineOpened, sourceSlide, source)
+    }
+  }
+  seedInsertedPictureBaselines(session)
+  return session.pictureResetInserted?.get(key) ?? null
 }
 
 // slides must be deep-copied: restoreSnapshot hands them to the live deck, which mutates in place
@@ -217,6 +288,7 @@ export function scheduleDeckBroadcast(session: Session): void {
 
 /** Call before an edit operation: push onto the undo stack and clear the redo stack. */
 export function pushHistory(session: Session): void {
+  seedInsertedPictureBaselines(session)
   session.undoStack.push(takeSnapshot(session))
   trimHistory(session.undoStack)
   session.redoStack = []
@@ -374,12 +446,13 @@ export function resetFontMetrics(): void {
 }
 
 export function buildAllRenderSlides(opened: OpenedPptx, fitWidthPx: number): RenderSlide[] {
+  const firstSlideNum = getFirstSlideNumber(opened.archive)
   return opened.deck.slides.map((s, i) =>
     buildRenderSlide(s, opened.deck.size, {
       fitWidthPx,
       media: makeMediaResolver(opened, s.path),
       metrics: getFontMetrics(),
-      slideNo: i + 1,
+      slideNo: firstSlideNum + i,
     }),
   )
 }
@@ -476,7 +549,7 @@ export function rebuildSlide(session: Session, slideIndex: number): RenderSlide 
     fitWidthPx: session.fitWidthPx,
     media: makeMediaResolver(session.opened, slide.path),
     metrics: getFontMetrics(),
-    slideNo: slideIndex + 1,
+    slideNo: getFirstSlideNumber(session.opened.archive) + slideIndex,
   })
 }
 
@@ -492,6 +565,6 @@ export function rebuildSlideWithReparse(session: Session, slideIndex: number): R
     fitWidthPx: session.fitWidthPx,
     media: makeMediaResolver(session.opened, fresh.path),
     metrics: getFontMetrics(),
-    slideNo: slideIndex + 1,
+    slideNo: getFirstSlideNumber(session.opened.archive) + slideIndex,
   })
 }

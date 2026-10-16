@@ -53,6 +53,406 @@ describe('printPageCount', () => {
 })
 
 describe('buildPrintDocumentHtml', () => {
+  it('omits disabled native notes slide/body regions while retaining master fields', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notes: ['Kept in PPTX'],
+      notesFields: [
+        { slideImageVisible: false, notesBodyVisible: false, header: { text: 'Visible header' } },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html').querySelector('.page.notes')!
+    expect(page.querySelector('.notes-slide-image')).toBeNull()
+    expect(page.querySelector('.note')).toBeNull()
+    expect(page.querySelector('.hf-header')?.textContent).toBe('Visible header')
+    expect(page.textContent).not.toContain('Kept in PPTX')
+  })
+  it('renders native notes paragraph bullet, RTL, exact line spacing, margins, tab grid and run styles', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notesFields: [
+        {
+          notesParagraphs: [
+            {
+              align: 'right',
+              rtl: true,
+              level: 1,
+              lineExactPt: 18,
+              spaceBeforePt: 6,
+              spaceAfterPct: 50,
+              marginLeftPt: 72,
+              marginRightPt: 10,
+              indentPt: -18,
+              tabStopsPt: [36],
+              defaultTabPt: 36,
+              bullet: { type: 'char', char: '★', color: '#AA3300', fontFamily: 'Arial' },
+              runs: [{ text: 'אב\tNotes', fontSizePt: 18, strike: true, highlight: '#FFFF00' }],
+            },
+          ],
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html')
+    const paragraph = page.querySelector('.note p')!
+    expect(paragraph.getAttribute('dir')).toBe('rtl')
+    expect(paragraph.getAttribute('style')).toContain('line-height:18pt')
+    expect(paragraph.getAttribute('style')).toContain('margin-top:6pt')
+    expect(paragraph.getAttribute('style')).toContain('margin-left:72pt')
+    expect(paragraph.getAttribute('style')).toContain('text-indent:-18pt')
+    expect(paragraph.getAttribute('style')).toContain('tab-size:4')
+    expect(paragraph.getAttribute('data-tab-stops')).toBe('36')
+    expect(paragraph.querySelector('.note-bullet')?.textContent).toBe('★')
+    expect(paragraph.querySelector('.note-bullet')?.getAttribute('style')).toContain(
+      'color:#AA3300',
+    )
+    expect(
+      paragraph.querySelector('.note-tab-segment > span:not(.note-bullet)')?.getAttribute('style'),
+    ).toContain('line-through')
+    expect(paragraph.querySelectorAll('.note-tab-segment')).toHaveLength(2)
+    expect(paragraph.textContent).toContain('אבNotes')
+  })
+
+  it('positions multiple native tabs with right, center and decimal alignment', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notesFields: [
+        {
+          notesParagraphs: [
+            {
+              tabStopsPt: [120, 240, 360],
+              tabStops: [
+                { posPt: 120, align: 'r' },
+                { posPt: 240, align: 'ctr' },
+                { posPt: 360, align: 'dec' },
+              ],
+              runs: [{ text: 'Label\tRight\tCenter\t12.34', fontSizePt: 12 }],
+            },
+          ],
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html')
+    const segments = page.querySelectorAll('.note-tab-segment')
+    expect(segments).toHaveLength(5)
+    expect(segments[1]?.getAttribute('style')).toContain('left:120pt;transform:translateX(-100%)')
+    expect(segments[2]?.getAttribute('style')).toContain('left:240pt;transform:translateX(-50%)')
+    expect(segments[3]?.getAttribute('style')).toContain('left:360pt;transform:translateX(-100%)')
+    expect(segments[3]?.textContent).toContain('12')
+    expect(segments[4]?.getAttribute('style')).toContain('left:360pt')
+    expect(segments[4]?.textContent).toContain('.34')
+  })
+  it('skips native stops covered by preceding text and continues on the default grid', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notesFields: [
+        {
+          notesParagraphs: [
+            {
+              defaultTabPt: 72,
+              tabStops: [
+                { posPt: 72, align: 'l' },
+                { posPt: 144, align: 'r' },
+                { posPt: 216, align: 'ctr' },
+                { posPt: 288, align: 'dec' },
+              ],
+              runs: [
+                { text: 'TAB_ORIGIN\tTAB_LEFT\tTAB_RIGHT\tTAB_CENTER\t12.34', fontSizePt: 12 },
+              ],
+            },
+            {
+              rtl: true,
+              defaultTabPt: 72,
+              tabStops: [
+                { posPt: 72, align: 'l' },
+                { posPt: 108, align: 'ctr' },
+              ],
+              runs: [{ text: 'RTL_ORIGIN\tRTL_LEFT\tRTL_RIGHT', fontSizePt: 12 }],
+            },
+          ],
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html')
+    const [ltr, rtl] = [...page.querySelectorAll('.note p')]
+    const ltrSegments = [...ltr!.querySelectorAll('.note-tab-segment')]
+    const rtlSegments = [...rtl!.querySelectorAll('.note-tab-segment')]
+    expect(ltrSegments[1]?.getAttribute('style')).toContain('left:144pt')
+    expect(ltrSegments[2]?.getAttribute('style')).toContain('left:216pt')
+    expect(ltrSegments[3]?.getAttribute('style')).toContain('left:288pt')
+    expect(ltrSegments[4]?.getAttribute('style')).toContain('left:432pt')
+    expect(rtlSegments[1]?.getAttribute('style')).toContain('right:108pt')
+    expect(rtlSegments[2]?.getAttribute('style')).toContain('right:144pt')
+  })
+  it('draws the resolved native picture bullet in notes print output', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notesFields: [
+        {
+          notesParagraphs: [
+            {
+              bullet: { type: 'blip', imageDataUrl: 'data:image/png;base64,AAAA' },
+              runs: [{ text: 'Bullet body' }],
+            },
+          ],
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html')
+    expect(page.querySelector('.note-bullet img')?.getAttribute('src')).toBe(
+      'data:image/png;base64,AAAA',
+    )
+    expect(page.querySelector('.note')?.textContent).toContain('Bullet body')
+  })
+  it('prints large authored native field and run sizes without an arbitrary 72pt cap', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notesFields: [
+        {
+          header: { text: 'Large header', fontSizePt: 100 },
+          notesParagraphs: [{ runs: [{ text: 'Large body', fontSizePt: 100 }] }],
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html')
+    expect(page.querySelector('.hf-header span')?.getAttribute('style')).toContain(
+      'font-size:100pt',
+    )
+    expect(page.querySelector('.note span')?.getAttribute('style')).toContain('font-size:100pt')
+  })
+  it('measures native stops from the frame after paragraph margins and mirrors RTL alignment', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notesFields: [
+        {
+          notesParagraphs: [
+            { marginLeftPt: 12, tabStops: [{ posPt: 36, align: 'r' }], runs: [{ text: 'A\tB' }] },
+            {
+              rtl: true,
+              marginRightPt: 18,
+              tabStops: [
+                { posPt: 72, align: 'l' },
+                { posPt: 108, align: 'ctr' },
+              ],
+              runs: [{ text: 'א\tב\tג' }],
+            },
+          ],
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html')
+    const paragraphs = page.querySelectorAll('.note p')
+    expect(
+      paragraphs[0]?.querySelectorAll('.note-tab-segment')[1]?.getAttribute('style'),
+    ).toContain('left:24pt;transform:translateX(-100%)')
+    expect(
+      paragraphs[1]?.querySelectorAll('.note-tab-segment')[1]?.getAttribute('style'),
+    ).toContain('right:54pt;transform:translateX(100%)')
+    expect(
+      paragraphs[1]?.querySelectorAll('.note-tab-segment')[2]?.getAttribute('style'),
+    ).toContain('right:90pt;transform:translateX(50%)')
+  })
+  it('layers native master artwork behind rotated fields and styled notes text in preview/PDF HTML', () => {
+    const masterPath = 'ppt/notesMasters/notesMaster1.xml'
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      masterArtwork: { [masterPath]: 'data:image/png;base64,ARTWORK' },
+      notesFields: [
+        {
+          masterPath,
+          canvas: { cx: 6858000, cy: 9144000 },
+          date: {
+            text: 'native',
+            box: { x: 457200, y: 8595360, cx: 1828800, cy: 320040, rotationDeg: 90, flipH: true },
+          },
+          notesBody: { x: 685800, y: 4400550, cx: 5486400, cy: 3600450, flipV: true },
+          notesParagraphs: [
+            {
+              align: 'right',
+              runs: [
+                { text: 'Styled body', fontSizePt: 18, color: '#225588', fontFamily: 'Arial' },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html').querySelector('.page.notes')!
+    expect(page.querySelector('.master-artwork')?.getAttribute('src')).toBe(
+      'data:image/png;base64,ARTWORK',
+    )
+    expect(page.querySelector('.hf-date')?.getAttribute('style')).toContain(
+      'rotate(90deg) scaleX(-1)',
+    )
+    expect(page.querySelector('.note')?.getAttribute('style')).toContain('scaleY(-1)')
+    expect(page.querySelector('.note p')?.getAttribute('style')).toContain('text-align:right')
+    expect(page.querySelector('.note span')?.getAttribute('style')).toContain('font-size:18pt')
+    expect(page.querySelector('.note span')?.getAttribute('style')).toContain('color:#225588')
+    expect(page.textContent).toContain('Styled body')
+    expect(html).toContain('.page .master-artwork { position:absolute;')
+  })
+  it('maps native notes-master placeholder boxes to preview and PDF page coordinates', () => {
+    const canvas = { cx: 6858000, cy: 9144000 }
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notes: ['Native body'],
+      notesFields: [
+        {
+          canvas,
+          background: '#EEEEDD',
+          header: {
+            text: 'Positioned',
+            box: { x: 685800, y: 914400, cx: 2743200, cy: 457200 },
+            align: 'right',
+            fontFamily: 'Arial',
+          },
+          slideImage: { x: 457200, y: 1371600, cx: 5943600, cy: 3200400 },
+          notesBody: { x: 457200, y: 4800600, cx: 5943600, cy: 3657600 },
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html').querySelector('.page.notes')!
+    expect(page.getAttribute('style')).toContain('background:#EEEEDD')
+    expect(page.querySelector('.hf-header')?.getAttribute('style')).toContain('left:10%')
+    expect(page.querySelector('.hf-header')?.getAttribute('style')).toContain('top:10%')
+    expect(page.querySelector('.hf-header')?.getAttribute('style')).toContain('text-align:right')
+    expect(page.querySelector('img')?.getAttribute('style')).toContain('top:15%')
+    expect(page.querySelector('.note')?.getAttribute('style')).toContain('top:52.5%')
+  })
+  it('prints native notes overrides, dynamic dates and offset page fields without changing slide selection', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(2),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notes: ['First', 'Second'],
+      slideIndexes: [1, 4],
+      firstSlideNum: 0,
+      dateLocale: 'en-US',
+      notesFields: [
+        {
+          header: { text: 'Local <header>', bold: true },
+          date: { text: 'old cache', field: 'datetime1' },
+          pageNum: { text: 'old number', field: 'slidenum' },
+        },
+        { footer: { text: 'Master & footer', italic: true } },
+      ],
+    })
+    expect(html).toContain('Local &lt;header&gt;')
+    expect(html).toContain('font-weight:700')
+    expect(html).toContain('font-style:italic')
+    expect(html).toContain('Master &amp; footer')
+    expect(html).toContain('<div class="hf-field hf-pageNum"')
+    expect(html).toContain('<span>1</span></div>')
+    expect(html).not.toContain('old cache')
+    expect(html).not.toContain('old number')
+  })
+
+  it('keeps notes-page numbers tied to slide positions and the presentation start', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(5),
+      ratio: 16 / 9,
+      layout: 'notes',
+      firstSlideNum: 0,
+      slideIndexes: [0, 1, 2, 3, 4],
+      notesFields: Array.from({ length: 5 }, () => ({
+        pageNum: { text: 'old cache', field: 'slidenum' },
+      })),
+    })
+    const pages = new DOMParser().parseFromString(html, 'text/html').querySelectorAll('.page.notes')
+    expect([...pages].map((page) => page.querySelector('.hf-pageNum')?.textContent)).toEqual([
+      '0',
+      '1',
+      '2',
+      '3',
+      '4',
+    ])
+  })
+
+  it('lets an edited native footer extend beyond its placeholder box in print', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(1),
+      ratio: 16 / 9,
+      layout: 'notes',
+      notesFields: [
+        {
+          canvas: { cx: 6858000, cy: 9144000 },
+          footer: {
+            text: 'HANDOUT_FOOTER_NATIVE_2026_EDITED',
+            box: { x: 2286000, y: 8595360, cx: 2286000, cy: 320040 },
+          },
+        },
+      ],
+    })
+    const page = new DOMParser().parseFromString(html, 'text/html')
+    const footer = page.querySelector('.hf-footer')!
+    expect(footer.textContent).toBe('HANDOUT_FOOTER_NATIVE_2026_EDITED')
+    expect(footer.getAttribute('style')).toContain('width:33.33333333333333%')
+    expect(html).toContain(
+      '.hf-field { position: absolute; z-index: 3; font-size: 10pt; overflow: visible;',
+    )
+  })
+
+  it('prints handout page fields from 1 across sheets, independent of slide-number start', () => {
+    const html = buildPrintDocumentHtml({
+      srcs: srcs(5),
+      ratio: 16 / 9,
+      layout: 'handout2',
+      firstSlideNum: 0,
+      handoutFields: {
+        header: { text: 'Handout heading' },
+        pageNum: { text: 'cached', field: 'slidenum' },
+      },
+    })
+    const pages = new DOMParser()
+      .parseFromString(html, 'text/html')
+      .querySelectorAll('.page.handout')
+    expect(pages).toHaveLength(3)
+    expect([...pages].map((page) => page.querySelector('.hf-pageNum')?.textContent)).toEqual([
+      '1',
+      '2',
+      '3',
+    ])
+    expect(html.match(/Handout heading/g)).toHaveLength(3)
+    for (const [layout, per] of [
+      ['handout1', 1],
+      ['handout2', 2],
+      ['handout3', 3],
+    ] as const) {
+      const variant = buildPrintDocumentHtml({
+        srcs: srcs(per * 2 + 1),
+        ratio: 16 / 9,
+        layout,
+        firstSlideNum: -3,
+        handoutFields: { pageNum: { text: 'old cache', field: 'slidenum' } },
+      })
+      const sheets = new DOMParser()
+        .parseFromString(variant, 'text/html')
+        .querySelectorAll('.page.handout')
+      expect([...sheets].map((page) => page.querySelector('.hf-pageNum')?.textContent)).toEqual([
+        '1',
+        '2',
+        '3',
+      ])
+    }
+  })
+
   it('full layout sizes pages by the slide ratio and can frame slides', () => {
     const html = buildPrintDocumentHtml({ srcs: srcs(2), ratio: 16 / 9, layout: 'full' })
     expect(html).toContain('@page { size: 13.333in 7.5in; margin: 0; }')
@@ -189,6 +589,43 @@ describe('multi-up full layout', () => {
 
 describe('PowerPoint print layouts', () => {
   const base = { srcs: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], ratio: 16 / 9 }
+
+  it('keeps native handout fields above a separate cell region on complete and partial sheets', () => {
+    for (const layout of [
+      'handout1',
+      'handout2',
+      'handout3',
+      'handout4h',
+      'handout4v',
+      'handout6h',
+      'handout6v',
+      'handout9h',
+      'handout9v',
+    ] as const) {
+      const html = buildPrintDocumentHtml({
+        ...base,
+        layout,
+        handoutFields: {
+          header: { text: 'Visible header' },
+          footer: { text: 'Visible footer' },
+          pageNum: { text: 'cached', field: 'slidenum' },
+        },
+      })
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      const pages = [...doc.querySelectorAll('.page.handout')]
+      expect(pages).toHaveLength(printPageCount(base.srcs.length, layout))
+      for (const page of pages) {
+        const content = page.querySelector(':scope > .handout-content')
+        expect(content).not.toBeNull()
+        expect(content!.querySelectorAll('.cell').length).toBeGreaterThan(0)
+        expect(content!.querySelector('.hf-field')).toBeNull()
+        expect(page.querySelector(':scope > .hf-header')?.textContent).toBe('Visible header')
+        expect(page.querySelector(':scope > .hf-footer')?.textContent).toContain('Visible footer')
+      }
+      expect(html).toContain('.page.handout { position: relative; padding: 0.42in 0.4in; }')
+      expect(html).toContain('.hf-field { position: absolute; z-index: 3;')
+    }
+  })
 
   it('counts pages for every handout size', () => {
     expect(printPageCount(7, 'handout1')).toBe(7)

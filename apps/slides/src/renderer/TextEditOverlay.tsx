@@ -23,6 +23,7 @@ import { displayFontFamily, konvaBaselineDrop } from './konva-adapter'
 import { ZOOM_PREVIEW_EVENT } from './zoom-preview'
 import { stepFontSizePt } from '@genoffice/pptx-engine/font-size-step'
 import { bulletRunText } from './bullet-presets'
+import { darkContentColor } from './dark-content'
 
 interface Props {
   node: ShapeRenderNode
@@ -41,6 +42,9 @@ interface Props {
   onFollowLink?: (target: LinkTargetOp) => void
   /** Edit-frame color (matches the canvas selection chrome: white on dark slide backgrounds) */
   frameColor?: string
+  /** Dark content preview: authored text colors stay the real inline declarations (commit reads
+   *  them back); a screen-only `--dk-*` twin repaints them (see .slide-text-editor.dk) */
+  darkContent?: boolean
   /** Canvas CSS zoom: the outline divides by it to keep a constant on-screen weight */
   zoom?: number
   /** Left press on the frame around the text (not on a line box) commits the edit and hands the press over as a shape drag */
@@ -236,6 +240,7 @@ function setEditorBullet(
     p.dataset.bulletText = '\u00a0'
     p.dataset.bulletImg = '1'
     p.style.setProperty('--bullet-color', 'transparent')
+    p.style.setProperty('--bullet-dk-color', 'transparent')
     p.style.setProperty('--bullet-img', `url("${b.image}")`)
     p.style.setProperty('--bullet-x', `${b.imageBox.x}px`)
     p.style.setProperty('--bullet-y', `${b.imageBox.y}px`)
@@ -245,6 +250,7 @@ function setEditorBullet(
     p.dataset.bulletText = b.text
     delete p.dataset.bulletImg
     p.style.setProperty('--bullet-color', b.color)
+    p.style.setProperty('--bullet-dk-color', darkContentColor(b.color))
   }
 }
 
@@ -306,6 +312,8 @@ function refreshEditorBullet(b: HTMLElement, root: HTMLElement): void {
   if (kind === 'blip' && !b.dataset.bulletImgSrc && b.dataset.bulletImg) return
   const sample = (b.querySelector('span, a') as HTMLElement | null) ?? b
   const cs = window.getComputedStyle(sample)
+  // Authored text color (the dark preview repaints computed color through a twin)
+  const authoredColor = sample.style.color || root.style.color || cs.color
   const norm = parseFloat(root.dataset.norm ?? '') || 1
   // A size chosen this session (% of the text) wins over the bullet's laid-out size
   const sizePct = parseFloat(b.dataset.bulletSizePct ?? '')
@@ -333,7 +341,10 @@ function refreshEditorBullet(b: HTMLElement, root: HTMLElement): void {
     b.style.setProperty('--bullet-w', `${widthPx}px`)
     b.style.setProperty('--bullet-hang', `${hangPx}px`)
     b.style.setProperty('--bullet-size', `${sizePx}px`)
-    if (b.dataset.bulletColor) b.style.setProperty('--bullet-color', b.dataset.bulletColor)
+    if (b.dataset.bulletColor) {
+      b.style.setProperty('--bullet-color', b.dataset.bulletColor)
+      b.style.setProperty('--bullet-dk-color', darkContentColor(b.dataset.bulletColor))
+    }
     b.style.setProperty(
       '--bullet-shift',
       `${bulletCenterShift(sizePx, parseFloat(cs.fontSize), 'char', undefined)}px`,
@@ -370,7 +381,7 @@ function refreshEditorBullet(b: HTMLElement, root: HTMLElement): void {
       image: b.dataset.bulletImgSrc,
       font,
       sizePx,
-      color: cs.color,
+      color: authoredColor,
       widthPx,
       hangPx,
       imageBox: { x: -hangPx, y: sizePx * 0.3, w: h, h },
@@ -384,7 +395,7 @@ function refreshEditorBullet(b: HTMLElement, root: HTMLElement): void {
     text,
     font,
     sizePx,
-    color: b.dataset.bulletColor ?? cs.color,
+    color: b.dataset.bulletColor ?? authoredColor,
     widthPx,
     hangPx,
     ...(kind === 'char' ? { symbolTextPx: parseFloat(cs.fontSize) } : {}),
@@ -773,6 +784,7 @@ export function TextEditOverlay({
   replaceWith,
   onFollowLink,
   frameColor = '#232425',
+  darkContent = false,
   zoom = 1,
   onFrameDrag,
 }: Props) {
@@ -791,6 +803,43 @@ export function TextEditOverlay({
     }
     window.addEventListener(ZOOM_PREVIEW_EVENT, onPreview)
     return () => window.removeEventListener(ZOOM_PREVIEW_EVENT, onPreview)
+  }, [])
+
+  // Dark content preview: mirror every inline text/highlight color into a `--dk-c` / `--dk-bg` twin
+  // (inline declarations stay authored, so extractParagraphs commits real colors). Re-run on any
+  // DOM/style change (typing, execCommand colors, ribbon picks); the observer is detached while
+  // writing so the twins don't retrigger it.
+  useEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const sync = (): void => {
+      for (const el of [root, ...Array.from(root.querySelectorAll<HTMLElement>('[style]'))]) {
+        const col = el.style.color
+        if (col) {
+          const dk = darkContentColor(col)
+          if (el.style.getPropertyValue('--dk-c') !== dk) el.style.setProperty('--dk-c', dk)
+        } else if (el.style.getPropertyValue('--dk-c')) el.style.removeProperty('--dk-c')
+        const bg = el.style.backgroundColor
+        if (bg) {
+          const dk = darkContentColor(bg)
+          if (el.style.getPropertyValue('--dk-bg') !== dk) el.style.setProperty('--dk-bg', dk)
+        } else if (el.style.getPropertyValue('--dk-bg')) el.style.removeProperty('--dk-bg')
+      }
+    }
+    const opts: MutationObserverInit = {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style'],
+    }
+    const mo = new MutationObserver(() => {
+      mo.disconnect()
+      sync()
+      mo.observe(root, opts)
+    })
+    sync()
+    mo.observe(root, opts)
+    return () => mo.disconnect()
   }, [])
 
   const box = node.box
@@ -1000,7 +1049,7 @@ export function TextEditOverlay({
     >
       <div
         ref={ref}
-        className="slide-text-editor"
+        className={darkContent ? 'slide-text-editor dk' : 'slide-text-editor'}
         contentEditable
         spellCheck
         suppressContentEditableWarning

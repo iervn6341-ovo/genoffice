@@ -9,6 +9,7 @@
  * - →/space/enter/PgDn/click next step/page; ←/PgUp/right-click previous page; Home/End first/last page;
  *   Esc exits; advancing past the last page shows the "end of show" black screen
  */
+import { NARRATION_NAME, withoutNarration } from '../narration'
 import React, {
   useCallback,
   useEffect,
@@ -135,9 +136,20 @@ export function SlideShowView({
   onRehearseDone,
   onUsePresenterView,
   windowed = false,
+  kiosk = false,
+  loop = false,
+  showAnimation = true,
+  useTimings = true,
+  showNarration = true,
 }: {
   /** Reading view: plays inside the editor window (no full screen), sized to its container */
   windowed?: boolean
+  kiosk?: boolean
+  loop?: boolean
+  showAnimation?: boolean
+  useTimings?: boolean
+  /** Play the slide's recorded narration automatically (Set Up Show > Play narrations) */
+  showNarration?: boolean
   slides: RenderSlide[]
   images: Map<string, HTMLImageElement>
   /** Start page (original index) */
@@ -160,6 +172,7 @@ export function SlideShowView({
     [slides, startAt, customOrder],
   )
   const [pos, setPos] = useState(() => Math.max(0, order.indexOf(startAt)))
+  const [loopTurn, setLoopTurn] = useState(0)
   const [ended, setEnded] = useState(false)
   /** Current transition animation: kind + replay nonce (key change re-triggers the CSS animation) */
   const [anim, setAnim] = useState<{
@@ -219,9 +232,11 @@ export function SlideShowView({
         }
       },
     )
-    void Promise.all(slides.map((_, i) => window.slidesApi.getAnimations(i))).then((lists) => {
-      if (!cancelled) setAllAnims(lists)
-    })
+    if (showAnimation) {
+      void Promise.all(slides.map((_, i) => window.slidesApi.getAnimations(i))).then((lists) => {
+        if (!cancelled) setAllAnims(lists)
+      })
+    } else setAllAnims(slides.map(() => []))
     void Promise.all(slides.map((_, i) => window.slidesApi.getShapeKeys(i))).then((keys) => {
       if (!cancelled) keysRef.current = keys
     })
@@ -243,7 +258,7 @@ export function SlideShowView({
     return () => {
       cancelled = true
     }
-  }, [slides])
+  }, [slides, showAnimation])
 
   const slide = slides[order[pos]!]
   // The stage repaints at most every PAINT_MIN_MS: a held arrow key turns pages every ~30ms, and
@@ -274,7 +289,7 @@ export function SlideShowView({
   // Load the page's animations when the page changes/prefetch completes (forward = initial state, back/jump = finished state)
   useEffect(() => {
     player.load(allAnims?.[order[pos]!] ?? [], navModeRef.current)
-  }, [allAnims, pos, order, player.load]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allAnims, pos, loopTurn, order, player.load]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const exitRef = useRef(() => {})
   exitRef.current = () => {
@@ -409,6 +424,7 @@ export function SlideShowView({
         }))
       }
       setPos(nextPos)
+      if (nextPos === pos) setLoopTurn((n) => n + 1)
     },
     [order, pos],
   )
@@ -416,16 +432,18 @@ export function SlideShowView({
   // "After": a page with an auto-advance time turns itself once it elapses (the timings the
   // Transitions tab sets and Rehearse Timings records)
   useEffect(() => {
-    if (ended) return
+    if (ended || !useTimings) return
     const page = order[pos]
     const ms = page != null ? (transDetailRef.current[page]?.advTm ?? null) : null
     if (ms == null) return
     const h = window.setTimeout(() => {
-      if (pos >= order.length - 1) setEnded(true)
-      else goTo(pos + 1, true)
+      if (pos >= order.length - 1) {
+        if (loop) goTo(0, true)
+        else setEnded(true)
+      } else goTo(pos + 1, true)
     }, ms)
     return () => window.clearTimeout(h)
-  }, [pos, ended, order, detailsVersion, goTo])
+  }, [pos, loopTurn, ended, order, detailsVersion, goTo, loop, useTimings])
 
   const next = useCallback(() => {
     if (ended) {
@@ -434,9 +452,11 @@ export function SlideShowView({
     }
     // Advance in-page animations first; turn the page only when this page's animations are done
     if (player.advance()) return
-    if (pos >= order.length - 1) setEnded(true)
-    else goTo(pos + 1, true)
-  }, [ended, pos, order.length, goTo, player.advance]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (pos >= order.length - 1) {
+      if (loop) goTo(0, true)
+      else setEnded(true)
+    } else goTo(pos + 1, true)
+  }, [ended, pos, order.length, goTo, player.advance, loop]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const prev = useCallback(() => {
     if (ended) {
@@ -571,6 +591,7 @@ export function SlideShowView({
       }
       if (command === 'black' || command === 'white')
         return setCover((c) => toggleShowScreen(c, command))
+      if (kiosk) return
       setCover('none')
       if (command === 'next') return next()
       if (command === 'prev') return prev()
@@ -578,6 +599,7 @@ export function SlideShowView({
       goTo(command === 'first' ? 0 : order.length - 1, false)
     },
     onGoto: (n) => {
+      if (kiosk) return
       // typed slide numbers are 1-based positions in the deck; hidden slides aren't playable
       const p = order.indexOf(n - 1)
       if (p < 0) return
@@ -647,6 +669,7 @@ export function SlideShowView({
           return
         }
         // the page's "On Mouse Click" is off: only keys / the timer turn the page
+        if (kiosk) return
         const page = order[pos]
         if (page != null && transDetailRef.current[page]?.advClick === false) return
         next()
@@ -711,12 +734,17 @@ export function SlideShowView({
                   }
                 >
                   <AnimatedSlideStage
-                    slide={paintSlide ?? slide}
+                    slide={withoutNarration(paintSlide ?? slide)}
                     images={images}
                     width={fitW}
                     states={player.states}
                   />
-                  <ShowMediaLayer slide={slide} slideIndex={order[pos]!} width={fitW} />
+                  <ShowMediaLayer
+                    slide={slide}
+                    slideIndex={order[pos]!}
+                    width={fitW}
+                    showNarration={showNarration}
+                  />
                 </div>
                 <CameraBubble on={camera} width={fitW} onError={() => setCamera(false)} />
                 <InkLayer
@@ -773,8 +801,8 @@ export function SlideShowView({
               }
             }}
             onBlack={() => setCover((c) => toggleShowScreen(c, 'black'))}
-            onPrev={prev}
-            onNext={next}
+            onPrev={kiosk ? () => {} : prev}
+            onNext={kiosk ? () => {} : next}
             onOpenChange={(open) => {
               popoverOpenRef.current = open
               if (!open) wake()
@@ -838,16 +866,19 @@ function ShowMediaLayer({
   slide,
   slideIndex,
   width,
+  showNarration = true,
 }: {
   slide: RenderSlide
   slideIndex: number
   width: number
+  showNarration?: boolean
 }) {
   const k = width / slide.widthPx
   const nodes = slide.nodes.filter(
     (n): n is import('@genoffice/pptx-render').PictureRenderNode =>
       n.type === 'picture' && !!(n as import('@genoffice/pptx-render').PictureRenderNode).media,
   )
+  const isNarration = (n: { name?: string }) => n.name === NARRATION_NAME
   const [urls, setUrls] = useState<Record<string, { kind: 'video' | 'audio'; dataUrl: string }>>({})
   const [playing, setPlaying] = useState<Record<string, boolean>>({})
   useEffect(() => {
@@ -899,6 +930,12 @@ function ShowMediaLayer({
               onPause={() => setPlaying((p) => ({ ...p, [n.sourceId]: false }))}
             />
           )
+        }
+        // Recorded narration: invisible, starts with the slide (when enabled) and ends on page turn
+        if (isNarration(n)) {
+          return showNarration ? (
+            <audio key={n.sourceId} src={media.dataUrl} autoPlay data-testid="show-narration" />
+          ) : null
         }
         // Audio: the poster frame is drawn by the canvas; overlay a transparent click layer + play badge
         return (

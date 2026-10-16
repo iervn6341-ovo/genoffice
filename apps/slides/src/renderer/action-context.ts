@@ -6,6 +6,7 @@
  * wrapper, so module functions always see the latest state without stale closures.
  */
 import type React from 'react'
+import type { NotesHandoutsHeaderFooterState } from '@genoffice/pptx-engine'
 import type { GroupRenderNode, RenderNode, RenderSlide } from '@genoffice/pptx-render'
 import type {
   AnimationItem,
@@ -49,6 +50,11 @@ export interface SlideShowState {
   startAt: number
   customOrder?: number[]
   rehearse?: boolean
+  mode?: 'speaker' | 'browse' | 'kiosk'
+  loop?: boolean
+  showAnimation?: boolean
+  useTimings?: boolean
+  showNarration?: boolean
 }
 
 export type CtxMenuState =
@@ -87,6 +93,13 @@ export interface HfDialogState {
   footer: string | null
   slideNum: boolean
   date: string | null
+  dateAuto: boolean
+  dateFormat: string
+  dontShowOnTitleSlide: boolean
+  firstSlideNum: number
+  isTitleSlide: boolean
+  slideNumber: number
+  notesHandouts: NotesHandoutsHeaderFooterState
 }
 
 export interface ChartDataDialogInit {
@@ -162,6 +175,8 @@ export interface ActionCtx {
   setPresenter: Set<{ startAt: number } | null>
   /** Slide Show → Use Presenter View: shows open presenter view when a second screen is connected */
   usePresenterView: boolean
+  showSetup: import('../shared/ipc').ShowSetup
+  customShows: import('../shared/ipc').CustomShowInfo[]
   setCustomShows: Set<CustomShow[]>
   setCustomShowDlgOpen: Set<boolean>
   /** Choose-the-screen dialog before a presenter-view show (several screens to pick from) */
@@ -190,6 +205,8 @@ export interface ActionCtx {
   setChartDataDialogOpen: Set<boolean>
   setFindOpen: Set<boolean>
   setPrintDlgOpen: Set<boolean>
+  /** Print: the macOS system panel, or the in-app sheet elsewhere */
+  requestPrint: () => void
   /** Open the AI annotation popover on the current selection (no-op when nothing is selected) */
   openAskPopover: () => void
   setZoom: Set<number>

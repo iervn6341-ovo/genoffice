@@ -1763,6 +1763,7 @@ function NodeView({
   // makes it movable, so a full-bleed picture can still be repositioned like in PowerPoint.
   const selected = !!selectedIds?.includes(node.sourceId)
   const draggable = node.type !== 'placeholder-chip' && (!node.background || selected)
+  const mathNode = (node.type === 'shape' || node.type === 'text') && !!node.hasEquation
   // Rotation/flip pivot on the box center (boxPivotProps): the Konva position IS the box
   // center, so model x/y = position − half size — including mid-gesture, since the offset
   // point stays the drawn box's center under any scale.
@@ -1778,7 +1779,7 @@ function NodeView({
     // Over the text of an editable shape the pointer is an I-beam (a click there places the caret);
     // anywhere else on a movable node it is the move cursor, like PowerPoint/WPS
     onMouseMove: (e: Konva.KonvaEventObject<MouseEvent>) =>
-      setStageCursor(e, !draggable ? '' : editable && clickOnText() ? 'text' : 'move'),
+      setStageCursor(e, !draggable ? '' : editable && !mathNode && clickOnText() ? 'text' : 'move'),
     onMouseLeave: (e: Konva.KonvaEventObject<MouseEvent>) => setStageCursor(e, ''),
     onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (suppressClickRef?.current) {
@@ -1795,7 +1796,7 @@ function NodeView({
       onSelect(node.sourceId, additive)
       // Single left click on the text itself starts editing with the caret at the click
       // (PowerPoint/WPS); the frame around the text only selects, so it stays the drag grip.
-      if (!additive && editable && clickOnText())
+      if (!additive && editable && !mathNode && clickOnText())
         onEditText(node.sourceId, { x: e.evt.clientX, y: e.evt.clientY })
     },
     onTap: () => onSelect(node.sourceId),
@@ -2065,22 +2066,24 @@ function NodeView({
         ref={groupRef}
         opacity={altDragging ? 0.5 : 1}
         {...common}
-        {...(editable
+        {...(editable && !(mathNode && !insideGroupId)
           ? {
               onDblClick: (e: Konva.KonvaEventObject<MouseEvent>) =>
                 onEditText(node.sourceId, { x: e.evt.clientX, y: e.evt.clientY, select: 'word' }),
               onDblTap: () => onEditText(node.sourceId),
             }
-          : node.type === 'group' && !insideGroupId && onEnterGroup
-            ? { onDblClick: onGroupDblClick, onDblTap: onGroupDblClick }
-            : node.type === 'table' && !insideGroupId
-              ? { onDblClick: onTableDblClick, onDblTap: onTableDblClick }
-              : isMedia && !insideGroupId
-                ? {
-                    onDblClick: () => onPlayMedia!(node.sourceId),
-                    onDblTap: () => onPlayMedia!(node.sourceId),
-                  }
-                : {})}
+          : mathNode && !insideGroupId
+            ? { onDblTap: () => onEditText(node.sourceId) }
+            : node.type === 'group' && !insideGroupId && onEnterGroup
+              ? { onDblClick: onGroupDblClick, onDblTap: onGroupDblClick }
+              : node.type === 'table' && !insideGroupId
+                ? { onDblClick: onTableDblClick, onDblTap: onTableDblClick }
+                : isMedia && !insideGroupId
+                  ? {
+                      onDblClick: () => onPlayMedia!(node.sourceId),
+                      onDblTap: () => onPlayMedia!(node.sourceId),
+                    }
+                  : {})}
       >
         {/* The selection frame is grabbable a few screen px around the box: half of the hairline border
             lies outside the shape, so a pointer on it would otherwise miss and fall back to the arrow */}
@@ -2095,6 +2098,9 @@ function NodeView({
         )}
         {/* group children don't take hits (listening=false); add a transparent hit area so the whole group can be selected/dragged */}
         {node.type === 'group' && <Rect width={box.w} height={box.h} fill="transparent" />}
+        {/* The equation raster follows this shape's transform. Keep the whole box hittable
+            so its first click selects before the native two-click editor gesture. */}
+        {mathNode && <Rect width={box.w} height={box.h} fill="transparent" />}
         <NodeBody
           node={node}
           images={images}

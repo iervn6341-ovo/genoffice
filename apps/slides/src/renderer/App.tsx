@@ -28,6 +28,7 @@ import type {
   NotesParagraphView,
   PasteSlideMode,
   SectionInfo,
+  ShowSetup,
   SetEffectsPatch,
   SetTransitionDetailOp,
   TransitionDetail,
@@ -35,6 +36,11 @@ import type {
   TransitionKind,
 } from '../shared/ipc'
 import { SlideCanvas, selectionChromeColor, type SlideCanvasHandle } from './SlideCanvas'
+import {
+  selectedEquationAtCanvasClick,
+  trackEquationClick,
+  type EquationClick,
+} from './equation-hit'
 import { tableCellOverlayBox } from './table-hit'
 import { ZOOM_PREVIEW_EVENT } from './zoom-preview'
 import { createWheelPager } from './wheel-page-flip'
@@ -50,6 +56,7 @@ import {
   type TextToggles,
   liveBulletChar,
   liveRtl,
+  saveEditSelection,
 } from './TextEditOverlay'
 import { CropOverlay } from './CropOverlay'
 import { createImageLoader } from './image-loader'
@@ -59,6 +66,8 @@ import { toPickerHex } from './color-input'
 import { InkOverlay } from './InkOverlay'
 import { inkNodesOf, type InkPenSettings, type InkStroke, type InkTool } from './ink'
 import type { SlideThemePreset } from './themes'
+import { displaySlide } from './dark-content'
+import { useUiThemeIsDark } from './ui-theme'
 import { Ribbon, type FormatCmd, type SlidesViewMode } from './components/Ribbon'
 import { contextElementTypeForNode, type ContextElementType } from './components/context-tabs'
 import { SlideShowView } from './components/SlideShowView'
@@ -72,9 +81,19 @@ import {
 import { NotesEditor, readNotesEditor } from './components/NotesEditor'
 import { PresenterView } from './components/PresenterView'
 import { CustomShowDialog } from './components/CustomShowDialog'
+import { CustomSlideSizeDialog, ShowSetupDialog } from './components/ShowSetupDialog'
+import {
+  importLegacyCustomShows,
+  retireLegacyCustomShows,
+  type PendingLegacyCustomShows,
+} from './custom-show-migration'
 import { ShowScreenDialog } from './components/ShowScreenDialog'
 import { showCandidates, type ShowScreen } from './show-screen'
 import { PrintDialog } from './components/PrintDialog'
+import { printEntryFor } from './print-entry'
+import { nativePrintEntries, runNativePrint } from './quick-print'
+import { isPrintLayout } from '../shared/print-prefs'
+import type { PrintLayout } from '../shared/print-html'
 import { FindReplaceDialog } from './components/FindReplaceDialog'
 import { formatClock, type CustomShow } from './slideshow-utils'
 import { ContextMenu } from './components/ContextMenu'
@@ -100,12 +119,20 @@ import { CommentsPane } from './components/CommentsPane'
 import { AnimationPane } from './components/AnimationPane'
 import { AnimPreviewOverlay } from './components/AnimatedSlide'
 import { outlineOf } from './outline-of'
-import { EquationDialog, HeaderFooterDialog, LinkDialog } from './components/InsertDialogs'
+import {
+  EquationDialog,
+  HeaderFooterDialog,
+  type HeaderFooterDialogApply,
+  LinkDialog,
+  SymbolDialog,
+} from './components/InsertDialogs'
 import { CutoutDialog } from './components/CutoutDialog'
 import {
   Backstage,
   backstageLabels,
+  printOfficeLabels,
   useAutoSavePref,
+  useContentDarkPref,
   type AiScopeQuoteData,
   type WordArtPreset,
 } from '@genoffice/ui'
@@ -143,6 +170,9 @@ import * as showActions from './show-actions'
 import { readShowMonitor, writeShowMonitor } from './show-monitor'
 import * as slideActions from './slide-actions'
 import * as pictureEditActions from './picture-edit-actions'
+import * as narrationActions from './narration-actions'
+import * as pictureToolsActions from './picture-tools-actions'
+import { AltTextDialog, PictureQualityDialog } from './components/PictureToolDialogs'
 import * as arrangeActions from './arrange-actions'
 import * as tableActions from './table-actions'
 import * as tableLayoutActions from './table-layout-actions'
@@ -304,8 +334,12 @@ function collectRtls(node: RenderNode, out: Set<boolean>) {
 /** localStorage key of the Slide Show → Use Presenter View checkbox */
 const USE_PRESENTER_VIEW_KEY = 'genoffice.slides.usePresenterView'
 
+/** Display preferences go to the shell's shared preferences record */
+const saveDisplayPrefs = (patch: Record<string, unknown>): unknown =>
+  window.slidesApi.setAiPanelPrefs(patch)
+
 export function App() {
-  const { lang } = useI18n()
+  const { lang, dateLocale } = useI18n()
   const [slides, setSlides] = useState<RenderSlide[]>([])
   // Layouts may reference Office-private fonts (resolved in main); register them as FontFaces
   useEffect(() => {
@@ -530,6 +564,7 @@ export function App() {
     thumbsListRef.current?.querySelector('.thumb.active')?.scrollIntoView({ block: 'nearest' })
   }, [current, showThumbs, viewMode])
   const [masterItems, setMasterItems] = useState<MasterPartItem[] | null>(null)
+  const [masterSelectedPath, setMasterSelectedPath] = useState<string | null>(null)
   // ── Slide show: when non-null, covers the whole window (startAt is the start page index;
   //    customOrder = custom show playback sequence; rehearse = rehearsal timing mode) ────────
   const [slideShow, setSlideShow] = useState<SlideShowState | null>(null)
@@ -568,6 +603,23 @@ export function App() {
   // ── Custom shows: document-level list (persisted to localStorage by file path) + management dialog ──
   const [customShows, setCustomShows] = useState<CustomShow[]>([])
   const [customShowDlgOpen, setCustomShowDlgOpen] = useState(false)
+  const [showSetup, setShowSetup] = useState<ShowSetup>({
+    mode: 'speaker',
+    loop: false,
+    showNarration: true,
+    showAnimation: true,
+    useTimings: true,
+    slides: { kind: 'all' },
+  })
+  const [showSetupDlgOpen, setShowSetupDlgOpen] = useState(false)
+  const [customSize, setCustomSize] = useState<{ cx: number; cy: number } | null>(null)
+  const [slideSizeEmu, setSlideSizeEmu] = useState<{ cx: number; cy: number } | null>(null)
+  const openedCustomShowPathRef = useRef('')
+  const customShowOpenTokenRef = useRef(0)
+  const attemptedCustomShowMigrationTokenRef = useRef<number | null>(null)
+  const customShowMigrationRef = useRef<Promise<void> | null>(null)
+  const customShowHistoryRef = useRef<Promise<void> | null>(null)
+  const pendingLegacyCustomShowsRef = useRef<PendingLegacyCustomShows | null>(null)
   const [screenPicker, setScreenPicker] = useState<{
     fromStart: boolean
     screens: ShowScreen[]
@@ -577,6 +629,12 @@ export function App() {
   const [pendingRehearse, setPendingRehearse] = useState<number[] | null>(null)
   const [showRuler, setShowRuler] = useState(false)
   const [showGrid, setShowGrid] = useState(false)
+  // Dark content preview (dark-content.ts): display-time remap of the editing canvas and thumbnails
+  // only. Defaults to the UI theme (re-synced when the theme changes); View ▸ Dark Content overrides
+  // it for the session. The model, save, export, print and the slide show never read this.
+  const themeDark = useUiThemeIsDark()
+  // View ▸ Dark Content: follows the app theme until pinned; the choice is a saved shared preference
+  const [darkContent, setDarkContent] = useContentDarkPref(themeDark, saveDisplayPrefs)
   const [showGuides, setShowGuides] = useState(false)
   // Draggable guides (pos = 0..1 relative to page width/height); persisted to localStorage by document path
   const [guides, setGuides] = useState<Array<{ axis: 'v' | 'h'; pos: number }>>([
@@ -660,6 +718,21 @@ export function App() {
   const [linkDialog, setLinkDialog] = useState<LinkDialogState | null>(null)
   const [hfDialog, setHfDialog] = useState<HfDialogState | null>(null)
   const [eqDialogOpen, setEqDialogOpen] = useState(false)
+  const [eqDialogTarget, setEqDialogTarget] = useState<string | null>(null)
+  const [eqDialogInitial, setEqDialogInitial] = useState('')
+  const [eqDialogUnsupported, setEqDialogUnsupported] = useState(false)
+  const [symbolDialogOpen, setSymbolDialogOpen] = useState(false)
+  const [altTextOpen, setAltTextOpen] = useState(false)
+  const [narrationRecording, setNarrationRecording] = useState(false)
+  const [pictureQualityOpen, setPictureQualityOpen] = useState(false)
+  const lastEquationClickRef = useRef<EquationClick | null>(null)
+  useEffect(() => {
+    const clearOutsideStage = (event: PointerEvent) => {
+      if (!stageRelRef.current?.contains(event.target as Node)) lastEquationClickRef.current = null
+    }
+    document.addEventListener('pointerdown', clearOutsideStage, true)
+    return () => document.removeEventListener('pointerdown', clearOutsideStage, true)
+  }, [])
   const recorderRef = useRef<{ rec: MediaRecorder; stream: MediaStream } | null>(null)
   const [recording, setRecording] = useState(false)
   // ── Layout picking: layout list + slide size (loaded after the file opens) ─────────────────
@@ -683,6 +756,9 @@ export function App() {
 
   const slide = slides[current]
   const hasDoc = !!slide
+  // On-screen copy of the current slide for canvas drawing; `slide` stays the authored tree for
+  // all logic (edit overlays commit from it, export/show/print never see the preview).
+  const canvasSlide = displaySlide(slide, darkContent)
 
   /// True when no slide carries real content (only master decorations and
   /// untouched empty placeholders) — the ribbon's one-click AI actions grey out.
@@ -890,6 +966,11 @@ export function App() {
   const applyOpen = useCallback(
     (result: { path: string; slides: RenderSlide[]; defaultFont?: string } | null) => {
       if (!result) return
+      openedCustomShowPathRef.current = result.path
+      customShowOpenTokenRef.current++
+      pendingLegacyCustomShowsRef.current = null
+      customShowMigrationRef.current = null
+      customShowHistoryRef.current = null
       setSlides(result.slides)
       setDefaultFont(result.defaultFont ?? null)
       setPath(result.path)
@@ -967,9 +1048,27 @@ export function App() {
   /** Set while the AI annotation popover is open (assigned below, next to askState) */
   const askOpenRef = useRef(false)
 
+  const retireLegacyAfterSave = useCallback(async () => {
+    const pending = pendingLegacyCustomShowsRef.current
+    if (!pending) return
+    try {
+      const native = await window.slidesApi.getCustomShows()
+      if (retireLegacyCustomShows(localStorage, pending, native.length > 0))
+        pendingLegacyCustomShowsRef.current = null
+    } catch {
+      // The native save succeeded. Keep the backup key if cleanup could not be verified.
+    }
+  }, [])
+
   const save = useCallback(
-    (quiet = false): Promise<boolean> => fileActions.save(() => ctxRef.current, quiet),
-    [],
+    async (quiet = false): Promise<boolean> => {
+      await customShowMigrationRef.current
+      await customShowHistoryRef.current
+      const ok = await fileActions.save(() => ctxRef.current, quiet)
+      if (ok) await retireLegacyAfterSave()
+      return ok
+    },
+    [retireLegacyAfterSave],
   )
 
   // Close guard (closing tab/window) chose "Save": run the full save flow and report the result
@@ -1039,7 +1138,12 @@ export function App() {
     }
   }, [autoSave, path, editing, editingCell, save])
 
-  const saveAs = useCallback(() => fileActions.saveAs(() => ctxRef.current), [])
+  const saveAs = useCallback(async () => {
+    await customShowMigrationRef.current
+    await customShowHistoryRef.current
+    const ok = await fileActions.saveAs(() => ctxRef.current)
+    if (ok) await retireLegacyAfterSave()
+  }, [retireLegacyAfterSave])
   const exportImages = useCallback(() => fileActions.exportImages(ctxRef.current), [])
   const exportPdf = useCallback(() => void fileActions.exportPdf(ctxRef.current), [])
 
@@ -1074,6 +1178,38 @@ export function App() {
   }, [])
 
   const [printDlgOpen, setPrintDlgOpen] = useState(false)
+  const nativePrintBusy = useRef(false)
+  /**
+   * Print. macOS opens the system print panel directly (layout from the File menu entry that was
+   * chosen, or the last-used one); Windows/Linux open the in-app sheet with its preview.
+   */
+  const requestPrint = (layout?: PrintLayout) => {
+    if (printEntryFor(navigator.platform) === 'in-app') {
+      setPrintDlgOpen(true)
+      return
+    }
+    if (nativePrintBusy.current || slides.length === 0) return
+    nativePrintBusy.current = true
+    setStatus(t('appPrintRendering'))
+    void runNativePrint({
+      slides,
+      images,
+      current,
+      ...(layout ? { layout } : {}),
+      dateLocale,
+      commentsTitle: printOfficeLabels(lang).comments,
+    })
+      .then((outcome) => {
+        if (outcome === 'printed' || outcome === 'canceled') setStatus('')
+        else if (outcome === 'empty') setStatus(t('appPrintNoPages'))
+        else setStatus(t('appPrintFailed', { error: outcome.error }))
+      })
+      .finally(() => {
+        nativePrintBusy.current = false
+      })
+  }
+  const requestPrintRef = useRef(requestPrint)
+  requestPrintRef.current = requestPrint
 
   /** Whether focus is in a text input (input/textarea/contentEditable) — these cases use native undo/delete */
   const inTextField = () => {
@@ -1090,6 +1226,9 @@ export function App() {
   /** Apply the full slides set after undo/redo: page count may change (undoing a new page), clamp current */
   const applyHistoryResult = useCallback((r: RenderSlide[] | null) => {
     if (!r) return
+    // An Undo may have reverted the intentional delete (or the migration itself).
+    if (pendingLegacyCustomShowsRef.current)
+      pendingLegacyCustomShowsRef.current.allowEmptyAfterExplicitDelete = false
     setSlides(r)
     setCurrent((c) => Math.min(c, r.length - 1))
     setSelectedIds([])
@@ -1116,7 +1255,22 @@ export function App() {
       if (!redoTextEdit()) document.execCommand('redo')
       return
     }
-    applyHistoryResult(await window.slidesApi.redo())
+    const result = await window.slidesApi.redo()
+    applyHistoryResult(result)
+    const pending = pendingLegacyCustomShowsRef.current
+    if (result && pending?.hadExplicitDelete) {
+      const check = window.slidesApi.getCustomShows().then(
+        (shows) => {
+          if (pendingLegacyCustomShowsRef.current === pending)
+            pending.allowEmptyAfterExplicitDelete = shows.length === 0
+        },
+        () => {
+          // A failed check retains the legacy backup rather than retiring it.
+        },
+      )
+      customShowHistoryRef.current = check
+      await check
+    }
   }, [editing, applyHistoryResult])
 
   // Global shortcuts (keyboard-actions.ts): the handler reads the latest state via ctxRef, so attach once
@@ -1692,14 +1846,32 @@ export function App() {
   )
   const openHeaderFooter = useCallback(() => insertActions.openHeaderFooter(ctxRef.current), [])
   const applyHf = useCallback(
-    (opts: { footer: string | null; slideNum: boolean; date: string | null; dateAuto: boolean }) =>
-      insertActions.applyHf(ctxRef.current, opts),
+    (opts: HeaderFooterDialogApply) => insertActions.applyHf(ctxRef.current, opts),
     [],
   )
   const insertEquation = useCallback(
-    (text: string) => insertActions.insertEquation(ctxRef.current, text),
-    [],
+    (text: string) =>
+      insertActions.insertEquation(ctxRef.current, text, eqDialogTarget ?? undefined),
+    [eqDialogTarget],
   )
+  const openEquation = useCallback(
+    (sourceId?: string) => {
+      lastEquationClickRef.current = null
+      const id = sourceId ?? (selectedIds.length === 1 ? selectedIds[0] : undefined)
+      const node = id ? slide?.nodes.find((n) => n.sourceId === id) : undefined
+      const math =
+        node?.type === 'shape' || node?.type === 'text' ? (node as ShapeRenderNode) : undefined
+      setEqDialogTarget(math?.hasEquation ? (id ?? null) : null)
+      setEqDialogInitial(math?.hasEquation ? (math.equationLatex ?? '') : '')
+      setEqDialogUnsupported(!!math?.hasEquation && !math.equationLatex)
+      setEqDialogOpen(true)
+    },
+    [selectedIds, slide],
+  )
+  const insertSymbol = useCallback((char: string, font: string) => {
+    setSymbolDialogOpen(false)
+    void insertActions.insertSymbol(ctxRef.current, char, font)
+  }, [])
   const insertMediaFile = useCallback(
     (kind: 'video' | 'audio') => insertActions.insertMediaFile(ctxRef.current, kind),
     [],
@@ -1835,8 +2007,13 @@ export function App() {
   }, [selAnim, animations, selectedIds])
 
   const patchAnimTiming = useCallback(
-    (patch: { trigger?: AnimTrigger; durationMs?: number; delayMs?: number }) =>
-      animationActions.patchAnimTiming(ctxRef.current, patch),
+    (patch: {
+      trigger?: AnimTrigger
+      durationMs?: number
+      delayMs?: number
+      direction?: AnimationItem['direction']
+      after?: AnimationItem['after'] | null
+    }) => animationActions.patchAnimTiming(ctxRef.current, patch),
     [],
   )
   const moveAnimation = useCallback(
@@ -1894,25 +2071,118 @@ export function App() {
     [],
   )
 
-  // ── Custom shows: load the document's list on document switch (no path = unsaved new document, memory-only) ──
+  // A path-keyed legacy list is imported once for each opened document, before any view refresh.
+  useEffect(() => {
+    if (!hasDoc || !path || path !== openedCustomShowPathRef.current) return
+    const token = customShowOpenTokenRef.current
+    if (attemptedCustomShowMigrationTokenRef.current === token) return
+    attemptedCustomShowMigrationTokenRef.current = token
+    const run = async () => {
+      const result = await importLegacyCustomShows({
+        path,
+        slideCount: slides.length,
+        storage: localStorage,
+        readNative: () => window.slidesApi.getCustomShows(),
+        writeNative: (next) =>
+          token === customShowOpenTokenRef.current
+            ? window.slidesApi.setCustomShows(next)
+            : Promise.resolve(null),
+      })
+      if (token !== customShowOpenTokenRef.current) return
+      if (result.kind === 'imported') {
+        pendingLegacyCustomShowsRef.current = result.pending ?? null
+        setCustomShows(result.shows ?? [])
+        setDirty(true)
+      } else if (result.kind === 'invalid') {
+        setStatus(t('appStatusSaveFailed', { error: t('paneCsdTitle') }))
+      }
+    }
+    const promise = run().catch(() => {
+      if (token === customShowOpenTokenRef.current)
+        setStatus(t('appStatusSaveFailed', { error: t('paneCsdTitle') }))
+    })
+    customShowMigrationRef.current = promise
+  }, [hasDoc, aiPanelKey, path, slides.length])
+
+  // ── Native custom shows follow open, slide order, and history restore. ──
   useEffect(() => {
     setCustomShowDlgOpen(false)
-    if (!path) {
+    if (!hasDoc) {
       setCustomShows([])
       return
     }
-    try {
-      const raw = localStorage.getItem(`ai-slides-custom-shows:${path}`)
-      const parsed: unknown = raw ? JSON.parse(raw) : []
-      setCustomShows(Array.isArray(parsed) ? (parsed as CustomShow[]) : [])
-    } catch {
-      setCustomShows([])
+    let alive = true
+    void (async () => {
+      await customShowMigrationRef.current
+      const shows = await window.slidesApi.getCustomShows()
+      if (alive) setCustomShows(shows)
+    })()
+    return () => {
+      alive = false
     }
-  }, [path])
+  }, [hasDoc, slides, aiPanelKey])
+
+  useEffect(() => {
+    if (!hasDoc) return
+    let active = true
+    void window.slidesApi.getShowSetup().then((settings) => {
+      if (active && settings) setShowSetup(settings)
+    })
+    void window.slidesApi.getSlideSize().then((size) => {
+      if (active) setSlideSizeEmu(size)
+    })
+    return () => {
+      active = false
+    }
+  }, [hasDoc, path, annotationsNonce])
+
+  const updateShowSetup = useCallback(
+    async (settings: ShowSetup): Promise<boolean> => {
+      if (JSON.stringify(settings) === JSON.stringify(showSetup)) return true
+      const result = await window.slidesApi.setShowSetup(settings)
+      if (!result) return false
+      setShowSetup(result)
+      setDirty(true)
+      return true
+    },
+    [showSetup],
+  )
+
+  const changeSlideSize = useCallback(async (cx: number, cy: number): Promise<boolean> => {
+    const currentSize = await window.slidesApi.getSlideSize()
+    if (currentSize?.cx === cx && currentSize.cy === cy) return true
+    const all = await window.slidesApi.setSlideSize({ cx, cy })
+    if (!all) return false
+    setSlides(all)
+    setSlideSizeEmu({ cx, cy })
+    setSelectedIds([])
+    setEditing(null)
+    setDirty(true)
+    return true
+  }, [])
 
   const updateCustomShows = useCallback(
-    (shows: CustomShow[]) => showActions.updateCustomShows(ctxRef.current, shows),
-    [],
+    async (shows: CustomShow[]): Promise<boolean> => {
+      if (JSON.stringify(shows) === JSON.stringify(customShows)) return true
+      try {
+        const next = await window.slidesApi.setCustomShows(shows)
+        if (!next) {
+          setStatus(t('appStatusSaveFailed', { error: t('paneCsdTitle') }))
+          return false
+        }
+        setCustomShows(next)
+        if (pendingLegacyCustomShowsRef.current) {
+          pendingLegacyCustomShowsRef.current.allowEmptyAfterExplicitDelete = next.length === 0
+          if (next.length === 0) pendingLegacyCustomShowsRef.current.hadExplicitDelete = true
+        }
+        setDirty(true)
+        return true
+      } catch {
+        setStatus(t('appStatusSaveFailed', { error: t('paneCsdTitle') }))
+        return false
+      }
+    },
+    [customShows],
   )
   const playCustomShow = useCallback(
     (show: CustomShow) => showActions.playCustomShow(ctxRef.current, show),
@@ -2084,19 +2354,26 @@ export function App() {
   }, [])
 
   // ── Master editing view (full-screen overlay; edits go through slides:master-* IPC) ────────────
-  const enterMasterView = useCallback(async () => {
-    if (!hasDoc) return
-    setEditing(null)
-    setEditingCell(null)
-    setSelectedIds([])
-    setCtxMenu(null)
-    const r = await window.slidesApi.masterEnter(FIT_WIDTH)
-    if (r?.items.length) setMasterItems(r.items)
-  }, [hasDoc])
+  const enterMasterView = useCallback(
+    async (kind: 'master' | 'notesMaster' | 'handoutMaster' = 'master') => {
+      if (!hasDoc) return
+      setEditing(null)
+      setEditingCell(null)
+      setSelectedIds([])
+      setCtxMenu(null)
+      const r = await window.slidesApi.masterEnter(FIT_WIDTH, kind)
+      if (r?.items.length) {
+        setMasterSelectedPath(r.selectedPartPath)
+        setMasterItems(r.items)
+      }
+    },
+    [hasDoc],
+  )
 
   const closeMasterView = useCallback(async () => {
     const all = await window.slidesApi.masterClose()
     setMasterItems(null)
+    setMasterSelectedPath(null)
     if (all) {
       // The inheritance chain changed: replace the whole render tree (all-new element ids)
       setSlides(all)
@@ -2264,7 +2541,11 @@ export function App() {
       // macOS has no File ribbon tab, so these only exist in the menu
       else if (cmd === 'export-pdf') void exportPdf()
       else if (cmd === 'export-images') void exportImages()
-      else if (cmd === 'print') setPrintDlgOpen(true)
+      else if (cmd === 'print') requestPrintRef.current()
+      else if (cmd.startsWith('print-layout:')) {
+        const layout = cmd.slice('print-layout:'.length)
+        if (isPrintLayout(layout)) requestPrintRef.current(layout)
+      }
       // Through the preview path so the zoom pivots on the viewport center, not the scroll origin
       else if (cmd === 'zoom-in') previewZoom((z) => Math.min(z * 1.15, 3))
       else if (cmd === 'zoom-out') previewZoom((z) => Math.max(z / 1.15, 0.25))
@@ -2376,10 +2657,15 @@ export function App() {
   const startEdit = useCallback(
     (sourceId: string, caret?: EditCaret) => {
       if (brushMode) return // the click already applied the format brush
+      const equation = slide?.nodes.find((n) => n.sourceId === sourceId)
+      if ((equation?.type === 'shape' || equation?.type === 'text') && equation.hasEquation) {
+        openEquation(sourceId)
+        return
+      }
       const isChild = enteredGroupNode?.children.some((c) => c.sourceId === sourceId)
       setEditing({ sourceId, caret, ...(isChild ? { groupId: enteredGroupNode!.sourceId } : {}) })
     },
-    [enteredGroupNode, brushMode],
+    [enteredGroupNode, brushMode, slide, openEquation],
   )
 
   // Audio/video playback overlay: triggered by double-clicking a media element, closed on page switch/Escape
@@ -3078,6 +3364,8 @@ export function App() {
     presenter,
     setPresenter,
     usePresenterView,
+    showSetup,
+    customShows,
     setCustomShows,
     setCustomShowDlgOpen,
     setScreenPicker,
@@ -3101,6 +3389,7 @@ export function App() {
     setChartDataDialogOpen,
     setFindOpen,
     setPrintDlgOpen,
+    requestPrint: () => requestPrintRef.current(),
     openAskPopover,
     setZoom,
     masterItems,
@@ -3187,7 +3476,7 @@ export function App() {
         onRedo={() => void redo()}
         onSaveAs={() => void saveAs()}
         onExportPdf={() => void exportPdf()}
-        onPrint={() => setPrintDlgOpen(true)}
+        onPrint={() => requestPrint()}
         onExportImages={() => void exportImages()}
         onFileTab={() => {
           void window.slidesApi.getRecentFiles().then(setRecent)
@@ -3281,25 +3570,16 @@ export function App() {
             .setSlideLayout({ slideIndex: current })
             .then((r) => r && applySlide(current, r))
         }
-        onSlideSize={(cx, cy) =>
-          void window.slidesApi.setSlideSize({ cx, cy }).then((all) => {
-            if (all) {
-              setSlides(all)
-              // Every slide re-materializes with fresh element ids
-              setSelectedIds([])
-              setEditing(null)
-              setDirty(true)
-            }
-          })
-        }
+        onSlideSize={(cx, cy) => void changeSlideSize(cx, cy)}
+        onCustomSlideSize={() => {
+          void window.slidesApi.getSlideSize().then((size) => size && setCustomSize(size))
+        }}
         slideSizeKey={
-          slide
-            ? Math.abs(slide.widthPx / slide.heightPx - 16 / 9) < 0.02
-              ? '16:9'
-              : Math.abs(slide.widthPx / slide.heightPx - 4 / 3) < 0.02
-                ? '4:3'
-                : null
-            : null
+          slideSizeEmu?.cx === 12192000 && slideSizeEmu.cy === 6858000
+            ? '16:9'
+            : slideSizeEmu?.cx === 9144000 && slideSizeEmu.cy === 6858000
+              ? '4:3'
+              : null
         }
         onParagraphFormat={onParagraphFormat}
         onDirection={onDirection}
@@ -3341,7 +3621,26 @@ export function App() {
           setShowMonitor(label)
           writeShowMonitor(label)
         }}
-        onCustomShow={() => setCustomShowDlgOpen(true)}
+        onCustomShow={() => {
+          void window.slidesApi.getCustomShows().then(
+            (shows) => {
+              setCustomShows(shows)
+              setCustomShowDlgOpen(true)
+            },
+            () => setStatus(t('appStatusSaveFailed', { error: t('paneCsdTitle') })),
+          )
+        }}
+        onShowSetup={() => {
+          void Promise.all([
+            window.slidesApi.getShowSetup(),
+            window.slidesApi.getCustomShows(),
+          ]).then(([settings, shows]) => {
+            if (!settings) return
+            setShowSetup(settings)
+            setCustomShows(shows)
+            setShowSetupDlgOpen(true)
+          })
+        }}
         onRehearse={startRehearseShow}
         currentHidden={!!slide?.hidden}
         onToggleHidden={() => void toggleHidden(current)}
@@ -3355,12 +3654,16 @@ export function App() {
         onInkClearAll={() => void clearInk()}
         viewMode={viewMode}
         onViewMode={onViewMode}
-        onSlideMaster={() => void enterMasterView()}
+        onSlideMaster={() => void enterMasterView('master')}
+        onNotesMaster={() => void enterMasterView('notesMaster')}
+        onHandoutMaster={() => void enterMasterView('handoutMaster')}
         onZoomFit={zoomToFit}
         showRuler={showRuler}
         onToggleRuler={() => setShowRuler((v) => !v)}
         showGrid={showGrid}
         onToggleGrid={() => setShowGrid((v) => !v)}
+        darkContent={darkContent}
+        onToggleDarkContent={() => setDarkContent(!darkContent)}
         showGuides={showGuides}
         onToggleGuides={() => setShowGuides((v) => !v)}
         showNotes={showNotes}
@@ -3379,7 +3682,29 @@ export function App() {
         slideCount={slides.length}
         currentSlide={current}
         onOpenHeaderFooter={() => void openHeaderFooter()}
-        onOpenEquation={() => setEqDialogOpen(true)}
+        onOpenEquation={() => openEquation()}
+        onOpenSymbol={() => {
+          saveEditSelection()
+          setSymbolDialogOpen(true)
+        }}
+        equationSelected={
+          selectedIds.length === 1 &&
+          !!(
+            (selectedNode?.type === 'shape' || selectedNode?.type === 'text') &&
+            selectedNode.hasEquation
+          )
+        }
+        equationLatex={
+          selectedIds.length === 1 &&
+          (selectedNode?.type === 'shape' || selectedNode?.type === 'text') &&
+          selectedNode.hasEquation
+            ? (selectedNode.equationLatex ?? '')
+            : ''
+        }
+        onEquationApply={(latex) => {
+          if (selectedIds.length === 1)
+            void insertActions.insertEquation(ctxRef.current, latex, selectedIds[0])
+        }}
         onInsertMedia={(kind) => void insertMediaFile(kind)}
         onInsertModel3d={() => void insertModel3dFile()}
         recording={recording}
@@ -3388,9 +3713,88 @@ export function App() {
         contextElementId={selectedNode?.sourceId}
         contextSlideIndex={current}
         contextChartStyle={contextChartStyle}
+        contextChartAreaFormat={
+          selectedNode?.type === 'chart'
+            ? {
+                chart: {
+                  fill:
+                    (selectedNode as ChartRenderNode).bgFill?.kind === 'solid'
+                      ? (
+                          (selectedNode as ChartRenderNode).bgFill as {
+                            kind: 'solid'
+                            color: string
+                          }
+                        ).color
+                      : (selectedNode as ChartRenderNode).bgFill
+                        ? undefined
+                        : null,
+                  stroke: (selectedNode as ChartRenderNode).border
+                    ? {
+                        color: (selectedNode as ChartRenderNode).border!.color,
+                        widthPt:
+                          Math.round(
+                            ((selectedNode as ChartRenderNode).border!.widthPx /
+                              (slide?.scale ?? 1)) *
+                              0.75 *
+                              100,
+                          ) / 100,
+                      }
+                    : null,
+                },
+                plot: {
+                  fill:
+                    (selectedNode as ChartRenderNode).plotRect?.fill?.kind === 'solid'
+                      ? (
+                          (selectedNode as ChartRenderNode).plotRect!.fill as {
+                            kind: 'solid'
+                            color: string
+                          }
+                        ).color
+                      : (selectedNode as ChartRenderNode).plotRect?.fill
+                        ? undefined
+                        : null,
+                  stroke: (selectedNode as ChartRenderNode).plotRect?.borderColor
+                    ? {
+                        color: (selectedNode as ChartRenderNode).plotRect!.borderColor!,
+                        widthPt:
+                          Math.round(
+                            (((selectedNode as ChartRenderNode).plotRect!.borderWidthPx ?? 1) /
+                              (slide?.scale ?? 1)) *
+                              0.75 *
+                              100,
+                          ) / 100,
+                      }
+                    : null,
+                },
+              }
+            : null
+        }
+        onChartAreaFormat={(format) => {
+          if (selectedNode?.type !== 'chart') return
+          void window.slidesApi
+            .editChartAreaFormat({
+              slideIndex: current,
+              sourceId: selectedNode.sourceId,
+              format,
+            })
+            .then((result) => {
+              if (!result) return
+              applySlide(current, result.slide)
+              if (result.sourceId) setSelectedIds([result.sourceId])
+            })
+        }}
         chartColorSchemes={chartColorSchemes}
         contextPictureCanCutout={contextPictureCanCutout}
         contextPictureStroke={contextPictureStroke}
+        contextPictureAdjustments={
+          selectedNode?.type === 'picture'
+            ? {
+                lum: (selectedNode as PictureRenderNode).lum,
+                duotone: (selectedNode as PictureRenderNode).duotone,
+                biLevel: (selectedNode as PictureRenderNode).biLevel,
+              }
+            : null
+        }
         onShapeEffects={(effects) => {
           // every selected shape / picture / text box; a group is left to the Format pane
           void (async () => {
@@ -3545,11 +3949,36 @@ export function App() {
         cropActive={cropTarget != null}
         onPictureCutout={startCutout}
         onPictureReplace={() => void replacePicture()}
+        onPictureReset={() => {
+          if (!selectedNode || selectedNode.type !== 'picture') return
+          void window.slidesApi
+            .resetPicture({ slideIndex: current, sourceId: selectedNode.sourceId })
+            .then((updated) => updated && applySlide(current, updated))
+        }}
+        onRecordNarration={() =>
+          void narrationActions.toggleNarration(ctxRef.current, setNarrationRecording)
+        }
+        onClearNarration={() => void narrationActions.clearNarration(ctxRef.current)}
+        narrationRecording={narrationRecording}
+        hasNarration={narrationActions.narrationNodes(slide).length > 0}
+        onPictureStyle={(id) => void pictureToolsActions.applyPictureStyle(ctxRef.current, id)}
+        onPictureAltText={() => setAltTextOpen(true)}
+        onPictureQuality={() => setPictureQualityOpen(true)}
         onPictureRotate={(delta) => void rotateSelected(delta)}
         onPictureOpacity={(opacity) => {
           if (!selectedNode || selectedNode.type !== 'picture') return
           void window.slidesApi
             .editPictureOpacity({ slideIndex: current, sourceId: selectedNode.sourceId, opacity })
+            .then((r) => r && applySlide(current, r))
+        }}
+        onPictureAdjustments={(adjustments) => {
+          if (!selectedNode || selectedNode.type !== 'picture') return
+          void window.slidesApi
+            .editPictureAdjustments({
+              slideIndex: current,
+              sourceId: selectedNode.sourceId,
+              adjustments,
+            })
             .then((r) => r && applySlide(current, r))
         }}
         tableTabInfo={tableTabInfo}
@@ -3681,7 +4110,11 @@ export function App() {
                     }}
                   >
                     <div className="sorter-frame">
-                      <SlideThumb slide={s} images={images} width={Math.round(260 * sorterZoom)} />
+                      <SlideThumb
+                        slide={displaySlide(s, darkContent)}
+                        images={images}
+                        width={Math.round(260 * sorterZoom)}
+                      />
                     </div>
                     <div className="sorter-meta">
                       <span className="sorter-num">{i + 1}</span>
@@ -3789,7 +4222,11 @@ export function App() {
                                 setCtxMenu({ kind: 'thumb', x: e.clientX, y: e.clientY, index: i })
                               }}
                             >
-                              <SlideThumb slide={s} images={images} width={thumbW} />
+                              <SlideThumb
+                                slide={displaySlide(s, darkContent)}
+                                images={images}
+                                width={thumbW}
+                              />
                               <span className="thumb-num">{i + 1}</span>
                               {pasteFloater?.index === i && (
                                 <PasteOptionsFloater
@@ -4019,6 +4456,42 @@ export function App() {
                               width: slide.widthPx,
                               height: slide.heightPx,
                             }}
+                            onClickCapture={(event) => {
+                              if (drawKindRef.current || brushMode) {
+                                lastEquationClickRef.current = null
+                                return
+                              }
+                              const selectedMathId =
+                                selectedIds.length === 1 &&
+                                slide.nodes.some(
+                                  (node) =>
+                                    node.sourceId === selectedIds[0] &&
+                                    (node.type === 'shape' || node.type === 'text') &&
+                                    node.hasEquation,
+                                )
+                                  ? selectedIds[0]!
+                                  : null
+                              const id = selectedEquationAtCanvasClick(
+                                event.currentTarget,
+                                event.target,
+                                selectedMathId,
+                              )
+                              if (!id || event.button !== 0) {
+                                lastEquationClickRef.current = null
+                                return
+                              }
+                              const tracked = trackEquationClick(
+                                lastEquationClickRef.current,
+                                { id, x: event.clientX, y: event.clientY, at: event.timeStamp },
+                                selectedIds.includes(id),
+                              )
+                              lastEquationClickRef.current = tracked.next
+                              if (tracked.activate) {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                openEquation(id)
+                              }
+                            }}
                             onDragOver={(e) => {
                               if (e.dataTransfer.types.includes('Files')) e.preventDefault()
                             }}
@@ -4053,7 +4526,7 @@ export function App() {
                           >
                             <SlideCanvas
                               ref={canvasRef}
-                              slide={slide}
+                              slide={canvasSlide!}
                               selectedIds={selectedIds}
                               onSelect={handleCanvasSelect}
                               onEditText={startEdit}
@@ -4170,7 +4643,12 @@ export function App() {
                                 onCommit={commitEdit}
                                 onCancel={() => setEditing(null)}
                                 onFollowLink={followRunLink}
-                                frameColor={selectionChromeColor(slide, images, editNode.box)}
+                                frameColor={selectionChromeColor(
+                                  canvasSlide!,
+                                  images,
+                                  editNode.box,
+                                )}
+                                darkContent={darkContent}
                                 zoom={zoom}
                                 onFrameDrag={(ev) => {
                                   // Drop the overlay now; the text commit above lands via setSlides on its own
@@ -4187,7 +4665,12 @@ export function App() {
                                 onCancel={() => setEditingCell(null)}
                                 onTabNav={(paragraphs, dir) => void navigateCell(paragraphs, dir)}
                                 onFollowLink={followRunLink}
-                                frameColor={selectionChromeColor(slide, images, cellEditNode.box)}
+                                frameColor={selectionChromeColor(
+                                  canvasSlide!,
+                                  images,
+                                  cellEditNode.box,
+                                )}
+                                darkContent={darkContent}
                                 zoom={zoom}
                               />
                             )}
@@ -4356,6 +4839,9 @@ export function App() {
                     node={selectedNode}
                     viewScale={slide?.scale}
                     slideSizePx={slide ? { w: slide.widthPx, h: slide.heightPx } : undefined}
+                    onPictureLockAspect={(id, locked) =>
+                      void pictureToolsActions.setPictureAspectLock(ctxRef.current, id, locked)
+                    }
                     onTransform={onTransform}
                     onFill={(id, fill) => void onFill(id, fill)}
                     onImageFill={(id) =>
@@ -4486,6 +4972,7 @@ export function App() {
         <MasterView
           key={masterItems[0]?.partPath}
           initialItems={masterItems}
+          initialPartPath={masterSelectedPath}
           onClose={() => void closeMasterView()}
         />
       )}
@@ -4497,6 +4984,12 @@ export function App() {
           startAt={slideShow.startAt}
           customOrder={slideShow.customOrder}
           rehearseMode={slideShow.rehearse}
+          windowed={slideShow.mode === 'browse'}
+          kiosk={slideShow.mode === 'kiosk'}
+          loop={slideShow.loop}
+          showAnimation={slideShow.showAnimation}
+          useTimings={slideShow.useTimings}
+          showNarration={slideShow.showNarration}
           onRehearseDone={onRehearseDone}
           onExit={exitSlideShow}
           onUsePresenterView={(i) => showActions.switchShowToPresenter(ctxRef.current, i)}
@@ -4542,9 +5035,40 @@ export function App() {
       )}
       {eqDialogOpen && (
         <EquationDialog
+          initial={eqDialogInitial}
+          unsupported={eqDialogUnsupported}
           onInsert={(text) => void insertEquation(text)}
           onClose={() => setEqDialogOpen(false)}
         />
+      )}
+      {altTextOpen && selectedNode?.type === 'picture' && (
+        <AltTextDialog
+          initialText={selectedNode.descr ?? ''}
+          initialDecorative={!!selectedNode.decorative}
+          onSave={(text, decorative) => {
+            setAltTextOpen(false)
+            void pictureToolsActions.savePictureAltText(
+              ctxRef.current,
+              selectedNode.sourceId,
+              text,
+              decorative,
+            )
+          }}
+          onClose={() => setAltTextOpen(false)}
+        />
+      )}
+      {pictureQualityOpen && selectedNode?.type === 'picture' && (
+        <PictureQualityDialog
+          hasCrop={!!selectedNode.srcRect}
+          onApply={(ppi, deleteCropped) => {
+            setPictureQualityOpen(false)
+            void pictureToolsActions.compressPicture(ctxRef.current, { ppi, deleteCropped })
+          }}
+          onClose={() => setPictureQualityOpen(false)}
+        />
+      )}
+      {symbolDialogOpen && (
+        <SymbolDialog onInsert={insertSymbol} onClose={() => setSymbolDialogOpen(false)} />
       )}
 
       {cutoutTarget && (
@@ -4576,9 +5100,27 @@ export function App() {
         <CustomShowDialog
           shows={customShows}
           slideCount={slides.length}
-          onChange={updateCustomShows}
+          onCommit={updateCustomShows}
           onPlay={playCustomShow}
           onClose={() => setCustomShowDlgOpen(false)}
+        />
+      )}
+
+      {showSetupDlgOpen && (
+        <ShowSetupDialog
+          initial={showSetup}
+          slideCount={slides.length}
+          customShows={customShows}
+          onCommit={updateShowSetup}
+          onClose={() => setShowSetupDlgOpen(false)}
+        />
+      )}
+
+      {customSize && (
+        <CustomSlideSizeDialog
+          initial={customSize}
+          onCommit={changeSlideSize}
+          onClose={() => setCustomSize(null)}
         />
       )}
 
@@ -4598,6 +5140,14 @@ export function App() {
               label: backstageLabels(lang).exportImages,
               run: () => void exportImages(),
             },
+            // macOS has no in-app sheet to pick a layout, so every layout is its own entry
+            ...(printEntryFor(navigator.platform) === 'native-panel'
+              ? nativePrintEntries(lang).map((e) => ({
+                  id: `print-${e.layout}`,
+                  label: e.label,
+                  run: () => requestPrint(e.layout),
+                }))
+              : []),
           ]}
           onClose={() => setShowBackstage(false)}
           onNew={() => void newBlank()}
@@ -4607,7 +5157,7 @@ export function App() {
           }
           onSave={() => void save()}
           onSaveAs={() => void saveAs()}
-          onPrint={() => setPrintDlgOpen(true)}
+          onPrint={() => requestPrint()}
         />
       )}
 

@@ -17,10 +17,16 @@ import '@genoffice/ui/ai-scope-quote.css'
 import '@genoffice/ui/printer-settings.css'
 import '@genoffice/ui/craft-icon.css'
 import '@genoffice/ui/backstage.css'
+import '@genoffice/ui/math-tools.css'
 import './styles.css'
 // compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
 import '@genoffice/ui/ribbon-density.css'
-import { applyAiPanelPrefs, installMacLineBoundaryKeys, installScreenTips } from '@genoffice/ui'
+import {
+  applyUiTheme,
+  applyAiPanelPrefs,
+  installMacLineBoundaryKeys,
+  installScreenTips,
+} from '@genoffice/ui'
 
 installScreenTips()
 installMacLineBoundaryKeys()
@@ -41,8 +47,7 @@ if (mode !== 'audience' && navigator.platform.toLowerCase().includes('mac'))
   document.body.classList.add('vib')
 
 function applyTheme(theme: UiTheme): void {
-  if (theme === 'system') document.documentElement.removeAttribute('data-theme')
-  else document.documentElement.setAttribute('data-theme', theme)
+  applyUiTheme(theme)
 }
 
 async function bootstrap(): Promise<void> {

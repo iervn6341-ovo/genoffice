@@ -51,6 +51,11 @@ import {
 import { ChartBody } from './ChartBody'
 import { needsTextFrameHitArea } from './text-hit-area'
 import { warpGlyphs, measureGlyph } from './text-warp'
+import {
+  equationRasterForGlyph,
+  getEquationRasterEpoch,
+  subscribeEquationRasters,
+} from './equation-raster'
 
 export interface NodeBodyProps {
   node: RenderNode
@@ -80,6 +85,7 @@ export const NodeBody = React.memo(function NodeBody({
   // subscription re-renders past React.memo so glyph y props recompute (a batchDraw alone
   // repaints stale positions).
   useSyncExternalStore(subscribeFontsEpoch, getFontsEpoch)
+  useSyncExternalStore(subscribeEquationRasters, getEquationRasterEpoch)
   const { box } = node
 
   // Reflection: a flipped fading copy of the node drawn below it, then the node itself
@@ -358,33 +364,61 @@ export const NodeBody = React.memo(function NodeBody({
                     />
                   ),
               )}
-              {cellGlyphs.map((g, j) => (
-                <Text
-                  key={j}
-                  x={cell.x + (cell.text?.insets.l ?? 0) + g.x}
-                  y={cell.y + (cell.text?.insets.t ?? 0) + g.y}
-                  text={g.text}
-                  fontSize={g.fontSize}
-                  fontFamily={g.fontFamily}
-                  fontStyle={g.fontStyle}
-                  textDecoration={g.textDecoration}
-                  rotation={g.rotation ?? 0}
-                  letterSpacing={g.letterSpacing ?? 0}
-                  fill={g.fill}
-                  direction={g.direction ?? 'inherit'}
-                  {...(g.stroke
-                    ? { stroke: g.stroke, strokeWidth: g.strokeWidth, fillAfterStrokeEnabled: true }
-                    : {})}
-                  {...(g.shadowEnabled
-                    ? {
-                        shadowColor: g.shadowColor,
-                        shadowBlur: g.shadowBlur,
-                        shadowOffsetX: g.shadowOffsetX,
-                        shadowOffsetY: g.shadowOffsetY,
-                      }
-                    : {})}
-                />
-              ))}
+              {cellGlyphs.map((g, j) => {
+                const mathImage = equationRasterForGlyph(g)
+                if (mathImage)
+                  return (
+                    <KImage
+                      key={j}
+                      image={mathImage}
+                      x={cell.x + (cell.text?.insets.l ?? 0) + g.x}
+                      y={cell.y + (cell.text?.insets.t ?? 0) + g.y}
+                      width={g.mathWidthPx ?? g.fontSize}
+                      height={g.mathHeightPx ?? g.fontSize}
+                      rotation={g.rotation ?? 0}
+                      scaleX={g.scaleX ?? 1}
+                      scaleY={g.scaleY ?? 1}
+                      offsetX={g.offsetX ?? 0}
+                      offsetY={g.offsetY ?? 0}
+                      shadowColor={g.shadowEnabled ? g.shadowColor : undefined}
+                      shadowBlur={g.shadowEnabled ? g.shadowBlur : undefined}
+                      shadowOffsetX={g.shadowEnabled ? g.shadowOffsetX : undefined}
+                      shadowOffsetY={g.shadowEnabled ? g.shadowOffsetY : undefined}
+                      listening={false}
+                    />
+                  )
+                return (
+                  <Text
+                    key={j}
+                    x={cell.x + (cell.text?.insets.l ?? 0) + g.x}
+                    y={cell.y + (cell.text?.insets.t ?? 0) + g.y}
+                    text={g.text}
+                    fontSize={g.fontSize}
+                    fontFamily={g.fontFamily}
+                    fontStyle={g.fontStyle}
+                    textDecoration={g.textDecoration}
+                    rotation={g.rotation ?? 0}
+                    letterSpacing={g.letterSpacing ?? 0}
+                    fill={g.fill}
+                    direction={g.direction ?? 'inherit'}
+                    {...(g.stroke
+                      ? {
+                          stroke: g.stroke,
+                          strokeWidth: g.strokeWidth,
+                          fillAfterStrokeEnabled: true,
+                        }
+                      : {})}
+                    {...(g.shadowEnabled
+                      ? {
+                          shadowColor: g.shadowColor,
+                          shadowBlur: g.shadowBlur,
+                          shadowOffsetX: g.shadowOffsetX,
+                          shadowOffsetY: g.shadowOffsetY,
+                        }
+                      : {})}
+                  />
+                )
+              })}
             </React.Fragment>
           )
         })}
@@ -774,6 +808,30 @@ export const NodeBody = React.memo(function NodeBody({
             )),
           )}
         {glyphs.map((g, i) => {
+          if (g.mathML) {
+            const raster = equationRasterForGlyph(g)
+            if (raster)
+              return (
+                <KImage
+                  key={i}
+                  image={raster}
+                  x={(shape.text?.insets.l ?? 0) + g.x}
+                  y={(shape.text?.insets.t ?? 0) + g.y}
+                  width={g.mathWidthPx ?? g.fontSize}
+                  height={g.mathHeightPx ?? g.fontSize}
+                  rotation={g.rotation ?? 0}
+                  scaleX={g.scaleX ?? 1}
+                  scaleY={g.scaleY ?? 1}
+                  offsetX={g.offsetX ?? 0}
+                  offsetY={g.offsetY ?? 0}
+                  shadowColor={g.shadowEnabled ? g.shadowColor : undefined}
+                  shadowBlur={g.shadowEnabled ? g.shadowBlur : undefined}
+                  shadowOffsetX={g.shadowEnabled ? g.shadowOffsetX : undefined}
+                  shadowOffsetY={g.shadowEnabled ? g.shadowOffsetY : undefined}
+                  listening={false}
+                />
+              )
+          }
           if (g.image) {
             const img = images.get(g.image)
             if (!img) return null

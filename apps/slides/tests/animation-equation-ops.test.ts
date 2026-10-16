@@ -3,6 +3,7 @@ import {
   addElement,
   createBlankPptx,
   getSlideAnimations,
+  setSlideAnimations,
   openPptx,
   savePptx,
   type OpenedPptx,
@@ -88,6 +89,18 @@ describe('addAnimation / removeAnimation / reorderAnimation', () => {
       ops: [{ op: 'addAnimation', target: { slide: 0, el: titleId }, effect: 'sparkle' }],
     })
     expect(unknown.failures![0]!.error).toContain('flyIn')
+    const badPath = runTxn(opened, {
+      ops: [
+        {
+          op: 'addAnimation',
+          target: { slide: 0, el: titleId },
+          effect: 'motionPath',
+          motionPath: 'M 0 0 L "broken" 1',
+        },
+      ],
+    })
+    expect(badPath.applied).toBe(false)
+    expect(badPath.failures![0]!.error).toContain('motionPath')
   })
 
   it('inserts after a position, removes by seq or element, reorders, all in one batch', () => {
@@ -169,6 +182,71 @@ describe('addAnimation / removeAnimation / reorderAnimation', () => {
     const after = /<p:timing>[\s\S]*<\/p:timing>/.exec(reopened.deck.slides[0]!.bodySuffix)![0]
     expect(after).toContain('filter="randombar(horizontal)"')
     expect(after).not.toContain('filter="fade"')
+  })
+
+  it('setAnimations preserves an imported effect while changing a different effect through the UI payload', async () => {
+    const slide = slide0()
+    const titleSpid = Number(
+      /<p:cNvPr\s[^>]*\bid="(\d+)"/.exec(
+        slide.elements.find((e) => e.id === titleId)!.anchor.originalXml,
+      )![1],
+    )
+    const cardSpid = Number(
+      /<p:cNvPr\s[^>]*\bid="(\d+)"/.exec(
+        slide.elements.find((e) => e.id === cardId)!.anchor.originalXml,
+      )![1],
+    )
+    const unsupported =
+      '<p:par><p:cTn id="701" presetID="77" presetClass="entr" presetSubtype="0" fill="hold" grpId="0" nodeType="clickEffect">' +
+      '<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>' +
+      `<p:animEffect transition="in" filter="nativeFilter"><p:cBhvr><p:cTn id="702" dur="600"/><p:tgtEl><p:spTgt spid="${cardSpid}"/></p:tgtEl></p:cBhvr></p:animEffect>` +
+      '<p:extLst><p:ext uri="native-child"/></p:extLst></p:childTnLst></p:cTn></p:par>'
+    setSlideAnimations(slide, [
+      { spid: titleSpid, effect: 'fade', trigger: 'onClick', durationMs: 500, delayMs: 0 },
+      {
+        spid: cardSpid,
+        effect: 'fade',
+        trigger: 'onClick',
+        durationMs: 600,
+        delayMs: 0,
+        presetXml: unsupported,
+      },
+    ])
+    const before = getSlideAnimations(slide, true)
+    const imported = before[1]!.nativeXml!
+    const changed = runTxn(opened, {
+      ops: [
+        {
+          op: 'setAnimations',
+          target: { slide: 0 },
+          items: [
+            {
+              sourceId: titleId,
+              effect: 'fade',
+              trigger: 'onClick',
+              durationMs: 900,
+              delayMs: 0,
+              nativeId: before[0]!.nativeId,
+            },
+            {
+              sourceId: cardId,
+              effect: 'fade',
+              trigger: 'onClick',
+              durationMs: 600,
+              delayMs: 0,
+              nativeId: before[1]!.nativeId,
+            },
+          ],
+        },
+      ],
+    })
+    expect(changed.applied).toBe(true)
+    expect(slide.bodySuffix).toContain(imported)
+    const reopened = await openPptx(await savePptx(opened))
+    const saved = getSlideAnimations(reopened.deck.slides[0]!, true)
+    expect(saved[0]).toMatchObject({ durationMs: 900, nativeId: before[0]!.nativeId })
+    expect(saved[1]!.nativeXml).toBe(imported)
+    expect(saved[1]!.preset).toMatchObject({ id: 77 })
   })
 })
 

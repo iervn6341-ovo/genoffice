@@ -21,4 +21,9 @@ describe('canvas text-frame hit area', () => {
   it('does not add a text-frame target to shapes without text', () => {
     expect(needsTextFrameHitArea(shape('ellipse', false))).toBe(false)
   })
+
+  it('keeps an empty master placeholder selectable across its frame', () => {
+    expect(needsTextFrameHitArea({ ...shape('rect', false), placeholder: 'body' })).toBe(true)
+    expect(needsTextFrameHitArea({ ...shape('rect', false), placeholder: 'sldImg' })).toBe(true)
+  })
 })

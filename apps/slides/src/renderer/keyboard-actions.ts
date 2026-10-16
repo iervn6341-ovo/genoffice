@@ -101,7 +101,7 @@ export function handleGlobalKeydown(
   if (mod && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
     if (editing || inField) return
     e.preventDefault()
-    ctx.setPrintDlgOpen(true)
+    ctx.requestPrint()
     return
   }
   // Zoom shortcut fallback

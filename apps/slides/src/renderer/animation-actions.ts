@@ -137,10 +137,23 @@ export function applyMotionPath(ctx: ActionCtx, path: string): void {
 
 export function patchAnimTiming(
   ctx: ActionCtx,
-  patch: { trigger?: AnimTrigger; durationMs?: number; delayMs?: number },
+  patch: {
+    trigger?: AnimTrigger
+    durationMs?: number
+    delayMs?: number
+    direction?: AnimationItem['direction']
+    after?: AnimationItem['after'] | null
+  },
 ): void {
   if (ctx.timingIdx < 0) return
-  const next = ctx.animations.map((a, i) => (i === ctx.timingIdx ? { ...a, ...patch } : a))
+  const next = ctx.animations.map((a, i) => {
+    if (i !== ctx.timingIdx) return a
+    const { after, ...rest } = patch
+    const updated: AnimationItem = { ...a, ...rest }
+    if (after === null) delete updated.after
+    else if (after !== undefined) updated.after = after
+    return updated
+  })
   void commitAnimations(ctx, next)
 }
 

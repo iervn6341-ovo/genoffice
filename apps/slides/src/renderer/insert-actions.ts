@@ -6,7 +6,12 @@
  */
 import type { InsertKind, LinkTargetOp } from '../shared/ipc'
 import type { ActionCtx } from './action-context'
-import { applySelectionLink, saveEditSelection, selectionLink } from './TextEditOverlay'
+import {
+  applySelectionLink,
+  restoreEditSelection,
+  saveEditSelection,
+  selectionLink,
+} from './TextEditOverlay'
 import { FIT_WIDTH } from './app-constants'
 import type { WordArtPreset } from '@genoffice/ui'
 import {
@@ -325,7 +330,65 @@ export async function applyLink(ctx: ActionCtx, target: LinkTargetOp | null): Pr
 }
 
 /** Zoom link (simplified Zoom): a button shape with an internal jump link. */
+/**
+ * Slide Zoom as a thumbnail of the target slide: a picture with a slide-jump
+ * hyperlink (the same linked-picture form PowerPoint keeps as the fallback of its
+ * native Zoom object; this is not the native p166 zoom object). Returns false
+ * when the thumbnail cannot be rendered so the caller can use the button form.
+ */
+async function insertZoomThumbnail(ctx: ActionCtx, target: number): Promise<boolean> {
+  const { slide, current } = ctx
+  const targetSlide = ctx.slides[target]
+  if (!slide || !targetSlide) return false
+  try {
+    // loaded on demand: the Konva stack is heavy and unavailable in DOM-only unit tests
+    const { renderSlidesToPngBase64 } = await import('./export-render')
+    const [png] = await renderSlidesToPngBase64([targetSlide], ctx.images, 1)
+    if (!png) return false
+    const emu = (px: number) => Math.round((px * 9525) / slide.scale)
+    const w = Math.round(slide.widthPx * 0.3)
+    const h = Math.round((w * targetSlide.heightPx) / targetSlide.widthPx)
+    const added = await window.slidesApi.applyTxn({
+      ops: [
+        {
+          op: 'addPicture',
+          target: { slide: current },
+          bytes: `data:image/png;base64,${png}`,
+          ext: 'png',
+          name: `Slide Zoom ${target + 1}`,
+          descr: `Slide Zoom: slide ${target + 1}`,
+          offset: {
+            x: emu((slide.widthPx - w) / 2),
+            y: emu((slide.heightPx - h) / 2),
+            cx: emu(w),
+            cy: emu(h),
+          },
+        },
+      ],
+    })
+    const id = added?.records?.[0]?.created?.[0]
+    if (!added?.applied || !id) return false
+    const linked = await window.slidesApi.applyTxn({
+      ops: [
+        {
+          op: 'setLink',
+          target: { slide: current, el: id },
+          link: { kind: 'slide', slideIndex: target },
+        },
+      ],
+    })
+    ctx.setSlides((linked?.applied && linked.slides) || added.slides || ctx.slides)
+    ctx.setDirty(true)
+    ctx.setSelectedIds([])
+    ctx.setStatus(t('appStatusZoomInserted', { page: target + 1 }))
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function insertZoom(ctx: ActionCtx, target: number): Promise<void> {
+  if (await insertZoomThumbnail(ctx, target)) return
   const { slide, current } = ctx
   if (!slide) return
   const w = 200
@@ -370,10 +433,26 @@ export async function openHeaderFooter(ctx: ActionCtx): Promise<void> {
 
 export async function applyHf(
   ctx: ActionCtx,
-  opts: { footer: string | null; slideNum: boolean; date: string | null; dateAuto: boolean },
+  opts: import('./components/InsertDialogs').HeaderFooterDialogApply,
 ): Promise<void> {
   ctx.setHfDialog(null)
-  const updated = await window.slidesApi.applyHeaderFooter({ ...opts, fitWidthPx: FIT_WIDTH })
+  const updated =
+    opts.tab === 'notes-handouts'
+      ? await window.slidesApi.applyNotesHandoutsHeaderFooter({
+          settings: opts.settings,
+          fitWidthPx: FIT_WIDTH,
+        })
+      : await window.slidesApi.applyHeaderFooter({
+          footer: opts.footer,
+          slideNum: opts.slideNum,
+          date: opts.date,
+          dateAuto: opts.dateAuto,
+          dateFormat: opts.dateFormat,
+          dontShowOnTitleSlide: opts.dontShowOnTitleSlide,
+          firstSlideNum: opts.firstSlideNum,
+          ...(opts.scope === 'current' ? { slideIndexes: [ctx.current] } : {}),
+          fitWidthPx: FIT_WIDTH,
+        })
   if (updated) {
     ctx.setSlides(updated)
     ctx.setSelectedIds([])
@@ -385,13 +464,63 @@ export async function applyHf(
   }
 }
 
-/** Equations: approximated as Cambria Math italic text (Unicode math symbols) for pptx compatibility. */
-export async function insertEquation(ctx: ActionCtx, text: string): Promise<void> {
-  ctx.setEqDialogOpen(false)
+/** Native a14:m/OMML equation, journaled through the same operation pipeline as AI edits. */
+export async function insertEquation(
+  ctx: ActionCtx,
+  latex: string,
+  replaceId?: string,
+): Promise<void> {
   const { slide, current } = ctx
   if (!slide) return
   const w = 420
   const h = 84
+  const emu = (px: number) => Math.round((px * 9525) / slide.scale)
+  const op = replaceId
+    ? { op: 'replaceEquation', target: { slide: current, el: replaceId }, latex }
+    : {
+        op: 'insertEquation',
+        target: { slide: current },
+        latex,
+        box: {
+          x: emu((slide.widthPx - w) / 2),
+          y: emu((slide.heightPx - h) / 2),
+          cx: emu(w),
+          cy: emu(h),
+        },
+      }
+  const r = await window.slidesApi.applyTxn({ ops: [op] })
+  if (r?.applied && r.slides) {
+    ctx.setEqDialogOpen(false)
+    ctx.setSlides(r.slides)
+    ctx.setDirty(true)
+    ctx.setSelectedIds(replaceId ? [replaceId] : (r.records?.[0]?.created ?? []))
+    ctx.setStatus(t('appStatusEquationInserted'))
+  } else {
+    ctx.setStatus(r?.failures?.[0]?.error ?? t('appStatusEquationPreview'))
+  }
+}
+
+/** Insert at the saved text caret; outside editing, create a normal text box for the symbol. */
+export async function insertSymbol(ctx: ActionCtx, char: string, font: string): Promise<void> {
+  if (restoreEditSelection()) {
+    // Only plain family names reach the style attribute (no quotes/semicolons)
+    const safeFont = /^[\p{L}\p{N} ._-]{1,64}$/u.test(font) ? font : 'Cambria Math'
+    const escaped = char.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    if (
+      !document.execCommand(
+        'insertHTML',
+        false,
+        `<span style="font-family: ${safeFont}">${escaped}</span>`,
+      )
+    ) {
+      document.execCommand('insertText', false, char)
+    }
+    return
+  }
+  const { slide, current } = ctx
+  if (!slide) return
+  const w = 92
+  const h = 64
   const r = await window.slidesApi.addElement({
     slideIndex: current,
     kind: 'textbox',
@@ -400,17 +529,11 @@ export async function insertEquation(ctx: ActionCtx, text: string): Promise<void
     wPx: w,
     hPx: h,
     fitWidthPx: FIT_WIDTH,
-    paragraphs: [
-      {
-        align: 'center',
-        runs: [{ text, fontSize: 28, italic: true, fontFamily: 'Cambria Math' }],
-      },
-    ],
+    paragraphs: [{ runs: [{ text: char, fontFamily: font, fontSize: 28 }] }],
   })
   if (r) {
     ctx.applySlide(current, r.slide)
     ctx.setSelectedIds([r.sourceId])
-    ctx.setStatus(t('appStatusEquationInserted'))
   }
 }
 

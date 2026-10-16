@@ -4,7 +4,7 @@
  * Functions take the ActionCtx built fresh per call.
  */
 import type { ActionCtx } from './action-context'
-import type { CustomShow } from './slideshow-utils'
+import { showSetupOrder, type CustomShow } from './slideshow-utils'
 import { t } from './i18n/locale'
 import { shouldAskScreen } from './show-screen'
 
@@ -25,7 +25,14 @@ export function liftShowCurtain(): void {
  */
 export function startSlideShow(ctx: ActionCtx, fromStart: boolean): void {
   if (ctx.slides.length === 0 || ctx.slideShow || ctx.presenter) return
-  if (!ctx.usePresenterView) {
+  if (
+    !ctx.usePresenterView ||
+    ctx.showSetup.mode !== 'speaker' ||
+    ctx.showSetup.slides.kind !== 'all' ||
+    ctx.showSetup.loop ||
+    !ctx.showSetup.showAnimation ||
+    !ctx.showSetup.useTimings
+  ) {
     playFullScreen(ctx, fromStart)
     return
   }
@@ -55,29 +62,37 @@ function beginPresenterShow(ctx: ActionCtx, fromStart: boolean): void {
 }
 
 function playFullScreen(ctx: ActionCtx, fromStart: boolean): void {
-  dropShowCurtain()
+  const selected = showSetupOrder(ctx.showSetup, ctx.slides.length, ctx.customShows)
+  if (selected.length === 0) {
+    ctx.setStatus(t('appStatusCustomShowEmpty'))
+    return
+  }
+  if (ctx.showSetup.mode !== 'browse') dropShowCurtain()
   ctx.setEditing(null)
   ctx.setCtxMenu(null)
   // From start: jump to the first unhidden slide (if all hidden, still start at slide 1)
-  const first = ctx.slides.findIndex((s) => !s.hidden)
-  ctx.setSlideShow({ startAt: fromStart ? Math.max(0, first) : ctx.current })
+  const order = selected.filter((i) => !ctx.slides[i]?.hidden)
+  const first =
+    order[0] ??
+    Math.max(
+      0,
+      ctx.slides.findIndex((s) => !s.hidden),
+    )
+  const startAt = fromStart ? first : order.includes(ctx.current) ? ctx.current : first
+  ctx.setSlideShow({
+    startAt,
+    customOrder: selected,
+    mode: ctx.showSetup.mode,
+    loop: ctx.showSetup.loop,
+    showAnimation: ctx.showSetup.showAnimation,
+    useTimings: ctx.showSetup.useTimings,
+    showNarration: ctx.showSetup.showNarration,
+  })
 }
 
 export function exitSlideShow(ctx: ActionCtx, lastIndex: number): void {
   ctx.setSlideShow(null)
   ctx.setCurrent(lastIndex)
-}
-
-/** Update the custom show list overwrite-style and persist */
-export function updateCustomShows(ctx: ActionCtx, shows: CustomShow[]): void {
-  ctx.setCustomShows(shows)
-  if (ctx.path) {
-    try {
-      localStorage.setItem(`ai-slides-custom-shows:${ctx.path}`, JSON.stringify(shows))
-    } catch {
-      // Degrade to memory-only when localStorage is full/unavailable
-    }
-  }
 }
 
 /** Play a custom show: only its included slides (filtering out-of-range indexes stale after deletions) */
