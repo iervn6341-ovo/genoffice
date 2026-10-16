@@ -17,6 +17,7 @@ export type NumfmtCategory =
   | 'fraction'
   | 'scientific'
   | 'text'
+  | 'special'
   | 'custom'
 
 export type NegativeStyle = 'minus' | 'red' | 'parens' | 'red-parens'
@@ -32,6 +33,9 @@ export interface NumfmtOptions {
   readonly timePattern: string
   readonly fractionPattern: string
   readonly custom: string
+  /// Special category: the chosen locale and the type's format code.
+  readonly specialLocale: string
+  readonly special: string
 }
 
 export const NUMFMT_CATEGORIES: readonly NumfmtCategory[] = [
@@ -45,6 +49,7 @@ export const NUMFMT_CATEGORIES: readonly NumfmtCategory[] = [
   'fraction',
   'scientific',
   'text',
+  'special',
   'custom',
 ]
 
@@ -93,6 +98,82 @@ export const FRACTION_PATTERNS: readonly string[] = [
   '# ?/10',
 ]
 
+/// Format Cells → Number → Special: locale-keyed lists of fixed-layout codes (postal codes, phone
+/// and ID numbers, East-Asian numerals). Labels are i18n keys; locale names are endonyms.
+/// en-US is the Excel Mac list; the other locales use the standard Excel codes and were NOT
+/// re-verified against Excel Mac's dialog.
+export interface SpecialFormat {
+  readonly label: string
+  readonly pattern: string
+}
+
+export interface SpecialLocale {
+  readonly id: string
+  readonly name: string
+  readonly formats: readonly SpecialFormat[]
+}
+
+export const SPECIAL_LOCALES: readonly SpecialLocale[] = [
+  {
+    id: 'en-US',
+    name: 'English (United States)',
+    formats: [
+      { label: 'dlgFcSpZip', pattern: '00000' },
+      { label: 'dlgFcSpZip4', pattern: '00000\\-0000' },
+      { label: 'dlgFcSpPhone', pattern: '[<=9999999]###\\-####;\\(###\\) ###\\-####' },
+      { label: 'dlgFcSpSsn', pattern: '000\\-00\\-0000' },
+    ],
+  },
+  {
+    id: 'zh-TW',
+    name: '中文 (台灣)',
+    formats: [
+      { label: 'dlgFcSpNumeralLower', pattern: '[DBNum1][$-404]General' },
+      { label: 'dlgFcSpNumeralUpper', pattern: '[DBNum2][$-404]General' },
+      { label: 'dlgFcSpNumeralFull', pattern: '[DBNum3][$-404]General' },
+    ],
+  },
+  {
+    id: 'zh-CN',
+    name: '中文 (中国)',
+    formats: [
+      { label: 'dlgFcSpNumeralLower', pattern: '[DBNum1][$-804]General' },
+      { label: 'dlgFcSpNumeralUpper', pattern: '[DBNum2][$-804]General' },
+      { label: 'dlgFcSpNumeralFull', pattern: '[DBNum3][$-804]General' },
+    ],
+  },
+  {
+    id: 'ja-JP',
+    name: '日本語 (日本)',
+    formats: [
+      { label: 'dlgFcSpPostalJa', pattern: '[<=999]000;[<=99999]000\\-00;000\\-0000' },
+      { label: 'dlgFcSpNumeralLower', pattern: '[DBNum1][$-411]General' },
+      { label: 'dlgFcSpNumeralUpper', pattern: '[DBNum2][$-411]General' },
+      { label: 'dlgFcSpNumeralFull', pattern: '[DBNum3][$-411]General' },
+    ],
+  },
+  {
+    id: 'ko-KR',
+    name: '한국어 (대한민국)',
+    formats: [
+      { label: 'dlgFcSpNumeralLower', pattern: '[DBNum1][$-412]General' },
+      { label: 'dlgFcSpNumeralUpper', pattern: '[DBNum2][$-412]General' },
+      { label: 'dlgFcSpNumeralFull', pattern: '[DBNum4][$-412]General' },
+    ],
+  },
+]
+
+/// The locale + type a pattern belongs to, or null when it is not a Special code.
+export function specialFormatOf(
+  pattern: string,
+): { locale: SpecialLocale; format: SpecialFormat } | null {
+  for (const locale of SPECIAL_LOCALES) {
+    const format = locale.formats.find((candidate) => candidate.pattern === pattern)
+    if (format) return { locale, format }
+  }
+  return null
+}
+
 export const DEFAULT_NUMFMT_OPTIONS: NumfmtOptions = {
   category: 'general',
   decimals: 2,
@@ -103,6 +184,8 @@ export const DEFAULT_NUMFMT_OPTIONS: NumfmtOptions = {
   timePattern: 'h:mm:ss',
   fractionPattern: '# ?/?',
   custom: '',
+  specialLocale: 'en-US',
+  special: '00000',
 }
 
 export function clampDecimals(value: number): number {
@@ -167,6 +250,8 @@ export function numfmtPattern(options: NumfmtOptions): string {
       return `0${digits(options.decimals)}E+00`
     case 'text':
       return '@'
+    case 'special':
+      return options.special
     case 'custom':
       return options.custom
   }
@@ -178,6 +263,10 @@ export function numfmtOptionsOf(pattern: string): NumfmtOptions {
   const defaults = DEFAULT_NUMFMT_OPTIONS
   if (!pattern || pattern === 'General') return { ...defaults, category: 'general' }
   if (pattern === '@') return { ...defaults, category: 'text' }
+  const special = specialFormatOf(pattern)
+  if (special) {
+    return { ...defaults, category: 'special', specialLocale: special.locale.id, special: pattern }
+  }
   if (datePatterns().includes(pattern))
     return { ...defaults, category: 'date', datePattern: pattern }
   if (TIME_PATTERNS.includes(pattern))

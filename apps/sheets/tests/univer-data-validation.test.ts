@@ -1,4 +1,5 @@
 import { DataValidationRenderMode } from '@univerjs/core'
+import { applyDvRules } from '@genoffice/xlsx-gateway/gateway/xlsx-dv'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -25,7 +26,7 @@ describe('toUniverDvRule', () => {
   it('keeps plain text rendering without changing dropdown semantics', () => {
     expect(toUniverDvRule(listRule, 'file-dv-sheet-1-0')).toMatchObject({
       type: 'list',
-      formula1: 'Return,Exchange',
+      formula1: JSON.stringify(['Return', 'Exchange']),
       showDropDown: true,
       renderMode: DataValidationRenderMode.TEXT,
     })
@@ -61,10 +62,56 @@ describe('toUniverDvRule', () => {
     ).toMatchObject({ formula1: '1', formula2: '10' })
   })
 
-  it('trims the items of a literal list like Excel', () => {
+  it('preserves literal list labels including whitespace', () => {
     expect(
       toUniverDvRule({ ...listRule, formulas: ['"Yes, No"'] }, 'file-dv-sheet-1-0'),
-    ).toMatchObject({ formula1: 'Yes,No' })
+    ).toMatchObject({ formula1: JSON.stringify(['Yes', ' No']) })
+    expect(
+      toUniverDvRule({ ...listRule, formulas: ['"  Open  ,Closed "'] }, 'file-dv-sheet-1-0'),
+    ).toMatchObject({ formula1: JSON.stringify(['  Open  ', 'Closed ']) })
+  })
+
+  it('repairs quoted JSON lists written by the previous exporter', () => {
+    expect(
+      toUniverDvRule({ ...listRule, formulas: ['"["Open","Closed"]"'] }, 'file-dv-sheet-1-0'),
+    ).toMatchObject({ formula1: JSON.stringify(['Open', 'Closed']) })
+  })
+
+  it('round-trips a UI-authored JSON list through OOXML and the import mapping', () => {
+    const labels = ['  Open  ', 'Closed ']
+    const xml = applyDvRules('<worksheet><sheetData/></worksheet>', [
+      {
+        ranges: [{ startRow: 1, endRow: 3, startColumn: 1, endColumn: 1 }],
+        rule: {
+          type: 'list',
+          formula1: JSON.stringify(labels),
+          showDropDown: true,
+          showInputMessage: true,
+          prompt: 'Choose one',
+          showErrorMessage: true,
+          error: 'Invalid status',
+        },
+      },
+    ])
+    expect(xml).toContain('sqref="B2:B4"')
+    expect(xml).toContain('<formula1>"  Open  ,Closed "</formula1>')
+    const imported = toUniverDvRule(
+      {
+        ...listRule,
+        ranges: [{ startRow: 1, endRow: 3, startColumn: 1, endColumn: 1 }],
+        formulas: ['"  Open  ,Closed "'],
+        prompt: 'Choose one',
+        error: 'Invalid status',
+      },
+      'file-dv-sheet-1-0',
+    )
+    expect(imported).toMatchObject({
+      ranges: [{ startRow: 1, endRow: 3, startColumn: 1, endColumn: 1 }],
+      formula1: JSON.stringify(labels),
+      showDropDown: true,
+      prompt: 'Choose one',
+      error: 'Invalid status',
+    })
   })
 
   it('rewrites a defined name aliasing a table column to its data rows', () => {

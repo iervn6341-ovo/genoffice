@@ -6,6 +6,10 @@
 import { BorderStyleTypes } from '@univerjs/core'
 import { htmlLang, type Lang } from '@genoffice/i18n'
 import { columnIndex, columnLabel } from '@genoffice/xlsx-gateway/domain/cell-address'
+import {
+  DEFAULT_THEME_PALETTE,
+  resolveStyleColor,
+} from '@genoffice/xlsx-gateway/domain/style-color'
 
 import type { WorkbookExportPdfRequest } from '../shared/desktop-api'
 import type { HeaderFooterParts } from './edit-journal'
@@ -15,6 +19,13 @@ import {
   MIN_PRINT_SCALE,
   type PrintAreaHeights,
 } from './print-scale'
+import {
+  firstPageOffset,
+  printedErrorText,
+  verticalCenterPadding,
+  type PrintOnlyOptions,
+} from './print-options'
+import { headerFooterColorAt } from './print-settings'
 import type { EffectivePageSetup, HeaderFooterPair, PrintMargins } from './print-settings'
 import type { PrintVisual, PrintVisualSnapshot } from './print-visuals'
 import { getLang, t } from './i18n/locale'
@@ -167,6 +178,10 @@ export function buildSheetPrintPayload(
   sheetName: string,
   pictures: HeaderFooterPictures = new Map(),
   visuals: PrintVisualSnapshot = { visuals: [], css: '' },
+  sourceWorkbookName?: string,
+  sourceWorkbookPath?: string,
+  themeColors: readonly string[] = DEFAULT_THEME_PALETTE,
+  options: PrintOnlyOptions = {},
 ): WorkbookExportPdfRequest {
   const areas =
     setup.printAreas.length > 0
@@ -174,7 +189,8 @@ export function buildSheetPrintPayload(
       : [usedArea(worksheet, visuals.visuals)]
   const titles = setup.printTitles ? parseTitleRows(setup.printTitles) : null
   const headings = setup.printHeadings
-  const gridlines = setup.printGridlines
+  // draft quality prints no gridlines (and no drawings: the caller passes none)
+  const gridlines = setup.printGridlines && options.draft !== true
   const rowHeaderPt = headings ? 24 : 0
 
   let totalCells = 0
@@ -187,8 +203,9 @@ export function buildSheetPrintPayload(
   if (totalCells > MAX_PRINT_CELLS) throw new PrintError(t('appPrintTooLarge'))
 
   let maxContentWidthPt = 0
-  const tables: string[] = []
+  const tables: Array<(padTopPt: number) => string> = []
   const areaHeights: PrintAreaHeights[] = []
+  const areaContentPt: number[] = []
   for (const area of areas) {
     const rows = area.endRow - area.startRow + 1
     const columns = area.endColumn - area.startColumn + 1
@@ -234,9 +251,12 @@ export function buildSheetPrintPayload(
             ` colspan="${Math.min(anchor.columns, area.endColumn - column + 1)}"`
           : ''
         const inArea = row >= area.startRow && row <= area.endRow
-        const text = inArea
-          ? (display[row - area.startRow]?.[column - area.startColumn] ?? '')
-          : cellDisplay(worksheet, row, column)
+        const text = printedErrorText(
+          inArea
+            ? (display[row - area.startRow]?.[column - area.startColumn] ?? '')
+            : cellDisplay(worksheet, row, column),
+          options.errorsAs,
+        )
         const rawValue = inArea ? raw[row - area.startRow]?.[column - area.startColumn] : undefined
         const style = worksheet.getRange(row, column).getCellStyleData()
         if (text !== '' && !anchor) {
@@ -283,6 +303,7 @@ export function buildSheetPrintPayload(
       topPt += printedRowHeightPt
     }
     areaHeights.push({ repeatedHeightPt, rowHeightsPt })
+    areaContentPt.push(repeatedHeightPt + rowHeightsPt.reduce((total, h) => total + h, 0))
 
     const overlays = visuals.visuals
       .filter(
@@ -297,9 +318,30 @@ export function buildSheetPrintPayload(
       .map((width) => `<col style="width:${round(width)}pt">`)
       .join('')}</colgroup>`
     tables.push(
-      `<div class="area"><table>${colgroup}<thead>${headParts.join('')}</thead><tbody>${bodyParts.join('')}</tbody></table>${overlays.join('')}</div>`,
+      (padTopPt: number) =>
+        `<div class="area"${padTopPt > 0 ? ` style="padding-top:${round(padTopPt)}pt"` : ''}><table>${colgroup}<thead>${headParts.join('')}</thead><tbody>${bodyParts.join('')}</tbody></table>${overlays.join('')}</div>`,
     )
   }
+
+  const margins = setup.margins
+  const pageSize = PAPER_SIZES[setup.paperSize] ?? 'A4'
+  const landscape = setup.orientation === 'landscape'
+  const scale = computeScale(setup, pageSize, landscape, margins, maxContentWidthPt, areaHeights)
+  // page capacity along the flow, in unscaled CSS points (Chromium lays out at page / scale)
+  const [paperWidthIn, paperHeightIn] =
+    typeof pageSize === 'string'
+      ? [PAPER_WIDTH_INCHES[pageSize] ?? 8.27, paperHeightInches(pageSize)]
+      : [pageSize.width, pageSize.height]
+  const downIn = landscape ? paperWidthIn : paperHeightIn
+  const capacityPt = ((downIn - margins.top - margins.bottom) * 72) / scale
+  const areaHtml = tables.map((render, index) =>
+    render(
+      options.centerVertically === true
+        ? verticalCenterPadding(areaContentPt[index] ?? 0, capacityPt)
+        : 0,
+    ),
+  )
+  const bw = options.blackAndWhite === true
 
   const html =
     `<!doctype html><html lang="${htmlLang(getLang())}"><head><meta charset="utf-8"><style>
@@ -307,7 +349,7 @@ export function buildSheetPrintPayload(
 body { margin: 0; font-family: Calibri, 'Helvetica Neue', Arial, ${printCjkFonts(getLang())}, sans-serif; }
 table { border-collapse: collapse; table-layout: fixed; }
 .area { position: relative; }
-.area + .area { break-before: page; }
+${options.centerHorizontally === true ? '.area { width: max-content; margin-left: auto; margin-right: auto; }\n' : ''}${bw ? 'td, th { color: #000 !important; background: transparent !important; }\ntd { border-color: #000 !important; }\n.pv { filter: grayscale(1) contrast(1.2); }\n' : ''}.area + .area { break-before: page; }
 .pv { position: absolute; overflow: hidden; break-inside: avoid; }
 .xlsx-print-visual { display: block; width: 100%; height: 100%; }
 thead { display: table-header-group; }
@@ -315,15 +357,12 @@ td, th { overflow: hidden; padding: 1pt 3pt; font-size: 11pt; vertical-align: bo
 th.hd { background: #f1f1f1; border: 0.5pt solid #b7b7b7; color: #444;
   font-size: 8.5pt; font-weight: 400; text-align: center; vertical-align: middle; }
 </style>${visuals.css ? `<style>${visuals.css}</style>` : ''}</head><body>` +
-    tables.join('') +
+    areaHtml.join('') +
     `</body></html>`
 
-  const margins = setup.margins
-  const pageSize = PAPER_SIZES[setup.paperSize] ?? 'A4'
-  const landscape = setup.orientation === 'landscape'
   const now = new Date()
-  const baseName = fileName.replace(/\.pdf$/, '')
-  const scale = computeScale(setup, pageSize, landscape, margins, maxContentWidthPt, areaHeights)
+  const baseName = sourceWorkbookName ?? fileName.replace(/\.pdf$/, '')
+  const pageBase = firstPageOffset(options)
   // Excel's "scale with document" (the default) shrinks the header/footer
   // text and pictures by the same factor as the sheet.
   const templateScale = setup.headerFooterScaleWithDoc ? scale : 1
@@ -338,6 +377,9 @@ th.hd { background: #f1f1f1; border: 0.5pt solid #b7b7b7; color: #444;
           now,
           sectionPictures(pictures, 'header', variant),
           templateScale,
+          sourceWorkbookPath,
+          themeColors,
+          pageBase,
         )
       : undefined
     const footerTemplate = pair.footer
@@ -350,6 +392,9 @@ th.hd { background: #f1f1f1; border: 0.5pt solid #b7b7b7; color: #444;
           now,
           sectionPictures(pictures, 'footer', variant),
           templateScale,
+          sourceWorkbookPath,
+          themeColors,
+          pageBase,
         )
       : undefined
     return {
@@ -406,12 +451,25 @@ export function buildHeaderFooterTemplate(
   now: Date,
   pictures: SectionPictures = {},
   scale = 1,
+  filePath?: string,
+  themeColors: readonly string[] = DEFAULT_THEME_PALETTE,
+  pageBase = 0,
 ): string | undefined {
   const sections = [parts.left ?? '', parts.center ?? '', parts.right ?? '']
   if (sections.every((text) => text === '')) return undefined
   const sectionPicture = [pictures.left, pictures.center, pictures.right]
   const rendered = sections.map((text, index) =>
-    renderHeaderFooterHtml(text, fileName, sheetName, now, sectionPicture[index], scale),
+    renderHeaderFooterHtml(
+      text,
+      fileName,
+      sheetName,
+      now,
+      sectionPicture[index],
+      scale,
+      filePath,
+      themeColors,
+      pageBase,
+    ),
   )
   const fontSizePt = round(HEADER_FOOTER_FONT_SIZE_PT * scale)
   // Excel offsets the header/footer from the paper edge by its own margin.
@@ -419,6 +477,13 @@ export function buildHeaderFooterTemplate(
     kind === 'header'
       ? `padding-top:${round(margins.header)}in`
       : `padding-bottom:${round(margins.footer)}in`
+  // Chromium's print template adds 15pt of padding to #header/#footer. Reset
+  // that wrapper so the workbook's own header/footer margin is measured from
+  // the paper edge exactly once, including for tall &G pictures.
+  const resetChromeInset =
+    kind === 'header'
+      ? '<style>#header{padding-top:0!important}</style>'
+      : '<style>#footer{padding-bottom:0!important}</style>'
   // Equal thirds like Excel's sections; an oversized picture or unbreakable
   // text overflows its neighbours instead of squeezing them.
   const spanStyle = 'flex:1;min-width:0;white-space:pre-wrap'
@@ -426,6 +491,7 @@ export function buildHeaderFooterTemplate(
   // border-box the width:100% + side padding overflows the page and
   // shifts/clips the sections.
   return (
+    resetChromeInset +
     `<div style="box-sizing:border-box;display:flex;width:100%;font-size:${fontSizePt}pt;color:#000;` +
     `font-family:Calibri,'Helvetica Neue',Arial,sans-serif;` +
     `padding-left:${round(margins.left)}in;padding-right:${round(margins.right)}in;${offset}">` +
@@ -446,11 +512,41 @@ export function renderHeaderFooterHtml(
   now: Date,
   picture?: HeaderFooterPictureImage,
   scale = 1,
+  filePath?: string,
+  themeColors: readonly string[] = DEFAULT_THEME_PALETTE,
+  /// First page number − 1: added to every &P.
+  pageBase = 0,
 ): string {
   let html = ''
   let literal = ''
+  let fontSize: number | null = null
+  let fontFamily: string | null = null
+  let color: string | null = null
+  let bold = false
+  let italic = false
+  let underline = false
+  let doubleUnderline = false
+  let strike = false
+  let baseline: 'super' | 'sub' | null = null
+  const styled = (content: string): string => {
+    const styles = [
+      fontSize === null ? '' : `font-size:${fontSize}pt`,
+      fontFamily === null ? '' : `font-family:${cssQuotedFontFamily(fontFamily)}`,
+      color === null ? '' : `color:${color}`,
+      bold ? 'font-weight:bold' : '',
+      italic ? 'font-style:italic' : '',
+      underline || doubleUnderline || strike
+        ? `text-decoration:${[underline || doubleUnderline ? 'underline' : '', strike ? 'line-through' : ''].filter(Boolean).join(' ')}`
+        : '',
+      doubleUnderline ? 'text-decoration-style:double' : '',
+      baseline === null ? '' : `vertical-align:${baseline}`,
+    ].filter(Boolean)
+    return styles.length === 0
+      ? content
+      : `<span style="${escapeAttribute(styles.join(';'))}">${content}</span>`
+  }
   const flush = (): void => {
-    html += escapeHtml(literal)
+    if (literal !== '') html += styled(escapeHtml(literal))
     literal = ''
   }
   for (let index = 0; index < text.length; index += 1) {
@@ -465,17 +561,35 @@ export function renderHeaderFooterHtml(
       break
     }
     index += 1
+    if (/[0-9]/.test(code)) {
+      flush()
+      let digits = code
+      while (/[0-9]/.test(text[index + 1] ?? '')) digits += text[++index]
+      const size = Number(digits)
+      if (size >= 1 && size <= 409) fontSize = size * scale
+      continue
+    }
     switch (code) {
       case '&':
         literal += '&'
         break
       case 'P':
         flush()
-        html += '<span class="pageNumber"></span>'
+        {
+          const explicit = /^[+-]\d+/.exec(text.slice(index + 1))?.[0]
+          const shift = pageBase + (explicit === undefined ? 0 : Number(explicit))
+          if (explicit !== undefined) index += explicit.length
+          if (shift !== 0) {
+            const signed = `${shift < 0 ? '-' : '+'}${Math.abs(shift)}`
+            html += styled(`<span data-genoffice-page-offset="${signed}"></span>`)
+          } else {
+            html += styled('<span class="pageNumber"></span>')
+          }
+        }
         break
       case 'N':
         flush()
-        html += '<span class="totalPages"></span>'
+        html += styled('<span class="totalPages"></span>')
         break
       case 'D':
         literal += now.toLocaleDateString()
@@ -495,12 +609,87 @@ export function renderHeaderFooterHtml(
           html += pictureHtml(picture, scale)
         }
         break
+      case 'B':
+        flush()
+        bold = !bold
+        break
+      case 'I':
+        flush()
+        italic = !italic
+        break
+      case 'U':
+        flush()
+        underline = !underline
+        break
+      case 'E':
+        flush()
+        doubleUnderline = !doubleUnderline
+        break
+      case 'S':
+        flush()
+        strike = !strike
+        break
+      case 'X':
+        flush()
+        baseline = baseline === 'super' ? null : 'super'
+        break
+      case 'Y':
+        flush()
+        baseline = baseline === 'sub' ? null : 'sub'
+        break
+      case '"': {
+        const close = text.indexOf('"', index + 1)
+        if (close !== -1) {
+          flush()
+          const [family, fontStyle] = text.slice(index + 1, close).split(',', 2)
+          fontFamily = family && safeHeaderFontFamily(family) ? family : null
+          bold = /bold/i.test(fontStyle ?? '')
+          italic = /italic/i.test(fontStyle ?? '')
+          index = close
+        }
+        break
+      }
+      case 'K': {
+        flush()
+        const spec = headerFooterColorAt(text, index + 1)
+        if (spec?.kind === 'rgb') color = spec.value
+        if (spec?.kind === 'theme') {
+          color = resolveStyleColor({ theme: spec.theme, tint: spec.tint }, themeColors)
+        }
+        index += spec?.length ?? 0
+        break
+      }
+      case 'Z':
+        if (filePath) literal += filePath.replace(/[\\/][^\\/]*$/, '')
+        break
+      case 'O':
+      case 'H':
+      case 'L':
+      case 'C':
+      case 'R':
+        break
       default:
-        literal += `&${code}`
+        // Unknown Excel control codes are preserved in the workbook but do
+        // not become visible text in the PDF margin.
+        break
     }
   }
   flush()
   return html
+}
+
+function cssQuotedFontFamily(family: string): string {
+  return `'${family.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+}
+
+function safeHeaderFontFamily(family: string): boolean {
+  return (
+    family.length <= 100 &&
+    ![...family].some((character) => {
+      const code = character.codePointAt(0) ?? 0
+      return code < 32 || code === 127 || code === 0x2028 || code === 0x2029
+    })
+  )
 }
 
 /// The picture at its declared size times the print scale (points → CSS px
@@ -582,7 +771,7 @@ function visualOverlayHtml(
   return `<div class="pv" style="${style}"><div style="${inner}">${visual.html}</div></div>`
 }
 
-function parseArea(area: string) {
+export function parseArea(area: string) {
   const match = /^\$?([A-Za-z]{1,3})\$?(\d{1,7}):\$?([A-Za-z]{1,3})\$?(\d{1,7})$/.exec(area)
   if (!match) throw new PrintError(t('appPrintBadArea', { area }))
   return {

@@ -11,7 +11,7 @@ pub(crate) fn index_worksheet(
     sheet_index: usize,
     cache_directory: &Path,
     shared_strings: &[SharedString],
-    styled_xfs: &[bool],
+    _styled_xfs: &[bool],
     colors: &ColorContext,
     rich_image_cells: &HashSet<(usize, usize)>,
     state: &Arc<(Mutex<SheetIndex>, Condvar)>,
@@ -142,7 +142,7 @@ pub(crate) fn index_worksheet(
                         chunk_index = cell_chunk;
                     }
                     if let Some(cell) =
-                        builder.finish(shared_strings, styled_xfs, rich_image_cells)?
+                        builder.finish(shared_strings, rich_image_cells)?
                     {
                         chunk.cells.push(cell);
                     }
@@ -318,7 +318,7 @@ pub(crate) fn index_worksheet(
                         chunk_index = cell_chunk;
                     }
                     if let Some(cell) =
-                        builder.finish(shared_strings, styled_xfs, rich_image_cells)?
+                        builder.finish(shared_strings, rich_image_cells)?
                     {
                         if cell.formula.is_some() {
                             pending_formulas.push(cell.clone());
@@ -1163,7 +1163,6 @@ pub(crate) fn row_property<R: std::io::BufRead>(
     // the attribute is leftover noise Excel ignores). xf 0 is the default.
     let style_index = attribute_value(reader, element, b"s")?
         .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
         .filter(|_| {
             matches!(
                 attribute_value(reader, element, b"customFormat")
@@ -1271,7 +1270,6 @@ impl CellBuilder {
     fn finish(
         self,
         shared_strings: &[SharedString],
-        styled_xfs: &[bool],
         rich_image_cells: &HashSet<(usize, usize)>,
     ) -> Result<Option<CellRecord>, SidecarError> {
         let formula = if self.formula.is_empty() {
@@ -1328,15 +1326,14 @@ impl CellBuilder {
                 }
             },
         };
-        // Unknown indices keep the cell so a bad styles part can't drop data.
-        let styled = self
-            .style_index
-            .is_some_and(|index| styled_xfs.get(index).copied().unwrap_or(true));
-        if value.is_none() && formula.is_none() && !styled {
+        // Any explicit s= (including 0 or an xf identical to Normal) blocks
+        // row/column inheritance, so retain its otherwise blank cell record.
+        if value.is_none() && formula.is_none() && self.style_index.is_none() {
             return Ok(None);
         }
         // A <c> without s= uses cellXfs[0] (the Normal xf), which may differ
         // from the renderer's built-in default font.
+        let explicit_style = self.style_index.is_some();
         let style_index = Some(self.style_index.unwrap_or(0));
         Ok(Some(CellRecord {
             row: self.row,
@@ -1349,6 +1346,7 @@ impl CellBuilder {
             },
             formula,
             style_index,
+            explicit_style,
             rich,
         }))
     }

@@ -17,6 +17,8 @@ const portrait = {
   printTitles: null,
   header: null,
   footer: null,
+  firstPage: { enabled: false, parts: null },
+  evenPages: { enabled: false, parts: null },
 }
 
 describe('⌘Z after a save writes the difference back into the journal', () => {
@@ -94,5 +96,55 @@ describe('manual page breaks come back after a save too', () => {
     expect(
       pageSetupPatch({ ...portrait, breaks: breaks([3]) }, { ...portrait, breaks: null }),
     ).toEqual({})
+  })
+})
+
+describe('header/footer variant history across a save', () => {
+  const firstOld = { header: { center: 'First old &P+2' }, footer: null }
+  const firstNew = { header: { center: 'First new &P+2' }, footer: null }
+  const evenOld = { header: { center: 'Even old' }, footer: { right: 'Page &P' } }
+  const evenNew = { header: { center: 'Even new' }, footer: null }
+
+  it('restores enabled first/even contents after their edit was saved', () => {
+    const before = {
+      ...portrait,
+      firstPage: { enabled: true, parts: firstOld },
+      evenPages: { enabled: true, parts: evenOld },
+    }
+    const saved = {
+      ...portrait,
+      firstPage: { enabled: true, parts: firstNew },
+      evenPages: { enabled: true, parts: evenNew },
+    }
+    expect(pageSetupPatch(saved, before)).toEqual({ firstPage: firstOld, evenPages: evenOld })
+    expect(pageSetupPatch(before, saved)).toEqual({ firstPage: firstNew, evenPages: evenNew })
+  })
+
+  it('disables variants and restores their hidden contents independently', () => {
+    const before = {
+      ...portrait,
+      firstPage: { enabled: false, parts: firstOld },
+      evenPages: { enabled: false, parts: evenOld },
+    }
+    const saved = {
+      ...portrait,
+      firstPage: { enabled: true, parts: firstNew },
+      evenPages: { enabled: true, parts: evenNew },
+    }
+    expect(pageSetupPatch(saved, before)).toEqual({
+      firstPage: null,
+      firstPageStored: firstOld,
+      evenPages: null,
+      evenPagesStored: evenOld,
+    })
+    expect(pageSetupPatch(before, saved)).toEqual({ firstPage: firstNew, evenPages: evenNew })
+  })
+
+  it('does not emit a disable edit for an already disabled variant with unchanged hidden text', () => {
+    const before = { ...portrait, firstPage: { enabled: false, parts: firstOld } }
+    expect(pageSetupPatch(before, before)).toEqual({})
+    expect(
+      pageSetupPatch({ ...portrait, firstPage: { enabled: false, parts: firstNew } }, before),
+    ).toEqual({ firstPageStored: firstOld })
   })
 })

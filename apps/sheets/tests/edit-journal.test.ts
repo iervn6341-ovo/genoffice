@@ -17,6 +17,7 @@ import {
   recordProtectedRangesChange,
   recordSetNumfmt,
   recordSetRangeValues,
+  restoreJournalCellSnapshot,
   recordThemeColors,
   recordThemeFonts,
   recordWorkbookProtection,
@@ -751,6 +752,41 @@ describe('recordStructuralOp', () => {
 })
 
 describe('toSaveEdits', () => {
+  it('restores pre-edit formatting after a full-null undo so redo does not create XF0', () => {
+    const journal = createEditJournal()
+    const initial = journal.cells.get('sheet-1')?.get('7:6') ?? null
+    recordSetRangeValues(journal, 'sheet-1', { 7: { 6: { v: 'ONE\nTWO\nTHREE' } } })
+    recordSetRangeValues(journal, 'sheet-1', {
+      7: { 6: { s: null, f: null, si: null, p: null, v: null, t: null, custom: null } },
+    })
+    expect(toSaveEdits(journal)[0]?.styleReset).toBe(true)
+    restoreJournalCellSnapshot(journal, 'sheet-1', 7, 6, initial)
+    expect(toSaveEdits(journal)).toEqual([])
+    recordSetRangeValues(journal, 'sheet-1', {
+      7: { 6: { v: 'ONE\nTWO\nTHREE', p: null, f: null } },
+    })
+    expect(toSaveEdits(journal)).toEqual([
+      {
+        sheetId: 'sheet-1',
+        row: 7,
+        column: 6,
+        writeValue: true,
+        value: 'ONE\nTWO\nTHREE',
+      },
+    ])
+
+    const priorReset = createEditJournal()
+    recordSetRangeValues(priorReset, 'sheet-1', { 7: { 6: { s: null } } })
+    const beforeValue = priorReset.cells.get('sheet-1')?.get('7:6') ?? null
+    recordSetRangeValues(priorReset, 'sheet-1', { 7: { 6: { v: 'ONE\nTWO' } } })
+    recordSetRangeValues(priorReset, 'sheet-1', {
+      7: { 6: { s: null, f: null, si: null, p: null, v: null, t: null, custom: null } },
+    })
+    restoreJournalCellSnapshot(priorReset, 'sheet-1', 7, 6, beforeValue)
+    recordSetRangeValues(priorReset, 'sheet-1', { 7: { 6: { v: 'ONE\nTWO', p: null, f: null } } })
+    expect(toSaveEdits(priorReset)[0]?.styleReset).toBe(true)
+  })
+
   it('flattens the journal into IPC-ready edits', () => {
     const journal = createEditJournal()
     recordSetRangeValues(journal, 'sheet-1', { 0: { 0: { v: 'a' }, 1: { f: '=SUM(A1)' } } })

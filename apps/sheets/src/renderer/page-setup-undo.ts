@@ -3,8 +3,10 @@ import { withJournalUndo, type JournalUndoContext, type JournalUndoKind } from '
 import { effectivePageBreaks } from './page-break-preview'
 import {
   MARGIN_PRESETS,
+  resolveHeaderFooterEditVariants,
   resolveEffectivePageSetup,
   type EffectivePageSetup,
+  type HeaderFooterEditVariant,
 } from './print-settings'
 import type { LazyWorkbookState } from './univer-state'
 
@@ -39,6 +41,16 @@ interface PageSetupSnapshot {
     | 'header'
     | 'footer'
   > & {
+    firstPage: HeaderFooterEditVariant
+    evenPages: HeaderFooterEditVariant
+    headerFooterPictures?: Array<{
+      id: string
+      position: string
+      widthPt: number
+      heightPt: number
+      mediaType: string
+      base64?: string
+    }>
     /// the manual page breaks in screen coordinates; null until the sheet is indexed
     breaks?: PageBreakSet | null
   }
@@ -65,10 +77,37 @@ export function effectiveSetupOf(state: LazyWorkbookState, sheetId: string): Eff
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
+function pictureMime(
+  value: string,
+): value is NonNullable<
+  NonNullable<NonNullable<PageSetupJournalState['headerFooterPictureEdits']>[number]['image']>
+>['mediaType'] {
+  return [
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/x-emf',
+    'image/x-wmf',
+    'image/bmp',
+    'image/webp',
+    'image/svg+xml',
+    'image/x-emz',
+    'image/x-wmz',
+  ].includes(value)
+}
+
+function storedVariantsOf(state: LazyWorkbookState, sheetId: string) {
+  return resolveHeaderFooterEditVariants(
+    state.editJournal.pageSetup.get(sheetId) ?? {},
+    state.sheetFilePageSetups.get(sheetId) ?? null,
+  )
+}
+
 /** the journal fields that bring the setup in force back to `wanted` */
 export function pageSetupPatch(
   now: PageSetupSnapshot['effective'],
   wanted: PageSetupSnapshot['effective'],
+  picturePositions?: ReadonlySet<string>,
 ): PageSetupJournalState {
   const patch: PageSetupJournalState = {}
   if (now.orientation !== wanted.orientation) patch.orientation = wanted.orientation
@@ -102,12 +141,56 @@ export function pageSetupPatch(
   }
   if (!same(now.header, wanted.header)) patch.header = wanted.header
   if (!same(now.footer, wanted.footer)) patch.footer = wanted.footer
+  const restoreVariant = (key: 'firstPage' | 'evenPages'): void => {
+    const current = now[key]
+    const target = wanted[key]
+    if (same(current, target)) return
+    if (target.enabled) {
+      patch[key] = target.parts ?? { header: null, footer: null }
+      return
+    }
+    if (current.enabled) patch[key] = null
+    if (!same(current.parts, target.parts)) {
+      patch[key === 'firstPage' ? 'firstPageStored' : 'evenPagesStored'] = target.parts
+    }
+  }
+  restoreVariant('firstPage')
+  restoreVariant('evenPages')
+  const currentPictures = new Map(
+    (now.headerFooterPictures ?? []).map((picture) => [picture.position, picture]),
+  )
+  const wantedPictures = new Map(
+    (wanted.headerFooterPictures ?? []).map((picture) => [picture.position, picture]),
+  )
+  const pictureEdits: NonNullable<PageSetupJournalState['headerFooterPictureEdits']> = []
+  for (const position of new Set([...currentPictures.keys(), ...wantedPictures.keys()])) {
+    if (picturePositions && !picturePositions.has(position)) continue
+    const current = currentPictures.get(position)
+    const target = wantedPictures.get(position)
+    if (same(current, target)) continue
+    if (!target) {
+      pictureEdits.push({ position, image: null })
+    } else if (target.base64 !== undefined && pictureMime(target.mediaType)) {
+      pictureEdits.push({
+        position,
+        image: { mediaType: target.mediaType, base64: target.base64 },
+        widthPt: target.widthPt,
+        heightPt: target.heightPt,
+      })
+    } else if (current?.id === target.id) {
+      pictureEdits.push({ position, widthPt: target.widthPt, heightPt: target.heightPt })
+    }
+  }
+  if (pictureEdits.length > 0) patch.headerFooterPictureEdits = pictureEdits
   return patch
 }
 
 const pickEffective = (
+  state: LazyWorkbookState,
+  sheetId: string,
   setup: EffectivePageSetup,
   breaks: PageBreakSet | null,
+  variants: ReturnType<typeof storedVariantsOf>,
 ): PageSetupSnapshot['effective'] => ({
   orientation: setup.orientation,
   paperSize: setup.paperSize,
@@ -122,6 +205,21 @@ const pickEffective = (
   printTitles: setup.printTitles,
   header: setup.header,
   footer: setup.footer,
+  firstPage: variants.firstPage,
+  evenPages: variants.evenPages,
+  headerFooterPictures: setup.headerFooterPictures.map((picture) => {
+    const pending = state.editJournal.pageSetup
+      .get(sheetId)
+      ?.headerFooterPictureEdits?.find((edit) => edit.position === picture.position)?.image
+    const source =
+      pending && pending !== null
+        ? pending
+        : state.headerFooterPictureData.get(sheetId)?.get(picture.position)
+    return {
+      ...picture,
+      ...(source ? { base64: source.base64 } : {}),
+    }
+  }),
   breaks,
 })
 
@@ -132,18 +230,46 @@ const pageSetupKind: JournalUndoKind<PageSetupSnapshot> = {
     return structuredClone({
       journal: value ? structuredClone(value) : null,
       effective: pickEffective(
+        state,
+        sheetId,
         effectiveSetupOf(state, sheetId),
         effectivePageBreaks(state, sheetId),
+        storedVariantsOf(state, sheetId),
       ),
     })
   },
-  restore: (state, sheetId, snapshot, ctx) => {
+  restore: (state, sheetId, snapshot, ctx, companion) => {
     if (snapshot.journal) state.editJournal.pageSetup.set(sheetId, snapshot.journal)
     else state.editJournal.pageSetup.delete(sheetId)
     // after a save the journal cannot say what the file now lacks: write the difference back
+    const picturePositions = new Set<string>()
+    if (companion) {
+      const before = new Map(
+        (snapshot.effective.headerFooterPictures ?? []).map((picture) => [
+          picture.position,
+          picture,
+        ]),
+      )
+      const after = new Map(
+        (companion.effective.headerFooterPictures ?? []).map((picture) => [
+          picture.position,
+          picture,
+        ]),
+      )
+      for (const position of new Set([...before.keys(), ...after.keys()])) {
+        if (!same(before.get(position), after.get(position))) picturePositions.add(position)
+      }
+    }
     const patch = pageSetupPatch(
-      pickEffective(effectiveSetupOf(state, sheetId), effectivePageBreaks(state, sheetId)),
+      pickEffective(
+        state,
+        sheetId,
+        effectiveSetupOf(state, sheetId),
+        effectivePageBreaks(state, sheetId),
+        storedVariantsOf(state, sheetId),
+      ),
       snapshot.effective,
+      picturePositions,
     )
     if (Object.keys(patch).length > 0) recordPageSetup(state.editJournal, sheetId, patch)
     ctx.setPendingEdits(journalSize(state.editJournal))

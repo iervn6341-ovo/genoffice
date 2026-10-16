@@ -70,6 +70,7 @@ import { getLang, useI18n, type StringKey } from './i18n/locale'
 import { NameManagerDialog, type DefinedNameAction, type DefinedNameRow } from './NameManagerDialog'
 import { categoryOptionForPattern, numberFormatCategories } from './number-format'
 import { type SelectionFormat } from './selection-format'
+import type { SelectionProtection } from './selection-protection'
 import { fontFamilyGroups, useSystemFontFamilies } from './system-fonts'
 import { isGridKeyTarget, shouldInterceptClearSelection } from './clear-selection-keyboard'
 
@@ -92,6 +93,8 @@ import { SubtotalDialog, type SubtotalConfig } from './SubtotalDialog'
 import { ConsolidateDialog } from './ConsolidateDialog'
 import type { ConsolidateConfig } from './consolidate'
 import { HeaderFooterDialog, type HeaderFooterResult } from './HeaderFooterDialog'
+import { TextToColumnsDialog, type TextToColumnsChoice } from './TextToColumnsDialog'
+import type { TextToColumnsError, TextToColumnsSeed } from './text-to-columns'
 import type { HeaderFooterParts } from './edit-journal'
 import { useDialogEscape } from './use-dialog-escape'
 
@@ -293,6 +296,7 @@ interface ExcelShellProps {
   readonly formulaBarVisible: boolean
   /// Cross-highlight ("reading mode") of the active row/column, echoed by the View checkbox.
   readonly crossHighlightVisible: boolean
+  readonly contentDark: boolean
   /// Allow-edit ranges of the active sheet, read when the dialog opens.
   readonly onGetProtectedRanges: () => {
     ranges: readonly { name: string; sqref: string; hasPassword: boolean }[]
@@ -311,6 +315,12 @@ interface ExcelShellProps {
   /// Subtotals use the selection; pivots pass their resolved source range.
   readonly onGetPivotFields: (sourceRange?: string) => PivotField[]
   readonly onGetSourceRange: () => string
+  readonly onGetTextToColumnsSeed: () => TextToColumnsSeed | null
+  readonly onApplyTextToColumns: (
+    seed: TextToColumnsSeed,
+    choice: TextToColumnsChoice,
+    overwrite: boolean,
+  ) => TextToColumnsError | 'sourceChanged' | 'confirmOverwrite' | null
   readonly onCreatePivot: (config: OoXmlPivotConfig) => string | null
   /// A3 editing of an existing pivot: when it returns null, App has already shown
   /// the reason and the dialog is not opened.
@@ -328,6 +338,11 @@ interface ExcelShellProps {
   /// Value of the selection's top-left cell, read when Format Cells opens
   /// (number-format preview).
   readonly onGetAnchorValue: () => number | string | null
+  readonly onGetSelectionProtection: () => Promise<SelectionProtection | null>
+  readonly onApplySelectionProtection: (
+    command: string,
+    selection: SelectionProtection | null,
+  ) => void
   /// Fill → Series…: the selection's default axis and whether its first cell is a date
   readonly onGetFillSeriesSeed: () => FillSeriesSeed | null
   /// the other shown sheets, for Fill → Across Worksheets
@@ -374,6 +389,22 @@ export interface PageLayoutEcho {
   readonly printTitles?: string | null | undefined
   readonly header?: HeaderFooterParts | null | undefined
   readonly footer?: HeaderFooterParts | null | undefined
+  readonly firstPage?:
+    | { readonly header: HeaderFooterParts | null; readonly footer: HeaderFooterParts | null }
+    | null
+    | undefined
+  readonly evenPages?:
+    | { readonly header: HeaderFooterParts | null; readonly footer: HeaderFooterParts | null }
+    | null
+    | undefined
+  readonly firstPageEnabled?: boolean | undefined
+  readonly evenPagesEnabled?: boolean | undefined
+  readonly headerFooterSessionId?: string | null | undefined
+  readonly headerFooterSheetId?: string | null | undefined
+  readonly headerFooterPictures?:
+    readonly import('./print-settings').HeaderFooterPictureSlot[] | undefined
+  readonly headerFooterPictureEdits?:
+    readonly import('./edit-journal').HeaderFooterPictureEdit[] | undefined
   /// Page Break Preview overlay on for the active sheet (View tab echo).
   readonly pageBreakPreview?: boolean | undefined
 }
@@ -397,12 +428,15 @@ export function ExcelShell({
   onGetWorkbookProtection,
   formulaBarVisible,
   crossHighlightVisible,
+  contentDark,
   onGetProtectedRanges,
   onApplyProtectedRanges,
   onGetDefinedNames,
   onDefinedNameAction,
   onGetPivotFields,
   onGetSourceRange,
+  onGetTextToColumnsSeed,
+  onApplyTextToColumns,
   onCreatePivot,
   onGetPivotEditSeed,
   onEditPivot,
@@ -411,6 +445,8 @@ export function ExcelShell({
   onGetActiveCell,
   onGetSelectionShape,
   onGetAnchorValue,
+  onGetSelectionProtection,
+  onApplySelectionProtection,
   onGetFillSeriesSeed,
   onGetOtherSheets,
   onGetThemeColors,
@@ -467,11 +503,29 @@ export function ExcelShell({
   useEffect(() => {
     localStorage.setItem('ai-sheets-show-ai', isCopilotOpen ? '1' : '0')
   }, [isCopilotOpen])
-  const [showFormatCells, setShowFormatCells] = useState(false)
+  const [formatCellsSelection, setFormatCellsSelection] = useState<{
+    format: SelectionFormat | null
+    protection: SelectionProtection | null
+    anchor: number | string | null
+  } | null>(null)
+  const formatCellsRequest = useRef(0)
+  const openFormatCells = (): void => {
+    const request = ++formatCellsRequest.current
+    const format = selectionFormat
+    const anchor = onGetAnchorValue()
+    void onGetSelectionProtection().then((protection) => {
+      if (formatCellsRequest.current === request) {
+        setFormatCellsSelection({ format, protection, anchor })
+      }
+    })
+  }
+  const openFormatCellsRef = useRef(openFormatCells)
+  openFormatCellsRef.current = openFormatCells
   const [axisSizeTarget, setAxisSizeTarget] = useState<'row' | 'col' | null>(null)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [showSortDialog, setShowSortDialog] = useState(false)
   const [showDedupeDialog, setShowDedupeDialog] = useState(false)
+  const [textToColumnsSeed, setTextToColumnsSeed] = useState<TextToColumnsSeed | null>(null)
   const [showNameManager, setShowNameManager] = useState(false)
   const [showPivotDialog, setShowPivotDialog] = useState(false)
   const [pivotEditSeed, setPivotEditSeed] = useState<PivotEditSeed | null>(null)
@@ -520,7 +574,7 @@ export function ExcelShell({
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key === '1') {
         event.preventDefault()
-        setShowFormatCells(true)
+        openFormatCellsRef.current()
       }
       // Excel's Go To shortcut (⌘G / Ctrl+G).
       if ((event.metaKey || event.ctrlKey) && event.key === 'g') {
@@ -792,6 +846,7 @@ export function ExcelShell({
           workbookProtected={onGetWorkbookProtection()}
           formulaBarVisible={formulaBarVisible}
           crossHighlightVisible={crossHighlightVisible}
+          contentDark={contentDark}
           pageLayout={pageLayout}
           selectedChart={selectedChart}
           activeTable={tableTab}
@@ -809,7 +864,7 @@ export function ExcelShell({
           onRefreshPivot={onRefreshPivot}
           onIsSelectionInPivot={onIsSelectionInPivot}
           onCommand={(command) => {
-            if (command === 'format-cells') setShowFormatCells(true)
+            if (command === 'format-cells') openFormatCells()
             else if (command === 'row-height-open') setAxisSizeTarget('row')
             else if (command === 'col-width-open') setAxisSizeTarget('col')
             else if (command === 'link-open') setShowLinkDialog(true)
@@ -824,6 +879,8 @@ export function ExcelShell({
               if (shape) setCellShiftDialog({ mode, initial: defaultCellShift(mode, shape.range) })
             } else if (command === 'sort-custom-open') setShowSortDialog(true)
             else if (command === 'remove-duplicates-open') setShowDedupeDialog(true)
+            else if (command === 'text-to-columns-open')
+              setTextToColumnsSeed(onGetTextToColumnsSeed())
             else if (command === 'name-manager-open') setShowNameManager(true)
             else if (command === 'pivot-open') setShowPivotDialog(true)
             else if (command === 'pivot-edit') setPivotEditSeed(onGetPivotEditSeed())
@@ -943,12 +1000,30 @@ export function ExcelShell({
           </footer>
         </div>
       </div>
-      {showFormatCells && (
+      {formatCellsSelection && (
         <FormatCellsDialog
-          selectionFormat={selectionFormat}
-          anchorValue={onGetAnchorValue()}
-          onCommand={onCommand}
-          onClose={() => setShowFormatCells(false)}
+          selectionFormat={formatCellsSelection.format}
+          selectionProtection={formatCellsSelection.protection}
+          anchorValue={formatCellsSelection.anchor}
+          onCommand={(command) => {
+            if (
+              command.startsWith('cellprot:') ||
+              command.startsWith('align:') ||
+              command.startsWith('valign:') ||
+              command.startsWith('rotate-ooxml:') ||
+              command.startsWith('shrink:') ||
+              command.startsWith('font-effect:') ||
+              command.startsWith('border-edges:')
+            ) {
+              onApplySelectionProtection(command, formatCellsSelection.protection)
+            } else {
+              onCommand(command)
+            }
+          }}
+          onClose={() => {
+            formatCellsRequest.current += 1
+            setFormatCellsSelection(null)
+          }}
         />
       )}
       {axisSizeTarget && (
@@ -988,6 +1063,18 @@ export function ExcelShell({
       )}
       {showDedupeDialog && (
         <RemoveDuplicatesDialog onCommand={onCommand} onClose={() => setShowDedupeDialog(false)} />
+      )}
+      {textToColumnsSeed && (
+        <TextToColumnsDialog
+          seed={textToColumnsSeed}
+          onApply={(choice, overwrite) =>
+            onApplyTextToColumns(textToColumnsSeed, choice, overwrite)
+          }
+          onClose={() => {
+            setTextToColumnsSeed(null)
+            onCommand('focus-grid')
+          }}
+        />
       )}
       {showNameManager &&
         (() => {
@@ -1149,6 +1236,14 @@ export function ExcelShell({
         <HeaderFooterDialog
           initialHeader={pageLayout.header ?? null}
           initialFooter={pageLayout.footer ?? null}
+          initialFirstPage={pageLayout.firstPage ?? null}
+          initialEvenPages={pageLayout.evenPages ?? null}
+          firstPageEnabled={pageLayout.firstPageEnabled ?? false}
+          evenPagesEnabled={pageLayout.evenPagesEnabled ?? false}
+          sessionId={pageLayout.headerFooterSessionId ?? null}
+          sheetId={pageLayout.headerFooterSheetId ?? null}
+          initialPictures={pageLayout.headerFooterPictures ?? []}
+          pendingPictureEdits={pageLayout.headerFooterPictureEdits ?? []}
           onApply={onApplyHeaderFooter}
           onClose={() => setShowHeaderFooter(false)}
         />
@@ -1481,6 +1576,7 @@ function Ribbon({
   workbookProtected,
   formulaBarVisible,
   crossHighlightVisible,
+  contentDark,
   pageLayout,
   selectedChart,
   activeTable,
@@ -1502,6 +1598,7 @@ function Ribbon({
   /// View > Show echo for the formula bar toggle (app-level, not per sheet).
   readonly formulaBarVisible: boolean
   readonly crossHighlightVisible: boolean
+  readonly contentDark: boolean
   readonly pageLayout: PageLayoutEcho
   readonly selectedChart: SelectedChartRibbon | null
   readonly activeTable: ActiveTableRibbon | null
@@ -2077,7 +2174,7 @@ function Ribbon({
             label={t('appNewComment')}
             detail={t('appAtSelection')}
             symbol="🗨"
-            onClick={() => onCommand('note-open')}
+            onClick={() => onCommand('comment-open')}
           />
         </RibbonGroup>
         <RibbonGroup
@@ -2101,7 +2198,7 @@ function Ribbon({
         </RibbonGroup>
         <RibbonGroup
           label={t('appGroupSymbols')}
-          fold={{ priority: 1, icon: <ToolSymbol symbol="π" /> }}
+          fold={{ priority: 1, icon: <ToolSymbol symbol="π" />, preserveEditorFocus: true }}
         >
           <div className="row-stack">
             <button
@@ -2115,6 +2212,7 @@ function Ribbon({
             <button
               className="styles-row as-button"
               data-tip={t('appSymbol')}
+              onPointerDown={(event) => event.preventDefault()}
               onClick={() => onCommand('insert-symbol')}
             >
               <ToolSymbol symbol="Ω" />
@@ -2610,12 +2708,13 @@ function Ribbon({
           label={t('appGroupDataTools')}
           fold={{ priority: 3, icon: <ToolSymbol symbol="⚡" /> }}
         >
-          {largeMenu(t('appTextToColumns'), '⇶', t('appTextToColumnsTitle'), [
-            { value: 'text-to-columns:2', label: t('appSplitByComma') },
-            { value: 'text-to-columns:4', label: t('appSplitBySemicolon') },
-            { value: 'text-to-columns:8', label: t('appSplitBySpace') },
-            { value: 'text-to-columns:1', label: t('appSplitByTab') },
-          ])}
+          <RibbonButton
+            large
+            label={t('appTextToColumns')}
+            detail={t('appTextToColumnsTitle')}
+            symbol="⇶"
+            onClick={() => onCommand('text-to-columns-open')}
+          />
           <RibbonButton
             large
             label={t('appFlashFill')}
@@ -2708,6 +2807,14 @@ function Ribbon({
             onClick={() => {
               if (pageLayout.pageBreakPreview !== true) onCommand('toggle-page-break-preview')
             }}
+          />
+          <RibbonButton
+            large
+            label={t('appDarkMode')}
+            detail={t('appDarkModeTip')}
+            symbol="☾"
+            active={contentDark}
+            onClick={() => onCommand('toggle-dark-content')}
           />
         </RibbonGroup>
         <RibbonGroup
@@ -2838,7 +2945,14 @@ function Ribbon({
             label={t('appNewComment')}
             detail={t('appNewCommentDetail')}
             symbol="🗨"
-            onClick={() => onCommand('note-open')}
+            onClick={() => onCommand('comment-open')}
+          />
+          <RibbonButton
+            large
+            label={t('appCmtPane')}
+            detail={t('appCmtPaneTitle')}
+            symbol="🗨"
+            onClick={() => onCommand('comment-pane')}
           />
           <RibbonButton
             large
@@ -4273,7 +4387,11 @@ function RibbonGroup({
   readonly children: React.ReactNode
   /// Folds into one dropdown button on a narrow window (lower priority folds first; see
   /// RibbonFoldGroup) instead of the ribbon scrolling
-  readonly fold?: { readonly priority: number; readonly icon: React.ReactNode }
+  readonly fold?: {
+    readonly priority: number
+    readonly icon: React.ReactNode
+    readonly preserveEditorFocus?: boolean
+  }
   readonly className?: string
 }): React.JSX.Element {
   if (fold) {
@@ -4283,6 +4401,7 @@ function RibbonGroup({
         label={label}
         icon={fold.icon}
         priority={fold.priority}
+        preserveEditorFocus={fold.preserveEditorFocus}
         className={className}
         itemsClassName="ribbon-group-content"
         buttonClassName="ribbon-tool as-button large"

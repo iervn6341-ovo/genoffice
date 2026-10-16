@@ -1994,3 +1994,22 @@ fn axis_text_sizes_colors_and_display_units_are_read() {
     assert!(json["yAxis"].get("labelSize").is_none());
     assert!(json["yAxis"].get("displayUnit").is_none());
 }
+
+#[test]
+fn pattern_fill_keeps_editable_parts_beside_the_blended_color() {
+    let colors = ColorContext::default();
+    let fill = fill_info(
+        r#"<patternFill patternType="darkHorizontal"><fgColor rgb="FFFF0000"/><bgColor rgb="FF0000FF"/></patternFill>"#,
+        &colors,
+    );
+    assert_eq!(fill.color.as_deref(), Some("#7F007F"));
+    let pattern = fill.pattern.expect("pattern parts");
+    assert_eq!(pattern.pattern_type, "darkHorizontal");
+    assert_eq!(pattern.foreground.as_deref(), Some("#FF0000"));
+    assert_eq!(pattern.background.as_deref(), Some("#0000FF"));
+    let solid = fill_info(
+        r#"<patternFill patternType="solid"><fgColor rgb="FF00FF00"/></patternFill>"#,
+        &colors,
+    );
+    assert!(solid.pattern.is_none());
+}

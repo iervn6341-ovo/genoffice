@@ -182,10 +182,31 @@ export function captureUndoCarry(runtime: UniverRuntime | null, newSha: string):
 }
 
 let pending: UndoCarry | null = null
+const carryWaiters = new Set<(ready: boolean) => void>()
+
+function finishCarryWaiters(ready: boolean): void {
+  for (const waiter of carryWaiters) waiter(ready)
+  carryWaiters.clear()
+}
+
+/** A rapid Undo after Save must wait until the carried stack is installed. */
+export function waitForPendingUndoCarry(timeoutMs = 10_000): Promise<boolean> {
+  if (pending === null) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const finish = (ready: boolean) => {
+      clearTimeout(timer)
+      carryWaiters.delete(finish)
+      resolve(ready)
+    }
+    carryWaiters.add(finish)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+  })
+}
 
 /// Called by the save flow right before openLazyWorkbook; null clears any
 /// stale stash (split saves and sheet-op saves opt out of carrying).
 export function stashUndoCarry(carry: UndoCarry | null): void {
+  if (pending !== null) finishCarryWaiters(false)
   pending = carry
 }
 
@@ -213,6 +234,7 @@ export function consumePendingUndoCarry(runtime: UniverRuntime, unitId: string):
   try {
     service = undoRedoService(runtime)
   } catch {
+    finishCarryWaiters(false)
     return
   }
   try {
@@ -246,6 +268,7 @@ export function consumePendingUndoCarry(runtime: UniverRuntime, unitId: string):
         service._updateStatus?.()
       }
     }
+    finishCarryWaiters(true)
   } catch {
     // A partially installed stack could replay out of order; reset to the
     // safe pre-feature state (empty history).
@@ -254,5 +277,6 @@ export function consumePendingUndoCarry(runtime: UniverRuntime, unitId: string):
     } catch {
       // The service itself is broken; leave whatever state it holds.
     }
+    finishCarryWaiters(false)
   }
 }

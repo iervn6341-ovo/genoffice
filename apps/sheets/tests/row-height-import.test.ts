@@ -193,6 +193,7 @@ describe('wrapAutoFitRows', () => {
         { row: 1, column: 0, value: 'more wrapping text', styleIndex: 0 },
         { row: 2, column: 0, value: 'no wrap style', styleIndex: 1 },
         { row: 3, column: 0, value: 'style-less', styleIndex: 2 },
+        // No cell s= still inherits XF0, which wraps in this fixture.
         { row: 4, column: 0, value: 'no style at all' },
       ] as never,
       styles,
@@ -202,7 +203,7 @@ describe('wrapAutoFitRows', () => {
       null,
       range,
     )
-    expect(rows).toEqual([0, 1])
+    expect(rows).toEqual([0, 1, 4])
   })
 
   it('re-fits cached-ht auto rows but keeps user-fixed and spacer rows (prod_054)', () => {

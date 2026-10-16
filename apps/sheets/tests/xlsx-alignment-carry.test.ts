@@ -14,6 +14,15 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8"?>
 
 const CARRIED = ['readingOrder', 'shrinkToFit', 'justifyLastLine', 'relativeIndent']
 
+const NAMED_STYLE = `<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1"><font/></fonts>
+  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+  <borders count="1"><border/></borders>
+  <cellStyleXfs count="2"><xf/><xf applyAlignment="1"><alignment horizontal="center" vertical="justify" wrapText="1" indent="3"/></xf></cellStyleXfs>
+  <cellXfs count="4"><xf xfId="0"/><xf xfId="1" applyAlignment="0"/><xf xfId="1" applyAlignment="1"/><xf xfId="1" applyAlignment="1"><alignment horizontal="left"/></xf></cellXfs>
+</styleSheet>`
+
 function xfAt(xml: string, index: number): string {
   const cellXfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(xml)?.[1] ?? ''
   const xfs = [...cellXfs.matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)]
@@ -24,6 +33,44 @@ function xfAt(xml: string, index: number): string {
 }
 
 describe('StylesheetEditor alignment carries', () => {
+  it('edits actual cell alignment without importing missing fields from a named style', () => {
+    const editor = new StylesheetEditor(NAMED_STYLE)
+    const edited = [1, 2, 3].map((base) =>
+      editor.resolveStyle(base, { verticalAlignment: 'distributed' }),
+    )
+    const xml = editor.serialize()
+    expect(xml).toContain(
+      '<cellStyleXfs count="2"><xf/><xf applyAlignment="1"><alignment horizontal="center" vertical="justify" wrapText="1" indent="3"/></xf></cellStyleXfs>',
+    )
+    expect(xfAt(xml, edited[0]!)).toContain('xfId="1"')
+    expect(xfAt(xml, edited[1]!)).toContain('xfId="1"')
+    for (const index of edited) {
+      const xf = xfAt(xml, index)
+      expect(xf).toContain('applyAlignment="1"')
+      expect(xf).toContain('vertical="distributed"')
+      expect(xf).not.toContain('wrapText=')
+      expect(xf).not.toContain('indent=')
+      expect(xf).not.toContain('horizontal="center"')
+    }
+    expect(xfAt(xml, edited[0]!)).not.toContain('horizontal=')
+    expect(xfAt(xml, edited[1]!)).not.toContain('horizontal=')
+    expect(xfAt(xml, edited[2]!)).toContain('horizontal="left"')
+  })
+
+  it('retains the cell apply flag and partial child on an unrelated edit', () => {
+    const editor = new StylesheetEditor(NAMED_STYLE)
+    const edited = [1, 2, 3].map((base) => editor.resolveStyle(base, { fillColor: '#FF0000' }))
+    const xml = editor.serialize()
+    expect(xfAt(xml, edited[0]!)).toContain('applyAlignment="0"')
+    expect(xfAt(xml, edited[0]!)).not.toContain('<alignment')
+    expect(xfAt(xml, edited[1]!)).toContain('applyAlignment="1"')
+    expect(xfAt(xml, edited[1]!)).not.toContain('<alignment')
+    expect(xfAt(xml, edited[2]!)).toContain('applyAlignment="1"')
+    expect(xfAt(xml, edited[2]!)).toContain('horizontal="left"')
+    expect(xfAt(xml, edited[2]!)).not.toContain('wrapText=')
+    expect(xfAt(xml, edited[2]!)).not.toContain('indent=')
+  })
+
   it('keeps the unmodeled alignment attributes through an unrelated edit', () => {
     const editor = new StylesheetEditor(STYLES)
     const index = editor.resolveStyle(1, { fillColor: '#FF0000' })
@@ -54,8 +101,7 @@ describe('StylesheetEditor alignment carries', () => {
     expect(xf).toContain('readingOrder="2"')
   })
 
-  it('does not read a namespace-prefixed name off the alignment element', () => {
-    // the prefixed spelling is the only place these appear, so anything emitted came from it
+  it('preserves namespace-prefixed alignment attributes without adding core versions', () => {
     const prefixed = STYLES.replace(
       '<alignment horizontal="right" readingOrder="2" shrinkToFit="1" justifyLastLine="1" relativeIndent="2"/>',
       '<alignment horizontal="right" x14:readingOrder="2" x14:shrinkToFit="1"/>',
@@ -63,13 +109,15 @@ describe('StylesheetEditor alignment carries', () => {
     const editor = new StylesheetEditor(prefixed)
     const index = editor.resolveStyle(1, { fillColor: '#FF0000' })
     const xf = xfAt(editor.serialize(), index)
-    // positive witness: this really is the rebuilt xf, not some untouched entry
+    // The fill edit changes the XF but does not reinterpret the vendor fields.
     expect(xf).toContain('applyFill="1"')
-    expect(xf).not.toContain('readingOrder=')
-    expect(xf).not.toContain('shrinkToFit=')
+    expect(xf).toContain('x14:readingOrder="2"')
+    expect(xf).toContain('x14:shrinkToFit="1"')
+    expect(xf).not.toMatch(/(?<!:)\breadingOrder="/)
+    expect(xf).not.toMatch(/(?<!:)\bshrinkToFit="/)
   })
 
-  it('does not let a namespaced applyAlignment decide the carry', () => {
+  it('keeps a namespaced applyAlignment without adding a core apply flag', () => {
     const prefixed = STYLES.replace(
       '<xf applyAlignment="1"><alignment horizontal="right" readingOrder="2"',
       '<xf x14:applyAlignment="1"><alignment readingOrder="2"',
@@ -78,12 +126,12 @@ describe('StylesheetEditor alignment carries', () => {
     const index = editor.resolveStyle(1, { fillColor: '#FF0000' })
     const xf = xfAt(editor.serialize(), index)
     expect(xf).toContain('applyFill="1"')
-    expect(xf).not.toContain('readingOrder=')
+    expect(xf).toContain('x14:applyAlignment="1"')
+    expect(xf).not.toMatch(/(?<!:)\bapplyAlignment="/)
+    expect(xf).toContain('readingOrder="2"')
   })
 
-  it('carries nothing when the xf holds an element that could own an alignment', () => {
-    // a vendor element can carry both an applyAlignment and an <alignment> of its own, and
-    // a regex cannot tell whose it found; main emits no alignment here at all
+  it('leaves a vendor child untouched on an unrelated fill edit', () => {
     const vendor = STYLES.replace(
       '<xf applyAlignment="1"><alignment horizontal="right" readingOrder="2" shrinkToFit="1" justifyLastLine="1" relativeIndent="2"/></xf>',
       '<xf><settings xmlns="urn:vendor" applyAlignment="1"><alignment readingOrder="2"/></settings></xf>',
@@ -92,13 +140,11 @@ describe('StylesheetEditor alignment carries', () => {
     const index = editor.resolveStyle(1, { fillColor: '#FF0000' })
     const xf = xfAt(editor.serialize(), index)
     expect(xf).toContain('applyFill="1"')
-    expect(xf).not.toContain('<alignment')
-    expect(xf).not.toContain('applyAlignment')
+    expect(xf).toContain('<settings xmlns="urn:vendor" applyAlignment="1">')
+    expect(xf).toContain('<alignment readingOrder="2"/></settings>')
   })
 
-  it('carries nothing out of an mc:AlternateContent branch', () => {
-    // main already promotes this branch's horizontal, but horizontal="general" is the
-    // default and changes nothing on screen, whereas readingOrder="2" flips the cell
+  it('leaves mc:AlternateContent untouched on an unrelated fill edit', () => {
     const alternate = STYLES.replace(
       '<xf applyAlignment="1"><alignment horizontal="right" readingOrder="2" shrinkToFit="1" justifyLastLine="1" relativeIndent="2"/></xf>',
       '<xf><mc:AlternateContent><mc:Choice Requires="x14">' +
@@ -109,12 +155,11 @@ describe('StylesheetEditor alignment carries', () => {
     const index = editor.resolveStyle(1, { fillColor: '#FF0000' })
     const xf = xfAt(editor.serialize(), index)
     expect(xf).toContain('applyFill="1"')
-    expect(xf).not.toContain('readingOrder=')
+    expect(xf).toContain('<mc:AlternateContent>')
+    expect(xf).toContain('<alignment horizontal="general" readingOrder="2"/>')
   })
 
-  it('does not create an alignment out of carried attributes alone', () => {
-    // no modeled attribute and not applied: emitting one would start applying an
-    // alignment the cell was inheriting from its cellStyleXf
+  it('preserves an unapplied alignment child on an unrelated fill edit', () => {
     const carriedOnly = STYLES.replace(
       '<xf applyAlignment="1"><alignment horizontal="right" readingOrder="2" shrinkToFit="1" justifyLastLine="1" relativeIndent="2"/></xf>',
       '<xf><alignment readingOrder="2"/></xf>',
@@ -122,7 +167,7 @@ describe('StylesheetEditor alignment carries', () => {
     const editor = new StylesheetEditor(carriedOnly)
     const index = editor.resolveStyle(1, { fillColor: '#FF0000' })
     const xf = xfAt(editor.serialize(), index)
-    expect(xf).not.toContain('<alignment')
+    expect(xf).toContain('<alignment readingOrder="2"/>')
     expect(xf).not.toContain('applyAlignment')
   })
 

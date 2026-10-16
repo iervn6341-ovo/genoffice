@@ -1132,6 +1132,134 @@ fn reads_header_footer_variants_and_pictures() {
     );
 }
 
+#[test]
+fn reads_cell_protection_flags_and_keeps_protected_blank_cells() {
+    let (_dir, path) = open_fixture(&[
+        (
+            "xl/workbook.xml",
+            r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/styles.xml",
+            r#"<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="2"><xf/><xf><protection hidden="1"/></xf></cellStyleXfs><cellXfs count="4"><xf fontId="0" fillId="0" borderId="0" xfId="0"/><xf fontId="0" fillId="0" borderId="0" xfId="0" applyProtection="1"><protection locked="0"/></xf><xf fontId="0" fillId="0" borderId="0" xfId="0" applyProtection="1"><protection hidden="1"/></xf><xf fontId="0" fillId="0" borderId="0" xfId="1"><protection locked="0"/></xf></cellXfs></styleSheet>"#,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>7</v></c><c r="B1" s="1"><v>8</v></c><c r="C1" s="2"><f>1+2</f><v>3</v></c><c r="D1" s="3"/></row></sheetData></worksheet>"#,
+        ),
+    ]);
+    let mut sessions = WorkbookSessions::new();
+    let metadata = sessions.open(&path).unwrap();
+    assert_eq!(metadata.styles[0].protection_locked, None);
+    assert_eq!(metadata.styles[0].protection_hidden, None);
+    assert_eq!(metadata.styles[1].protection_locked, Some(false));
+    assert_eq!(metadata.styles[1].protection_hidden, None);
+    assert_eq!(metadata.styles[2].protection_locked, None);
+    assert_eq!(metadata.styles[2].protection_hidden, Some(true));
+    assert_eq!(metadata.styles[3].protection_hidden, Some(true));
+    assert_eq!(metadata.styles[3].protection_locked, Some(false));
+    let range = CellRange {
+        start_row: 0,
+        end_row: 0,
+        start_column: 0,
+        end_column: 3,
+    };
+    let result = loop {
+        let result = sessions
+            .read_range(&metadata.session_id, &metadata.sheets[0].id, &range)
+            .unwrap();
+        if result.indexing_complete {
+            break result;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert_eq!(result.cells.len(), 4);
+    assert_eq!(result.cells[3].style_index, Some(3));
+    assert!(result.cells[3].value.is_none());
+    assert_eq!(result.cells[2].formula.as_deref(), Some("=1+2"));
+}
+
+/// A broken optional picture relationship must not make the worksheet's
+/// ordinary cells unreadable. This includes both relationship parts and
+/// targets that try to escape the OOXML package.
+#[test]
+fn malformed_header_footer_picture_relationships_keep_cells_readable() {
+    let worksheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"><c r="A1"><v>42</v></c></row></sheetData><headerFooter><oddHeader>&amp;L&amp;G</oddHeader></headerFooter><legacyDrawingHF r:id="rId7"/></worksheet>"#;
+    let vml = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><v:shape id="LH" style="width:20pt;height:10pt"><v:imagedata o:relid="rId1"/></v:shape></xml>"#;
+    let valid_sheet_rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/></Relationships>"#;
+    let cases = [
+        (
+            "unsafe VML target",
+            r#"<Relationships><Relationship Id="rId7" Type="vmlDrawing" Target="../../../../outside.vml"/></Relationships>"#,
+            None,
+            None,
+        ),
+        (
+            "malformed VML rels",
+            valid_sheet_rels,
+            Some(vml),
+            Some("<Relationships><Relationship"),
+        ),
+        (
+            "unsafe media target",
+            valid_sheet_rels,
+            Some(vml),
+            Some(
+                r#"<Relationships><Relationship Id="rId1" Type="image" Target="../../../../outside.png"/></Relationships>"#,
+            ),
+        ),
+    ];
+    for (name, sheet_rels, vml_part, media_rels) in cases {
+        let mut entries = vec![
+            (
+                "xl/workbook.xml",
+                r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+            ),
+            ("xl/worksheets/sheet1.xml", worksheet),
+            ("xl/worksheets/_rels/sheet1.xml.rels", sheet_rels),
+        ];
+        if let Some(xml) = vml_part {
+            entries.push(("xl/drawings/vmlDrawing1.vml", xml));
+        }
+        if let Some(xml) = media_rels {
+            entries.push(("xl/drawings/_rels/vmlDrawing1.vml.rels", xml));
+        }
+        let (_dir, path) = open_fixture(&entries);
+        let mut sessions = WorkbookSessions::new();
+        let metadata = sessions.open(&path).unwrap();
+        let range = CellRange {
+            start_row: 0,
+            end_row: 0,
+            start_column: 0,
+            end_column: 0,
+        };
+        let result = loop {
+            let result = sessions
+                .read_range(&metadata.session_id, &metadata.sheets[0].id, &range)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            if result.indexing_complete {
+                break result;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(
+            matches!(result.cells[0].value, Some(CellValue::Number(42.0))),
+            "{name}"
+        );
+        let setup = result.page_setup.unwrap();
+        assert_eq!(setup.odd_header.as_deref(), Some("&L&G"), "{name}");
+        assert!(setup.header_footer_pictures.is_empty(), "{name}");
+    }
+}
+
 /// The wire caps header/footer text at 500 UTF-16 code units (JS string
 /// length); an emoji-laden header must come out within that bound or the
 /// schema rejects the whole range read.
@@ -2967,9 +3095,11 @@ fn keeps_value_less_cells_whose_style_paints_borders_or_fill() {
             // Self-closing and open-empty styled blanks both survive.
             (0, 1, false, Some(1)),
             (0, 2, false, Some(1)),
+            // An explicit s="0" survives because it blocks an inherited
+            // row/column xf; the style-less E1 stays dropped.
+            (0, 3, false, Some(0)),
             // Font-only blank survives too: the format applies the moment
-            // the user types into the cell (#169). D1 (s="0", the default
-            // xf) and E1 (no style) stay dropped.
+            // the user types into the cell (#169).
             (0, 5, false, Some(3)),
             // Filled blank anchoring the merged range survives.
             (1, 0, false, Some(2)),
@@ -3029,15 +3159,18 @@ fn unstyled_cells_resolve_to_the_default_xf() {
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     };
-    let mut cells: Vec<(usize, Option<usize>)> = result
+    let mut cells: Vec<(usize, Option<usize>, bool)> = result
         .cells
         .iter()
-        .map(|cell| (cell.column, cell.style_index))
+        .map(|cell| (cell.column, cell.style_index, cell.explicit_style))
         .collect();
     cells.sort();
-    // A1 (no s=) and B1 (s="0") are indistinguishable; the value-less,
-    // style-less D1 is still dropped.
-    assert_eq!(cells, vec![(0, Some(0)), (1, Some(0)), (2, Some(1))]);
+    // Both use base xf 0, but only B1's explicit s="0" blocks an inherited
+    // row or column xf. The value-less, style-less D1 is still dropped.
+    assert_eq!(
+        cells,
+        vec![(0, Some(0), false), (1, Some(0), true), (2, Some(1), true)]
+    );
 }
 
 /// <row r=> and <c r=> are both optional (54288.xlsx omits r on all but
@@ -3135,6 +3268,7 @@ fn reports_row_and_column_default_styles() {
 <sheetData>
 <row r="1" s="1" customFormat="1"><c r="A1"><v>1</v></c></row>
 <row r="2" s="1"><c r="A2"><v>2</v></c></row>
+<row r="3" s="0" customFormat="1"><c r="A3"><v>3</v></c></row>
 </sheetData>
 </worksheet>"#,
         ),
@@ -3159,7 +3293,7 @@ fn reports_row_and_column_default_styles() {
     let sheet_id = metadata.sheets[0].id.clone();
     let range = CellRange {
         start_row: 0,
-        end_row: 1,
+        end_row: 2,
         start_column: 0,
         end_column: 0,
     };
@@ -3181,6 +3315,7 @@ fn reports_row_and_column_default_styles() {
     };
     assert_eq!(style_of(0), Some(1));
     assert_eq!(style_of(1), None);
+    assert_eq!(style_of(2), Some(0));
 }
 
 /// zh Excel/WPS date cells reference locale-reserved builtin numFmtIds
@@ -3359,6 +3494,46 @@ fn resolves_alternate_content_style_entries() {
         metadata.dxf_styles[1].fill_color.as_deref(),
         Some("#FF0000")
     );
+}
+
+#[test]
+fn cell_xf_alignment_does_not_take_missing_fields_from_named_style() {
+    let (_dir, path) = open_fixture(&[
+        (
+            "xl/workbook.xml",
+            r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/styles.xml",
+            r#"<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="1"><font/></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders>
+<cellStyleXfs count="2"><xf/><xf applyAlignment="1"><alignment horizontal="center" vertical="justify" wrapText="1" indent="3"/></xf></cellStyleXfs>
+<cellXfs count="5"><xf xfId="0"/><xf xfId="1" applyAlignment="0"/><xf xfId="1" applyAlignment="1"/><xf xfId="1" applyAlignment="1"><alignment horizontal="left"/></xf><xf xfId="1"/></cellXfs>
+</styleSheet>"#,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1" t="inlineStr"><is><t>false</t></is></c><c r="B1" s="2" t="inlineStr"><is><t>true-empty</t></is></c><c r="C1" s="3" t="inlineStr"><is><t>true-partial</t></is></c><c r="D1" s="4" t="inlineStr"><is><t>default</t></is></c></row></sheetData></worksheet>"#,
+        ),
+    ]);
+    let mut sessions = WorkbookSessions::new();
+    let metadata = sessions.open(&path).unwrap();
+    for index in [1, 2, 4] {
+        let style = &metadata.styles[index];
+        assert_eq!(style.horizontal_alignment, None);
+        assert_eq!(style.vertical_alignment, None);
+        assert!(!style.wrap_text);
+        assert_eq!(style.indent, None);
+    }
+    let partial = &metadata.styles[3];
+    assert_eq!(partial.horizontal_alignment.as_deref(), Some("left"));
+    assert_eq!(partial.vertical_alignment, None);
+    assert!(!partial.wrap_text);
+    assert_eq!(partial.indent, None);
 }
 
 #[test]

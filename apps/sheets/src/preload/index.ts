@@ -297,7 +297,11 @@ const desktopApi: DesktopApi = {
       IPC_CHANNELS.writeWorkbookRecovery,
       validatedRequest,
     )
-    return { ok: (result as { ok?: unknown } | null)?.ok === true }
+    const reply = result as { ok?: unknown; error?: unknown } | null
+    return {
+      ok: reply?.ok === true,
+      ...(typeof reply?.error === 'string' ? { error: reply.error.slice(0, 500) } : {}),
+    }
   },
   async autoRenameWorkbook(sessionId, baseName) {
     if (!isUuid(sessionId)) throw new Error('Invalid workbook session.')
@@ -316,7 +320,10 @@ const desktopApi: DesktopApi = {
   },
   async exportPdf(request) {
     if (!isPdfExportRequest(request)) throw new Error('Invalid PDF export request.')
-    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.exportPdf, request)
+    const result: unknown = await ipcRenderer.invoke(
+      IPC_CHANNELS.exportPdf,
+      await chunkedHtml(request),
+    )
     if (
       !isRecord(result) ||
       typeof result.canceled !== 'boolean' ||
@@ -333,7 +340,11 @@ const desktopApi: DesktopApi = {
   },
   async printWorkbook(request, job) {
     if (!isPdfExportRequest(request)) throw new Error('Invalid print request.')
-    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.printWorkbook, request, job)
+    const result: unknown = await ipcRenderer.invoke(
+      IPC_CHANNELS.printWorkbook,
+      await chunkedHtml(request),
+      job,
+    )
     if (
       !isRecord(result) ||
       typeof result.ok !== 'boolean' ||
@@ -342,6 +353,65 @@ const desktopApi: DesktopApi = {
       throw new Error('Invalid print response.')
     }
     return result as { ok: true } | { ok: false; error?: string }
+  },
+  async printPreview(id, request, from, to) {
+    if (
+      typeof id !== 'string' ||
+      id.length === 0 ||
+      id.length > 100 ||
+      !Number.isInteger(from) ||
+      !Number.isInteger(to) ||
+      from < 1 ||
+      to < from ||
+      to - from > 200 ||
+      (request !== undefined && !isPdfExportRequest(request))
+    ) {
+      throw new Error('Invalid print preview request.')
+    }
+    const result: unknown = await ipcRenderer.invoke(
+      IPC_CHANNELS.printPreview,
+      id,
+      request === undefined ? undefined : await chunkedHtml(request),
+      from,
+      to,
+    )
+    if (!isRecord(result) || typeof result.ok !== 'boolean') {
+      throw new Error('Invalid print preview response.')
+    }
+    return result as Awaited<ReturnType<DesktopApi['printPreview']>>
+  },
+  async addPrintBand(jobId, request) {
+    if (typeof jobId !== 'string' || jobId.length === 0 || jobId.length > 100) {
+      throw new Error('Invalid print job.')
+    }
+    if (!isPdfExportRequest(request)) throw new Error('Invalid print request.')
+    const result: unknown = await ipcRenderer.invoke(
+      IPC_CHANNELS.addPrintBand,
+      jobId,
+      await chunkedHtml(request),
+    )
+    if (!isRecord(result) || typeof result.ok !== 'boolean') {
+      throw new Error('Invalid print response.')
+    }
+    return result as { ok: true } | { ok: false; error: string }
+  },
+  async finishPrintBands(jobId, job) {
+    if (typeof jobId !== 'string' || jobId.length === 0 || jobId.length > 100) {
+      throw new Error('Invalid print job.')
+    }
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.finishPrintBands, jobId, job)
+    if (!isRecord(result) || typeof result.ok !== 'boolean') {
+      throw new Error('Invalid print response.')
+    }
+    return result as Awaited<ReturnType<DesktopApi['finishPrintBands']>>
+  },
+  async cancelPrintBands(jobId) {
+    if (typeof jobId !== 'string' || jobId.length === 0 || jobId.length > 100) return
+    await ipcRenderer.invoke(IPC_CHANNELS.cancelPrintBands, jobId)
+  },
+  async releasePrintPreview(id) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 100) return
+    await ipcRenderer.invoke(IPC_CHANNELS.releasePrintPreview, id)
   },
   async exportCsv(request) {
     if (
@@ -432,6 +502,9 @@ const desktopApi: DesktopApi = {
         action === 'save' ||
         action === 'save-as' ||
         action === 'print' ||
+        action === 'print-workbook' ||
+        action === 'print-selection' ||
+        action === 'print-ignore-area' ||
         action === 'export-pdf' ||
         action === 'export-csv' ||
         action === 'undo' ||
@@ -1094,7 +1167,8 @@ function parseCellRecord(cell: unknown): WorkbookRangeResult['cells'][number] {
     (cell.formula !== undefined && typeof cell.formula !== 'string') ||
     (cell.arrayRef !== undefined &&
       (typeof cell.arrayRef !== 'string' || cell.arrayRef.length > 64)) ||
-    (cell.styleIndex !== undefined && !isNonnegativeInteger(cell.styleIndex))
+    (cell.styleIndex !== undefined && !isNonnegativeInteger(cell.styleIndex)) ||
+    (cell.explicitStyle !== undefined && typeof cell.explicitStyle !== 'boolean')
   ) {
     throw new Error('Invalid workbook cell response.')
   }
@@ -1106,6 +1180,7 @@ function parseCellRecord(cell: unknown): WorkbookRangeResult['cells'][number] {
     ...(cell.formula === undefined ? {} : { formula: cell.formula }),
     ...(cell.arrayRef === undefined ? {} : { arrayRef: cell.arrayRef }),
     ...(cell.styleIndex === undefined ? {} : { styleIndex: cell.styleIndex }),
+    ...(cell.explicitStyle === undefined ? {} : { explicitStyle: cell.explicitStyle }),
     ...(rich === undefined ? {} : { rich }),
   }
 }
@@ -1730,7 +1805,7 @@ function isOptionalBarLength(value: unknown): value is number | undefined {
   return value === undefined || (isNonnegativeInteger(value) && value <= 100)
 }
 
-function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveRequest {
+export function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveRequest {
   // Every rejection names the failing part: this one message ends up in the
   // save-failure toast, and "Invalid workbook save request." alone gave user
   // reports nothing to go on.
@@ -2108,13 +2183,24 @@ function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveRequest {
       !isNonnegativeInteger(visualEdit.drawingIndex) ||
       visualEdit.drawingIndex > 10_000 ||
       (visualEdit.remove !== undefined && visualEdit.remove !== true) ||
-      (visualEdit.remove === undefined && !isRecord(visualEdit.anchor))
+      (visualEdit.remove === undefined &&
+        !isRecord(visualEdit.anchor) &&
+        !isRecord(visualEdit.equation))
     ) {
       throw new Error('Invalid workbook visual edit.')
     }
     if (visualEdit.anchor !== undefined) {
       if (!isRecord(visualEdit.anchor)) throw new Error('Invalid workbook visual edit.')
       parseDrawingAnchor(visualEdit.anchor)
+    }
+    if (visualEdit.equation !== undefined) {
+      if (
+        !isRecord(visualEdit.equation) ||
+        !isBoundedString(visualEdit.equation.latex, 16_384) ||
+        !isBoundedString(visualEdit.equation.omml, 131_072)
+      ) {
+        throw new Error('Invalid workbook visual edit.')
+      }
     }
   }
   for (const op of input.structuralOps) {
@@ -2220,8 +2306,15 @@ function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveRequest {
           edit.formula.length === 0 ||
           edit.formula.length > 8_192)) ||
       (edit.style !== undefined && !isStyleEdit(edit.style)) ||
+      (edit.styleReference !== undefined &&
+        edit.styleReference !== null &&
+        !isNonnegativeInteger(edit.styleReference)) ||
       (edit.styleReset !== undefined && typeof edit.styleReset !== 'boolean') ||
-      (!edit.writeValue && edit.style === undefined && edit.styleReset !== true)
+      (edit.styleReset === true && edit.styleReference !== undefined) ||
+      (!edit.writeValue &&
+        edit.style === undefined &&
+        edit.styleReset !== true &&
+        edit.styleReference === undefined)
     ) {
       throw new Error('Invalid workbook cell edit.')
     }
@@ -2286,6 +2379,30 @@ function isFilterColumn(input: unknown): boolean {
 }
 
 /** Shape check shared by PDF export and print: both send the laid-out sheet with its page setup. */
+const HTML_CHUNK_CHARS = 2_000_000
+
+/// Big print HTML goes to the main process in chunks (one IPC message per 2M characters) and the
+/// request travels with a transfer id instead of the text, so no print job is refused for size.
+async function chunkedHtml<T extends { html: string }>(
+  request: T,
+): Promise<T | (Omit<T, 'html'> & { html: string; htmlTransferId: string })> {
+  if (request.html.length <= HTML_CHUNK_CHARS) return request
+  const id = `html-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  for (
+    let offset = 0, index = 0;
+    offset < request.html.length;
+    offset += HTML_CHUNK_CHARS, index++
+  ) {
+    await ipcRenderer.invoke(
+      IPC_CHANNELS.printHtmlChunk,
+      id,
+      index,
+      request.html.slice(offset, offset + HTML_CHUNK_CHARS),
+    )
+  }
+  return { ...request, html: '', htmlTransferId: id }
+}
+
 function isPdfExportRequest(request: unknown): boolean {
   return !(
     !isRecord(request) ||
@@ -2294,7 +2411,6 @@ function isPdfExportRequest(request: unknown): boolean {
     request.fileName.length > 255 ||
     typeof request.html !== 'string' ||
     request.html.length === 0 ||
-    request.html.length > 20_000_000 ||
     typeof request.landscape !== 'boolean' ||
     !isPdfPageSize(request.pageSize) ||
     !isRecord(request.margins) ||
@@ -2384,6 +2500,81 @@ function isPageSetupState(input: unknown): boolean {
     (typeof input.printTitles !== 'string' || !/^\d{1,7}:\d{1,7}$/.test(input.printTitles))
   )
     return false
+  const validParts = (parts: unknown): boolean =>
+    parts === null ||
+    (isRecord(parts) &&
+      Object.keys(parts).every((key) => ['left', 'center', 'right'].includes(key)) &&
+      ['left', 'center', 'right'].every(
+        (key) => parts[key] === undefined || isBoundedString(parts[key], 255),
+      ))
+  for (const key of ['header', 'footer']) {
+    if (input[key] !== undefined && !validParts(input[key])) return false
+  }
+  for (const key of ['firstPage', 'evenPages', 'firstPageStored', 'evenPagesStored']) {
+    const variant = input[key]
+    if (
+      variant !== undefined &&
+      variant !== null &&
+      (!isRecord(variant) ||
+        Object.keys(variant).some((field) => field !== 'header' && field !== 'footer') ||
+        !validParts(variant.header) ||
+        !validParts(variant.footer))
+    )
+      return false
+  }
+  if (input.headerFooterPictureEdits !== undefined) {
+    if (
+      !Array.isArray(input.headerFooterPictureEdits) ||
+      input.headerFooterPictureEdits.length > 18
+    )
+      return false
+    const positions = new Set<string>()
+    for (const edit of input.headerFooterPictureEdits) {
+      if (
+        !isRecord(edit) ||
+        typeof edit.position !== 'string' ||
+        !HEADER_FOOTER_PICTURE_POSITION.test(edit.position) ||
+        positions.has(edit.position)
+      )
+        return false
+      positions.add(edit.position)
+      if (
+        edit.image !== undefined &&
+        edit.image !== null &&
+        (!isRecord(edit.image) ||
+          ![
+            'image/png',
+            'image/jpeg',
+            'image/gif',
+            'image/x-emf',
+            'image/x-wmf',
+            'image/bmp',
+            'image/webp',
+            'image/svg+xml',
+            'image/x-emz',
+            'image/x-wmz',
+          ].includes(String(edit.image.mediaType)) ||
+          !isBoundedString(edit.image.base64, 2_800_000))
+      )
+        return false
+      if (
+        edit.widthPt !== undefined &&
+        (typeof edit.widthPt !== 'number' ||
+          !Number.isFinite(edit.widthPt) ||
+          edit.widthPt <= 0 ||
+          edit.widthPt > 2_000)
+      )
+        return false
+      if (
+        edit.heightPt !== undefined &&
+        (typeof edit.heightPt !== 'number' ||
+          !Number.isFinite(edit.heightPt) ||
+          edit.heightPt <= 0 ||
+          edit.heightPt > 2_000)
+      )
+        return false
+    }
+  }
   for (const [key, max] of [
     ['rowBreaks', 1_048_575],
     ['colBreaks', 16_383],
@@ -2449,7 +2640,13 @@ function isStyleEdit(input: unknown): boolean {
       (value.color === undefined || isHexColor(value.color)) &&
       Object.keys(value).every((key) => ['style', 'color'].includes(key)))
   if (
-    ![input.borderTop, input.borderBottom, input.borderLeft, input.borderRight].every(isBorderEdge)
+    ![
+      input.borderTop,
+      input.borderBottom,
+      input.borderLeft,
+      input.borderRight,
+      input.borderDiagonal,
+    ].every(isBorderEdge)
   ) {
     return false
   }
@@ -2459,6 +2656,8 @@ function isStyleEdit(input: unknown): boolean {
     isOptionalBoolean(input.underline) &&
     isOptionalBoolean(input.strikethrough) &&
     isOptionalBoolean(input.wrapText) &&
+    isOptionalBoolean(input.diagonalUp) &&
+    isOptionalBoolean(input.diagonalDown) &&
     (input.fontFamily === undefined ||
       (typeof input.fontFamily === 'string' &&
         input.fontFamily.length > 0 &&
@@ -2471,17 +2670,31 @@ function isStyleEdit(input: unknown): boolean {
     (input.fontColor === undefined || input.fontColor === null || isHexColor(input.fontColor)) &&
     (input.fillColor === undefined || input.fillColor === null || isHexColor(input.fillColor)) &&
     (input.horizontalAlignment === undefined ||
-      ['left', 'center', 'right', 'justify', 'distributed'].includes(
-        String(input.horizontalAlignment),
-      )) &&
+      [
+        'general',
+        'left',
+        'center',
+        'right',
+        'fill',
+        'justify',
+        'centerContinuous',
+        'distributed',
+      ].includes(String(input.horizontalAlignment))) &&
     (input.verticalAlignment === undefined ||
-      ['top', 'center', 'bottom'].includes(String(input.verticalAlignment))) &&
+      ['top', 'center', 'bottom', 'justify', 'distributed'].includes(
+        String(input.verticalAlignment),
+      )) &&
+    isOptionalBoolean(input.shrinkToFit) &&
     (input.numberFormat === undefined ||
       (typeof input.numberFormat === 'string' &&
         input.numberFormat.length > 0 &&
         input.numberFormat.length <= 255)) &&
     (input.underlineStyle === undefined ||
-      ['single', 'double'].includes(String(input.underlineStyle))) &&
+      ['single', 'double', 'singleAccounting', 'doubleAccounting'].includes(
+        String(input.underlineStyle),
+      )) &&
+    (input.fontVerticalAlign === undefined ||
+      ['baseline', 'superscript', 'subscript'].includes(String(input.fontVerticalAlign))) &&
     (input.textRotation === undefined ||
       (typeof input.textRotation === 'number' &&
         Number.isInteger(input.textRotation) &&
@@ -2499,6 +2712,7 @@ function isStyleEdit(input: unknown): boolean {
         'italic',
         'underline',
         'underlineStyle',
+        'fontVerticalAlign',
         'strikethrough',
         'fontFamily',
         'fontSize',
@@ -2507,6 +2721,7 @@ function isStyleEdit(input: unknown): boolean {
         'horizontalAlignment',
         'verticalAlignment',
         'wrapText',
+        'shrinkToFit',
         'numberFormat',
         'textRotation',
         'indent',
@@ -2516,6 +2731,9 @@ function isStyleEdit(input: unknown): boolean {
         'borderBottom',
         'borderLeft',
         'borderRight',
+        'borderDiagonal',
+        'diagonalUp',
+        'diagonalDown',
       ].includes(key),
     )
   )
@@ -2827,15 +3045,23 @@ function parsePivotDefinitionResult(input: unknown): WorkbookPivotDefinition {
   return input as unknown as WorkbookPivotDefinition
 }
 
-function parseCellStyle(input: unknown): WorkbookCellStyle {
+export function parseCellStyle(input: unknown): WorkbookCellStyle {
   if (
     !isRecord(input) ||
     typeof input.bold !== 'boolean' ||
     typeof input.italic !== 'boolean' ||
     typeof input.underline !== 'boolean' ||
+    (input.underlineStyle !== undefined &&
+      !['single', 'double', 'singleAccounting', 'doubleAccounting'].includes(
+        String(input.underlineStyle),
+      )) ||
+    (input.fontVerticalAlign !== undefined &&
+      !['baseline', 'superscript', 'subscript'].includes(String(input.fontVerticalAlign))) ||
     typeof input.strikethrough !== 'boolean' ||
     typeof input.wrapText !== 'boolean' ||
     (input.shrinkToFit !== undefined && typeof input.shrinkToFit !== 'boolean') ||
+    (input.protectionLocked !== undefined && typeof input.protectionLocked !== 'boolean') ||
+    (input.protectionHidden !== undefined && typeof input.protectionHidden !== 'boolean') ||
     !isOptionalString(input.fontFamily) ||
     (input.fontSize !== undefined &&
       (typeof input.fontSize !== 'number' ||
@@ -2871,11 +3097,19 @@ function parseCellStyle(input: unknown): WorkbookCellStyle {
     bold: input.bold,
     italic: input.italic,
     underline: input.underline,
+    ...(input.underlineStyle === undefined
+      ? {}
+      : { underlineStyle: input.underlineStyle as WorkbookCellStyle['underlineStyle'] }),
+    ...(input.fontVerticalAlign === undefined
+      ? {}
+      : { fontVerticalAlign: input.fontVerticalAlign as WorkbookCellStyle['fontVerticalAlign'] }),
     strikethrough: input.strikethrough,
     wrapText: input.wrapText,
     diagonalUp: input.diagonalUp,
     diagonalDown: input.diagonalDown,
     ...(input.shrinkToFit === undefined ? {} : { shrinkToFit: input.shrinkToFit }),
+    ...(input.protectionLocked === undefined ? {} : { protectionLocked: input.protectionLocked }),
+    ...(input.protectionHidden === undefined ? {} : { protectionHidden: input.protectionHidden }),
     ...(input.fontFamily === undefined ? {} : { fontFamily: input.fontFamily }),
     ...(input.fontSize === undefined ? {} : { fontSize: input.fontSize }),
     ...(input.fontColor === undefined ? {} : { fontColor: input.fontColor }),
@@ -2935,7 +3169,7 @@ function parseVisualObject(input: unknown): WorkbookVisualObject {
     !isRecord(input) ||
     typeof input.id !== 'string' ||
     typeof input.sheetId !== 'string' ||
-    !['chart', 'image', 'shape', 'ole', 'slicer'].includes(String(input.kind)) ||
+    !['chart', 'image', 'shape', 'equation', 'ole', 'slicer'].includes(String(input.kind)) ||
     !isRecord(input.anchor)
   ) {
     throw new Error('Invalid workbook visual response.')
@@ -2951,6 +3185,19 @@ function parseVisualObject(input: unknown): WorkbookVisualObject {
     input.fillGradient === undefined ? undefined : parseFillGradient(input.fillGradient)
   const customPath = input.customPath === undefined ? undefined : parseCustomPath(input.customPath)
   const crop = input.crop === undefined ? undefined : parseCropRect(input.crop)
+  const equation = input.equation
+  if (
+    equation !== undefined &&
+    (!isRecord(equation) ||
+      (equation.latex !== null && typeof equation.latex !== 'string') ||
+      (typeof equation.latex === 'string' &&
+        (equation.latex.length === 0 || equation.latex.length > 16_384)) ||
+      typeof equation.omml !== 'string' ||
+      equation.omml.length === 0 ||
+      equation.omml.length > 131_072)
+  ) {
+    throw new Error('Invalid workbook equation response.')
+  }
   if (
     !isOptionalString(input.shapeType) ||
     (input.opacity !== undefined &&
@@ -2995,8 +3242,11 @@ function parseVisualObject(input: unknown): WorkbookVisualObject {
   return {
     id: input.id,
     sheetId: input.sheetId,
-    kind: input.kind as 'chart' | 'image' | 'shape' | 'ole' | 'slicer',
+    kind: input.kind as 'chart' | 'image' | 'shape' | 'equation' | 'ole' | 'slicer',
     anchor,
+    ...(equation === undefined
+      ? {}
+      : { equation: { latex: equation.latex as string | null, omml: equation.omml as string } }),
     ...(chart === undefined ? {} : { chart }),
     ...(typeof input.chartPath === 'string' ? { chartPath: input.chartPath } : {}),
     ...(typeof input.mediaPath === 'string' ? { mediaPath: input.mediaPath } : {}),

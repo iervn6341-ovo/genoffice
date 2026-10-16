@@ -808,11 +808,43 @@ export function handleInsertScreenshot(
 
 export function handleInsertEquation(
   ctx: VisualActionContext,
-  dataUrl: string,
-  width: number,
-  height: number,
+  equation: { latex: string; omml: string },
 ): void {
-  insertPictureVisual(ctx, dataUrl, 'image/png', 'Equation.png', width, height)
+  const runtime = ctx.univerRef.current
+  const state = ctx.lazyWorkbookRef.current
+  const workbook = runtime?.univerAPI.getActiveWorkbook()
+  const worksheet = workbook?.getActiveSheet()
+  const range = workbook?.getActiveRange()
+  if (!runtime || !state || !worksheet || !range) {
+    ctx.setMessage(t('appSelectCellFirst'))
+    return
+  }
+  const sheetId = worksheet.getSheetId()
+  if (isSheetRemoved(state.editJournal, sheetId)) return
+  const { columns, rows } = fitPictureFrame(360, 96)
+  const row = range.getRow()
+  const column = range.getColumn()
+  const visual: WorkbookVisualObject = {
+    id: `added-equation-${Date.now().toString(36)}-${state.editJournal.visualAdds.length + 1}`,
+    sheetId,
+    kind: 'equation',
+    equation,
+    name: 'Equation',
+    anchor: {
+      fromRow: row,
+      fromColumn: column,
+      fromRowOffset: 0,
+      fromColumnOffset: 0,
+      toRow: row + rows,
+      toColumn: column + columns,
+      toRowOffset: 0,
+      toColumnOffset: 0,
+    },
+  }
+  pushVisualAddUndo(ctx, runtime, state, visual)
+  ctx.setPendingEdits(journalSize(state.editJournal))
+  queueCtxVisualInstall(ctx, runtime)
+  ctx.setMessage(t('appEquationInserted'))
 }
 
 export function handleInsertIcon(

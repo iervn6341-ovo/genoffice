@@ -160,6 +160,16 @@ describe('buildHeaderFooterXml', () => {
         '</headerFooter>',
     )
   })
+
+  it('writes advanced formatting and page offsets as the exact Excel codes', () => {
+    expect(
+      buildHeaderFooterXml({ left: '&"游ゴシック,Bold"&E雙線&E&K05+050色&P-2 2026' }, null),
+    ).toBe(
+      '<headerFooter><oddHeader>' +
+        '&amp;L&amp;&quot;游ゴシック,Bold&quot;&amp;E雙線&amp;E&amp;K05+050色&amp;P-2 2026' +
+        '</oddHeader></headerFooter>',
+    )
+  })
 })
 
 describe('applyPageSetupState headerFooter', () => {
@@ -184,6 +194,119 @@ describe('applyPageSetupState headerFooter', () => {
     expect(patched).toContain('<oddHeader>&amp;CNew</oddHeader>')
     expect(patched).toContain('<oddFooter>&amp;RKeep</oddFooter>')
     expect(patched).not.toContain('Old')
+  })
+
+  it('keeps the raw formatting codes of an untouched header while editing the footer', () => {
+    const header =
+      '<oddHeader>&amp;L&amp;&quot;游ゴシック,Bold&quot;&amp;E雙線&amp;E&amp;K04+050色&amp;P+2</oddHeader>'
+    const xml = `<worksheet><sheetData/><headerFooter>${header}<oddFooter>&amp;ROld</oddFooter></headerFooter></worksheet>`
+    const patched = applyPageSetupState(xml, { sheetName: 'S', footer: { right: 'New' } })
+    expect(patched).toContain(header)
+    expect(patched).toContain('<oddFooter>&amp;RNew</oddFooter>')
+  })
+
+  it('updates retained first/even contents while leaving both variants disabled', () => {
+    const xml =
+      '<worksheet><sheetData/><headerFooter>' +
+      '<firstHeader>&amp;COld first</firstHeader><evenFooter>&amp;ROld even</evenFooter>' +
+      '</headerFooter></worksheet>'
+    const patched = applyPageSetupState(xml, {
+      sheetName: 'S',
+      firstPage: null,
+      firstPageStored: { header: { center: 'Restored &Efirst&E' }, footer: null },
+      evenPages: null,
+      evenPagesStored: { header: null, footer: { right: 'Restored &P-1' } },
+    })
+    expect(patched).toContain('<firstHeader>&amp;CRestored &amp;Efirst&amp;E</firstHeader>')
+    expect(patched).toContain('<evenFooter>&amp;RRestored &amp;P-1</evenFooter>')
+    expect(patched).not.toContain('differentFirst="1"')
+    expect(patched).not.toContain('differentOddEven="1"')
+  })
+
+  it('treats an omitted variant flag as no-op when updating stored text', () => {
+    const xml =
+      '<worksheet><sheetData/><headerFooter differentFirst="1">' +
+      '<firstHeader>&amp;COld</firstHeader></headerFooter></worksheet>'
+    const patched = applyPageSetupState(xml, {
+      sheetName: 'S',
+      firstPageStored: { header: { center: 'Restored' }, footer: null },
+    })
+    expect(patched).toContain('differentFirst="1"')
+    expect(patched).toContain('<firstHeader>&amp;CRestored</firstHeader>')
+    expect(applyPageSetupState(xml, { sheetName: 'S', firstPage: null })).not.toContain(
+      'differentFirst="1"',
+    )
+  })
+
+  it('retains section attributes and whitespace semantics when dialog resubmits variants', () => {
+    const first = '<firstHeader xml:space="preserve" custom="kept">&amp;C  First  </firstHeader>'
+    const even = '<evenFooter xml:space="preserve" custom="also-kept">&amp;R Even </evenFooter>'
+    const xml = `<worksheet><sheetData/><headerFooter>${first}${even}</headerFooter></worksheet>`
+    const same = applyPageSetupState(xml, {
+      sheetName: 'S',
+      firstPageStored: { header: { center: '  First  ' }, footer: null },
+      evenPagesStored: { header: null, footer: { right: ' Even ' } },
+    })
+    expect(same).toContain(first)
+    expect(same).toContain(even)
+
+    const changed = applyPageSetupState(xml, {
+      sheetName: 'S',
+      firstPageStored: { header: { center: '  Revised  ' }, footer: null },
+      evenPagesStored: { header: null, footer: { right: ' Updated ' } },
+    })
+    expect(changed).toContain(
+      '<firstHeader xml:space="preserve" custom="kept">&amp;C  Revised  </firstHeader>',
+    )
+    expect(changed).toContain(
+      '<evenFooter xml:space="preserve" custom="also-kept">&amp;R Updated </evenFooter>',
+    )
+  })
+
+  it("keeps a self-closing section's attributes when adding text", () => {
+    const xml =
+      '<worksheet><sheetData/><headerFooter>' +
+      '<firstHeader xml:space="preserve" custom="kept"/>' +
+      '</headerFooter></worksheet>'
+    const patched = applyPageSetupState(xml, {
+      sheetName: 'S',
+      firstPageStored: { header: { center: ' Added ' }, footer: null },
+    })
+    expect(patched).toContain(
+      '<firstHeader xml:space="preserve" custom="kept">&amp;C Added </firstHeader>',
+    )
+  })
+
+  it('leaves an empty attributed section unchanged when its resubmitted content is still empty', () => {
+    const empty = '<firstHeader xml:space="preserve" custom="kept"/>'
+    const xml = `<worksheet><sheetData/><headerFooter>${empty}</headerFooter></worksheet>`
+    expect(
+      applyPageSetupState(xml, {
+        sheetName: 'S',
+        firstPageStored: { header: null, footer: null },
+      }),
+    ).toBe(xml)
+  })
+
+  it('preserves both quoting styles when an attribute contains a greater-than sign', () => {
+    const xml =
+      '<worksheet><sheetData/><headerFooter>' +
+      '<firstHeader xml:space="preserve" custom="a>b">&amp;COld</firstHeader>' +
+      "<evenFooter custom='c>d' xml:space='preserve'>&amp;ROld</evenFooter>" +
+      '</headerFooter></worksheet>'
+    const patched = applyPageSetupState(xml, {
+      sheetName: 'S',
+      firstPageStored: { header: { center: 'New first' }, footer: null },
+      evenPagesStored: { header: null, footer: { right: 'New even' } },
+    })
+    expect(patched).toContain(
+      '<firstHeader xml:space="preserve" custom="a>b">&amp;CNew first</firstHeader>',
+    )
+    expect(patched).toContain(
+      "<evenFooter custom='c>d' xml:space='preserve'>&amp;RNew even</evenFooter>",
+    )
+    expect(patched.match(/<firstHeader\b/g)).toHaveLength(1)
+    expect(patched.match(/<evenFooter\b/g)).toHaveLength(1)
   })
 
   it('keeps "$" sequences in header text literal when overwriting an existing element', () => {
@@ -267,6 +390,29 @@ describe('applyPageSetupState headerFooter', () => {
       '<oddHeader>&amp;COdd</oddHeader></headerFooter></worksheet>'
     const patched = applyPageSetupState(xml, { sheetName: 'S', header: null })
     expect(patched).toBe('<worksheet><sheetData/><headerFooter differentOddEven="1"/></worksheet>')
+  })
+
+  it('creates and toggles first/even sections without changing the odd sections', () => {
+    const xml =
+      '<worksheet><sheetData/><headerFooter><oddHeader>&amp;COdd</oddHeader></headerFooter></worksheet>'
+    const patched = applyPageSetupState(xml, {
+      sheetName: 'S',
+      firstPage: { header: { left: 'First &P' }, footer: null },
+      evenPages: { header: null, footer: { right: 'Even &N' } },
+    })
+    expect(patched).toContain('differentFirst="1"')
+    expect(patched).toContain('differentOddEven="1"')
+    expect(patched).toContain('<oddHeader>&amp;COdd</oddHeader>')
+    expect(patched).toContain('<firstHeader>&amp;LFirst &amp;P</firstHeader>')
+    expect(patched).toContain('<evenFooter>&amp;REven &amp;N</evenFooter>')
+    const disabled = applyPageSetupState(patched, {
+      sheetName: 'S',
+      firstPage: null,
+      evenPages: null,
+    })
+    expect(disabled).not.toContain('differentFirst=')
+    expect(disabled).not.toContain('differentOddEven=')
+    expect(disabled).toContain('<oddHeader>&amp;COdd</oddHeader>')
   })
 })
 

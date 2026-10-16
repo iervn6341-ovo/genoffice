@@ -1,6 +1,6 @@
 import ReactDOM from 'react-dom/client'
 import { htmlLang, type Lang } from '@genoffice/i18n'
-import { applyAiPanelPrefs, installScreenTips } from '@genoffice/ui'
+import { applyUiTheme, applyAiPanelPrefs, installScreenTips } from '@genoffice/ui'
 
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
@@ -11,6 +11,7 @@ import '@genoffice/ui/ribbon-fit.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/ai-panel-prefs.css'
 import '@genoffice/ui/ai-scope-quote.css'
+import '@genoffice/ui/math-tools.css'
 import '@univerjs/preset-sheets-core/lib/index.css'
 
 import { App } from './App'
@@ -40,8 +41,7 @@ installScreenTips()
 installCanvasFontFallback()
 
 function applyTheme(theme: UiTheme): void {
-  if (theme === 'system') document.documentElement.removeAttribute('data-theme')
-  else document.documentElement.setAttribute('data-theme', theme)
+  applyUiTheme(theme)
 }
 
 // Canvas fillText never triggers @font-face downloads, so the bundled Carlito

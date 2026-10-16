@@ -9,6 +9,7 @@ import {
   isLoadArtifact,
   rewriteCarriedValue,
   stashUndoCarry,
+  waitForPendingUndoCarry,
   type CarriedUndoItem,
 } from '../src/renderer/undo-carry'
 import type { UniverRuntime } from '../src/renderer/univer-state'
@@ -203,6 +204,22 @@ function fakeService(stack: CarriedUndoItem[], redoStack: CarriedUndoItem[] = []
 }
 
 describe('captureUndoCarry / consumePendingUndoCarry', () => {
+  it('lets a rapid Undo wait until the new unit installs its carried stack', async () => {
+    const service = fakeService([cellItem(OLD_UNIT, 1)])
+    const runtime = fakeRuntime(service)
+    stashUndoCarry(captureUndoCarry(runtime, 'newsha'))
+    let settled = false
+    const waiting = waitForPendingUndoCarry().then((ready) => {
+      settled = true
+      return ready
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    consumePendingUndoCarry(runtime, NEW_UNIT)
+    expect(await waiting).toBe(true)
+    expect(service.pushed).toHaveLength(1)
+  })
+
   it('captures, rewrites, and installs across the swap', () => {
     const service = fakeService([cellItem(OLD_UNIT, 1), cellItem(OLD_UNIT, 2)])
     const runtime = fakeRuntime(service)

@@ -4,6 +4,7 @@
  * variants (see there for the behavior). The plan's writes go through `set-range-values`, so the
  * edit journals, saves and undoes like any cell edit — one ⌘Z for the whole paste.
  */
+import { ensureColumnOnActiveWorkbook } from './column-extension'
 import type { ICellData, IStyleData } from '@univerjs/core'
 import { CellValueType, extractPureTextFromCell, type ICellData as CellData } from '@univerjs/core'
 import { LexerTreeBuilder } from '@univerjs/engine-formula'
@@ -122,6 +123,10 @@ export async function pasteSpecial(
   const extent = pasteExtent(copied.rows.length, copied.columns.length, options, target)
   const cellCount =
     (extent.endRow - extent.startRow + 1) * (extent.endColumn - extent.startColumn + 1)
+  // Columns run to XFD: grow the grid first so a paste near the edge fits.
+  if (cellCount <= MAX_PASTE_CELLS) {
+    ensureColumnOnActiveWorkbook(runtime, sheet.getSheetId(), extent.endColumn)
+  }
   if (
     extent.endRow >= sheet.getMaxRows() ||
     extent.endColumn >= sheet.getMaxColumns() ||

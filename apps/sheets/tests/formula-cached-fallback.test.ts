@@ -36,8 +36,16 @@ function captureInterceptor(lazyWorkbookRef: { current: unknown }): Interceptor 
 
 function makeState(cached: Record<string, string | number | boolean>) {
   return {
+    file: {
+      sheets: [
+        { id: 'sheet-1', name: 'Data' },
+        { id: 'inputs', name: 'Inputs' },
+        { id: 'unrelated', name: 'Other' },
+      ],
+    },
     editJournal: { structuralOps: new Map(), cells: new Map() },
     cachedFormulaValues: new Map([['sheet-1', new Map(Object.entries(cached))]]),
+    formulaText: new Map(),
   }
 }
 
@@ -145,6 +153,48 @@ describe('installCachedValueFallbackInterceptor', () => {
     expect(handler(divide, at(0, 0), passthrough)).toBe(divide)
     // #NAME? cannot be computed under any inputs; the cache stays better.
     expect(handler({ v: '#NAME?' }, at(0, 1), passthrough)).toMatchObject({ v: 7 })
+  })
+
+  it('shows a newly computed error when only a precedent on another sheet changed', () => {
+    const state = makeState({ '0:0': 0.1, '0:1': 7 })
+    state.editJournal.cells.set('inputs', new Map([['0:0', { hasValue: true }]]))
+    const { handler } = captureInterceptor({ current: state })
+    const divide = { v: '#DIV/0!' }
+    expect(handler(divide, { ...at(0, 0), rawData: { f: '=1/(Inputs!A1-40)' } }, passthrough)).toBe(
+      divide,
+    )
+    expect(handler({ v: '#NAME?' }, at(0, 1), passthrough)).toMatchObject({ v: 7 })
+  })
+
+  it('retains the cache for an unrelated-sheet edit and follows an intermediate formula', () => {
+    const state = makeState({ '0:0': 0.1 })
+    state.editJournal.cells.set('inputs', new Map([['0:0', { hasValue: true }]]))
+    const { handler } = captureInterceptor({ current: state })
+    const error = { v: '#DIV/0!' }
+    expect(
+      handler(error, { ...at(0, 0), rawData: { f: '=1/(Other!A1-40)' } }, passthrough),
+    ).toMatchObject({ v: 0.1 })
+
+    state.formulaText.set('unrelated', new Map([['0:0', '=Inputs!A1']]))
+    expect(handler(error, { ...at(0, 0), rawData: { f: '=1/(Other!A1-40)' } }, passthrough)).toBe(
+      error,
+    )
+  })
+
+  it('does not traverse a wide formula range when no content was edited', () => {
+    const state = makeState({ '0:0': 42 })
+    state.formulaText.set(
+      'unrelated',
+      new Map(Array.from({ length: 10_050 }, (_, row) => [`${row}:0`, '=1+1'])),
+    )
+    const { handler } = captureInterceptor({ current: state })
+    expect(
+      handler(
+        { v: '#VALUE!' },
+        { ...at(0, 0), rawData: { f: '=SUM(Other!A1:A11000)' } },
+        passthrough,
+      ),
+    ).toMatchObject({ v: 42 })
   })
 
   it('keeps a genuine arithmetic #VALUE! instead of the stale cache', () => {

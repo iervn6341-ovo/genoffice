@@ -404,6 +404,10 @@ pub struct CellRecord {
     pub array_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style_index: Option<usize>,
+    /// Whether the source `<c>` explicitly had `s=`. An absent `s` can
+    /// inherit a row or column xf even though its base index is still zero.
+    #[serde(default)]
+    pub explicit_style: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rich: Option<Vec<RichRun>>,
 }

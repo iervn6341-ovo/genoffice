@@ -1,10 +1,12 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+import { latexToOmml } from '@genoffice/office-math'
 
 import {
   applyVisualEdits,
   VisualEditError,
 } from '@genoffice/xlsx-gateway/gateway/xlsx-drawing-edit'
-import type { MutablePackage } from '@genoffice/xlsx-gateway/gateway/xlsx-drawing-add'
+import { equationXml, type MutablePackage } from '@genoffice/xlsx-gateway/gateway/xlsx-drawing-add'
 
 const ANCHOR = {
   fromRow: 2,
@@ -84,6 +86,241 @@ function packageWithDrawing(): Map<string, string> {
 }
 
 describe('applyVisualEdits', () => {
+  it('replaces only the selected native equation choice and preserves unrelated anchors byte-for-byte', async () => {
+    const before = equationXml(19, { latex: 'x+1', omml: latexToOmml('x+1') })
+    const firstAnchor = `<xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}${before}<xdr:clientData/></xdr:twoCellAnchor>`
+    const unrelated = `<xdr:twoCellAnchor>${marker('from', 5, 1)}${marker('to', 9, 9)}<xdr:sp name="keep"/><xdr:clientData/></xdr:twoCellAnchor>`
+    const entries = new Map([[PATH, `<xdr:wsDr>${firstAnchor}${unrelated}</xdr:wsDr>`]])
+    await applyVisualEdits(
+      fakePackage(entries),
+      [
+        {
+          drawingPath: PATH,
+          drawingIndex: 0,
+          equation: { latex: 'x+2', omml: latexToOmml('x+2') },
+        },
+      ],
+      new Set(),
+    )
+    const after = entries.get(PATH)!
+    expect(after).toContain(latexToOmml('x+2'))
+    expect(after).not.toContain(latexToOmml('x+1'))
+    expect(after).toContain(unrelated)
+    expect(after).toContain('id="19"')
+    expect(after).toContain(`GenOfficeEquationV2:${Buffer.from('x+2').toString('base64')}:`)
+    await applyVisualEdits(
+      fakePackage(entries),
+      [
+        {
+          drawingPath: PATH,
+          drawingIndex: 0,
+          equation: { latex: 'x+3', omml: latexToOmml('x+3') },
+        },
+      ],
+      new Set(),
+    )
+    expect(entries.get(PATH)).toContain(latexToOmml('x+3'))
+    expect(entries.get(PATH)).not.toContain(latexToOmml('x+2'))
+    expect(entries.get(PATH)).toContain(unrelated)
+  })
+
+  it('refuses to rewrite a non-equation anchor', async () => {
+    await expect(
+      applyVisualEdits(
+        fakePackage(packageWithDrawing()),
+        [
+          {
+            drawingPath: PATH,
+            drawingIndex: 2,
+            equation: { latex: 'x', omml: latexToOmml('x') },
+          },
+        ],
+        new Set(),
+      ),
+    ).rejects.toThrow(/supported native equation/)
+  })
+
+  it('edits direct a14:m content without rebuilding its styled shape or ordinary text', async () => {
+    const style =
+      '<xdr:spPr><a:xfrm rot="5400000"><a:off x="42" y="51"/><a:ext cx="920000" cy="510000"/></a:xfrm><a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="AABBCC"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:ln></xdr:spPr>'
+    const direct = `<xdr:wsDr><xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="8" name="Finance equation" title="Quarterly" descr="Analyst note"/></xdr:nvSpPr>${style}<xdr:txBody><a:bodyPr vert="vert270"/><a:p><a:pPr algn="ctr"/><a:r><a:rPr b="1"/><a:t>before </a:t></a:r><a14:m><m:oMath>${latexToOmml('x')}</m:oMath></a14:m><a:r><a:t> after</a:t></a:r></a:p></xdr:txBody></xdr:sp><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`
+    const entries = new Map([[PATH, direct]])
+    await applyVisualEdits(
+      fakePackage(entries),
+      [{ drawingPath: PATH, drawingIndex: 0, equation: { latex: 'y', omml: latexToOmml('y') } }],
+      new Set(),
+    )
+    const after = entries.get(PATH) ?? ''
+    expect(after).not.toContain('<mc:Choice')
+    expect(after).toContain(latexToOmml('y'))
+    expect(after).not.toContain(latexToOmml('x'))
+    expect(after).toContain(style)
+    expect(after).toContain('id="8" name="Finance equation" title="Quarterly" descr="Analyst note"')
+    expect(after).toContain('<a:r><a:rPr b="1"/><a:t>before </a:t></a:r>')
+    expect(after).toContain('<a:r><a:t> after</a:t></a:r>')
+    expect(after).toContain('<a:bodyPr vert="vert270"/><a:p><a:pPr algn="ctr"/>')
+  })
+
+  it('keeps imported Choice/Fallback styling and adjacent text while changing matched fallback math text', async () => {
+    const original = equationXml(31, { latex: 'q', omml: latexToOmml('q') })
+    const custom = original
+      .replaceAll(
+        /<xdr:cNvPr id="31"[^>]*\/>/g,
+        '<xdr:cNvPr id="31" name="Custom equation" title="Board report" descr="User description"/>',
+      )
+      .replaceAll(
+        '<a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm>',
+        '<a:xfrm rot="600000"><a:off x="600" y="700"/><a:ext cx="800000" cy="300000"/></a:xfrm>',
+      )
+      .replaceAll(
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln>',
+        '<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="ABCDEF"/></a:solidFill><a:ln w="9144"><a:solidFill><a:srgbClr val="010203"/></a:solidFill></a:ln>',
+      )
+      .replaceAll(
+        '<a:bodyPr/><a:lstStyle/><a:p>',
+        '<a:bodyPr vert="vert270"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr sz="1300"/><a:t>before </a:t></a:r>',
+      )
+      .replaceAll('</a:p></xdr:txBody>', '<a:r><a:t> after</a:t></a:r></a:p></xdr:txBody>')
+    const entries = new Map([
+      [
+        PATH,
+        `<xdr:wsDr><xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}${custom}<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`,
+      ],
+    ])
+    const before = entries.get(PATH) ?? ''
+    await applyVisualEdits(
+      fakePackage(entries),
+      [{ drawingPath: PATH, drawingIndex: 0, equation: { latex: 'y', omml: latexToOmml('y') } }],
+      new Set(),
+    )
+    const after = entries.get(PATH) ?? ''
+    expect(after).toContain(latexToOmml('y'))
+    expect(after).not.toContain(latexToOmml('q'))
+    expect(after).toContain('<a:t>before </a:t>')
+    expect(after).toContain('<a:t>y</a:t>')
+    expect(after).toContain('<a:t> after</a:t>')
+    expect(
+      after.match(/name="Custom equation" title="Board report" descr="User description"/g),
+    ).toHaveLength(2)
+    expect(after.match(/<a:xfrm rot="600000"><a:off x="600" y="700"\/>/g)).toHaveLength(2)
+    expect(after.match(/<a:prstGeom prst="roundRect">/g)).toHaveLength(2)
+    expect(after.match(/<a:solidFill><a:srgbClr val="ABCDEF"\/><\/a:solidFill>/g)).toHaveLength(2)
+    expect(after.match(/<a:ln w="9144">/g)).toHaveLength(2)
+    expect(after.match(/<a:bodyPr vert="vert270"\/>/g)).toHaveLength(2)
+    expect(after.match(/<a:pPr algn="ctr"\/>/g)).toHaveLength(2)
+    expect(
+      after.replace(latexToOmml('y'), latexToOmml('q')).replace('<a:t>y</a:t>', '<a:t>q</a:t>'),
+    ).toBe(before)
+  })
+
+  it('refuses an equation with a picture fallback so the old preview cannot survive an edit', async () => {
+    const native = equationXml(33, { latex: 'x', omml: latexToOmml('x') }).replace(
+      /<mc:Fallback>[\s\S]*?<\/mc:Fallback>/,
+      '<mc:Fallback><xdr:pic><a:blip r:embed="rId9"/></xdr:pic></mc:Fallback>',
+    )
+    const entries = new Map([
+      [
+        PATH,
+        `<xdr:wsDr><xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}${native}<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`,
+      ],
+    ])
+    await expect(
+      applyVisualEdits(
+        fakePackage(entries),
+        [{ drawingPath: PATH, drawingIndex: 0, equation: { latex: 'y', omml: latexToOmml('y') } }],
+        new Set(),
+      ),
+    ).rejects.toThrow(/fallback cannot be updated/)
+    expect(entries.get(PATH)).toContain(latexToOmml('x'))
+  })
+
+  it('uses native OMML when a matching-digest metadata source was tampered', async () => {
+    const native = equationXml(34, { latex: 'x', omml: latexToOmml('x') }).replaceAll(
+      `GenOfficeEquationV2:${Buffer.from('x').toString('base64')}:`,
+      `GenOfficeEquationV2:${Buffer.from('y').toString('base64')}:`,
+    )
+    const entries = new Map([
+      [
+        PATH,
+        `<xdr:wsDr><xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}${native}<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`,
+      ],
+    ])
+    await applyVisualEdits(
+      fakePackage(entries),
+      [{ drawingPath: PATH, drawingIndex: 0, equation: { latex: 'z', omml: latexToOmml('z') } }],
+      new Set(),
+    )
+    expect(entries.get(PATH)).toContain(latexToOmml('z'))
+    expect(entries.get(PATH)).toContain('<a:t>z</a:t>')
+    expect(entries.get(PATH)).toContain(
+      `GenOfficeEquationV2:${Buffer.from('z').toString('base64')}:`,
+    )
+  })
+
+  it('rejects unsupported native OMML even when stored source and digest look current', async () => {
+    const originalOmml = latexToOmml('x')
+    const unsupportedOmml = '<m:unsupportedNativeMath/>'
+    const native = equationXml(35, { latex: 'x', omml: originalOmml })
+      .replace(originalOmml, unsupportedOmml)
+      .replaceAll(
+        createHash('sha256').update(originalOmml).digest('hex'),
+        createHash('sha256').update(unsupportedOmml).digest('hex'),
+      )
+    const entries = new Map([
+      [
+        PATH,
+        `<xdr:wsDr><xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}${native}<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`,
+      ],
+    ])
+    await expect(
+      applyVisualEdits(
+        fakePackage(entries),
+        [{ drawingPath: PATH, drawingIndex: 0, equation: { latex: 'z', omml: latexToOmml('z') } }],
+        new Set(),
+      ),
+    ).rejects.toThrow(/cannot be reversed safely/)
+    expect(entries.get(PATH)).toContain(unsupportedOmml)
+  })
+
+  it('rejects an anchor with multiple native math zones instead of editing only the first', async () => {
+    const omml = latexToOmml('x')
+    const math = `<a14:m><m:oMath>${omml}</m:oMath></a14:m>`
+    const native = equationXml(36, { latex: 'x', omml }).replace(math, math + math)
+    const entries = new Map([
+      [
+        PATH,
+        `<xdr:wsDr><xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}${native}<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`,
+      ],
+    ])
+    await expect(
+      applyVisualEdits(
+        fakePackage(entries),
+        [{ drawingPath: PATH, drawingIndex: 0, equation: { latex: 'z', omml: latexToOmml('z') } }],
+        new Set(),
+      ),
+    ).rejects.toThrow(/one supported native equation/)
+    expect(entries.get(PATH)?.match(/<a14:m>/g)).toHaveLength(2)
+  })
+
+  it('preserves literal dollar sequences in replacement equation XML', async () => {
+    const original = equationXml(25, { latex: 'x', omml: latexToOmml('x') })
+    const entries = new Map([
+      [
+        PATH,
+        `<xdr:wsDr><xdr:twoCellAnchor>${marker('from', 0, 0)}${marker('to', 4, 8)}${original}<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`,
+      ],
+    ])
+    const latex = 'x$1'
+    const omml = latexToOmml(latex)
+    await applyVisualEdits(
+      fakePackage(entries),
+      [{ drawingPath: PATH, drawingIndex: 0, equation: { latex, omml } }],
+      new Set(),
+    )
+    expect(entries.get(PATH)).toContain(omml)
+    expect(entries.get(PATH)).toContain('id="25"')
+  })
+
   it('removes a picture anchor and leaves the others verbatim', async () => {
     const entries = packageWithDrawing()
     const touched = new Set<string>()

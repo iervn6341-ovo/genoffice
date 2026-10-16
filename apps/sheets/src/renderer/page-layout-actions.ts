@@ -27,15 +27,19 @@ import { endThemePreview, startThemePreview, type ThemePreviewKind } from './the
 import { withThemeUndo } from './theme-undo'
 import { COLOR_SCHEMES, FONT_SCHEMES, rethemeStyles, THEME_PRESETS } from './themes'
 import { loadVisibleRange } from './univer-sync'
+import { ensureRangeResident } from './lazy-resident'
+import { PRINT_JOB_MAX_CELLS, totalCells, unitsForAreas, type PrintArea } from './print-bands'
+import { parseArea } from './print-html'
 import {
   buildSheetPrintPayload,
   type HeaderFooterPictureImage,
   type PrintWorksheet,
 } from './print-html'
+import type { PrintOnlyOptions } from './print-options'
 import { resolveEffectivePageSetup, type HeaderFooterPictureSlot } from './print-settings'
 import { settleVisualNodes, snapshotPrintVisuals } from './print-visuals'
 import { installedVisualFrames, type InstalledVisualFrame } from './WorkbookVisuals'
-import type { LazyWorkbookState, UniverRuntime } from './univer-state'
+import { lazySheetScreenExtent, type LazyWorkbookState, type UniverRuntime } from './univer-state'
 
 const PAPER_NAMES: Record<string, string> = {
   1: 'Letter',
@@ -392,11 +396,39 @@ export function handleApplyHeaderFooter(
     .getActiveWorkbook()
     ?.getActiveSheet()
     ?.getSheetId()
-  if (!sheetId || isSheetRemoved(state.editJournal, sheetId)) {
+  if (!sheetId || result.sheetId !== sheetId || isSheetRemoved(state.editJournal, sheetId)) {
     return t('appActiveSheetUnavailable')
   }
+  const changedPictures = new Set(result.pictureEdits.map((edit) => edit.position))
+  state.headerFooterPictureData.set(
+    sheetId,
+    new Map(
+      result.loadedPictures
+        .filter((picture) => changedPictures.has(picture.position))
+        .map((picture) => [
+          picture.position,
+          {
+            mediaType: picture.mediaType,
+            base64: picture.base64,
+          },
+        ]),
+    ),
+  )
   void withPageSetupUndo(ctx, sheetId, () => {
-    recordPageSetup(state.editJournal, sheetId, { header: result.header, footer: result.footer })
+    const previous = state.editJournal.pageSetup.get(sheetId)?.headerFooterPictureEdits ?? []
+    const editsByPosition = new Map(previous.map((edit) => [edit.position, edit]))
+    for (const edit of result.pictureEdits) editsByPosition.set(edit.position, edit)
+    recordPageSetup(state.editJournal, sheetId, {
+      header: result.header,
+      footer: result.footer,
+      firstPage: result.firstPage,
+      evenPages: result.evenPages,
+      firstPageStored: result.firstPageStored,
+      evenPagesStored: result.evenPagesStored,
+      ...(result.pictureEdits.length > 0
+        ? { headerFooterPictureEdits: [...editsByPosition.values()] }
+        : {}),
+    })
     ctx.setPendingEdits(journalSize(state.editJournal))
     ctx.setMessage(t('appHfUpdated'))
   })
@@ -413,6 +445,8 @@ export interface PrintScopeOptions {
   /// First / last page of the active sheet's print (1-based).
   readonly pageFrom?: number
   readonly pageTo?: number
+  /// Print-only options (custom margins, centering, errors as, B/W, draft, first page number).
+  readonly options?: PrintOnlyOptions
 }
 
 /// The effective Page Layout of one sheet (file settings + this session's edits).
@@ -451,18 +485,26 @@ function activeSelectionArea(runtime: UniverRuntime): string | null {
 async function sheetPrintPayload(
   ctx: PageLayoutContext,
   worksheet: { getSheetId(): string; getSheetName(): string },
-  override?: { readonly printAreas?: readonly string[] },
+  override?: { readonly printAreas?: readonly string[]; readonly options?: PrintOnlyOptions },
 ): Promise<WorkbookExportPdfRequest> {
   const state = ctx.lazyWorkbookRef.current
   const sheetId = worksheet.getSheetId()
   const baseSetup = effectiveSetupFor(ctx, sheetId)
-  const setup =
+  const options = override?.options ?? {}
+  const withAreas =
     override?.printAreas === undefined
       ? baseSetup
       : { ...baseSetup, printAreas: override.printAreas }
-  const baseName = (state?.file.name ?? 'Book1').replace(/\.[^.]+$/, '')
+  const setup =
+    options.margins === undefined ? withAreas : { ...withAreas, margins: options.margins }
+  const workbookName = state?.file.name ?? 'Book1.xlsx'
+  const baseName = workbookName.replace(/\.[^.]+$/, '')
   const pictures = state
-    ? await loadHeaderFooterPictures(state.file.sessionId, setup.headerFooterPictures)
+    ? await loadHeaderFooterPictures(
+        state.file.sessionId,
+        setup.headerFooterPictures,
+        state.editJournal.pageSetup.get(sheetId)?.headerFooterPictureEdits ?? [],
+      )
     : new Map<string, HeaderFooterPictureImage>()
   const frames = await settledVisualFrames(ctx, state, sheetId)
   return buildSheetPrintPayload(
@@ -471,7 +513,12 @@ async function sheetPrintPayload(
     `${baseName}.pdf`,
     worksheet.getSheetName(),
     pictures,
-    snapshotPrintVisuals(document, frames),
+    // draft quality prints no drawings
+    options.draft === true ? { visuals: [], css: '' } : snapshotPrintVisuals(document, frames),
+    workbookName,
+    state?.file.csvPath ?? state?.file.path,
+    state?.file.themeColors,
+    options,
   )
 }
 
@@ -521,6 +568,119 @@ export async function handleExportPdf(ctx: PageLayoutContext, outPath?: string):
   }
 }
 
+/// The print units of a job — sheets, or row bands of sheets too large to lay out in one piece —
+/// each laid out lazily as print HTML (the print sheet's preview and the real print both walk
+/// this list). Large workbooks are not loaded whole: a unit reads only its own rows from the file.
+/// `error` is a user-facing reason nothing can print.
+export type PrintTargets =
+  | {
+      readonly ok: true
+      readonly count: number
+      /// Some sheet was split into bands: the real print merges the bands into one PDF.
+      readonly banded: boolean
+      payloadAt(index: number): Promise<WorkbookExportPdfRequest>
+    }
+  | { readonly ok: false; readonly error: string }
+
+function a1Of(area: PrintArea): string {
+  return `${columnLabel(area.startColumn)}${area.startRow + 1}:${columnLabel(area.endColumn)}${area.endRow + 1}`
+}
+
+export function printTargets(ctx: PageLayoutContext, scope: PrintScopeOptions): PrintTargets {
+  try {
+    const runtime = ctx.univerRef.current
+    const workbook = runtime?.univerAPI.getActiveWorkbook()
+    const active = workbook?.getActiveSheet()
+    if (!runtime || !workbook || !active) {
+      return { ok: false, error: t('appActiveSheetUnavailable') }
+    }
+    const state = ctx.lazyWorkbookRef.current
+    const partial = state !== null && !state.flags.preloadComplete
+    const sheets =
+      scope.scope === 'workbook'
+        ? workbook.getSheets().filter((sheet) => !sheet.isSheetHidden())
+        : [active]
+    let selection: PrintArea | null = null
+    if (scope.scope === 'selection') {
+      const area = activeSelectionArea(runtime)
+      if (area === null) return { ok: false, error: t('appSelectPrintRange') }
+      selection = parseArea(area)
+    }
+    interface Unit {
+      readonly sheet: (typeof sheets)[number]
+      /// undefined = the sheet's own page layout decides (small, fully loaded sheets)
+      readonly areas: readonly PrintArea[] | undefined
+    }
+    const units: Unit[] = []
+    let banded = false
+    let cells = 0
+    for (const sheet of sheets) {
+      const sheetId = sheet.getSheetId()
+      const extent = state ? lazySheetScreenExtent(state, sheetId) : null
+      const used: PrintArea = {
+        startRow: 0,
+        startColumn: 0,
+        endRow: Math.max(extent ? extent.rows - 1 : sheet.getLastRow(), 0),
+        endColumn: Math.max(extent ? extent.columns - 1 : sheet.getLastColumn(), 0),
+      }
+      const setup = effectiveSetupFor(ctx, sheetId)
+      const areas: PrintArea[] =
+        selection !== null
+          ? [selection]
+          : scope.ignorePrintArea === true || setup.printAreas.length === 0
+            ? [used]
+            : setup.printAreas.map(parseArea)
+      cells += totalCells(areas)
+      const plan = unitsForAreas(areas)
+      if (plan.banded) banded = true
+      // explicit areas only when the sheet's own layout would be wrong or too big
+      const explicit =
+        plan.banded || selection !== null || scope.ignorePrintArea === true || partial
+      for (const unit of plan.units) {
+        units.push({ sheet, areas: explicit ? unit : undefined })
+      }
+    }
+    if (cells > PRINT_JOB_MAX_CELLS) return { ok: false, error: t('appPrintJobTooLarge') }
+    return {
+      ok: true,
+      count: units.length,
+      banded,
+      payloadAt: async (index) => {
+        const unit = units[index]!
+        if (unit.areas !== undefined && partial) {
+          for (const area of unit.areas) {
+            const resident = await ensureRangeResident(
+              runtime,
+              ctx.lazyWorkbookRef,
+              unit.sheet as unknown as Parameters<typeof ensureRangeResident>[2],
+              area,
+              ctx.setMessage,
+            )
+            if (!resident) throw new Error(t('appLoadRangeFailed'))
+          }
+        }
+        return sheetPrintPayload(ctx, unit.sheet, {
+          ...(unit.areas === undefined ? {} : { printAreas: unit.areas.map(a1Of) }),
+          // a band is a slice of a taller sheet: centering it on its own page would misplace it
+          ...(scope.options === undefined
+            ? {}
+            : {
+                options: banded ? { ...scope.options, centerVertically: false } : scope.options,
+              }),
+        })
+      },
+    }
+  } catch (error: unknown) {
+    return { ok: false, error: error instanceof Error ? error.message : t('appPrintFailed') }
+  }
+}
+
+export interface PrintRunOptions {
+  /// Called as units are prepared (band-by-band jobs).
+  readonly onProgress?: (done: number, total: number) => void
+  readonly signal?: AbortSignal
+}
+
 /// File → Print: the same layout, handed to the system print dialog. The
 /// print pane's scope decides which sheets / range go out: the active sheet
 /// (default), every visible sheet one after the other, or the selection.
@@ -528,29 +688,16 @@ export async function handlePrint(
   ctx: PageLayoutContext,
   job?: WorkbookPrintJob,
   scope: PrintScopeOptions = { scope: 'active' },
+  run: PrintRunOptions = {},
 ): Promise<boolean> {
-  const messages = {
-    notLoaded: t('appPrintNeedsFullLoad'),
-    preparing: t('appPrintPreparing'),
-  }
+  let bandJob: string | null = null
   try {
-    const runtime = ctx.univerRef.current
-    const workbook = runtime?.univerAPI.getActiveWorkbook()
-    const active = workbook?.getActiveSheet()
-    if (!runtime || !workbook || !active) {
-      ctx.setMessage(t('appActiveSheetUnavailable'))
+    const targets = printTargets(ctx, scope)
+    if (!targets.ok) {
+      ctx.setMessage(targets.error)
       return false
     }
-    const state = ctx.lazyWorkbookRef.current
-    if (state && !state.flags.preloadComplete) {
-      ctx.setMessage(messages.notLoaded)
-      return false
-    }
-    ctx.setMessage(messages.preparing)
-    const sheets =
-      scope.scope === 'workbook'
-        ? workbook.getSheets().filter((sheet) => !sheet.isSheetHidden())
-        : [active]
+    ctx.setMessage(t('appPrintPreparing'))
     const pageRange =
       scope.scope !== 'workbook' && scope.pageFrom !== undefined
         ? {
@@ -558,24 +705,37 @@ export async function handlePrint(
             ...(scope.pageTo === undefined ? {} : { pageTo: scope.pageTo }),
           }
         : {}
-    let sent = false
-    for (const sheet of sheets) {
-      let areas: readonly string[] | undefined
-      if (scope.scope === 'selection') {
-        const area = activeSelectionArea(runtime)
-        if (area === null) {
-          ctx.setMessage(t('appSelectPrintRange'))
+    if (targets.banded) {
+      // very large: every band is laid out, rendered to disk and released in turn, then merged
+      const jobId = `print-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      bandJob = jobId
+      for (let index = 0; index < targets.count; index++) {
+        if (run.signal?.aborted === true) {
+          ctx.setMessage(t('appPrintCanceled'))
           return false
         }
-        areas = [area]
-      } else if (scope.ignorePrintArea === true) {
-        areas = []
+        run.onProgress?.(index, targets.count)
+        ctx.setMessage(t('appPrintBandProgress', { done: index + 1, total: targets.count }))
+        const added = await window.desktopApi.addPrintBand(jobId, await targets.payloadAt(index))
+        if (!added.ok) throw new Error(added.error)
       }
-      const payload = await sheetPrintPayload(
-        ctx,
-        sheet,
-        areas === undefined ? undefined : { printAreas: areas },
-      )
+      run.onProgress?.(targets.count, targets.count)
+      if (run.signal?.aborted === true) {
+        ctx.setMessage(t('appPrintCanceled'))
+        return false
+      }
+      const result = await window.desktopApi.finishPrintBands(jobId, { ...job, ...pageRange })
+      bandJob = null
+      if (!result.ok) {
+        ctx.setMessage(result.error === undefined ? t('appPrintCanceled') : t('appPrintFailed'))
+        return false
+      }
+      ctx.setMessage(result.openedPdf === undefined ? t('appPrintSent') : t('appPrintOpenedPdf'))
+      return true
+    }
+    let sent = false
+    for (let index = 0; index < targets.count; index++) {
+      const payload = await targets.payloadAt(index)
       const result = await window.desktopApi.printWorkbook(payload, { ...job, ...pageRange })
       if (!result.ok) {
         ctx.setMessage(result.error === undefined ? t('appPrintCanceled') : t('appPrintFailed'))
@@ -589,6 +749,8 @@ export async function handlePrint(
     // layout errors (empty print area, oversized sheet, bad titles) name the cause
     ctx.setMessage(error instanceof Error ? error.message : t('appPrintFailed'))
     return false
+  } finally {
+    if (bandJob !== null) void window.desktopApi.cancelPrintBands(bandJob)
   }
 }
 
@@ -628,12 +790,19 @@ async function settledVisualFrames(
 async function loadHeaderFooterPictures(
   sessionId: string,
   slots: readonly HeaderFooterPictureSlot[],
+  edits: readonly import('./edit-journal').HeaderFooterPictureEdit[],
 ): Promise<Map<string, HeaderFooterPictureImage>> {
   const pictures = new Map<string, HeaderFooterPictureImage>()
   await Promise.all(
     slots.map(async (slot) => {
       try {
-        const media = await window.desktopApi.readWorkbookMedia({ sessionId, visualId: slot.id })
+        const pending = slot.id.startsWith('journal:')
+          ? edits.find((edit) => edit.position === slot.position)?.image
+          : undefined
+        const media =
+          pending && pending !== null
+            ? pending
+            : await window.desktopApi.readWorkbookMedia({ sessionId, visualId: slot.id })
         const dataUrl = isMetafileMime(media.mediaType)
           ? await metafileToDataUrl(base64ToBytes(media.base64), media.mediaType)
           : `data:${media.mediaType};base64,${media.base64}`

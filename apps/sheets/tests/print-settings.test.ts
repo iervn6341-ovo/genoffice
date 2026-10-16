@@ -7,6 +7,7 @@ import {
 } from '../src/renderer/print-html'
 import {
   decodeHeaderFooter,
+  resolveHeaderFooterEditVariants,
   printAreasFromFormula,
   printTitleRowsFromFormula,
   resolveEffectivePageSetup,
@@ -26,16 +27,28 @@ describe('decodeHeaderFooter', () => {
     expect(decodeHeaderFooter('Quarterly Report')).toEqual({ center: 'Quarterly Report' })
   })
 
-  it('strips font, size, color and unsupported codes', () => {
+  it('preserves font, size, color and path codes for round-trip editing', () => {
     expect(decodeHeaderFooter('&C&"Broadway,Bold Italic"&12&KFF0000Big &BRed&B Title&Z')).toEqual({
-      center: 'Big Red Title',
+      center: '&"Broadway,Bold Italic"&12&KFF0000Big &BRed&B Title&Z',
     })
   })
 
-  it('drops the path code but keeps the file and picture codes', () => {
+  it('preserves theme colors, page offsets, Unicode fonts and adjacent section markers', () => {
+    expect(decodeHeaderFooter('&L&"游ゴシック,Bold"&E雙線&E&K05+050Tint&P-2 2026&RRight')).toEqual({
+      left: '&"游ゴシック,Bold"&E雙線&E&K05+050Tint&P-2 2026',
+      right: 'Right',
+    })
+    expect(decodeHeaderFooter('&L&K05bad&RRight')).toEqual({
+      left: '&K05bad',
+      right: 'Right',
+    })
+    expect(decodeHeaderFooter('&LTrailing&')).toEqual({ left: 'Trailing&' })
+  })
+
+  it('keeps the path, file and picture codes in storage', () => {
     expect(decodeHeaderFooter('&C&P / &N&R&Z&F&G')).toEqual({
       center: '&P / &N',
-      right: '&F&G',
+      right: '&Z&F&G',
     })
     expect(decodeHeaderFooter('&L&G')).toEqual({ left: '&G' })
   })
@@ -44,8 +57,8 @@ describe('decodeHeaderFooter', () => {
     expect(decodeHeaderFooter('&LProfit && Loss')).toEqual({ left: 'Profit && Loss' })
   })
 
-  it('returns null when everything strips away', () => {
-    expect(decodeHeaderFooter('&L&Z')).toBeNull()
+  it('returns null only for empty sections', () => {
+    expect(decodeHeaderFooter('&L&Z')).toEqual({ left: '&Z' })
     expect(decodeHeaderFooter('')).toBeNull()
   })
 
@@ -227,6 +240,65 @@ describe('resolveEffectivePageSetup', () => {
     expect(on.evenPages).toEqual({ header: { center: 'Even' }, footer: null })
   })
 
+  it('retains disabled first/even text for editing while print uses odd pages', () => {
+    const file = {
+      oddHeader: '&COdd',
+      firstHeader: '&LFIRST &F',
+      firstFooter: '&RFirst footer',
+      evenHeader: '&CEVEN &A',
+      evenFooter: '&LEven footer',
+      differentFirst: false,
+      differentOddEven: false,
+    }
+    const print = resolveEffectivePageSetup({}, file, null)
+    expect(print.firstPage).toBeNull()
+    expect(print.evenPages).toBeNull()
+    const edit = resolveHeaderFooterEditVariants({}, file)
+    expect(edit.firstPage).toEqual({
+      enabled: false,
+      parts: { header: { left: 'FIRST &F' }, footer: { right: 'First footer' } },
+    })
+    expect(edit.evenPages).toEqual({
+      enabled: false,
+      parts: { header: { center: 'EVEN &A' }, footer: { left: 'Even footer' } },
+    })
+    expect(resolveHeaderFooterEditVariants({ firstPage: null, evenPages: null }, file)).toEqual(
+      edit,
+    )
+    expect(
+      resolveHeaderFooterEditVariants({ firstPage: edit.firstPage.parts! }, file).firstPage,
+    ).toEqual({ enabled: true, parts: edit.firstPage.parts })
+  })
+
+  it('uses journaled hidden contents without enabling disabled first/even variants', () => {
+    const file = {
+      firstHeader: '&COld first',
+      evenFooter: '&ROld even',
+      differentFirst: false,
+      differentOddEven: false,
+    }
+    const journal = {
+      firstPage: null,
+      firstPageStored: { header: { center: 'Restored first' }, footer: null },
+      evenPages: null,
+      evenPagesStored: { header: null, footer: { right: 'Restored even' } },
+    }
+    expect(resolveEffectivePageSetup(journal, file, null)).toMatchObject({
+      firstPage: null,
+      evenPages: null,
+    })
+    expect(resolveHeaderFooterEditVariants(journal, file)).toEqual({
+      firstPage: { enabled: false, parts: journal.firstPageStored },
+      evenPages: { enabled: false, parts: journal.evenPagesStored },
+    })
+    expect(
+      resolveHeaderFooterEditVariants({ firstPageStored: null, evenPagesStored: null }, file),
+    ).toEqual({
+      firstPage: { enabled: false, parts: null },
+      evenPages: { enabled: false, parts: null },
+    })
+  })
+
   it('keeps the file variants when the session edits the odd header', () => {
     const setup = resolveEffectivePageSetup(
       { header: { center: 'Session' }, footer: null },
@@ -236,6 +308,20 @@ describe('resolveEffectivePageSetup', () => {
     expect(setup.header).toEqual({ center: 'Session' })
     expect(setup.footer).toBeNull()
     expect(setup.firstPage).toEqual({ header: { center: 'First' }, footer: null })
+  })
+
+  it('uses edited first/even variants for preview without losing the file odd header', () => {
+    const setup = resolveEffectivePageSetup(
+      {
+        firstPage: { header: { left: 'New first &P' }, footer: null },
+        evenPages: { header: null, footer: { right: 'New even &N' } },
+      },
+      { oddHeader: '&COdd', differentFirst: true, firstHeader: '&COld first' },
+      null,
+    )
+    expect(setup.header).toEqual({ center: 'Odd' })
+    expect(setup.firstPage).toEqual({ header: { left: 'New first &P' }, footer: null })
+    expect(setup.evenPages).toEqual({ header: null, footer: { right: 'New even &N' } })
   })
 
   it('shifts the file print area through rows inserted above', () => {
@@ -319,6 +405,91 @@ describe('renderHeaderFooterHtml', () => {
 
   it('prints nothing for &G when the slot has no picture', () => {
     expect(renderHeaderFooterHtml('&GTitle', 'Book', 'S1', now)).toBe('Title')
+  })
+
+  it('renders supported font codes and hides other Excel controls in PDF text', () => {
+    const html = renderHeaderFooterHtml(
+      '&"Arial,Bold Italic"&12&KFF0000Red &P&B normal&B&Sstrike&S&Z&O&H',
+      'Book',
+      'S1',
+      now,
+    )
+    expect(html).toContain("font-family:'Arial'")
+    expect(html).toContain('font-size:12pt')
+    expect(html).toContain('color:#FF0000')
+    expect(html).toContain('font-weight:bold')
+    expect(html).toContain('font-style:italic')
+    expect(html).toContain('<span class="pageNumber"></span>')
+    expect(html).toContain('text-decoration:line-through')
+    expect(html).not.toMatch(/&(?:K|Z|O|H|B|S|12)/)
+  })
+
+  it('renders double underline independently from single underline', () => {
+    const html = renderHeaderFooterHtml('&ESpecial&E &UOrdinary&U', 'Book', 'S1', now)
+    expect(html).toContain('text-decoration:underline;text-decoration-style:double')
+    expect(html).toContain('<span style="text-decoration:underline">Ordinary</span>')
+    expect(html).not.toContain('&E')
+  })
+
+  it('resolves theme tint against the workbook palette without printing color fragments', () => {
+    const palette = [
+      '#FFFFFF',
+      '#000000',
+      '#E7E6E6',
+      '#44546A',
+      '#123456',
+      '#ED7D31',
+      '#A5A5A5',
+      '#FFC000',
+      '#5B9BD5',
+      '#70AD47',
+      '#0563C1',
+      '#954F72',
+    ]
+    const html = renderHeaderFooterHtml(
+      '&K05+000Base &K05+100White &K05-100Black',
+      'Book',
+      'S1',
+      now,
+      undefined,
+      1,
+      undefined,
+      palette,
+    )
+    expect(html).toContain('color:#123456')
+    expect(html).toContain('color:#FFFFFF')
+    expect(html).toContain('color:#000000')
+    expect(html).not.toMatch(/&K|05[+-](?:000|100)/)
+  })
+
+  it('escapes a Unicode font family as one CSS string inside the template attribute', () => {
+    const html = renderHeaderFooterHtml('&"新細明體\';color:red,Regular"Text', 'Book', 'S1', now)
+    expect(html).toContain("font-family:'新細明體\\';color:red'")
+    expect(html).not.toContain("style=\"font-family:'新細明體';color:red")
+    expect(html).toContain('>Text</span>')
+  })
+
+  it('marks signed page-number offsets for page-specific PDF rendering', () => {
+    expect(renderHeaderFooterHtml('&P+2x3 / &P-1 &P+ &N', 'Book', 'S1', now)).toBe(
+      '<span data-genoffice-page-offset="+2"></span>x3 / ' +
+        '<span data-genoffice-page-offset="-1"></span> ' +
+        '<span class="pageNumber"></span>+ <span class="totalPages"></span>',
+    )
+  })
+
+  it('resolves the workbook path and filename fields from the source file', () => {
+    expect(
+      renderHeaderFooterHtml(
+        '&Z/&F',
+        'Budget.xlsx',
+        'Q1',
+        now,
+        undefined,
+        1,
+        '/tmp/reports/Budget.xlsx',
+      ),
+    ).toBe('/tmp/reports/Budget.xlsx')
+    expect(renderHeaderFooterHtml('&Z/&F', 'Budget.xlsx', 'Q1', now)).toBe('/Budget.xlsx')
   })
 })
 
@@ -408,6 +579,24 @@ function tallWorksheet(rows: number): PrintWorksheet {
 }
 
 describe('buildSheetPrintPayload', () => {
+  it('uses the workbook theme palette for header/footer theme color codes', () => {
+    const palette = Array.from({ length: 12 }, () => '#101010')
+    palette[2] = '#ABCDEF'
+    const payload = buildSheetPrintPayload(
+      fakeWorksheet(),
+      payloadSetup({ header: { center: '&K04+000Theme' } }),
+      'Book.pdf',
+      'S1',
+      new Map(),
+      { visuals: [], css: '' },
+      'Book.xlsx',
+      undefined,
+      palette,
+    )
+    expect(payload.headerTemplate).toContain('color:#ABCDEF')
+    expect(payload.headerTemplate).not.toContain('04+000')
+  })
+
   it('maps common OOXML paper sizes instead of falling back to A4', () => {
     const b4 = buildSheetPrintPayload(
       fakeWorksheet(),
@@ -636,6 +825,34 @@ describe('buildSheetPrintPayload', () => {
     expect(payload.headerTemplate).not.toContain('FIRST')
     expect(payload.firstPage?.headerTemplate).toContain('src="data:image/png;base64,FIRST"')
     expect(payload.firstPage?.headerTemplate).not.toContain('ODD')
+  })
+
+  it('positions picture templates from saved edge margins without Chromium’s extra 15pt inset', () => {
+    const image = { dataUrl: 'data:image/png;base64,IMAGE', widthPt: 120, heightPt: 24 }
+    const payload = buildSheetPrintPayload(
+      fakeWorksheet(),
+      payloadSetup({
+        margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
+        header: { left: '&G' },
+        footer: { left: '&G' },
+      }),
+      'Book.pdf',
+      'S1',
+      new Map([
+        ['LH', image],
+        ['LF', image],
+      ]),
+    )
+    // Chromium's template page puts a 15pt pad on #header and #footer. The
+    // workbook's 0.3in margin must be the only inset: 21.6pt + 24pt < 54pt.
+    expect(payload.headerTemplate).toContain('#header{padding-top:0!important}')
+    expect(payload.headerTemplate).toContain('padding-top:0.3in')
+    expect(payload.headerTemplate).toContain('height:32px')
+    expect(payload.footerTemplate).toContain('#footer{padding-bottom:0!important}')
+    expect(payload.footerTemplate).toContain('padding-bottom:0.3in')
+    expect(payload.footerTemplate).toContain('height:32px')
+    expect(payload.margins.top).toBe(0.75)
+    expect(payload.margins.bottom).toBe(0.75)
   })
 
   it('scales the header/footer with the document unless scaleWithDoc is off', () => {

@@ -24,6 +24,52 @@ export interface HeaderFooterPair {
   readonly footer: HeaderFooterParts | null
 }
 
+export interface HeaderFooterEditVariant {
+  readonly enabled: boolean
+  readonly parts: HeaderFooterPair | null
+}
+
+/// The print layout gates variants by their flags. Editing also needs the
+/// stored text when a flag is off, so re-enabling does not erase it.
+export function resolveHeaderFooterEditVariants(
+  journal: PageSetupJournalState,
+  file: WorkbookPagePrintSettings | null,
+): { readonly firstPage: HeaderFooterEditVariant; readonly evenPages: HeaderFooterEditVariant } {
+  const fromFile = (
+    header: string | undefined,
+    footer: string | undefined,
+  ): HeaderFooterPair | null => {
+    const pair = {
+      header: header === undefined ? null : decodeHeaderFooter(header),
+      footer: footer === undefined ? null : decodeHeaderFooter(footer),
+    }
+    return pair.header === null && pair.footer === null ? null : pair
+  }
+  const variant = (
+    edit: HeaderFooterPair | null | undefined,
+    storedEdit: HeaderFooterPair | null | undefined,
+    enabledInFile: boolean,
+    stored: HeaderFooterPair | null,
+  ): HeaderFooterEditVariant => ({
+    enabled: edit === undefined ? enabledInFile : edit !== null,
+    parts: edit && edit !== null ? edit : storedEdit === undefined ? stored : storedEdit,
+  })
+  return {
+    firstPage: variant(
+      journal.firstPage,
+      journal.firstPageStored,
+      file?.differentFirst === true,
+      fromFile(file?.firstHeader, file?.firstFooter),
+    ),
+    evenPages: variant(
+      journal.evenPages,
+      journal.evenPagesStored,
+      file?.differentOddEven === true,
+      fromFile(file?.evenHeader, file?.evenFooter),
+    ),
+  }
+}
+
 /// One `&G` picture slot the file declares (legacyDrawingHF); the bytes are
 /// fetched through readWorkbookMedia at export time.
 export type HeaderFooterPictureSlot = NonNullable<
@@ -177,18 +223,13 @@ export function resolveEffectivePageSetup(
       : file?.oddFooter !== undefined
         ? decodeHeaderFooter(file.oddFooter)
         : null
-  // The session edits the odd header/footer only (like Excel's Page Setup
-  // dialog); the file's first/even variants keep applying to their pages.
-  const decodeOptional = (encoded: string | undefined): HeaderFooterParts | null =>
-    encoded === undefined ? null : decodeHeaderFooter(encoded)
-  const firstPage =
-    file?.differentFirst === true
-      ? { header: decodeOptional(file.firstHeader), footer: decodeOptional(file.firstFooter) }
-      : null
-  const evenPages =
-    file?.differentOddEven === true
-      ? { header: decodeOptional(file.evenHeader), footer: decodeOptional(file.evenFooter) }
-      : null
+  const variants = resolveHeaderFooterEditVariants(journal, file)
+  const firstPage = variants.firstPage.enabled
+    ? (variants.firstPage.parts ?? { header: null, footer: null })
+    : null
+  const evenPages = variants.evenPages.enabled
+    ? (variants.evenPages.parts ?? { header: null, footer: null })
+    : null
   return {
     orientation: journal.orientation ?? file?.orientation ?? 'portrait',
     paperSize: journal.paperSize ?? file?.paperSize ?? 9,
@@ -206,8 +247,42 @@ export function resolveEffectivePageSetup(
     firstPage,
     evenPages,
     headerFooterScaleWithDoc: file?.headerFooterFixedSize !== true,
-    headerFooterPictures: file?.headerFooterPictures ?? [],
+    headerFooterPictures: effectiveHeaderFooterPictures(
+      file?.headerFooterPictures ?? [],
+      journal.headerFooterPictureEdits ?? [],
+    ),
   }
+}
+
+function effectiveHeaderFooterPictures(
+  file: readonly HeaderFooterPictureSlot[],
+  edits: NonNullable<PageSetupJournalState['headerFooterPictureEdits']>,
+): HeaderFooterPictureSlot[] {
+  const slots = new Map(file.map((slot) => [slot.position, slot]))
+  for (const edit of edits) {
+    if (edit.image === null) {
+      slots.delete(edit.position)
+      continue
+    }
+    const original = slots.get(edit.position)
+    if (edit.image !== undefined) {
+      if (edit.widthPt === undefined || edit.heightPt === undefined) continue
+      slots.set(edit.position, {
+        id: `journal:${edit.position}`,
+        position: edit.position,
+        widthPt: edit.widthPt,
+        heightPt: edit.heightPt,
+        mediaType: edit.image.mediaType,
+      })
+    } else if (original && edit.widthPt !== undefined && edit.heightPt !== undefined) {
+      slots.set(edit.position, {
+        ...original,
+        widthPt: edit.widthPt,
+        heightPt: edit.heightPt,
+      })
+    }
+  }
+  return [...slots.values()]
 }
 
 /// Splits a defined-name formula on commas outside quoted sheet names.
@@ -272,9 +347,9 @@ export function printTitleRowsFromFormula(formula: string | undefined): string |
 }
 
 /// Excel's encoded header/footer → left/center/right parts. Field codes the
-/// layout resolves (&P &N &D &T &F &A &G picture, && literal) stay verbatim;
-/// formatting codes (font/size/color/bold/…) and unsupported codes (&Z
-/// path) are stripped. Text before the first section marker is centered.
+/// layout resolves (&P &N &D &T &F &A &G picture, && literal) stay verbatim.
+/// Formatting and other field codes are retained so an edited workbook does
+/// not silently lose styles. Text before the first section is centered.
 export function decodeHeaderFooter(encoded: string): HeaderFooterParts | null {
   const sections = { L: '', C: '', R: '' }
   let current: 'L' | 'C' | 'R' = 'C'
@@ -287,28 +362,38 @@ export function decodeHeaderFooter(encoded: string): HeaderFooterParts | null {
       continue
     }
     const next = encoded[index + 1]
-    if (next === undefined) break
+    if (next === undefined) {
+      sections[current] += '&'
+      break
+    }
     if (next === '&') {
       sections[current] += '&&'
       index += 2
       continue
     }
-    // &"Font Name,Style" — skip the whole quoted spec.
+    // &"Font Name,Style" belongs to the current section.
     if (next === '"') {
       const close = encoded.indexOf('"', index + 2)
+      sections[current] += encoded.slice(index, close === -1 ? encoded.length : close + 1)
       index = close === -1 ? encoded.length : close + 1
       continue
     }
     // &nn font size.
     if (/[0-9]/.test(next)) {
+      const start = index
       index += 2
       while (index < encoded.length && /[0-9]/.test(encoded[index] ?? '')) index += 1
+      sections[current] += encoded.slice(start, index)
       continue
     }
     const code = next.toUpperCase()
-    // &K followed by an RRGGBB or theme color spec.
+    // Keep exactly the color payload; a short/malformed &K must not absorb
+    // adjacent text or a later control code.
     if (code === 'K') {
-      index += 8
+      const color = headerFooterColorAt(encoded, index + 2)
+      const end = index + 2 + (color?.length ?? 0)
+      sections[current] += encoded.slice(index, end)
+      index = end
       continue
     }
     if (code === 'L' || code === 'C' || code === 'R') {
@@ -316,17 +401,7 @@ export function decodeHeaderFooter(encoded: string): HeaderFooterParts | null {
       index += 2
       continue
     }
-    if (
-      code === 'P' ||
-      code === 'N' ||
-      code === 'D' ||
-      code === 'T' ||
-      code === 'F' ||
-      code === 'A' ||
-      code === 'G'
-    ) {
-      sections[current] += `&${code}`
-    }
+    sections[current] += encoded.slice(index, index + 2)
     index += 2
   }
   if (sections.L === '' && sections.C === '' && sections.R === '') return null
@@ -335,4 +410,34 @@ export function decodeHeaderFooter(encoded: string): HeaderFooterParts | null {
     ...(sections.C === '' ? {} : { center: sections.C }),
     ...(sections.R === '' ? {} : { right: sections.R }),
   }
+}
+
+export type HeaderFooterColor =
+  | { readonly kind: 'rgb'; readonly value: string; readonly length: 6 }
+  | {
+      readonly kind: 'theme'
+      readonly theme: number
+      readonly tint: number
+      readonly length: 6
+    }
+
+/** The six characters after &K are either RRGGBB or TT±SSS. */
+export function headerFooterColorAt(text: string, start: number): HeaderFooterColor | null {
+  const spec = text.slice(start, start + 6)
+  const theme = /^(\d{2})([+-])(\d{3})$/.exec(spec)
+  if (theme) {
+    // VBA's 1–12 ordering is Dark1, Light1, Dark2, Light2, Accent1–6,
+    // Hyperlink, FollowedHyperlink; the workbook palette is OOXML order.
+    const paletteIndex = [1, 0, 3, 2, 4, 5, 6, 7, 8, 9, 10, 11]
+    const slot = Math.min(12, Math.max(1, Number(theme[1])))
+    const shade = Math.min(100, Number(theme[3])) / 100
+    return {
+      kind: 'theme',
+      theme: paletteIndex[slot - 1]!,
+      tint: theme[2] === '-' ? -shade : shade,
+      length: 6,
+    }
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(spec)) return { kind: 'rgb', value: `#${spec}`, length: 6 }
+  return null
 }

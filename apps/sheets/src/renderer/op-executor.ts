@@ -57,6 +57,7 @@ import {
 } from './plan-operations'
 import { deleteNotesUndoable, setNoteUndoable } from './note-undo'
 import { aiBulkUndoGate, journalSuppression } from './univer-state'
+import { unmergePreservingCellStyles } from './unmerge-preserve-styles'
 import type {
   ActiveWorkbook,
   LazyWorkbookState,
@@ -543,8 +544,16 @@ async function executeOp(op: PlannedOp, run: OpRun): Promise<void> {
     )
   } else if (op.op === 'delete_sheet') workbook.deleteSheet(op.sheetId)
   else if (op.op === 'merge_cells') sheetById(op.sheetId).getRange(op.range).merge()
-  else if (op.op === 'unmerge_cells') sheetById(op.sheetId).getRange(op.range).breakApart()
-  else if (op.op === 'set_row_height') {
+  else if (op.op === 'unmerge_cells') {
+    const sheet = sheetById(op.sheetId)
+    const selected = sheet.getRange(op.range)
+    unmergePreservingCellStyles(runtime, sheet, {
+      startRow: selected.getRow(),
+      endRow: selected.getRow() + selected.getHeight() - 1,
+      startColumn: selected.getColumn(),
+      endColumn: selected.getColumn() + selected.getWidth() - 1,
+    })
+  } else if (op.op === 'set_row_height') {
     sheetById(op.sheetId).setRowHeights(
       op.row - 1,
       op.count,

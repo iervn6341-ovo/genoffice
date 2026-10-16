@@ -10,6 +10,7 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
+          '@genoffice/office-math',
           '@genoffice/ai-provider',
           '@genoffice/agent-core',
           '@genoffice/ai-search',

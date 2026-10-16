@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { latexToOmml } from '@genoffice/office-math'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -168,6 +169,38 @@ describe('visual additions: shapes and text boxes', () => {
     expect(drawingXml).toContain('<xdr:graphicFrame')
     expect(drawingXml).toContain('<xdr:sp macro=""')
     expect(drawingXml).toContain('<a:noFill/>')
+  })
+})
+
+describe('native equation additions', () => {
+  it('writes editable OMML in the a14 choice, a readable fallback, and leaves prior parts untouched', async () => {
+    const latex = 'x = \\frac{1}{2}'
+    const omml = latexToOmml(latex)
+    const plan = await planWith([{ sheetName: 'Data', anchor: ANCHOR, equation: { latex, omml } }])
+    const drawing = plan.added.get('xl/drawings/drawing1.xml')
+    expect(drawing).toContain('<mc:AlternateContent')
+    expect(drawing).toContain('<mc:Choice Requires="a14">')
+    expect(drawing).toContain(`<a14:m><m:oMath>${omml}</m:oMath></a14:m>`)
+    expect(drawing).toContain('<mc:Fallback>')
+    expect(drawing).toContain('GenOfficeEquationV2:')
+    expect(drawing).toContain('<a:t>x = \\frac{1}{2}</a:t>')
+    expect(plan.added.get('xl/media/image1.png')).toBeUndefined()
+    expect(plan.replaced.has('xl/charts/chart1.xml')).toBe(false)
+  })
+
+  it('rejects source and OMML disagreement before writing a drawing', async () => {
+    await expect(
+      planWith([
+        {
+          sheetName: 'Data',
+          anchor: ANCHOR,
+          equation: {
+            latex: 'x+1',
+            omml: latexToOmml('x+2'),
+          },
+        },
+      ]),
+    ).rejects.toThrow(/source and native OMML disagree/)
   })
 })
 

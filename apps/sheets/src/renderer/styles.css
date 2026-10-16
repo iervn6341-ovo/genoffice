@@ -47,6 +47,7 @@
   /* content-side constants: charts, shapes and their selection chrome sit on
    * the paper-like grid and never follow the theme */
   --sheets-paper: #ffffff;
+  --sheets-paper-dark: #1b1c1f;
   --sheets-ink: #000000;
   --sheets-on-accent: #ffffff;
   --sheets-knob-dot: #ffffff;
@@ -166,6 +167,50 @@
     --sheets-validation-prompt-ink: #f2ecd0;
     --sheets-validation-prompt-shadow: rgb(0 0 0 / 45%);
   }
+}
+
+/* Univer's DOM chrome follows the app theme (decoupleUniverUiTheme) but the grid
+ * canvas follows the View > Dark Mode content flag: paint the canvas backdrop in
+ * the content shade so empty cells match it in every theme x content combination */
+section:has(> canvas[id^='univer-sheet-main-canvas']) {
+  background: var(--sheets-paper) !important;
+}
+
+html[data-content-dark='true'] section:has(> canvas[id^='univer-sheet-main-canvas']) {
+  background: var(--sheets-paper-dark) !important;
+}
+
+/* The formula bar is a Univer doc canvas, so it paints in the content shade
+ * (opaque page fill). When content and UI disagree, invert it with a filter and
+ * blend it over the UI-coloured container behind it: lighten keeps the inverted
+ * (black) fill at the UI surface in a dark UI, darken does the same for white
+ * in a light UI; the text stays the readable extreme either way. */
+html[data-content-mismatch='ui-dark'] canvas#univer-doc-main-canvas[style*='background: rgb'] {
+  filter: invert(1);
+  mix-blend-mode: lighten;
+}
+
+/* gray UI with dark content: the canvas fill is Univer's near-black; lighten it
+ * up to the gray surface so the bar matches the ribbon and name box */
+html[data-theme-variant='gray'][data-content-mismatch='false']
+  canvas#univer-doc-main-canvas[style*='background: rgb'] {
+  mix-blend-mode: lighten;
+}
+
+html[data-content-mismatch='ui-light'] canvas#univer-doc-main-canvas[style*='background: rgb'] {
+  filter: invert(1);
+  mix-blend-mode: darken;
+}
+
+/* Gray UI theme: Univer's dark UI ramp (blue-black grays) is re-pointed at the
+ * gray chrome tokens so its name box / formula bar / sheet tabs / menus /
+ * dialogs match the ribbon. 100-400 (text) keep Univer's values. */
+html[data-theme='dark'][data-theme-variant='gray'] {
+  --univer-gray-900: var(--canvas);
+  --univer-gray-800: var(--surface);
+  --univer-gray-700: var(--surface-subtle);
+  --univer-gray-600: var(--hover);
+  --univer-gray-500: var(--pressed);
 }
 
 /* UI CJK fonts per language (documentElement.lang is set at bootstrap and on switch);
@@ -597,6 +642,21 @@ html.genoffice-popover-open .ribbon-tabs {
   border-radius: 1px;
   background: var(--accent);
   content: '';
+}
+
+/* File: a filled accent pill, like the Docs and Slides ribbons */
+.ribbon-tabs > button.ribbon-tab-file {
+  margin-right: 6px;
+  padding: 6px 16px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--sheets-on-accent);
+}
+
+.ribbon-tabs > button.ribbon-tab-file:hover,
+.ribbon-tabs > button.ribbon-tab-file:focus-visible {
+  background: var(--accent-dark);
+  color: var(--sheets-on-accent);
 }
 
 /* Contextual tabs (Chart Design) stand out even while inactive, with a
@@ -2448,6 +2508,26 @@ textarea:focus {
   pointer-events: none;
 }
 
+.accounting-underline-overlay {
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.thread-marker {
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.thread-marker polygon {
+  fill: var(--sheets-thread-marker);
+}
+
+.thread-marker.resolved polygon {
+  fill: var(--text-muted);
+}
+
 .data-validation-dropdown-button {
   width: 100%;
   height: 100%;
@@ -3100,6 +3180,69 @@ textarea:focus {
   font-weight: 600;
 }
 
+.header-footer-dialog {
+  width: min(900px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.hf-picture-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.hf-picture-controls img {
+  max-width: 90px;
+  max-height: 50px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.hf-picture-controls label:not(.hf-picture-pick) {
+  width: 72px;
+}
+
+.hf-picture-controls .hf-picture-pick {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+}
+
+.hf-picture-controls .hf-picture-pick input[type='file'] {
+  display: none;
+}
+
+.symbol-dialog .symbol-formula-source {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.symbol-dialog .symbol-formula-source textarea {
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font:
+    13px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+
 .dialog-tabs {
   display: flex;
   gap: 2px;
@@ -3707,7 +3850,36 @@ textarea:focus {
 
 /* Equation dialog */
 .equation-dialog {
-  width: 560px;
+  width: min(760px, 94vw);
+}
+
+.equation-dialog .dialog-body {
+  max-height: min(70vh, 700px);
+  overflow: auto;
+}
+
+.xlsx-equation {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: 'Cambria Math', 'STIX Two Math', serif;
+  font-size: 26px;
+}
+
+.xlsx-equation math {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Keep the editable host as the stable target across both clicks; MathML
+   descendants have no separate pointer interaction. */
+.shape-editable > .xlsx-equation,
+.shape-editable > .xlsx-equation * {
+  pointer-events: none;
 }
 
 .equation-presets {
@@ -5626,6 +5798,160 @@ textarea:focus {
   width: min(460px, calc(100vw - 32px));
 }
 
+.text-columns-dialog {
+  width: min(700px, calc(100vw - 32px));
+  max-height: min(720px, 90vh);
+  overflow: auto;
+}
+
+.text-columns-dialog .dialog-body {
+  display: grid;
+  gap: 10px;
+}
+
+.text-columns-dialog fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.text-columns-dialog .dialog-check,
+.text-columns-dialog .dialog-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.text-columns-dialog input:not([type='checkbox'], [type='radio']),
+.text-columns-dialog select {
+  margin-left: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.text-columns-preview,
+.text-columns-source-preview {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.text-columns-source-preview > div {
+  padding: 4px 8px;
+  white-space: pre-wrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.text-columns-preview table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.text-columns-preview th,
+.text-columns-preview td {
+  min-width: 100px;
+  max-width: 220px;
+  padding: 4px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+}
+
+.text-columns-preview th button.selected {
+  background: var(--accent-soft);
+}
+
+.text-columns-fixed-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.text-columns-fixed-ruler,
+.text-columns-fixed-line {
+  display: flex;
+  width: max-content;
+  min-height: 22px;
+  white-space: pre;
+}
+
+.text-columns-fixed-ruler button,
+.text-columns-fixed-line span {
+  box-sizing: border-box;
+  flex: 0 0 2ch;
+  width: 2ch;
+  min-width: 2ch;
+  padding: 0;
+  text-align: center;
+  font: inherit;
+  border: 0;
+  border-right: 2px solid transparent;
+}
+
+.text-columns-fixed-ruler button {
+  color: var(--text-muted);
+  background: var(--surface);
+  cursor: col-resize;
+}
+
+.text-columns-fixed-ruler button:hover {
+  background: var(--hover);
+}
+
+.text-columns-fixed-ruler button.active,
+.text-columns-fixed-line span.break {
+  border-right-color: var(--accent);
+}
+
+.text-columns-fixed-line {
+  border-top: 1px solid var(--border);
+}
+
+.text-columns-dialog [role='alert'] {
+  color: var(--danger);
+}
+
+.text-columns-dialog .text-columns-format select {
+  margin-left: 8px;
+}
+
+.text-columns-dialog .text-columns-advanced {
+  display: grid;
+  gap: 6px;
+}
+
+.text-columns-dialog .text-columns-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface-raised, var(--surface));
+}
+
+.text-columns-confirm p {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.text-columns-preview th.skipped,
+.text-columns-preview td.skipped {
+  color: var(--text-muted);
+  background: var(--hover);
+  text-decoration: line-through;
+}
+
 .fill-series-groups {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6054,4 +6380,399 @@ textarea:focus {
 
 .table-style-gallery .table-style-new:hover {
   background: var(--hover);
+}
+
+/* Format Cells → Fill → pattern gallery */
+.fill-pattern-field {
+  display: grid;
+  gap: 6px;
+}
+
+.fill-pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 36px);
+  gap: 4px;
+}
+
+.fill-pattern-grid button {
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.fill-pattern-grid button.active {
+  outline: 2px solid var(--accent);
+}
+
+.fill-pattern-grid button i,
+.fill-pattern-sample i {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fill-pattern-sample {
+  width: 96px;
+  height: 36px;
+  border: 1px solid var(--border-strong);
+}
+
+/* Comments pane (threaded comments) */
+:root {
+  --sheets-thread-marker: #7e3ff2;
+}
+
+.comments-panel {
+  position: fixed;
+  top: 120px;
+  right: 18px;
+  bottom: 56px;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--sheets-shadow-slicer);
+  overflow-y: auto;
+  z-index: 60;
+}
+
+.comments-panel header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
+  background: var(--accent);
+  color: var(--sheets-on-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.comments-title,
+.comments-spacer {
+  flex: 1;
+}
+
+.comments-close {
+  border: none;
+  background: transparent;
+  color: var(--sheets-on-accent);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.comments-panel label {
+  display: grid;
+  gap: 4px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.comments-panel input,
+.comments-panel textarea {
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.comments-panel button {
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.comments-panel button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.comments-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.comments-composer {
+  display: grid;
+  gap: 6px;
+}
+
+.comments-composer > button {
+  justify-self: end;
+  margin-right: 10px;
+}
+
+.comments-note,
+.comments-empty,
+.comments-panel [role='alert'] {
+  margin: 0;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.comments-empty {
+  color: var(--text-muted);
+}
+
+.comments-panel [role='alert'] {
+  color: var(--danger);
+}
+
+.comments-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 10px;
+  list-style: none;
+}
+
+.comments-thread {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.comments-thread.focused {
+  outline: 2px solid var(--accent);
+}
+
+.comments-thread.resolved {
+  opacity: 0.75;
+}
+
+.comments-thread-head,
+.comments-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.comments-badge {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 11px;
+}
+
+.comments-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.comments-meta time {
+  color: var(--text-muted);
+}
+
+.comments-text {
+  margin: 2px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+
+.comments-reply {
+  display: grid;
+  gap: 4px;
+}
+
+.comments-reply button {
+  justify-self: end;
+}
+
+/* print sheet: page preview beside the settings; stacks on narrow windows (no sideways scroll) */
+.print-sheet-dialog.with-preview {
+  width: min(900px, calc(100vw - 32px));
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.print-sheet-layout {
+  display: flex;
+  gap: 14px;
+  min-width: 0;
+  height: min(560px, calc(100vh - 190px));
+}
+
+.print-sheet-layout > .dialog-body {
+  flex: 0 0 300px;
+  min-width: 0;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.print-preview-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--hover);
+  overflow: hidden;
+}
+
+.print-preview-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.print-preview-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-modal);
+}
+
+.print-preview-canvas.stale {
+  opacity: 0.45;
+}
+
+.print-preview-msg {
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.print-preview-busy {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.print-preview-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.print-preview-nav button {
+  width: 26px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.print-preview-nav button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.print-preview-nav button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+@media (max-width: 760px) {
+  .print-sheet-layout {
+    flex-direction: column;
+    height: calc(100vh - 190px);
+  }
+
+  .print-sheet-layout > .dialog-body {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .print-preview-pane {
+    flex: 0 0 42%;
+  }
+}
+
+.print-progress-bar {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.print-fit-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.print-sheet-dialog .ps-note {
+  margin: 6px 0 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* Univer's shared Popup (cell / header / sheet-tab context menus) grows from
+ * the top (scaleY 0 → 1, .15 s) and lingers .5 s on close. Menus appear and
+ * disappear at once. The enter class starts at opacity 0 and relies on the
+ * animation, so it is pinned visible; the exit class is hidden outright. */
+.univer-popup.univer-popup-enter,
+.univer-popup.univer-popup-enter-active {
+  animation: none !important;
+  transition: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+.univer-popup.univer-popup-exit {
+  animation: none !important;
+  display: none !important;
+}
+
+/* Same for Univer's tailwind-animate popups (filter panel, select/dropdown
+ * lists, tooltips): fade/zoom/slide-in on open is dropped. */
+[class*='univer-animate-in'],
+[class*='univer-animate-out'] {
+  animation: none !important;
+}
+
+/* Sheet-tab context menu: sits on the sheet bar (sheet-tab-context-menu.ts);
+ * Univer's own cap on the panel height is replaced by the room above the bar. */
+.univer-popup[data-sheet-tab-menu] > section > div {
+  max-height: var(--sheet-tab-menu-max, 80vh) !important;
 }

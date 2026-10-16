@@ -121,6 +121,9 @@ import {
   type CellShiftOption,
 } from './cell-shift'
 import type { ChartDialogKind, ChartEditData, ShapeEditChanges } from './WorkbookVisuals'
+import { unmergePreservingCellStyles } from './unmerge-preserve-styles'
+import { commentAuthor, removeThreadComment } from './threaded-comments-actions'
+import { blendPatternColors, FILL_PATTERN_KEY, FILL_PATTERN_TYPES, toHex } from './fill-pattern'
 
 /** The App refs/state the ribbon dispatcher needs; built fresh per call. */
 export interface RibbonCommandContext {
@@ -174,7 +177,7 @@ function selectionStyle(
 /// Every other command treats the whole remainder after the first colon as
 /// the argument, because arguments like number-format patterns
 /// ("h:mm:ss AM/PM") legitimately contain colons.
-const EXTRA_SEGMENT_COMMANDS = new Set(['cellprot', 'sort-custom', 'border'])
+const EXTRA_SEGMENT_COMMANDS = new Set(['cellprot', 'sort-custom', 'border', 'fill-pattern'])
 
 /// Univer's built-in header sizes, restored when headings toggle back on.
 const DEFAULT_ROW_HEADER_WIDTH = 46
@@ -681,13 +684,46 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
       active.setDataValidation(runtime.univerAPI.newDataValidation().requireCheckbox().build())
       return
     }
-    case 'note-open':
+    case 'note-open': {
+      // a cell holds a note or a comment thread, never both
+      const active = runtime.univerAPI.getActiveWorkbook()?.getActiveRange()
+      const sheetId = worksheet?.getSheetId()
+      if (
+        active &&
+        sheetId &&
+        ctx.lazyWorkbookRef.current?.editJournal.threads
+          .get(sheetId)
+          ?.some((thread) => thread.row === active.getRow() && thread.column === active.getColumn())
+      ) {
+        ctx.setMessage(t('appCmtNoteHasThread'))
+        return
+      }
       // Opens the note editor popup at the primary selected cell; the
       // journal snapshots the sheet's notes and ⌘S writes legacy comments.
       void runtime.univerAPI.executeCommand('sheet.operation.add-note-popup')
       return
+    }
     case 'note-delete': {
       const active = runtime.univerAPI.getActiveWorkbook()?.getActiveRange()
+      // a cell holding a comment thread deletes the thread (Excel: Delete on the comment)
+      const thread =
+        active && worksheet
+          ? ctx.lazyWorkbookRef.current?.editJournal.threads
+              .get(worksheet.getSheetId())
+              ?.find(
+                (entry) => entry.row === active.getRow() && entry.column === active.getColumn(),
+              )
+          : undefined
+      if (thread && worksheet) {
+        void removeThreadComment(
+          ctx,
+          worksheet.getSheetId(),
+          thread.id,
+          thread.comments[0]?.id ?? '',
+          commentAuthor(),
+        )
+        return
+      }
       if (ctx.lazyWorkbookRef.current && worksheet && active) {
         void ctx.runOps(
           [
@@ -1598,7 +1634,14 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
           return
         }
         if (argument === 'unmerge') {
-          range.breakApart()
+          if (sheet) {
+            unmergePreservingCellStyles(runtime, sheet, {
+              startRow: range.getRow(),
+              endRow: range.getRow() + range.getHeight() - 1,
+              startColumn: range.getColumn(),
+              endColumn: range.getColumn() + range.getWidth() - 1,
+            })
+          }
         } else if (argument === 'across') {
           range.mergeAcross()
         } else {
@@ -1650,6 +1693,39 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
           const fillColor = normalizeHexColor(argument)
           if (fillColor) recordFullHeightColumnStyle({ fillColor }, undoTopBefore)
         }
+        break
+      }
+      case 'fill-pattern': {
+        // Pattern fill = flat blended background + the editable parts in the cell's `custom`
+        // bag, written by ONE set-range-values mutation so Undo/Redo move them together.
+        const [fgText = '', bgText = ''] = extra.split(':')
+        const foreground = toHex(fgText)
+        const background = toHex(bgText)
+        const sheet = worksheet?.getSheet()
+        if (
+          !foreground ||
+          !background ||
+          !sheet ||
+          !(FILL_PATTERN_TYPES as readonly string[]).includes(argument)
+        )
+          return
+        if (range.getHeight() * range.getWidth() > 10_000) {
+          ctx.setMessage(t('appTooManyCellsForSetting'))
+          return
+        }
+        const marker = { pattern: argument, fg: foreground, bg: background }
+        const display = blendPatternColors(foreground, background)
+        const matrix = Array.from({ length: range.getHeight() }, (_row, rowOffset) =>
+          Array.from({ length: range.getWidth() }, (_cell, columnOffset) => ({
+            s: { bg: { rgb: display } },
+            custom: {
+              ...sheet.getCell(range.getRow() + rowOffset, range.getColumn() + columnOffset)
+                ?.custom,
+              [FILL_PATTERN_KEY]: marker,
+            },
+          })),
+        )
+        range.setValues(matrix as never)
         break
       }
       case 'font-color':
@@ -2009,26 +2085,6 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
         })
         refreshSparklinesHere()
         ctx.setMessage(t('appSparklinesInserted', { count: cells.length }))
-        return
-      }
-      case 'text-to-columns': {
-        if (!worksheet) return
-        if (range.getWidth() > 1) {
-          ctx.setMessage(t('appTextToColsSelectOne'))
-          return
-        }
-        const delimiter = Number(argument)
-        if (!Number.isInteger(delimiter) || delimiter <= 0) return
-        ctx.setMessage(t('appSplitIntoColumns'))
-        void runtime.univerAPI.executeCommand('sheet.command.split-text-to-columns', {
-          range: {
-            startRow: range.getRow(),
-            endRow: range.getRow() + range.getHeight() - 1,
-            startColumn: range.getColumn(),
-            endColumn: range.getColumn(),
-          },
-          delimiter,
-        })
         return
       }
       case 'border': {

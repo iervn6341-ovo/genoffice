@@ -4,6 +4,7 @@
  * Extracted from App.tsx; the App component passes a DataToolsContext built
  * fresh per call so refs and state never go stale.
  */
+import { captureEditorCaret } from './symbol-formula'
 import { ILayoutService } from '@univerjs/preset-sheets-core'
 
 import { columnLabel } from '@genoffice/xlsx-gateway/domain/cell-address'
@@ -23,11 +24,13 @@ import {
   type OutputCell,
 } from './consolidate'
 import { isSheetRemoved, journalSize, recordStructuralOp } from './edit-journal'
-import { resolveGoToRef, type GoToNameEntry } from './goto'
+import { maxColumnIndexOfRef, resolveGoToRef, sheetNameOfRef, type GoToNameEntry } from './goto'
+import { ensureColumnOnActiveWorkbook } from './column-extension'
 import { getLang, t } from './i18n/locale'
 import { fileTableAt, restyleFileTable } from './file-table-design'
 import { redesignTable } from './table-design-actions'
-import { appendSymbol } from './SymbolDialog'
+import { symbolCellPatch } from './symbol-rich-cell'
+import { indexedFormulaText } from './formula-view'
 import { inferContinuousRegion } from './table-actions'
 import { DEFAULT_THEME_COLORS, tableThemeFor, type TableThemeSheet } from './table-styles'
 import { DEFAULT_TABLE_OPTIONS, tableOptionsOf } from './table-design'
@@ -39,6 +42,7 @@ import {
   advancedFilterColumnOptions,
   applyFilterCriteria,
   columnLetter,
+  fontTextStyleOf,
   loadVisibleRange,
   sheetOutline,
   univerDefinedNames,
@@ -161,6 +165,16 @@ export function goToReference(ctx: DataToolsContext, ref: string): string | null
       endEditingAsync?(save: boolean): Promise<boolean>
     }
     if (editing.isCellEditing?.()) void editing.endEditingAsync?.(true)
+    // Excel columns run to XFD; the grid grows on demand, so a far-right
+    // target is materialised before the range lookup bounds-checks it.
+    const farColumn = maxColumnIndexOfRef(resolved)
+    if (farColumn !== null && ctx.univerRef.current) {
+      const named = sheetNameOfRef(resolved)
+      const targetSheet = named === '' ? worksheet : workbook.getSheetByName(named)
+      if (targetSheet) {
+        ensureColumnOnActiveWorkbook(ctx.univerRef.current, targetSheet.getSheetId(), farColumn)
+      }
+    }
     const range = worksheet.getRange(resolved)
     const target = workbook.getSheetBySheetId(range.getSheetId()) ?? worksheet
     workbook.setActiveRange(range)
@@ -315,25 +329,80 @@ export function handleCreateNamesFromSelection(ctx: DataToolsContext, mode: 'top
   )
 }
 
-/// The Symbol dialog's click: appends the picked character to the active
-/// range's top-left cell as text. setValue lands as a normal
-/// set-range-values command, so it journals and undoes like typing.
-export function handleInsertSymbol(ctx: DataToolsContext, char: string): void {
-  const workbook = ctx.univerRef.current?.univerAPI.getActiveWorkbook()
-  const worksheet = workbook?.getActiveSheet()
+/// The Symbol dialog's plain-cell click: appends the picked character to the
+/// active cell. Formula cells use the source editor in symbol-formula.ts;
+/// never convert their calculated display value into a rich text cell.
+export interface SymbolCellTarget {
+  readonly workbookId: string
+  readonly sheetId: string
+  readonly row: number
+  readonly column: number
+  /// Editor caret / selection when the dialog was opened mid-edit; absent = append.
+  readonly caret?: { readonly start: number; readonly end: number }
+}
+
+export function captureSymbolCellTarget(runtime: UniverRuntime | null): SymbolCellTarget | null {
+  const workbook = runtime?.univerAPI.getActiveWorkbook()
+  const sheet = workbook?.getActiveSheet()
   const range = workbook?.getActiveRange()
-  if (!workbook || !worksheet || !range) {
+  if (!workbook || !sheet || !range) return null
+  const caret = captureEditorCaret(runtime)
+  return {
+    workbookId: workbook.getId(),
+    sheetId: sheet.getSheetId(),
+    row: range.getRow(),
+    column: range.getColumn(),
+    ...(caret ? { caret } : {}),
+  }
+}
+
+export function handleInsertSymbol(
+  ctx: DataToolsContext,
+  char: string,
+  font = 'Cambria Math',
+  target?: SymbolCellTarget | null,
+): void {
+  const workbook = ctx.univerRef.current?.univerAPI.getActiveWorkbook()
+  if (target && workbook?.getId() !== target.workbookId) {
+    ctx.setMessage(t('appSymbolInsertFailed'))
+    return
+  }
+  const worksheet = target
+    ? workbook?.getSheetBySheetId(target.sheetId)
+    : workbook?.getActiveSheet()
+  const range = target ? null : workbook?.getActiveRange()
+  if (!workbook || !worksheet || (!target && !range)) {
     ctx.setMessage(t('appSymbolNeedsCell'))
     return
   }
-  const cell = worksheet.getRange(range.getRow(), range.getColumn(), 1, 1)
+  const row = target?.row ?? range!.getRow()
+  const column = target?.column ?? range!.getColumn()
+  const cell = worksheet.getRange(row, column, 1, 1)
+  if (
+    cell.getFormula() ||
+    cell.getCellDatas()[0]?.[0]?.f ||
+    indexedFormulaText(ctx.lazyWorkbookRef.current, worksheet.getSheetId(), row, column)
+  ) {
+    ctx.setMessage(t('appSymbolInsertFailed'))
+    return
+  }
   try {
-    cell.setValue(appendSymbol(cell.getValue(), char))
+    const baseFont = fontTextStyleOf(worksheet.getSheet().getComposedCellStyle(row, column))
+    cell.setValue(
+      symbolCellPatch(
+        cell.getValue(),
+        cell.getCellDatas()[0]?.[0] ?? null,
+        char,
+        font,
+        baseFont,
+        target?.caret ?? null,
+      ),
+    )
   } catch (error: unknown) {
     ctx.setMessage(error instanceof Error ? error.message : t('appSymbolInsertFailed'))
     return
   }
-  ctx.setMessage(t('appSymbolInserted', { char, cell: activeCellLabel(ctx) }))
+  ctx.setMessage(t('appSymbolInserted', { char, cell: `${columnLetter(column)}${row + 1}` }))
 }
 
 /// Samples the active filter range's header row and opens the Advanced

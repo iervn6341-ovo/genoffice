@@ -13,8 +13,16 @@ import type { LazyWorkbookState } from '../src/renderer/univer-state'
 
 /// loadWorkbookSkeleton clears the unit's undo history through the injector.
 const undoStub = {
-  __getInjector: () => ({ get: () => ({ clearUndoRedo: () => undefined }) }),
+  __getInjector: () => ({
+    get: () => ({ clearUndoRedo: () => undefined, getSheetNameMap: () => ({}) }),
+  }),
 }
+
+const createdWorkbookStub = () => ({
+  getWorkbook: () => ({ getSheetBySheetName: () => undefined, getSheets: () => [] }),
+  getSheetBySheetId: () => null,
+  setActiveSheet: () => undefined,
+})
 
 /// Shape the eviction path writes per cell (clearContent/clearFormat would
 /// run selection-based command interceptors — see patchWorksheetRangeInner).
@@ -83,7 +91,7 @@ describe('loadWorkbookSkeleton', () => {
         disposeUnit: () => undefined,
         createWorkbook: (config: (typeof created)[number]) => {
           created.push(config)
-          return { getSheetBySheetId: () => null, setActiveSheet: () => undefined }
+          return createdWorkbookStub()
         },
       },
     }
@@ -127,7 +135,7 @@ describe('loadWorkbookSkeleton', () => {
         disposeUnit: () => undefined,
         createWorkbook: (config: (typeof created)[number]) => {
           created.push(config)
-          return { getSheetBySheetId: () => null, setActiveSheet: () => undefined }
+          return createdWorkbookStub()
         },
       },
     }
@@ -170,7 +178,7 @@ describe('loadWorkbookSkeleton', () => {
           disposeUnit: () => undefined,
           createWorkbook: (config: (typeof created)[number]) => {
             created.push(config)
-            return { getSheetBySheetId: () => null, setActiveSheet: () => undefined }
+            return createdWorkbookStub()
           },
         },
       }
@@ -404,7 +412,10 @@ describe('ensureLazyRangeLoaded', () => {
     const written: Array<{ row: number; column: number; data: unknown }> = []
     const capturingWorksheet = {
       getSheetId: () => 'sheet-1',
-      getSheet: () => ({ getRowManager: () => ({ getRow: () => undefined }) }),
+      getSheet: () => ({
+        getRowManager: () => ({ getRow: () => undefined }),
+        getCell: () => undefined,
+      }),
       getRange: (row: number, column: number) => ({
         setValues: (values: unknown[][]) => written.push({ row, column, data: values[0]?.[0] }),
         clearContent: () => written.push({ row, column, data: null }),

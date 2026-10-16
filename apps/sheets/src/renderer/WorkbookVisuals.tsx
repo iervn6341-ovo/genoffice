@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useRef, useState, useSyncExternalStore } fr
 import { createPortal } from 'react-dom'
 import { BooleanNumber, numfmt } from '@univerjs/core'
 import { isMetafileMime, metafileToDataUrl } from '@genoffice/docx-engine/metafile'
+import { ommlToMathML } from '@genoffice/office-math'
 import { Dropdown, shapePreviewPath, useDismissablePopover } from '@genoffice/ui'
 
 import type { createUniver } from './create-univer'
@@ -83,6 +84,7 @@ export interface ShapeEditChanges {
   readonly frameSize?: { readonly width: number; readonly height: number }
   readonly text?: string
   readonly remove?: true
+  readonly equation?: { readonly latex: string; readonly omml: string }
 }
 
 export interface ShapeEditing {
@@ -101,12 +103,16 @@ export function isEditableAddedImage(visual: WorkbookVisualObject): boolean {
   return visual.kind === 'image' && visual.id.startsWith('added-image-')
 }
 
+export function isEditableAddedEquation(visual: WorkbookVisualObject): boolean {
+  return visual.kind === 'equation' && visual.id.startsWith('added-equation-')
+}
+
 /// Images and shapes already in the file move/delete through a surgical
 /// anchor edit, located by the sidecar's (drawingPath, drawingIndex) pair.
 /// Charts keep their own editor; deletion routes through the same edit.
 export function isEditableFileVisual(visual: WorkbookVisualObject): boolean {
   return (
-    (visual.kind === 'image' || visual.kind === 'shape') &&
+    (visual.kind === 'image' || visual.kind === 'shape' || visual.kind === 'equation') &&
     !visual.id.startsWith('added-') &&
     visual.drawingPath !== undefined &&
     visual.drawingIndex !== undefined
@@ -199,6 +205,7 @@ export function installWorkbookVisuals(
     const editable =
       isEditableShape(visual) ||
       isEditableAddedImage(visual) ||
+      isEditableAddedEquation(visual) ||
       isEditableFileVisual(visual) ||
       isEditableChart(visual)
     // Lazy grids are sized to the data, but session-added visuals anchor
@@ -574,6 +581,9 @@ function WorkbookVisual({
   if (visual.kind === 'image') {
     return <ImageVisual file={file} visual={visual} />
   }
+  if (visual.kind === 'equation' && visual.equation) {
+    return <EquationVisual visual={visual} />
+  }
   if (visual.kind === 'ole') {
     return <OleVisual file={file} visual={visual} />
   }
@@ -581,6 +591,15 @@ function WorkbookVisual({
     return <SlicerVisual visual={visual} />
   }
   return <ShapeVisual file={file} visual={visual} frame={frame} />
+}
+
+function EquationVisual({ visual }: { readonly visual: WorkbookVisualObject }): React.JSX.Element {
+  const mathml = visual.equation ? ommlToMathML(`<m:oMath>${visual.equation.omml}</m:oMath>`) : ''
+  return mathml ? (
+    <div className="xlsx-equation" dangerouslySetInnerHTML={{ __html: mathml }} />
+  ) : (
+    <div className="xlsx-equation">{visual.name ?? ''}</div>
+  )
 }
 
 /// A drag commit tears down and re-registers every float DOM, dropping the
@@ -713,6 +732,13 @@ export function subscribeChartElementSelection(notify: () => void): () => void {
 /// (same recipe as the visual-selection listener).
 export type ChartDialogKind = 'select-data' | 'format'
 let chartDialogListener: ((editKey: string, dialog: ChartDialogKind) => void) | null = null
+let equationEditListener: ((visual: WorkbookVisualObject) => void) | null = null
+
+export function setEquationEditListener(
+  listener: ((visual: WorkbookVisualObject) => void) | null,
+): void {
+  equationEditListener = listener
+}
 
 export function setChartDialogListener(
   listener: ((editKey: string, dialog: ChartDialogKind) => void) | null,
@@ -1100,7 +1126,10 @@ function EditableShapeVisual({
           dx: 0,
           dy: 0,
         })
-        event.preventDefault()
+        // A canceled pointerdown can suppress the click sequence used by a
+        // native double-click. Equation content is noninteractive, so keep
+        // its body click sequence while retaining capture for drag/resize.
+        if (visual.kind !== 'equation' || handleCorner) event.preventDefault()
         event.stopPropagation()
         // preventScroll: grabbing a half-visible visual must not scroll it
         // into view mid-drag — the sheet would shift under the pointer.
@@ -1114,6 +1143,9 @@ function EditableShapeVisual({
           event.stopPropagation()
           onEdit(visual.id, { remove: true })
           clearVisualSelection(visual.id)
+        } else if ((event.key === 'Enter' || event.key === 'F2') && visual.kind === 'equation') {
+          event.preventDefault()
+          equationEditListener?.(visual)
         } else if (event.key === 'Escape') {
           event.preventDefault()
           event.currentTarget.blur()
@@ -1150,7 +1182,13 @@ function EditableShapeVisual({
         }
       }}
       onPointerUp={(event) => {
-        if (!drag) return
+        if (!drag) {
+          // A quick click can release before React has committed setDrag.
+          // Never leave the global drag gate set, or visual refresh stalls.
+          setDrag(null)
+          setDragActive(false)
+          return
+        }
         const { mode, corner } = drag
         const { dx, dy } = mode === 'move' ? moveDeltaRef.current : drag
         setDrag(null)
@@ -1168,6 +1206,19 @@ function EditableShapeVisual({
         setDrag(null)
         setDragActive(false)
       }}
+      onClick={
+        visual.kind === 'equation'
+          ? (event) => {
+              if (
+                event.detail !== 2 ||
+                (event.target as HTMLElement).closest('button, .shape-handle')
+              )
+                return
+              event.stopPropagation()
+              equationEditListener?.(visual)
+            }
+          : undefined
+      }
       onDoubleClick={
         allowText
           ? () => setTextEditing(true)
@@ -1176,7 +1227,22 @@ function EditableShapeVisual({
                 if ((event.target as HTMLElement).closest('button, .chart-editor')) return
                 setChartEditRequest((count) => count + 1)
               }
-            : undefined
+            : visual.kind === 'equation'
+              ? (event) => {
+                  if ((event.target as HTMLElement).closest('button, .shape-handle')) return
+                  equationEditListener?.(visual)
+                }
+              : undefined
+      }
+      onContextMenu={
+        visual.kind === 'equation'
+          ? (event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              selectVisual(visual)
+              equationEditListener?.(visual)
+            }
+          : undefined
       }
       data-tip={
         textEditing
@@ -1203,6 +1269,8 @@ function EditableShapeVisual({
         />
       ) : visual.kind === 'image' ? (
         <ImageVisual file={file} visual={visual} />
+      ) : visual.kind === 'equation' ? (
+        <EquationVisual visual={visual} />
       ) : (
         <ShapeVisual
           file={file}

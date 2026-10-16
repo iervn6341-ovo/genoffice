@@ -14,6 +14,7 @@ export interface JournalUndoContext {
   lazyWorkbookRef: { readonly current: LazyWorkbookState | null }
   setPendingEdits: (count: number) => void
   refreshPageBreakPreview?: () => void
+  refreshAlignmentPreview?: (sheetId: string) => void
   /// re-renders the ribbon, which reads these values from the journal
   requestRender?: () => void
 }
@@ -24,13 +25,20 @@ export interface JournalUndoKind<Snapshot> {
   /** a deep copy of what the edit may change (must be structured-cloneable) */
   capture(state: LazyWorkbookState, key: string): Snapshot
   /** puts a captured snapshot back, then repaints whatever shows it */
-  restore(state: LazyWorkbookState, key: string, snapshot: Snapshot, ctx: JournalUndoContext): void
+  restore(
+    state: LazyWorkbookState,
+    key: string,
+    snapshot: Snapshot,
+    ctx: JournalUndoContext,
+    companion?: Snapshot,
+  ): void
 }
 
 interface Params {
   unitId: string
   key: string
   snapshot: unknown
+  companion?: unknown
 }
 
 /** the context each kind's registered mutation applies through (refreshed by every edit of that kind) */
@@ -50,15 +58,32 @@ function register<S>(runtime: UniverRuntime, kind: JournalUndoKind<S>): void {
     id: kind.id,
     type: CommandType.MUTATION,
     handler: (_accessor, params) => {
-      const { key, snapshot } = params as Params
+      const { key, snapshot, companion } = params as Params
       const ctx = applyContexts.get(kind.id)
       const state = ctx?.lazyWorkbookRef.current
       if (!ctx || !state) return false
-      kind.restore(state, key, structuredClone(snapshot) as S, ctx)
+      kind.restore(
+        state,
+        key,
+        structuredClone(snapshot) as S,
+        ctx,
+        companion === undefined ? undefined : (structuredClone(companion) as S),
+      )
       ctx.requestRender?.()
       return true
     },
   })
+}
+
+/** A carried history can reach a fresh runtime before any edit re-registers its mutation. */
+export function registerJournalUndoKind<S>(
+  ctx: JournalUndoContext,
+  kind: JournalUndoKind<S>,
+): void {
+  const runtime = ctx.univerRef.current
+  if (!runtime) return
+  register(runtime, kind)
+  applyContexts.set(kind.id, ctx)
 }
 
 /**
@@ -83,14 +108,13 @@ export async function withJournalUndo<S>(
   if (applied === false || ctx.lazyWorkbookRef.current !== state) return
   const after = kind.capture(state, key)
   if (JSON.stringify(before) === JSON.stringify(after)) return
-  register(runtime, kind)
-  applyContexts.set(kind.id, ctx)
+  registerJournalUndoKind(ctx, kind)
   runtime.univer
     .__getInjector()
     .get(IUndoRedoService)
     .pushUndoRedo({
       unitID: unitId,
-      undoMutations: [{ id: kind.id, params: { unitId, key, snapshot: before } }],
-      redoMutations: [{ id: kind.id, params: { unitId, key, snapshot: after } }],
+      undoMutations: [{ id: kind.id, params: { unitId, key, snapshot: before, companion: after } }],
+      redoMutations: [{ id: kind.id, params: { unitId, key, snapshot: after, companion: before } }],
     })
 }

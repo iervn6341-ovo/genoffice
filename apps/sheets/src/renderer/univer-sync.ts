@@ -31,6 +31,9 @@ import { SheetSkeletonManagerService } from '@univerjs/sheets-ui'
 import { CFValueType, type IValueConfig } from '@univerjs/preset-sheets-conditional-formatting'
 
 import { CENTER_ACROSS_END_KEY } from './center-continuous'
+import { VERTICAL_DISTRIBUTION_KEY } from './vertical-distribution'
+import { ACCOUNTING_UNDERLINE_KEY, accountingUnderlineMode } from './accounting-underline'
+import { blendedDisplayOf, FILL_PATTERN_KEY, isFillPattern, markerFromFile } from './fill-pattern'
 import { notifyCfStreamWindow } from './cf-formula-fold'
 import {
   THRESHOLD_RANGE_CELL_CAP,
@@ -78,6 +81,7 @@ import type {
   WorkbookNoteState,
   WorkbookRangeResult,
   WorkbookRichRun,
+  WorkbookStyleEdit,
   WorkbookVisualObject,
 } from '../shared/desktop-api'
 import {
@@ -100,6 +104,7 @@ import {
   recordSetRangeValues,
   toRecalcUserInput,
   type EditJournal,
+  type JournalEntry,
   type VisualEditEntry,
 } from './edit-journal'
 import { sharedFormulaResolverFor } from './shared-formula-journal'
@@ -171,6 +176,7 @@ import {
   type WrapMeasureCoverage,
 } from './univer-state'
 import { isManualCalculation } from './calc-options'
+import { installCaseInsensitiveFormulaSheetLookup } from './formula-sheet-lookup'
 import { noteFormulaStreamChunk, requestFullRecalcAfterStream } from './formula-stream-hold'
 
 export const MINIMUM_SHEET_ROW_COUNT = 1000
@@ -358,7 +364,7 @@ export function applyFormatPatchToRange(
         ? null
         : 'gradient' in patch.fill
           ? (patch.fill.gradient.stops[0]?.color ?? null)
-          : patch.fill.fg
+          : (blendedDisplayOf(patch.fill) ?? patch.fill.fg)
     range.setBackground(displayColor(display) as unknown as string)
   } else if (patch.fillColor !== undefined) {
     range.setBackground(displayColor(patch.fillColor) as unknown as string)
@@ -492,6 +498,7 @@ export function loadWorkbookSkeleton(runtime: UniverRuntime | null, file: Workbo
       }),
     ),
   })
+  if (created) installCaseInsensitiveFormulaSheetLookup(runtime, created.getWorkbook())
   // Excel opens on workbookView/@activeTab; Univer defaults to the first
   // visible sheet. Skip hidden targets (stale activeTab in the file).
   const activeMeta = [file.sheets[file.activeTab], ...file.sheets].find(
@@ -1170,12 +1177,15 @@ function applyWorkbookNotesInner(
   }
 }
 
-function createColumnData(
+export function createColumnData(
   sheet: WorkbookFile['sheets'][number],
   styles: WorkbookFile['styles'],
   // The snapshot grid is padded past the used range (MINIMUM_SHEET_COLUMN_COUNT);
   // a workbook-wide <col min="1" max="16384"> must keep painting the padding.
   columnCount: number,
+  // Columns below this index are skipped: the on-demand column growth only
+  // needs the entries of the columns it just added.
+  firstColumn = 0,
 ): Record<number, { w?: number; hd?: BooleanNumber; s?: IStyleData }> {
   const data: Record<number, { w?: number; hd?: BooleanNumber; s?: IStyleData }> = {}
   for (const columnWidth of sheet.columnWidths) {
@@ -1187,7 +1197,11 @@ function createColumnData(
     // Cell beats row beats column (OOXML order) — row-over-column needs the
     // isRowStylePrecedeColumnStyle preset flag set in App.tsx.
     const style = columnWidth.styleIndex === undefined ? undefined : styles[columnWidth.styleIndex]
-    for (let column = columnWidth.startColumn; column <= endColumn; column += 1) {
+    for (
+      let column = Math.max(columnWidth.startColumn, firstColumn);
+      column <= endColumn;
+      column += 1
+    ) {
       // Merge overlapping <col> spans: a later width-only span must not erase
       // an earlier span's style (and vice versa).
       data[column] = {
@@ -1242,6 +1256,7 @@ export async function loadVisibleRange(
   worksheet: UniverWorksheet,
   setMessage: (message: string) => void,
   viewportStart?: { row: number; column: number },
+  refreshLoaded = false,
 ): Promise<void> {
   const state = lazyWorkbookRef.current
   if (!state) return
@@ -1283,7 +1298,19 @@ export async function loadVisibleRange(
     screenRowCount,
     screenColumnCount,
   )
-  await loadRange(runtime, lazyWorkbookRef, worksheet, range, setMessage)
+  await loadRange(
+    runtime,
+    lazyWorkbookRef,
+    worksheet,
+    range,
+    setMessage,
+    false,
+    false,
+    0,
+    null,
+    false,
+    refreshLoaded,
+  )
   await loadFrozenColumnStrip(lazyWorkbookRef, worksheet, sheet, range)
   await extendWindowPastHiddenRows(
     runtime,
@@ -1484,6 +1511,8 @@ export async function activateFormulaClosure(
         sheetRowColStyleKeys(state, sheetId),
         inheritedWrapLookup(state.file.styles, result.rows, sheetMeta.columnWidths),
         hiddenRowsInfo(state, sheetId),
+        inheritedVerticalLookup(state.file.styles, result.rows, sheetMeta.columnWidths),
+        inheritedStyleIndexLookup(result.rows, sheetMeta.columnWidths),
       )
       // Re-pinning must not revive a formula the install kept cache-only.
       for (const cell of wanted) {
@@ -1632,6 +1661,11 @@ export async function readCopySourceDirect(
         const entry = journalCells?.get(`${row}:${column}`)
         const target = out[row - bounds.startRow]?.[column - bounds.startColumn]
         if (!target) continue
+        if (entry?.styleReference !== undefined) {
+          const referenced =
+            entry.styleReference === null ? null : state.file.styles[entry.styleReference]
+          target.s = referenced ? (toUniverStyle(referenced) as Record<string, unknown>) : null
+        }
         if (entry?.styleReset) target.s = null
         if (entry?.style) {
           target.s = {
@@ -1738,6 +1772,8 @@ export async function pinStreamedPrecedents(
         sheetRowColStyleKeys(state, sheetId),
         inheritedWrapLookup(state.file.styles, mapped.screen.rows, sheetMeta.columnWidths),
         hiddenRowsInfo(state, sheetId),
+        inheritedVerticalLookup(state.file.styles, mapped.screen.rows, sheetMeta.columnWidths),
+        inheritedStyleIndexLookup(mapped.screen.rows, sheetMeta.columnWidths),
       )
       for (const cell of mapped.screen.cells) {
         const key = cellKey(cell.row, cell.column)
@@ -2565,6 +2601,8 @@ async function loadFrozenColumnStrip(
       sheetRowColStyleKeys(state, sheetId),
       inheritedWrapLookup(state.file.styles, mapped.screen.rows, sheet.columnWidths),
       hiddenRowsInfo(state, sheetId),
+      inheritedVerticalLookup(state.file.styles, mapped.screen.rows, sheet.columnWidths),
+      inheritedStyleIndexLookup(mapped.screen.rows, sheet.columnWidths),
     )
     const stripQualifying = wrapAutoFitRows(
       mapped.screen.cells,
@@ -2717,12 +2755,15 @@ async function remeasureWrapRowsAcrossSheet(
         inheritedWrapLookup(state.file.styles, mapped.screen.rows, sheet.columnWidths),
         pinnedKeys,
         hiddenRowsInfo(state, sheetId),
+        undefined,
+        inheritedVerticalLookup(state.file.styles, mapped.screen.rows, sheet.columnWidths),
+        inheritedStyleIndexLookup(mapped.screen.rows, sheet.columnWidths),
       )
     }
   })
   measureWrapAutoFitRows(worksheet, rows)
   suppressed(() => {
-    for (const { range } of reads) {
+    for (const { range, mapped } of reads) {
       const clearStartRow = Math.max(range.startRow, frozenRows)
       const clearStartColumn = Math.max(range.startColumn, frozenColumns)
       if (clearStartRow <= range.endRow && clearStartColumn <= range.endColumn) {
@@ -2742,7 +2783,17 @@ async function remeasureWrapRowsAcrossSheet(
         const kept = { ...range, endRow: Math.min(range.endRow, frozenRows - 1) }
         const overlay = state.recalc.overlay.get(sheetId)
         if (overlay?.size) applyPinnedOverlay(worksheet, overlay, undefined, kept)
-        applyJournalOverlay(worksheet, state.editJournal, kept)
+        applyJournalOverlay(
+          worksheet,
+          state.editJournal,
+          kept,
+          journalVisualStyleLookup(
+            mapped.screen.cells,
+            state.file.styles,
+            inheritedStyleIndexLookup(mapped.screen.rows, sheet.columnWidths),
+          ),
+          (index) => state.file.styles[index],
+        )
       }
     }
   })
@@ -2792,6 +2843,7 @@ async function loadRange(
   waitStalls = 0,
   lastIndexedRow: number | null = null,
   bulk = false,
+  refreshLoaded = false,
 ): Promise<void> {
   const state = lazyWorkbookRef.current
   if (!state) return
@@ -2803,6 +2855,7 @@ async function loadRange(
   // lands, or the decorations starve forever behind this early return.
   if (
     !isRetry &&
+    !refreshLoaded &&
     loaded &&
     containsRange(loaded, range) &&
     !state.decorationsPendingSheets.has(sheetId)
@@ -2864,7 +2917,7 @@ async function loadRange(
     if (availableEndRow !== null && availableEndRow >= range.startRow) {
       const availableRange = { ...range, endRow: availableEndRow }
       const alreadyLoaded = state.loadedRanges.get(sheetId)
-      if (!alreadyLoaded || !containsRange(alreadyLoaded, availableRange)) {
+      if (refreshLoaded || !alreadyLoaded || !containsRange(alreadyLoaded, availableRange)) {
         if (state.formulaMode) recordCachedFormulaValues(state, sheetId, mapped.screen.cells)
         recordRowStyleKeys(state, sheetId, mapped.screen.rows)
         recordHiddenFileRows(state, sheetId, mapped.screen.rows, availableRange)
@@ -2889,6 +2942,8 @@ async function loadRange(
           sheetRowColStyleKeys(state, sheetId),
           inheritedWrapLookup(state.file.styles, mapped.screen.rows, sheetMeta.columnWidths),
           hiddenRowsInfo(state, sheetId),
+          inheritedVerticalLookup(state.file.styles, mapped.screen.rows, sheetMeta.columnWidths),
+          inheritedStyleIndexLookup(mapped.screen.rows, sheetMeta.columnWidths),
         )
         if (!state.flags.preloadRunning) state.loadedRanges.set(sheetId, availableRange)
         patchedRange = availableRange
@@ -3766,6 +3821,8 @@ function patchWorksheetRange(
   rowColStyleKeys?: ReadonlySet<string>,
   inheritedWrap?: (row: number, column: number) => boolean,
   hiddenRows?: HiddenRowsInfo,
+  inheritedVertical?: (row: number, column: number) => WorkbookCellStyle['verticalAlignment'],
+  inheritedStyleIndex?: (row: number, column: number) => number | undefined,
 ): void {
   noteFormulaStreamChunk()
   // Windowed CF formula registrations follow the loaded row window; report
@@ -3797,6 +3854,9 @@ function patchWorksheetRange(
         inheritedWrap,
         pinned?.size ? new Set(pinned.keys()) : undefined,
         hiddenRows,
+        journal,
+        inheritedVertical,
+        inheritedStyleIndex,
       )
       // Closure cells are engine-owned: streaming skips them entirely (see
       // pinnedKeys in the inner patcher) instead of evict-and-re-pin — every
@@ -3806,7 +3866,14 @@ function patchWorksheetRange(
       // 1900). The journal overlay still runs after so
       // user edits always win.
       if (recalcOverlay?.size) applyPinnedOverlay(worksheet, recalcOverlay, previousRange, range)
-      if (journal) applyJournalOverlay(worksheet, journal, range)
+      if (journal)
+        applyJournalOverlay(
+          worksheet,
+          journal,
+          range,
+          journalVisualStyleLookup(cells, styles, inheritedStyleIndex),
+          (index) => styles[index],
+        )
     })
   } finally {
     journalSuppression.active = false
@@ -3846,10 +3913,130 @@ function applyPinnedOverlay(
   }
 }
 
+interface JournalVisualStyle {
+  readonly style: WorkbookCellStyle | undefined
+  readonly inherited: boolean
+}
+
+function journalVisualStyleLookup(
+  cells: WorkbookRangeResult['cells'],
+  styles: readonly WorkbookCellStyle[],
+  inheritedStyleIndex: ((row: number, column: number) => number | undefined) | undefined,
+): (row: number, column: number) => JournalVisualStyle {
+  const fileCells = new Map(cells.map((cell) => [`${cell.row}:${cell.column}`, cell]))
+  return (row, column) => {
+    const fileCell = fileCells.get(`${row}:${column}`)
+    const inherited =
+      !fileCell || fileCell.explicitStyle === false || fileCell.styleIndex === undefined
+    const index =
+      !inherited && fileCell?.styleIndex !== undefined
+        ? fileCell.styleIndex
+        : (inheritedStyleIndex?.(row, column) ?? 0)
+    return { style: styles[index], inherited }
+  }
+}
+
+/** Refresh one edited multiline cell after Univer commits it into an inherited blank. */
+export async function refreshJournalMultilineVisual(
+  runtime: UniverRuntime,
+  lazyWorkbookRef: { current: LazyWorkbookState | null },
+  sheetId: string,
+  row: number,
+  column: number,
+  liveOnly = false,
+): Promise<void> {
+  const state = lazyWorkbookRef.current
+  const sheet = state?.file.sheets.find((candidate) => candidate.id === sheetId)
+  if (!state || !sheet) return
+  const worksheet = runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(sheetId)
+  if (!worksheet) return
+  // The edited cell may extend the file's used area. A nearby in-file column
+  // still reports its row xf; outside all source rows only column/XF0 remain.
+  const readRow = Math.min(row, sheet.rowCount - 1)
+  const readColumn = Math.min(column, sheet.columnCount - 1)
+  let mapped: MappedRangeRead | null = null
+  if (readRow >= 0 && readColumn >= 0 && row < sheet.rowCount) {
+    try {
+      mapped = await readSheetRangeMapped(
+        state,
+        sheetId,
+        {
+          startRow: readRow,
+          endRow: readRow,
+          startColumn: readColumn,
+          endColumn: readColumn,
+        },
+        sheet,
+      )
+    } catch {
+      return
+    }
+  }
+  if (lazyWorkbookRef.current !== state) return
+  const latest = state.editJournal.cells.get(sheetId)?.get(`${row}:${column}`)
+  if (
+    !liveOnly &&
+    (!latest?.hasValue || typeof latest.value !== 'string' || !latest.value.includes('\n'))
+  )
+    return
+  const lookup = journalVisualStyleLookup(
+    mapped?.screen.cells ?? [],
+    state.file.styles,
+    inheritedStyleIndexLookup(mapped?.screen.rows ?? [], sheet.columnWidths),
+  )
+  const wasSuppressed = journalSuppression.active
+  journalSuppression.active = true
+  try {
+    if (liveOnly) {
+      reapplyLiveMultilineVisual(worksheet, row, column, lookup(row, column), latest)
+    } else {
+      applyJournalOverlay(
+        worksheet,
+        state.editJournal,
+        { startRow: row, endRow: row, startColumn: column, endColumn: column },
+        lookup,
+        (index) => state.file.styles[index],
+      )
+    }
+  } finally {
+    journalSuppression.active = wasSuppressed
+  }
+}
+
+/** Restore only derived rendering after Univer redoes a value mutation. */
+export function reapplyLiveMultilineVisual(
+  worksheet: UniverWorksheet,
+  row: number,
+  column: number,
+  visual: JournalVisualStyle,
+  latest?: JournalEntry,
+): void {
+  const cell = worksheet.getSheet().getCell(row, column)
+  const stream = cell?.p?.body?.dataStream
+  const richText = typeof stream === 'string' ? stream.replace(/\r?\n$/, '').replace(/\r$/, '') : ''
+  const plainText = typeof cell?.v === 'string' ? cell.v : ''
+  if (!/[\r\n]/.test(richText || plainText)) return
+  const range = worksheet.getRange(row, column, 1, 1)
+  if (visual.inherited && visual.style?.wrapText === true) {
+    range.setValues([[{ s: { tb: WrapStrategy.WRAP } }]])
+  }
+  const vertical =
+    latest?.style?.verticalAlignment ??
+    (latest?.styleReset ? undefined : visual.style?.verticalAlignment)
+  const marker = vertical === 'justify' || vertical === 'distributed' ? vertical : null
+  const custom = worksheet.getSheet().getCell(row, column)?.custom
+  const current = custom?.[VERTICAL_DISTRIBUTION_KEY]
+  if (marker !== null ? current !== marker : current !== undefined && current !== null) {
+    range.setValues([[{ custom: { ...custom, [VERTICAL_DISTRIBUTION_KEY]: marker } }]])
+  }
+}
+
 export function applyJournalOverlay(
   worksheet: UniverWorksheet,
   journal: EditJournal,
   range: IRange,
+  visualStyleAt?: (row: number, column: number) => JournalVisualStyle,
+  styleAtIndex?: (index: number) => WorkbookCellStyle | undefined,
 ): void {
   const sheetId = worksheet.getSheetId()
   const fills = journal.bulkConstantFills?.get(sheetId) ?? []
@@ -3876,6 +4063,7 @@ export function applyJournalOverlay(
   }
   for (const entry of journalEntriesInRange(journal, sheetId, range)) {
     const cellRange = worksheet.getRange(entry.row, entry.column, 1, 1)
+    const visual = visualStyleAt?.(entry.row, entry.column)
     if (entry.hasValue) {
       // Replayed rich/multiline docs need the same cell-font base as the
       // load path; the cell's composed style is already installed here.
@@ -3888,14 +4076,76 @@ export function applyJournalOverlay(
       } else if (typeof entry.value === 'string' && entry.value.includes('\n')) {
         cellRange.setValues([[{ p: toRichTextDocument(entry.value, [], baseFont()) }]])
       } else cellRange.setValues([[{ v: entry.value }]])
+      if (
+        visual?.inherited &&
+        visual.style?.wrapText === true &&
+        typeof entry.value === 'string' &&
+        entry.value.includes('\n')
+      ) {
+        cellRange.setValues([[{ s: { tb: WrapStrategy.WRAP } }]])
+      }
     }
     // The set-range-values mutation merges style patches, so re-applying the
     // delta over the just-installed original reproduces the edited look.
+    if (entry.styleReference !== undefined) {
+      const referenced = entry.styleReference === null ? null : styleAtIndex?.(entry.styleReference)
+      cellRange.setValues([[{ s: referenced ? toUniverStyle(referenced) : null } as ICellData]])
+    }
     if (entry.styleReset) {
       cellRange.setValues([[{ s: null } as unknown as ICellData]])
     }
     if (entry.style) {
       cellRange.setValues([[{ s: fromNeutralStyle(entry.style) as IStyleData }]])
+    }
+    const referenceIndex = entry.styleReference
+    const vertical =
+      entry.style?.verticalAlignment ??
+      (entry.styleReset || referenceIndex !== undefined
+        ? referenceIndex === null || referenceIndex === undefined
+          ? undefined
+          : styleAtIndex?.(referenceIndex)?.verticalAlignment
+        : visual?.style?.verticalAlignment)
+    if (entry.style?.verticalAlignment !== undefined || entry.styleReset || visual) {
+      const marker = vertical === 'justify' || vertical === 'distributed' ? vertical : null
+      const custom = worksheet.getSheet().getCell(entry.row, entry.column)?.custom
+      const current = custom?.[VERTICAL_DISTRIBUTION_KEY]
+      if (marker !== null ? current !== marker : current !== undefined && current !== null) {
+        cellRange.setValues([[{ custom: { ...custom, [VERTICAL_DISTRIBUTION_KEY]: marker } }]])
+      }
+    }
+    if (
+      entry.style?.underline !== undefined ||
+      entry.style?.underlineStyle !== undefined ||
+      entry.styleReset ||
+      entry.styleReference !== undefined ||
+      visual
+    ) {
+      const fontBase =
+        entry.styleReset || entry.styleReference === null
+          ? styleAtIndex?.(0)
+          : entry.styleReference !== undefined
+            ? styleAtIndex?.(entry.styleReference)
+            : visual?.style
+      const marker = accountingUnderlineMode({
+        underline: entry.style?.underline ?? fontBase?.underline ?? false,
+        underlineStyle: entry.style?.underlineStyle ?? fontBase?.underlineStyle,
+      })
+      const custom = worksheet.getSheet().getCell(entry.row, entry.column)?.custom
+      if ((custom?.[ACCOUNTING_UNDERLINE_KEY] ?? null) !== marker) {
+        cellRange.setValues([[{ custom: { ...custom, [ACCOUNTING_UNDERLINE_KEY]: marker } }]])
+      }
+    }
+    // (Clear Formats leaves a stale marker behind, which fillPatternOf rejects by its blend)
+    if (entry.style?.fill !== undefined || entry.style?.fillColor !== undefined) {
+      const fill = entry.style?.fill
+      const marker = isFillPattern(fill)
+        ? { pattern: fill.pattern, fg: fill.fg, bg: fill.bg }
+        : null
+      const custom = worksheet.getSheet().getCell(entry.row, entry.column)?.custom
+      const current = custom?.[FILL_PATTERN_KEY] ?? null
+      if (JSON.stringify(current) !== JSON.stringify(marker)) {
+        cellRange.setValues([[{ custom: { ...custom, [FILL_PATTERN_KEY]: marker } }]])
+      }
     }
   }
 }
@@ -4103,29 +4353,40 @@ export function inheritedWrapLookup(
   rows: WorkbookRangeResult['rows'],
   columnWidths: WorkbookFile['sheets'][number]['columnWidths'],
 ): (row: number, column: number) => boolean {
-  const rowWrap = new Map<number, boolean>()
+  const index = inheritedStyleIndexLookup(rows, columnWidths)
+  return (row, column) => styles[index(row, column) ?? 0]?.wrapText === true
+}
+
+/** The row or last matching column xf for a cell with no explicit `s=`. */
+export function inheritedStyleIndexLookup(
+  rows: WorkbookRangeResult['rows'],
+  columnWidths: WorkbookFile['sheets'][number]['columnWidths'],
+): (row: number, column: number) => number | undefined {
+  const rowStyles = new Map<number, number>()
   for (const row of rows) {
-    if (row.styleIndex === undefined) continue
-    rowWrap.set(row.row, styles[row.styleIndex]?.wrapText === true)
+    if (row.styleIndex !== undefined) rowStyles.set(row.row, row.styleIndex)
   }
-  const columnSpans = columnWidths
-    .filter((span) => span.styleIndex !== undefined)
-    .map((span) => ({
-      start: span.startColumn,
-      end: span.endColumn,
-      wrap: styles[span.styleIndex as number]?.wrapText === true,
-    }))
+  const columnSpans = columnWidths.filter((span) => span.styleIndex !== undefined)
   return (row, column) => {
-    const fromRow = rowWrap.get(row)
-    if (fromRow !== undefined) return fromRow
-    // Match createColumnData: overlapping <col> spans apply in file order, so
-    // the last styled span covering the column decides.
-    let wrap = false
+    const rowStyle = rowStyles.get(row)
+    if (rowStyle !== undefined) return rowStyle
+    let columnStyle: number | undefined
     for (const span of columnSpans) {
-      if (column >= span.start && column <= span.end) wrap = span.wrap
+      if (column >= span.startColumn && column <= span.endColumn) columnStyle = span.styleIndex
     }
-    return wrap
+    return columnStyle
   }
+}
+
+/** Native vertical alignment for XF-less cells: row default, then the last styled column span, then base XF. */
+export function inheritedVerticalLookup(
+  styles: readonly WorkbookCellStyle[],
+  rows: WorkbookRangeResult['rows'],
+  columnWidths: WorkbookFile['sheets'][number]['columnWidths'],
+): (row: number, column: number) => WorkbookCellStyle['verticalAlignment'] {
+  const index = inheritedStyleIndexLookup(rows, columnWidths)
+  return (row, column) =>
+    styles[index(row, column) ?? 0]?.verticalAlignment ?? styles[0]?.verticalAlignment
 }
 
 /// Rows Excel DOES auto-fit when opening a file: the row is in auto mode
@@ -4207,7 +4468,10 @@ export function wrapAutoFitCells(
     if (cell.column < range.startColumn || cell.column > range.endColumn) continue
     if (lockedHeights.has(cell.row)) continue
     if (inMerge(cell.row, cell.column)) continue
-    const style = cell.styleIndex === undefined ? undefined : styles[cell.styleIndex]
+    const style =
+      cell.explicitStyle === false || cell.styleIndex === undefined
+        ? undefined
+        : styles[cell.styleIndex]
     const wraps = style ? style.wrapText === true : inheritedWrap(cell.row, cell.column)
     if (!wraps) continue
     const value = cell.value ?? ''
@@ -4506,6 +4770,9 @@ export function patchWorksheetRangeInner(
   inheritedWrap?: (row: number, column: number) => boolean,
   pinnedKeys?: ReadonlySet<string>,
   hiddenRows?: HiddenRowsInfo,
+  journal?: EditJournal,
+  inheritedVertical?: (row: number, column: number) => WorkbookCellStyle['verticalAlignment'],
+  inheritedStyleIndex?: (row: number, column: number) => number | undefined,
 ): void {
   if (previousRange) {
     // Frozen rows/columns stay visible while scrolling, so never evict them —
@@ -4541,7 +4808,35 @@ export function patchWorksheetRangeInner(
     Array.from({ length: columns }, () => ({})),
   )
   const overrideCells: Array<[number, number]> = []
-  const centerAcrossEnds = centerContinuousRunEnds(cells, range, styles)
+  const journalCells = journal?.cells.get(worksheet.getSheetId())
+  const previewCells = cells.map((cell) => {
+    const edit = journalCells?.get(`${cell.row}:${cell.column}`)
+    return edit?.hasValue ? { ...cell, value: edit.value, formula: edit.formula } : cell
+  })
+  if (journalCells?.size) {
+    const present = new Set(cells.map((cell) => `${cell.row}:${cell.column}`))
+    for (const entry of journalCells.values()) {
+      if (
+        entry.row < range.startRow ||
+        entry.row > range.endRow ||
+        entry.column < range.startColumn ||
+        entry.column > range.endColumn ||
+        present.has(`${entry.row}:${entry.column}`)
+      )
+        continue
+      previewCells.push({
+        row: entry.row,
+        column: entry.column,
+        value: entry.hasValue ? entry.value : null,
+      })
+    }
+  }
+  const centerAcrossEnds = centerContinuousRunEnds(
+    previewCells,
+    range,
+    styles,
+    (cell) => journalCells?.get(`${cell.row}:${cell.column}`)?.style?.horizontalAlignment,
+  )
   for (const cell of cells) {
     if (
       cell.row < range.startRow ||
@@ -4562,7 +4857,15 @@ export function patchWorksheetRangeInner(
     const displayValue =
       cell.value ?? (cell.formula ? (useFormulas && !keepsCache ? cell.formula : '') : '') ?? ''
     const row = matrix[cell.row - range.startRow]
-    const style = cell.styleIndex === undefined ? undefined : styles[cell.styleIndex]
+    const inheritedIndex = inheritedStyleIndex?.(cell.row, cell.column)
+    const fileStyle =
+      cell.explicitStyle === false && inheritedIndex !== undefined
+        ? undefined
+        : cell.styleIndex === undefined
+          ? undefined
+          : styles[cell.styleIndex]
+    const pendingStyle = journalCells?.get(`${cell.row}:${cell.column}`)?.style
+    const style = pendingAlignmentStyle(fileStyle, styles[inheritedIndex ?? 0], pendingStyle)
     // CSE array follower: its dead cached value would block the master's
     // spill with #SPILL!; keep the style, let the engine fill the content.
     // Clear explicitly — an earlier viewport install may have put the
@@ -4624,75 +4927,90 @@ export function patchWorksheetRangeInner(
       shrinkScale >= 1 || !style
         ? style
         : { ...style, fontSize: scaledFontSize(style.fontSize ?? 11, shrinkScale) }
+    const fillPreview =
+      effectiveStyle?.horizontalAlignment === 'fill' &&
+      !cell.formula &&
+      !cell.rich &&
+      typeof displayValue === 'string' &&
+      displayValue !== '' &&
+      !displayValue.includes('\n')
+        ? fillPreviewText(worksheet, cell.column, displayValue, effectiveStyle)
+        : null
     if (row) {
       row[cell.column - range.startColumn] = {
         // Explicit string typing: bare `v` lets Univer coerce numeric-looking
         // text ("007", phone numbers) into numbers.
-        ...(cell.rich && typeof displayValue === 'string'
+        ...(fillPreview
           ? {
-              p: toRichTextDocument(
-                joinLines ? joinManualBreaks(displayValue) : displayValue,
-                joinLines
-                  ? cell.rich.map((run) => ({ ...run, text: joinManualBreaks(run.text) }))
-                  : cell.rich,
-                cellFontTextStyle(effectiveStyle),
-                shrinkScale,
-              ),
-              // Excel joins manual breaks only visually — CHAR(10) stays in
-              // the stored value; keep v raw so formulas and copies see it.
-              ...(joinLines ? { v: displayValue, t: CellValueType.STRING } : {}),
+              v: displayValue,
+              t: CellValueType.STRING,
+              p: toRichTextDocument(fillPreview, [], cellFontTextStyle(effectiveStyle)),
             }
-          : useFormulas && cell.formula && !keepsCache
-            ? // No cached value: leave v unset so the engine computes instead
-              // of showing the formula text as a literal. An error-literal
-              // cache means the last writer could not evaluate the formula
-              // (LibreOffice caches #NAME? for functions it lacks) — drop it
-              // too, so the engine recomputes like Excel does on open.
-              // Plain-arithmetic formulas also recompute: the engine handles
-              // them at full parity, and Excel's own recalc-on-open shows
-              // #VALUE! where a stale cache still holds a number (comma-
-              // decimal text summed before the cells went text). Array
-              // masters with a usable cache never reach here (keepsCache).
-              cell.value === null ||
-              cell.value === undefined ||
-              (typeof cell.value === 'string' && EXCEL_ERROR_LITERALS.has(cell.value)) ||
-              isPlainArithmeticFormula(cell.formula)
-              ? { f: cell.formula }
-              : cachedFormulaCellData(cell.formula, cell.value)
-            : typeof displayValue === 'string' && joinLines
-              ? // Excel joins manual breaks only visually — CHAR(10) stays in
-                // the stored value. Render the joined line through the doc
-                // model and keep v raw for formulas, edits, and copies.
-                {
-                  v: displayValue,
-                  t: CellValueType.STRING,
-                  p: toRichTextDocument(
-                    joinManualBreaks(displayValue),
-                    [],
-                    cellFontTextStyle(effectiveStyle),
-                  ),
-                }
-              : typeof displayValue === 'string' && multiline
-                ? // Bare `v` renders only the first line; the doc model keeps all.
-                  { p: toRichTextDocument(displayValue, [], cellFontTextStyle(effectiveStyle)) }
-                : typeof displayValue === 'string' && displayValue !== ''
-                  ? { v: displayValue, t: CellValueType.STRING }
-                  : displayValue === ''
-                    ? cell.value === ''
-                      ? // A real empty-string value (shared string / inlineStr
-                        // ''): keep it a STRING so copies and saves carry it —
-                        // Excel keeps such cells non-blank (=ref returns '',
-                        // =ref+1 is #VALUE!, COUNTA counts it).
-                        { v: '', t: CellValueType.STRING }
-                      : // Style-only cells (`<c r="B3" s="170"/>`, value null):
-                        // `v: ''` would make them empty STRINGS, and a formula
-                        // referencing one then returns '' where Excel returns 0
-                        // (a serial-0 date shows 1900/1/0, a plain 0 shows 0 —
-                        // not blank). `v: null` clears any earlier value and
-                        // keeps them value-less.
-                        { v: null }
-                    : { v: displayValue }),
-        ...(effectiveStyle || numericNoWrap
+          : cell.rich && typeof displayValue === 'string'
+            ? {
+                p: toRichTextDocument(
+                  joinLines ? joinManualBreaks(displayValue) : displayValue,
+                  joinLines
+                    ? cell.rich.map((run) => ({ ...run, text: joinManualBreaks(run.text) }))
+                    : cell.rich,
+                  cellFontTextStyle(effectiveStyle),
+                  shrinkScale,
+                ),
+                // Excel joins manual breaks only visually — CHAR(10) stays in
+                // the stored value; keep v raw so formulas and copies see it.
+                ...(joinLines ? { v: displayValue, t: CellValueType.STRING } : {}),
+              }
+            : useFormulas && cell.formula && !keepsCache
+              ? // No cached value: leave v unset so the engine computes instead
+                // of showing the formula text as a literal. An error-literal
+                // cache means the last writer could not evaluate the formula
+                // (LibreOffice caches #NAME? for functions it lacks) — drop it
+                // too, so the engine recomputes like Excel does on open.
+                // Plain-arithmetic formulas also recompute: the engine handles
+                // them at full parity, and Excel's own recalc-on-open shows
+                // #VALUE! where a stale cache still holds a number (comma-
+                // decimal text summed before the cells went text). Array
+                // masters with a usable cache never reach here (keepsCache).
+                cell.value === null ||
+                cell.value === undefined ||
+                (typeof cell.value === 'string' && EXCEL_ERROR_LITERALS.has(cell.value)) ||
+                isPlainArithmeticFormula(cell.formula)
+                ? { f: cell.formula }
+                : cachedFormulaCellData(cell.formula, cell.value)
+              : typeof displayValue === 'string' && joinLines
+                ? // Excel joins manual breaks only visually — CHAR(10) stays in
+                  // the stored value. Render the joined line through the doc
+                  // model and keep v raw for formulas, edits, and copies.
+                  {
+                    v: displayValue,
+                    t: CellValueType.STRING,
+                    p: toRichTextDocument(
+                      joinManualBreaks(displayValue),
+                      [],
+                      cellFontTextStyle(effectiveStyle),
+                    ),
+                  }
+                : typeof displayValue === 'string' && multiline
+                  ? // Bare `v` renders only the first line; the doc model keeps all.
+                    { p: toRichTextDocument(displayValue, [], cellFontTextStyle(effectiveStyle)) }
+                  : typeof displayValue === 'string' && displayValue !== ''
+                    ? { v: displayValue, t: CellValueType.STRING }
+                    : displayValue === ''
+                      ? cell.value === ''
+                        ? // A real empty-string value (shared string / inlineStr
+                          // ''): keep it a STRING so copies and saves carry it —
+                          // Excel keeps such cells non-blank (=ref returns '',
+                          // =ref+1 is #VALUE!, COUNTA counts it).
+                          { v: '', t: CellValueType.STRING }
+                        : // Style-only cells (`<c r="B3" s="170"/>`, value null):
+                          // `v: ''` would make them empty STRINGS, and a formula
+                          // referencing one then returns '' where Excel returns 0
+                          // (a serial-0 date shows 1900/1/0, a plain 0 shows 0 —
+                          // not blank). `v: null` clears any earlier value and
+                          // keeps them value-less.
+                          { v: null }
+                      : { v: displayValue }),
+        ...(effectiveStyle || numericNoWrap || (multiline && wrapsEffective)
           ? {
               s: {
                 // Hyperlinked cells keep the file's own font: Excel styles a
@@ -4700,12 +5018,59 @@ export function patchWorksheetRangeInner(
                 // overrode plain-styled links.
                 ...(effectiveStyle ? toUniverStyle(effectiveStyle) : {}),
                 ...(numericNoWrap ? { tb: WrapStrategy.CLIP } : {}),
+                // Row/column wrap is part of the native effective style, but
+                // Univer does not pass that inherited flag into a rich cell's
+                // document skeleton. Copy only tb onto XF-less multiline cells;
+                // fonts, fills, and alignment still compose from the row/column.
+                ...(!effectiveStyle && multiline && wrapsEffective
+                  ? { tb: WrapStrategy.WRAP }
+                  : {}),
               },
             }
           : {}),
         ...(shrinks && typeof displayValue === 'number'
           ? { custom: { [SHRINK_TO_FIT_KEY]: true } }
           : {}),
+      }
+      const verticalMode =
+        pendingStyle?.verticalAlignment ??
+        (fileStyle
+          ? (fileStyle.verticalAlignment ?? styles[0]?.verticalAlignment)
+          : (inheritedVertical?.(cell.row, cell.column) ?? styles[0]?.verticalAlignment))
+      if (verticalMode === 'justify' || verticalMode === 'distributed') {
+        const target = row[cell.column - range.startColumn]
+        if (target) {
+          target.custom = {
+            ...target.custom,
+            [VERTICAL_DISTRIBUTION_KEY]: verticalMode,
+          }
+        }
+      }
+      const journalEntry = journalCells?.get(`${cell.row}:${cell.column}`)
+      const fontBase = journalEntry?.styleReset
+        ? styles[0]
+        : (fileStyle ?? styles[inheritedIndex ?? 0])
+      const accounting = accountingUnderlineMode({
+        underline: pendingStyle?.underline ?? fontBase?.underline ?? false,
+        underlineStyle: pendingStyle?.underlineStyle ?? fontBase?.underlineStyle,
+      })
+      if (accounting) {
+        const target = row[cell.column - range.startColumn]
+        if (target) target.custom = { ...target.custom, [ACCOUNTING_UNDERLINE_KEY]: accounting }
+      }
+      // Editable parts of an imported two-color pattern fill (the cell shows the blend)
+      const pendingFill = pendingStyle?.fill
+      const patternMarker =
+        pendingFill !== undefined
+          ? isFillPattern(pendingFill)
+            ? { pattern: pendingFill.pattern, fg: pendingFill.fg, bg: pendingFill.bg }
+            : null
+          : journalEntry?.styleReset || pendingStyle?.fillColor !== undefined
+            ? null
+            : markerFromFile(fileStyle?.fillPattern)
+      if (patternMarker) {
+        const target = row[cell.column - range.startColumn]
+        if (target) target.custom = { ...target.custom, [FILL_PATTERN_KEY]: patternMarker }
       }
       // Only cells with their own xf override row/col defaults.
       if (effectiveStyle && rowColStyleKeys?.size) {
@@ -4738,6 +5103,66 @@ export function patchWorksheetRangeInner(
   // The one measure Excel really performs on open — auto rows with wrapped
   // text — runs afterwards via measureWrapAutoFitRows.
   worksheet.getRange(range.startRow, range.startColumn, rows, columns).setValues(matrix)
+}
+
+/** Only renderer-supported alignment properties are overlaid; the saved XF is authoritative. */
+function pendingAlignmentStyle(
+  fileStyle: WorkbookCellStyle | undefined,
+  defaultStyle: WorkbookCellStyle | undefined,
+  delta: WorkbookStyleEdit | undefined,
+): WorkbookCellStyle | undefined {
+  if (!delta) return fileStyle
+  if (
+    delta.horizontalAlignment === undefined &&
+    delta.verticalAlignment === undefined &&
+    delta.textRotation === undefined &&
+    delta.shrinkToFit === undefined
+  )
+    return fileStyle
+  const base = fileStyle ?? defaultStyle
+  if (!base) return undefined
+  return {
+    ...base,
+    ...(delta.horizontalAlignment === undefined
+      ? {}
+      : { horizontalAlignment: delta.horizontalAlignment }),
+    ...(delta.verticalAlignment === undefined
+      ? {}
+      : { verticalAlignment: delta.verticalAlignment }),
+    ...(delta.shrinkToFit === undefined ? {} : { shrinkToFit: delta.shrinkToFit }),
+    ...(delta.textRotation === undefined
+      ? {}
+      : { textRotation: delta.textRotation === 0 ? undefined : delta.textRotation }),
+  }
+}
+
+/** Excel Fill repeats the formatted text across its own cell without changing its value. */
+export function repeatFillPreview(
+  text: string,
+  cellWidth: number,
+  measure: (value: string) => number,
+): string {
+  const textWidth = measure(text)
+  if (!Number.isFinite(cellWidth) || !Number.isFinite(textWidth) || textWidth <= 0) return text
+  const repeats = Math.max(
+    1,
+    Math.min(Math.floor(256 / text.length), Math.ceil((cellWidth - 4) / textWidth)),
+  )
+  return text.repeat(repeats)
+}
+
+function fillPreviewText(
+  worksheet: UniverWorksheet,
+  column: number,
+  text: string,
+  style: WorkbookCellStyle,
+): string {
+  const { fontString } = getFontStyleString(cellFontTextStyle(style))
+  return repeatFillPreview(
+    text,
+    worksheet.getSheet().getColumnWidth(column),
+    (candidate) => FontCache.getMeasureText(candidate, fontString).width,
+  )
 }
 
 /// True only for a real fill: unfilled xfs carry the bg empty-rgb sentinel
@@ -5099,8 +5524,27 @@ export function cellFontTextStyle(style: WorkbookCellStyle | undefined): IStyleD
     ...(style.fontSize ? { fs: style.fontSize } : {}),
     ...(style.bold ? { bl: BooleanNumber.TRUE } : {}),
     ...(style.italic ? { it: BooleanNumber.TRUE } : {}),
-    ...(style.underline ? { ul: { s: BooleanNumber.TRUE } } : {}),
+    ...(style.underline
+      ? {
+          ul: {
+            s: BooleanNumber.TRUE,
+            ...(['double', 'doubleAccounting'].includes(style.underlineStyle ?? '')
+              ? { t: 10 }
+              : {}),
+          },
+        }
+      : {}),
     ...(style.strikethrough ? { st: { s: BooleanNumber.TRUE } } : {}),
+    ...(style.fontVerticalAlign
+      ? {
+          va:
+            style.fontVerticalAlign === 'subscript'
+              ? BaselineOffset.SUBSCRIPT
+              : style.fontVerticalAlign === 'superscript'
+                ? BaselineOffset.SUPERSCRIPT
+                : BaselineOffset.NORMAL,
+        }
+      : {}),
     ...(style.fontColor ? { cl: { rgb: style.fontColor } } : {}),
   }
 }
@@ -5114,8 +5558,9 @@ export function fontTextStyleOf(s: IStyleData | null | undefined): IStyleData {
     ...(s.fs ? { fs: s.fs } : {}),
     ...(s.bl ? { bl: s.bl } : {}),
     ...(s.it ? { it: s.it } : {}),
-    ...(s.ul?.s ? { ul: { s: BooleanNumber.TRUE } } : {}),
+    ...(s.ul?.s ? { ul: { s: BooleanNumber.TRUE, ...(s.ul.t ? { t: s.ul.t } : {}) } } : {}),
     ...(s.st?.s ? { st: { s: BooleanNumber.TRUE } } : {}),
+    ...(s.va ? { va: s.va } : {}),
     ...(s.cl?.rgb ? { cl: { rgb: s.cl.rgb } } : {}),
   }
 }
@@ -5151,6 +5596,7 @@ export function centerContinuousRunEnds(
   cells: WorkbookRangeResult['cells'],
   range: IRange,
   styles: readonly WorkbookCellStyle[],
+  horizontalOverride?: (cell: WorkbookRangeResult['cells'][number]) => string | undefined,
 ): Map<number, Map<number, number>> {
   const content = new Map<number, Map<number, boolean>>()
   for (const cell of cells) {
@@ -5163,7 +5609,7 @@ export function centerContinuousRunEnds(
       continue
     }
     const style = cell.styleIndex === undefined ? undefined : styles[cell.styleIndex]
-    if (style?.horizontalAlignment !== 'centerContinuous') continue
+    if ((horizontalOverride?.(cell) ?? style?.horizontalAlignment) !== 'centerContinuous') continue
     let rowRuns = content.get(cell.row)
     if (!rowRuns) content.set(cell.row, (rowRuns = new Map()))
     rowRuns.set(cell.column, (cell.value != null && cell.value !== '') || Boolean(cell.formula))
@@ -5436,6 +5882,8 @@ async function preloadEntireWorkbookInner(
         sheetRowColStyleKeys(state, sheetId),
         inheritedWrapLookup(state.file.styles, screen.rows, sheet.columnWidths),
         hiddenRowsInfo(state, sheetId),
+        inheritedVerticalLookup(state.file.styles, screen.rows, sheet.columnWidths),
+        inheritedStyleIndexLookup(screen.rows, sheet.columnWidths),
       )
       // Every mode needs formulaText for the formula bar (see loadRange):
       // value-mode cells install cached results with no `f` in the grid, and
@@ -5872,7 +6320,14 @@ export function collectNoteStates(
         text: split?.[2] ?? note.note,
       }
     })
-    noteStates.push({ sheetId, notes })
+    // a sheet that has (or had) threaded comments always sends its whole set, so a notes-only
+    // edit can never strip the threads' legacy placeholders
+    const threads = state.editJournal.threads.get(sheetId)
+    noteStates.push(
+      threads === undefined
+        ? { sheetId, notes }
+        : { sheetId, notes, threads, persons: state.editJournal.threadPersons.list },
+    )
   }
   return noteStates
 }
@@ -6175,9 +6630,9 @@ function applyDataValidations(
   }
 }
 
-/// File rule → Univer IDataValidationRule. Transformations are bijective with
-/// the save-side mapping in xlsx-dv.ts: none↔any, list literal `"a,b"`↔`a,b`,
-/// reference/custom formulas gain a leading `=`; everything else verbatim.
+/// File rule → Univer IDataValidationRule. Excel's literal list becomes the
+/// JSON string-array format authored by Univer's dropdown editor; references
+/// and custom formulas gain a leading `=`.
 export function toUniverDvRule(
   rule: WorkbookRangeResult['dataValidations'][number],
   uid: string,
@@ -6207,7 +6662,7 @@ export function toUniverDvRule(
     }
     formula1 =
       literal.startsWith('"') && literal.endsWith('"')
-        ? trimListItems(literal.slice(1, -1))
+        ? excelListLiteralToUniver(literal.slice(1, -1))
         : `=${resolveDvListSource(literal.replace(/^=/, ''), file)}`
   } else if (type === 'custom' && formula1 !== undefined) {
     formula1 = `=${formula1.replace(/^=/, '')}`
@@ -6247,13 +6702,20 @@ export function toUniverDvRule(
   }
 }
 
-/// Excel ignores the whitespace around each item of a literal list
-/// (`"Yes, No"`); Univer splits on the bare comma and would reject "No".
-function trimListItems(items: string): string {
-  return items
-    .split(',')
-    .map((item) => item.trim())
-    .join(',')
+/// Preserve each label exactly. Older exports incorrectly wrote Univer's
+/// JSON array inside an Excel quoted literal; recognize that repairable shape.
+function excelListLiteralToUniver(literal: string): string {
+  if (literal.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(literal)
+      if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) {
+        return JSON.stringify(parsed)
+      }
+    } catch {
+      // A legacy CSV item can begin with '[' without being JSON.
+    }
+  }
+  return JSON.stringify(literal.split(','))
 }
 
 type DvListSourceContext = Pick<WorkbookFile, 'definedNames' | 'sheets'>
@@ -7052,17 +7514,38 @@ export function toUniverStyle(style: WorkbookCellStyle): IStyleData {
     ...(style.fontSize ? { fs: style.fontSize } : {}),
     bl: style.bold ? BooleanNumber.TRUE : BooleanNumber.FALSE,
     it: style.italic ? BooleanNumber.TRUE : BooleanNumber.FALSE,
-    ...(style.underline ? { ul: { s: BooleanNumber.TRUE } } : {}),
+    ...(style.underline
+      ? {
+          ul: {
+            s: BooleanNumber.TRUE,
+            ...(['double', 'doubleAccounting'].includes(style.underlineStyle ?? '')
+              ? { t: 10 }
+              : {}),
+          },
+        }
+      : {}),
     ...(style.strikethrough ? { st: { s: BooleanNumber.TRUE } } : {}),
+    ...(style.fontVerticalAlign
+      ? {
+          va:
+            style.fontVerticalAlign === 'subscript'
+              ? BaselineOffset.SUBSCRIPT
+              : style.fontVerticalAlign === 'superscript'
+                ? BaselineOffset.SUPERSCRIPT
+                : BaselineOffset.NORMAL,
+        }
+      : {}),
     // xf alignment is fully resolved in the file: an explicit non-wrap cell
     // must override a WRAP column/row style at compose time.
     // centerContinuous rides on the overflow machinery (center-continuous.ts),
     // so it must not wrap: Excel renders a wrapText+centerContinuous title on
     // one line across the run, not folded inside the anchor cell (prod ref).
     tb:
-      style.wrapText && style.horizontalAlignment !== 'centerContinuous'
-        ? WrapStrategy.WRAP
-        : WrapStrategy.OVERFLOW,
+      style.horizontalAlignment === 'fill'
+        ? WrapStrategy.CLIP
+        : style.wrapText && style.horizontalAlignment !== 'centerContinuous'
+          ? WrapStrategy.WRAP
+          : WrapStrategy.OVERFLOW,
     ...(style.fontColor ? { cl: { rgb: style.fontColor } } : {}),
     // Like tb above: an explicit xf without a fill must BLOCK a filled
     // column/row style at compose time — Univer merges styles by key, so a
@@ -7127,6 +7610,7 @@ export function mapBorderStyle(style: string): BorderStyleTypes {
 }
 
 function mapHorizontalAlignment(value: string | undefined): HorizontalAlign | undefined {
+  if (value === 'general') return HorizontalAlign.UNSPECIFIED
   if (value === 'left') return HorizontalAlign.LEFT
   if (value === 'center') return HorizontalAlign.CENTER
   // The center-across-selection box is widened by center-continuous.ts.
@@ -7141,8 +7625,8 @@ function mapVerticalAlignment(value: string | undefined): VerticalAlign | undefi
   if (value === 'top') return VerticalAlign.TOP
   if (value === 'center') return VerticalAlign.MIDDLE
   if (value === 'bottom') return VerticalAlign.BOTTOM
-  // Excel centres a justify/distributed block; Univer has no equivalent and
-  // would otherwise fall through to its bottom default.
+  // The render hook replaces MIDDLE with per-line vertical spacing for
+  // multiline cells; MIDDLE remains the normal single-line fallback.
   if (value === 'justify' || value === 'distributed') return VerticalAlign.MIDDLE
   return undefined
 }
@@ -7308,7 +7792,7 @@ export function queueVisualInstall(
             .filter((visual) => !visualEdits.get(visual.id)?.remove)
             .map((visual) => {
               const edit = visualEdits.get(visual.id)
-              if (!edit?.anchor && !edit?.frameSize) return visual
+              if (!edit?.anchor && !edit?.frameSize && !edit?.equation) return visual
               return {
                 ...visual,
                 ...(edit.anchor ? { anchor: edit.anchor } : {}),
@@ -7317,6 +7801,7 @@ export function queueVisualInstall(
                 ...(edit.frameSize
                   ? { frameWidth: edit.frameSize.width, frameHeight: edit.frameSize.height }
                   : {}),
+                ...(edit.equation ? { equation: edit.equation } : {}),
               }
             })
     const file =
@@ -7447,7 +7932,12 @@ export function lazyCellReader(worksheet: UniverWorksheet): (address: string) =>
     // paragraph breaks (\r) become \n, matching extractRichText and typed text
     const richText =
       typeof richStream === 'string' ? richStream.replace(/\r\n$/, '').replace(/\r/g, '\n') : null
-    const rawValue = (rawCell?.v ?? richText) as CellState['rawValue']
+    const rawValue = (
+      rawCell?.t === CellValueType.BOOLEAN &&
+      (rawCell.v === 0 || rawCell.v === 1 || rawCell.v === '0' || rawCell.v === '1')
+        ? rawCell.v === 1 || rawCell.v === '1'
+        : (rawCell?.v ?? richText)
+    ) as CellState['rawValue']
     // Formula cells also carry their computed value (the AI needs to see results
     // and error values like #REF!/#DIV/0!; drift checks compare only formula
     // text for formula cells, see planStillMatches)

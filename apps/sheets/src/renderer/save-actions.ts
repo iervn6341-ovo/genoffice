@@ -26,10 +26,12 @@ import { activeCsvSheet, handleExportCsv, serializeActiveSheetCsv } from './csv-
 import type { CellState } from '@genoffice/xlsx-gateway/domain/workbook.types'
 import {
   journaledFormulaValues,
+  residentFormulaValues,
   verifiedFormulaValues,
   type CachedFormulaValue,
 } from './formula-values'
 import { t } from './i18n/locale'
+import { isManualCalculation } from './calc-options'
 import { abortStagedEditsTransfer, stageEditsForSave, type StagedEdits } from './save-edits-staging'
 import { showToast } from './toast-bus'
 import { captureUndoCarry, hasPendingUndoCarry, stashUndoCarry } from './undo-carry'
@@ -93,6 +95,24 @@ export interface SaveOutcome {
  * (main enforces the overwrite policy; the request carries it). Callers pass
  * mode 'save-as' with it.
  */
+/// The crash-recovery copy runs on a timer, so a failure repeats every tick: warn when the reason
+/// changes, and again at most every 10 minutes while it persists.
+let lastRecoveryWarning: { reason: string; at: number } | null = null
+const RECOVERY_WARNING_REPEAT_MS = 10 * 60_000
+
+function warnRecoveryCopyFailed(reason: string): void {
+  const now = Date.now()
+  if (
+    lastRecoveryWarning &&
+    lastRecoveryWarning.reason === reason &&
+    now - lastRecoveryWarning.at < RECOVERY_WARNING_REPEAT_MS
+  ) {
+    return
+  }
+  lastRecoveryWarning = { reason, at: now }
+  showToast(t('appRecoveryCopyFailed', { reason }), 'error')
+}
+
 export async function handleSave(
   ctx: SaveContext,
   mode: 'save' | 'save-as' | 'recovery',
@@ -225,17 +245,48 @@ export async function handleSave(
           return [{ sheetId, row, column, value }]
         }),
   )
+  const hasJournaledFormula = [...state.editJournal.cells.values()].some((cells) =>
+    [...cells.values()].some((cell) => cell.formula !== undefined),
+  )
+  // A fully preloaded workbook, or a streamed workbook with its dependency
+  // closure pinned in the engine, has imported formulas absent from the
+  // journal. Force one dependency pass before reading their model values;
+  // otherwise a changed precedent can save the formula's old <v>.
+  // Manual calculation keeps the user's explicit calculation choice.
+  let residentValues: CachedFormulaValue[] = []
+  let residentCalculationSettled = false
+  if (
+    ctx.readCells &&
+    ((state.formulaMode && state.flags.preloadComplete) || state.closure.status === 'active') &&
+    structuralOps.length === 0 &&
+    !isManualCalculation(ctx.univerRef.current) &&
+    [...state.formulaText.values()].some((formulas) => formulas.size > 0)
+  ) {
+    residentCalculationSettled = await formulaEngineSettled(ctx.univerRef.current, true)
+    if (!residentCalculationSettled && mode !== 'recovery') {
+      const message = t('appSaveCalcPending')
+      ctx.setMessage(message)
+      if (!quiet) showToast(message, 'error')
+      return { ok: false }
+    }
+    if (residentCalculationSettled) {
+      residentValues = residentFormulaValues(
+        state.formulaText,
+        state.editJournal.cells,
+        ctx.readCells,
+        (sheetId) => isSheetRemoved(state.editJournal, sheetId),
+      )
+    }
+  }
   // Journaled formulas an MCP batch saw settle (see formula-values.ts) were left
   // out above because the overlay could be stale; their values are read live here.
   const verifiedValues = ctx.readCells ? verifiedFormulaValues(ctx.readCells) : []
   // Formulas typed in the grid: wait for the engine to settle (bounded), then
   // cache their live results so non-recalculating readers see values (C3).
   let typedValues: CachedFormulaValue[] = []
-  const hasJournaledFormula = [...state.editJournal.cells.values()].some((cells) =>
-    [...cells.values()].some((cell) => cell.formula !== undefined),
-  )
   if (ctx.readCells && hasJournaledFormula) {
-    const settled = await formulaEngineSettled(ctx.univerRef.current)
+    const settled =
+      residentCalculationSettled || (await formulaEngineSettled(ctx.univerRef.current))
     if (settled) {
       typedValues = journaledFormulaValues(state.editJournal.cells, ctx.readCells, (sheetId) =>
         isSheetRemoved(state.editJournal, sheetId),
@@ -243,7 +294,12 @@ export async function handleSave(
     }
   }
   const valueKeys = new Set<string>()
-  const formulaValues = [...overlayValues, ...verifiedValues, ...typedValues].filter((cell) => {
+  const formulaValues = [
+    ...overlayValues,
+    ...verifiedValues,
+    ...typedValues,
+    ...residentValues,
+  ].filter((cell) => {
     const key = `${cell.sheetId}:${cell.row}:${cell.column}`
     if (valueKeys.has(key)) return false
     valueKeys.add(key)
@@ -415,14 +471,19 @@ export async function handleSave(
   if (mode === 'recovery') {
     // Best-effort; a failure only means this tick's copy is skipped — but an
     // unconsumed transfer must not sit in main-process memory until expiry.
-    const written = await window.desktopApi.writeWorkbookRecovery(payload).catch(async () => {
-      await abortStagedEditsTransfer(
-        window.desktopApi,
-        state.file.sessionId,
-        staged.editsTransferId,
-      )
-      return { ok: false }
-    })
+    const written: { ok: boolean; error?: string } = await window.desktopApi
+      .writeWorkbookRecovery(payload)
+      .catch(async () => {
+        await abortStagedEditsTransfer(
+          window.desktopApi,
+          state.file.sessionId,
+          staged.editsTransferId,
+        )
+        return { ok: false }
+      })
+    if (written.ok !== true && written.error) {
+      warnRecoveryCopyFailed(stripIpcErrorWrapper(written.error))
+    }
     return { ok: written.ok === true }
   }
   try {
@@ -628,10 +689,18 @@ export function localizeSaveError(message: string): string | null {
 
 /** true once the formula engine has no pending computation (false on timeout
  *  or when the runtime has no formula facade, e.g. in tests) */
-async function formulaEngineSettled(runtime: UniverRuntime | null): Promise<boolean> {
+async function formulaEngineSettled(
+  runtime: UniverRuntime | null,
+  recalculate = false,
+): Promise<boolean> {
   try {
     const formula = runtime?.univerAPI.getFormula()
     if (!formula) return false
+    if (recalculate) {
+      formula.executeCalculation()
+      await formula.onCalculationResultApplied(FORMULA_SETTLE_TIMEOUT_MS)
+      return true
+    }
     return await formula.whenComputingCompleteAsync(FORMULA_SETTLE_TIMEOUT_MS)
   } catch {
     return false

@@ -71,11 +71,13 @@ describe('journal border mapping', () => {
     expect(neutral).toEqual({
       borderTop: { style: 'thin', color: '#FF0000' },
       borderBottom: null,
+      diagonalDown: false,
     })
     expect(fromNeutralStyle(neutral ?? {})).toEqual({
       bd: {
         t: { s: 1, cl: { rgb: '#FF0000' } },
         b: null,
+        tl_br: null,
       },
     })
   })
@@ -158,6 +160,8 @@ describe('sidecar read side keeps styled blanks', () => {
         { row: 0, column: 0, styleIndex: 0 },
         { row: 0, column: 1, styleIndex: 1 },
         { row: 0, column: 2, styleIndex: 1 },
+        // Explicit s="0" blank cells remain distinct from truly absent cells.
+        { row: 0, column: 3, styleIndex: 0 },
         { row: 1, column: 0, styleIndex: 2 },
         { row: 1, column: 1, styleIndex: 2 },
       ])

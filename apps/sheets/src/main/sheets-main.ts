@@ -55,6 +55,8 @@ import {
   listSystemPrinters,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang, type Lang, normalizeLang, setUiLang } from '@genoffice/i18n'
+import { workbookDisplayName } from './workbook-display-name'
+import { equationAtDrawingIndex } from './equation-visuals'
 import { ProjectStore } from '@genoffice/project-store'
 
 import {
@@ -94,6 +96,8 @@ import {
   saveWorkbookViaSidecar,
 } from '@genoffice/xlsx-gateway/gateway/xlsx-package-io'
 import { parsePivotDefinition } from '@genoffice/xlsx-gateway/gateway/xlsx-pivot'
+import { readWorkbookThreads } from '@genoffice/xlsx-gateway/gateway/xlsx-gateway'
+import { isThreadPlaceholderAuthor } from '@genoffice/xlsx-gateway/gateway/xlsx-threaded-comments'
 import {
   isTablePartPath,
   tableKeyOf,
@@ -147,7 +151,17 @@ import { IPC_CHANNELS } from '../shared/ipc-channels'
 import { atomicWriteFile } from './atomic-write'
 import { closeGuardDecision } from './close-guard'
 import { SaveEditsTransferStore } from './save-edits-transfer'
-import { exportPdf, printWorkbook } from './pdf-export'
+import {
+  addPrintBand,
+  resolvePrintRequest,
+  storePrintHtmlChunk,
+  cancelPrintBands,
+  exportPdf,
+  finishPrintBands,
+  printWorkbook,
+  releasePrintPreview,
+  renderPrintPreview,
+} from './pdf-export'
 import { allowsAutomaticWorkbookRecovery } from './recovery-policy'
 import {
   setSystemShortDate,
@@ -204,6 +218,9 @@ const tMain = createI18n({
     menuSaveAs: '另存为…',
     menuExportPdf: '导出 PDF…',
     menuPrint: '打印…',
+    menuPrintWorkbook: '打印整个工作簿…',
+    menuPrintSelection: '打印选定区域…',
+    menuPrintIgnoreArea: '打印（忽略打印区域）…',
     menuClose: '关闭',
     menuQuit: '退出',
     menuEdit: '编辑',
@@ -260,6 +277,9 @@ const tMain = createI18n({
     menuSaveAs: 'Save As…',
     menuExportPdf: 'Export PDF…',
     menuPrint: 'Print…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Close',
     menuQuit: 'Quit',
     menuEdit: 'Edit',
@@ -320,6 +340,9 @@ const tMain = createI18n({
     menuSaveAs: '名前を付けて保存…',
     menuExportPdf: 'PDF をエクスポート…',
     menuPrint: '印刷…',
+    menuPrintWorkbook: 'ブック全体を印刷…',
+    menuPrintSelection: '選択範囲を印刷…',
+    menuPrintIgnoreArea: '印刷（印刷範囲を無視）…',
     menuClose: '閉じる',
     menuQuit: '終了',
     menuEdit: '編集',
@@ -381,6 +404,9 @@ const tMain = createI18n({
     menuSaveAs: '다른 이름으로 저장…',
     menuExportPdf: 'PDF 내보내기…',
     menuPrint: '인쇄…',
+    menuPrintWorkbook: '통합 문서 전체 인쇄…',
+    menuPrintSelection: '선택 영역 인쇄…',
+    menuPrintIgnoreArea: '인쇄(인쇄 영역 무시)…',
     menuClose: '닫기',
     menuQuit: '끝내기',
     menuEdit: '편집',
@@ -442,6 +468,9 @@ const tMain = createI18n({
     menuSaveAs: 'Enregistrer sous…',
     menuExportPdf: 'Exporter en PDF…',
     menuPrint: 'Imprimer…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Fermer',
     menuQuit: 'Quitter',
     menuEdit: 'Édition',
@@ -504,6 +533,9 @@ const tMain = createI18n({
     menuSaveAs: 'Speichern unter…',
     menuExportPdf: 'PDF exportieren…',
     menuPrint: 'Drucken…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Schließen',
     menuQuit: 'Beenden',
     menuEdit: 'Bearbeiten',
@@ -565,6 +597,9 @@ const tMain = createI18n({
     menuSaveAs: 'Guardar como…',
     menuExportPdf: 'Exportar a PDF…',
     menuPrint: 'Imprimir…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Cerrar',
     menuQuit: 'Salir',
     menuEdit: 'Edición',
@@ -625,6 +660,9 @@ const tMain = createI18n({
     menuSaveAs: 'บันทึกเป็น…',
     menuExportPdf: 'ส่งออก PDF…',
     menuPrint: 'พิมพ์…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'ปิด',
     menuQuit: 'ออก',
     menuEdit: 'แก้ไข',
@@ -684,6 +722,9 @@ const tMain = createI18n({
     menuSaveAs: 'Simpan Sebagai…',
     menuExportPdf: 'Ekspor PDF…',
     menuPrint: 'Cetak…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Tutup',
     menuQuit: 'Keluar',
     menuEdit: 'Edit',
@@ -744,6 +785,9 @@ const tMain = createI18n({
     menuSaveAs: 'Сохранить как…',
     menuExportPdf: 'Экспорт в PDF…',
     menuPrint: 'Печать…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Закрыть',
     menuQuit: 'Выход',
     menuEdit: 'Правка',
@@ -803,6 +847,9 @@ const tMain = createI18n({
     menuSaveAs: 'حفظ باسم…',
     menuExportPdf: 'تصدير PDF…',
     menuPrint: 'طباعة…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'إغلاق',
     menuQuit: 'إنهاء',
     menuEdit: 'تحرير',
@@ -861,6 +908,9 @@ const tMain = createI18n({
     menuSaveAs: 'Salvar Como…',
     menuExportPdf: 'Exportar PDF…',
     menuPrint: 'Imprimir…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Fechar',
     menuQuit: 'Sair',
     menuEdit: 'Editar',
@@ -922,6 +972,9 @@ const tMain = createI18n({
     menuSaveAs: 'Salva con nome…',
     menuExportPdf: 'Esporta PDF…',
     menuPrint: 'Stampa…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Chiudi',
     menuQuit: 'Esci',
     menuEdit: 'Modifica',
@@ -982,6 +1035,9 @@ const tMain = createI18n({
     menuSaveAs: 'Zapisz jako…',
     menuExportPdf: 'Eksportuj PDF…',
     menuPrint: 'Drukuj…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Zamknij',
     menuQuit: 'Zakończ',
     menuEdit: 'Edycja',
@@ -1042,6 +1098,9 @@ const tMain = createI18n({
     menuSaveAs: 'Uložit jako…',
     menuExportPdf: 'Exportovat PDF…',
     menuPrint: 'Tisk…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Zavřít',
     menuQuit: 'Ukončit',
     menuEdit: 'Úpravy',
@@ -1103,6 +1162,9 @@ const tMain = createI18n({
     menuSaveAs: 'Opslaan als…',
     menuExportPdf: 'PDF exporteren…',
     menuPrint: 'Afdrukken…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Sluiten',
     menuQuit: 'Stoppen',
     menuEdit: 'Bewerken',
@@ -1162,6 +1224,9 @@ const tMain = createI18n({
     menuSaveAs: 'Simpan Sebagai…',
     menuExportPdf: 'Eksport PDF…',
     menuPrint: 'Cetak…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'Tutup',
     menuQuit: 'Keluar',
     menuEdit: 'Edit',
@@ -1222,6 +1287,9 @@ const tMain = createI18n({
     menuSaveAs: 'שמירה בשם…',
     menuExportPdf: 'ייצוא PDF…',
     menuPrint: 'הדפסה…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'סגירה',
     menuQuit: 'יציאה',
     menuEdit: 'עריכה',
@@ -1280,6 +1348,9 @@ const tMain = createI18n({
     menuSaveAs: 'इस रूप में सहेजें…',
     menuExportPdf: 'PDF निर्यात करें…',
     menuPrint: 'प्रिंट करें…',
+    menuPrintWorkbook: 'Print Entire Workbook…',
+    menuPrintSelection: 'Print Selection…',
+    menuPrintIgnoreArea: 'Print (Ignore Print Area)…',
     menuClose: 'बंद करें',
     menuQuit: 'बाहर निकलें',
     menuEdit: 'संपादन',
@@ -1339,6 +1410,9 @@ const tMain = createI18n({
     menuSaveAs: '另存新檔…',
     menuExportPdf: '匯出 PDF…',
     menuPrint: '列印…',
+    menuPrintWorkbook: '列印整本活頁簿…',
+    menuPrintSelection: '列印選取範圍…',
+    menuPrintIgnoreArea: '列印（忽略列印區域）…',
     menuClose: '關閉',
     menuQuit: '結束',
     menuEdit: '編輯',
@@ -1675,10 +1749,21 @@ export function setSheetsWorkbookOpenedHook(
   workbookOpenedHook = fn
 }
 
+export type SheetsMenuActionName =
+  | 'open'
+  | 'save'
+  | 'save-as'
+  | 'print'
+  | 'print-workbook'
+  | 'print-selection'
+  | 'print-ignore-area'
+  | 'export-pdf'
+  | 'export-csv'
+  | 'undo'
+  | 'redo'
+
 /** forward an application-menu File command into the sheets renderer */
-export function sendSheetsMenuAction(
-  action: 'open' | 'save' | 'save-as' | 'print' | 'export-pdf' | 'export-csv' | 'undo' | 'redo',
-): void {
+export function sendSheetsMenuAction(action: SheetsMenuActionName): void {
   activeSheetsWebContents?.send(IPC_CHANNELS.menuAction, action)
 }
 
@@ -1851,6 +1936,9 @@ function startCaptureServer(): void {
         action === 'save' ||
         action === 'save-as' ||
         action === 'print' ||
+        action === 'print-workbook' ||
+        action === 'print-selection' ||
+        action === 'print-ignore-area' ||
         action === 'export-pdf' ||
         action === 'export-csv' ||
         action === 'undo' ||
@@ -2732,9 +2820,21 @@ export function registerSheetsIpc(): void {
     return workbookTableInfoSchema.parse(info)
   })
 
+  ipcMain.handle(
+    IPC_CHANNELS.printHtmlChunk,
+    (event, id: unknown, index: unknown, text: unknown) => {
+      sessionFor(event)
+      storePrintHtmlChunk(
+        z.string().min(1).max(100).parse(id),
+        z.number().int().min(0).max(100_000).parse(index),
+        z.string().max(4_000_000).parse(text),
+      )
+    },
+  )
+
   ipcMain.handle(IPC_CHANNELS.exportPdf, async (event, input: unknown) => {
     sessionFor(event)
-    const request = workbookExportPdfRequestSchema.parse(input)
+    const request = resolvePrintRequest(workbookExportPdfRequestSchema.parse(input))
     const result = await exportPdf(event, request)
     if (!result.canceled && result.path) openGeneratedFile(result.path)
     return result
@@ -2744,9 +2844,59 @@ export function registerSheetsIpc(): void {
     sessionFor(event)
     return printWorkbook(
       event,
-      workbookExportPdfRequestSchema.parse(input),
+      resolvePrintRequest(workbookExportPdfRequestSchema.parse(input)),
       job === undefined ? undefined : workbookPrintJobSchema.parse(job),
     )
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.printPreview,
+    async (event, id: unknown, input: unknown, from: unknown, to: unknown) => {
+      sessionFor(event)
+      const range = z
+        .object({
+          id: z.string().min(1).max(100),
+          from: z.number().int().min(1).max(100_000),
+          to: z.number().int().min(1).max(100_000),
+        })
+        .refine((value) => value.to >= value.from && value.to - value.from <= 200)
+        .parse({ id, from, to })
+      return renderPrintPreview(
+        range.id,
+        input === undefined
+          ? undefined
+          : resolvePrintRequest(workbookExportPdfRequestSchema.parse(input)),
+        range.from,
+        range.to,
+      )
+    },
+  )
+
+  ipcMain.handle(IPC_CHANNELS.addPrintBand, async (event, jobId: unknown, input: unknown) => {
+    sessionFor(event)
+    return addPrintBand(
+      z.string().min(1).max(100).parse(jobId),
+      resolvePrintRequest(workbookExportPdfRequestSchema.parse(input)),
+    )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.finishPrintBands, async (event, jobId: unknown, job: unknown) => {
+    sessionFor(event)
+    return finishPrintBands(
+      event,
+      z.string().min(1).max(100).parse(jobId),
+      job === undefined ? undefined : workbookPrintJobSchema.parse(job),
+    )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.cancelPrintBands, async (event, jobId: unknown) => {
+    sessionFor(event)
+    if (typeof jobId === 'string') await cancelPrintBands(jobId)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.releasePrintPreview, async (event, id: unknown) => {
+    sessionFor(event)
+    if (typeof id === 'string') await releasePrintPreview(id)
   })
 
   ipcMain.handle(IPC_CHANNELS.listPrinters, (event) => {
@@ -3083,7 +3233,8 @@ export function registerSheetsIpc(): void {
       return { ok: true }
     } catch (error) {
       console.warn('[sheets] recovery copy failed:', error)
-      return { ok: false }
+      // the renderer shows this: a silent failure leaves the user believing the file is protected
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 
@@ -3622,6 +3773,7 @@ async function writeWorkbookTo(
     writeValue: edit.writeValue,
     cell: { value: edit.value, formula: edit.formula },
     style: edit.style,
+    styleReference: edit.styleReference,
     rich: edit.rich,
     styleReset: edit.styleReset,
   }))
@@ -3697,9 +3849,10 @@ async function writeWorkbookTo(
     sheetName: resolveSheetName(sheetId),
     ...state,
   }))
-  const noteStates = request.noteStates.map(({ sheetId, notes }) => ({
+  const noteStates = request.noteStates.map(({ sheetId, notes, threads, persons }) => ({
     sheetName: resolveSheetName(sheetId),
     notes,
+    ...(threads === undefined ? {} : { threads, persons: persons ?? [] }),
   }))
   const visualAdditions = request.visualAdditions.map((addition) => ({
     sheetName: resolveSheetName(addition.sheetId),
@@ -3707,6 +3860,7 @@ async function writeWorkbookTo(
     chart: addition.chart,
     shape: addition.shape,
     image: addition.image,
+    equation: addition.equation,
   }))
   const tableAdditions = request.tableAdditions.map((table) => ({
     sheetName: resolveSheetName(table.sheetId),
@@ -3887,8 +4041,60 @@ async function openWorkbookSession(
       ...(restoreTarget === undefined ? {} : { restoreTarget }),
       ...(restoreTargetSha === undefined ? {} : { restoreTargetSha }),
     })
+    const equationDrawingPaths = new Set(
+      opened.visuals
+        .filter((visual) => visual.kind === 'shape')
+        .map((visual) => visual.drawingPath)
+        .filter((drawingPath): drawingPath is string => drawingPath !== undefined),
+    )
+    const equationDrawings = new Map(
+      await Promise.all(
+        [...equationDrawingPaths].map(
+          async (drawingPath) =>
+            [drawingPath, await readArchiveEntryText(client, snapshotPath, drawingPath)] as const,
+        ),
+      ),
+    )
+    const visuals = opened.visuals.map((visual) => {
+      if (
+        visual.kind !== 'shape' ||
+        visual.drawingPath === undefined ||
+        visual.drawingIndex === undefined
+      ) {
+        return visual
+      }
+      const drawingXml = equationDrawings.get(visual.drawingPath)
+      const equation = drawingXml && equationAtDrawingIndex(drawingXml, visual.drawingIndex)
+      return equation ? { ...visual, kind: 'equation' as const, equation } : visual
+    })
+    // Threaded comments: read from the package; their legacy placeholders never surface as notes
+    const archiveNames = new Set(await listArchiveEntryNames(client, snapshotPath))
+    const threadData = [...archiveNames].some((name) => name.startsWith('xl/threadedComments/'))
+      ? await readWorkbookThreads(
+          {
+            has: async (entry) => archiveNames.has(entry),
+            readText: (entry) => readArchiveEntryText(client, snapshotPath, entry),
+          },
+          opened.sheets.map((sheet) => sheet.name),
+        )
+      : null
+    const sheetsWithThreads = opened.sheets.map((sheet) => {
+      const threads = threadData?.sheets.get(sheet.name)
+      const comments = sheet.comments.filter(
+        (comment) => !isThreadPlaceholderAuthor(comment.author),
+      )
+      return {
+        ...sheet,
+        comments,
+        ...(threads === undefined ? {} : { threads }),
+      }
+    })
     return workbookFileSchema.parse({
       ...opened,
+      sheets: sheetsWithThreads,
+      ...(threadData && threadData.persons.length > 0 ? { persons: threadData.persons } : {}),
+      visuals,
+      name: workbookDisplayName(path, { csvSourcePath, restoreTarget, suggestSaveAs }),
       // The renderer-facing path is what the user opened: for a restored
       // recovery copy that is the original file, not the copy under userData.
       path: restoreTarget ?? path,
@@ -4029,6 +4235,25 @@ function installApplicationMenu(): void {
             accelerator: 'CmdOrCtrl+P',
             click: () => sendMenuAction('print'),
           },
+          // macOS prints through the system panel, which has no "what to print": these entries
+          // pick the scope up front (Excel for Mac's Print: Active Sheets / Entire Workbook /
+          // Selection). Elsewhere the in-app print sheet has the scope list itself.
+          ...(process.platform === 'darwin'
+            ? [
+                {
+                  label: tm('menuPrintWorkbook'),
+                  click: () => sendMenuAction('print-workbook'),
+                },
+                {
+                  label: tm('menuPrintSelection'),
+                  click: () => sendMenuAction('print-selection'),
+                },
+                {
+                  label: tm('menuPrintIgnoreArea'),
+                  click: () => sendMenuAction('print-ignore-area'),
+                },
+              ]
+            : []),
           { type: 'separator' },
           {
             label: tm('menuExportPdf'),

@@ -1388,6 +1388,8 @@ export function structuralDeleteFormulaErrorSync(
       getSheetName(): string
       getMaxRows(): number
       getMaxColumns(): number
+      getLastRow?(): number
+      getLastColumn?(): number
       getRange(
         row: number,
         column: number,
@@ -1417,7 +1419,20 @@ export function structuralDeleteFormulaErrorSync(
     const texts: string[] = []
     if (state.formulaMode) {
       // the live model already reflects every session edit
-      const formulas = sheet.getRange(0, 0, sheet.getMaxRows(), sheet.getMaxColumns()).getFormulas()
+      const formulas = sheet
+        .getRange(
+          0,
+          0,
+          Math.min(
+            sheet.getMaxRows(),
+            Math.max((sheet.getLastRow?.() ?? sheet.getMaxRows()) + 1, 1),
+          ),
+          Math.min(
+            sheet.getMaxColumns(),
+            Math.max((sheet.getLastColumn?.() ?? sheet.getMaxColumns()) + 1, 1),
+          ),
+        )
+        .getFormulas()
       for (const row of formulas) for (const formula of row) if (formula) texts.push(formula)
     } else {
       const journalCells = state.editJournal.cells.get(sheetId)

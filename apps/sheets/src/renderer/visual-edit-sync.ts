@@ -462,15 +462,19 @@ export function applyShapeEdit(
     clearVisualSelection(visualId)
   } else if (!updateVisualAdd(state.editJournal, visualId, changes)) {
     const visual = state.file.visuals.find((candidate) => candidate.id === visualId)
-    if (changes.text !== undefined || changes.anchor === undefined) {
+    if (
+      changes.text !== undefined ||
+      (changes.anchor === undefined && changes.equation === undefined)
+    ) {
       ctx.setMessage(t('appFileVisualMoveDeleteOnly'))
       return
     }
     if (
       !visual ||
       !recordVisualEdit(state.editJournal, visual, {
-        anchor: changes.anchor,
+        ...(changes.anchor ? { anchor: changes.anchor } : {}),
         ...(changes.frameSize ? { frameSize: changes.frameSize } : {}),
+        ...(changes.equation ? { equation: changes.equation } : {}),
       })
     ) {
       ctx.setMessage(t('appVisualNoMove'))
@@ -495,9 +499,11 @@ export function applyShapeEdit(
   ctx.setMessage(
     changes.remove
       ? t('appVisualDeleted')
-      : changes.text !== undefined
-        ? t('appShapeTextUpdated')
-        : t('appShapeMoved'),
+      : changes.equation !== undefined
+        ? t('appEquationUpdated')
+        : changes.text !== undefined
+          ? t('appShapeTextUpdated')
+          : t('appShapeMoved'),
   )
   ctx.refreshLazyVisuals(state)
 }

@@ -3,8 +3,18 @@ import { useEffect, useRef, useState } from 'react'
 import { Dropdown } from '@genoffice/ui'
 
 import { ColorDropdown } from './ColorDropdown'
-import { draftFromSelection, formatCellsCommands, type FormatCellsDraft } from './format-cells'
+import {
+  accountingUnderlineChangeBlocked,
+  accountingUnderlineUnavailable,
+  degreesToOoxmlRotation,
+  borderPresetEdges,
+  draftFromSelection,
+  formatCellsCommands,
+  ooxmlRotationDegrees,
+  type FormatCellsDraft,
+} from './format-cells'
 import { useI18n, type StringKey } from './i18n/locale'
+import { FILL_PATTERN_TYPES, patternPreviewCss, type CellFillPattern } from './fill-pattern'
 import {
   clampDecimals,
   CURRENCY_SYMBOLS,
@@ -20,9 +30,13 @@ import {
   todaySerial,
   type NumfmtCategory,
   type NumfmtOptions,
+  SPECIAL_LOCALES,
 } from './numfmt-dialog'
 
 import type { SelectionFormat } from './selection-format'
+import type { SelectionProtection } from './selection-protection'
+import { BORDER_CONTROLS } from './border-format'
+import { borderControlHasVisibleSeam, canEditSelectionBorder } from './merged-border-geometry'
 import { fontFamilyGroups, useSystemFontFamilies } from './system-fonts'
 
 /// Excel's Format Cells dialog (⌘1), scoped to what the save pipeline can
@@ -43,26 +57,40 @@ const TAB_LABELS: Record<Tab, StringKey> = {
   Protection: 'dlgFcTabProtection',
 }
 
-const H_ALIGNMENTS = ['left', 'center', 'right', 'justify', 'distributed'] as const
-const V_ALIGNMENTS = ['top', 'middle', 'bottom'] as const
+const H_ALIGNMENTS = [
+  'general',
+  'left',
+  'center',
+  'right',
+  'fill',
+  'justify',
+  'centerContinuous',
+  'distributed',
+] as const
+const V_ALIGNMENTS = ['top', 'middle', 'bottom', 'justify', 'distributed'] as const
 const H_ALIGN_LABELS: Record<(typeof H_ALIGNMENTS)[number], StringKey> = {
+  general: 'dlgFcAlignGeneral',
   left: 'dlgFcAlignLeft',
   center: 'dlgFcAlignCenter',
   right: 'dlgFcAlignRight',
+  fill: 'dlgFcAlignFill',
   justify: 'dlgFcAlignJustify',
+  centerContinuous: 'dlgFcCenterAcross',
   distributed: 'dlgFcAlignDistributed',
 }
 const V_ALIGN_LABELS: Record<(typeof V_ALIGNMENTS)[number], StringKey> = {
   top: 'dlgFcAlignTop',
   middle: 'dlgFcAlignMiddle',
   bottom: 'dlgFcAlignBottom',
+  justify: 'dlgFcAlignJustify',
+  distributed: 'dlgFcAlignDistributed',
 }
 const ROTATIONS: { readonly labelKey: StringKey; readonly value: string }[] = [
   { labelKey: 'dlgFcRotNone', value: '0' },
   { labelKey: 'dlgFcRotCcw', value: '45' },
-  { labelKey: 'dlgFcRotCw', value: '-45' },
+  { labelKey: 'dlgFcRotCw', value: '135' },
   { labelKey: 'dlgFcRotUp', value: '90' },
-  { labelKey: 'dlgFcRotDown', value: '-90' },
+  { labelKey: 'dlgFcRotDown', value: '180' },
   { labelKey: 'dlgFcRotVertical', value: 'vertical' },
 ]
 
@@ -77,7 +105,28 @@ const NUMFMT_CATEGORY_LABELS: Record<NumfmtCategory, StringKey> = {
   fraction: 'appNumFmtFraction',
   scientific: 'dlgFcNumScientific',
   text: 'dlgFcNumText',
+  special: 'dlgFcNumSpecial',
   custom: 'dlgFcNumCustomName',
+}
+
+const PATTERN_LABELS: Record<CellFillPattern['pattern'], StringKey> = {
+  darkHorizontal: 'dlgFcPatDarkHorizontal',
+  darkVertical: 'dlgFcPatDarkVertical',
+  darkDown: 'dlgFcPatDarkDown',
+  darkUp: 'dlgFcPatDarkUp',
+  darkGrid: 'dlgFcPatDarkGrid',
+  darkTrellis: 'dlgFcPatDarkTrellis',
+  lightHorizontal: 'dlgFcPatLightHorizontal',
+  lightVertical: 'dlgFcPatLightVertical',
+  lightDown: 'dlgFcPatLightDown',
+  lightUp: 'dlgFcPatLightUp',
+  lightGrid: 'dlgFcPatLightGrid',
+  lightTrellis: 'dlgFcPatLightTrellis',
+  gray125: 'dlgFcPat12',
+  gray0625: 'dlgFcPat6',
+  lightGray: 'dlgFcPat25',
+  mediumGray: 'dlgFcPat50',
+  darkGray: 'dlgFcPat75',
 }
 
 const FRACTION_LABELS: readonly StringKey[] = [
@@ -110,11 +159,18 @@ const BORDER_LINE_STYLES: { readonly labelKey: StringKey; readonly value: string
   { labelKey: 'dlgFcStyleHair', value: 'hair' },
   { labelKey: 'dlgFcStyleDashed', value: 'dashed' },
   { labelKey: 'dlgFcStyleDotted', value: 'dotted' },
+  { labelKey: 'dlgFcStyleDashDot', value: 'dashDot' },
+  { labelKey: 'dlgFcStyleDashDotDot', value: 'dashDotDot' },
+  { labelKey: 'dlgFcStyleMediumDashed', value: 'mediumDashed' },
+  { labelKey: 'dlgFcStyleMediumDashDot', value: 'mediumDashDot' },
+  { labelKey: 'dlgFcStyleMediumDashDotDot', value: 'mediumDashDotDot' },
+  { labelKey: 'dlgFcStyleSlantDashDot', value: 'slantDashDot' },
 ]
 
 const BORDER_PRESETS: { readonly labelKey: StringKey; readonly value: string }[] = [
   { labelKey: 'dlgFcBorderNone', value: 'none' },
   { labelKey: 'dlgFcBorderAll', value: 'all' },
+  { labelKey: 'dlgFcBorderInside', value: 'inside' },
   { labelKey: 'dlgFcBorderOutline', value: 'outer' },
   { labelKey: 'dlgFcBorderThickOutline', value: 'thick-outer' },
   { labelKey: 'dlgFcBorderTop', value: 'top' },
@@ -125,11 +181,13 @@ const BORDER_PRESETS: { readonly labelKey: StringKey; readonly value: string }[]
 
 export function FormatCellsDialog({
   selectionFormat,
+  selectionProtection,
   anchorValue,
   onCommand,
   onClose,
 }: {
   readonly selectionFormat: SelectionFormat | null
+  readonly selectionProtection: SelectionProtection | null
   /// Value of the selection's top-left cell, for the number-format preview.
   readonly anchorValue: number | string | null
   readonly onCommand: (command: string) => void
@@ -146,9 +204,28 @@ export function FormatCellsDialog({
   }, [onClose])
   // The selection format at open time is the change baseline; the live echo
   // must not move it while the dialog is up.
-  const initialRef = useRef(draftFromSelection(selectionFormat))
+  const initialRef = useRef(draftFromSelection(selectionFormat, selectionProtection))
   const initial = initialRef.current
   const [draft, setDraft] = useState(initial)
+  const accountingUnavailable = accountingUnderlineUnavailable(selectionProtection, draft.rotation)
+  const accountingChangeBlocked = accountingUnderlineChangeBlocked(
+    initial,
+    draft,
+    selectionProtection,
+  )
+  const borderEditable = canEditSelectionBorder(selectionProtection)
+  const hasHorizontalSeam =
+    selectionProtection !== null &&
+    borderEditable &&
+    borderControlHasVisibleSeam(selectionProtection.range, selectionProtection.merges ?? [], 'down')
+  const hasVerticalSeam =
+    selectionProtection !== null &&
+    borderEditable &&
+    borderControlHasVisibleSeam(
+      selectionProtection.range,
+      selectionProtection.merges ?? [],
+      'right',
+    )
   const set = <K extends keyof FormatCellsDraft>(key: K, value: FormatCellsDraft[K]): void =>
     setDraft((previous) => ({ ...previous, [key]: value }))
 
@@ -179,6 +256,7 @@ export function FormatCellsDialog({
       : [...FONT_SIZES, draft.size].sort((a, b) => Number(a) - Number(b))
 
   function handleApply(): void {
+    if (accountingChangeBlocked) return
     for (const command of formatCellsCommands(initial, draft)) onCommand(command)
     onClose()
   }
@@ -336,6 +414,50 @@ export function FormatCellsDialog({
                     </div>
                   </div>
                 )}
+                {numOptions.category === 'special' && (
+                  <>
+                    <label className="numfmt-field">
+                      {t('dlgFcSpLocale')}
+                      <select
+                        value={numOptions.specialLocale}
+                        onChange={(event) => {
+                          const locale =
+                            SPECIAL_LOCALES.find((entry) => entry.id === event.target.value) ??
+                            SPECIAL_LOCALES[0]!
+                          updateNumfmt({
+                            specialLocale: locale.id,
+                            special: locale.formats[0]!.pattern,
+                          })
+                        }}
+                      >
+                        {SPECIAL_LOCALES.map((locale) => (
+                          <option key={locale.id} value={locale.id}>
+                            {locale.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="numfmt-field">
+                      {t('dlgFcTypeLabel')}
+                      <div className="numfmt-list" role="listbox" aria-label={t('dlgFcTypeLabel')}>
+                        {(
+                          SPECIAL_LOCALES.find((entry) => entry.id === numOptions.specialLocale) ??
+                          SPECIAL_LOCALES[0]!
+                        ).formats.map((candidate) => (
+                          <button
+                            key={candidate.pattern}
+                            role="option"
+                            aria-selected={candidate.pattern === numOptions.special}
+                            className={candidate.pattern === numOptions.special ? 'active' : ''}
+                            onClick={() => updateNumfmt({ special: candidate.pattern })}
+                          >
+                            {t(candidate.label as StringKey)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
                 {numOptions.category === 'general' && (
                   <p className="numfmt-note">{t('dlgFcGeneralNote')}</p>
                 )}
@@ -362,9 +484,13 @@ export function FormatCellsDialog({
             <div className="dialog-grid">
               <label>
                 {t('dlgFcHorizontal')}
+                {selectionProtection?.alignment.horizontal === null && (
+                  <small> · {t('dlgFcMixed')}</small>
+                )}
                 <Dropdown
                   ariaLabel={t('dlgFcHorizontal')}
                   value={draft.hAlign}
+                  disabled={selectionProtection === null}
                   options={[
                     { value: '', label: t('dlgFcUnchanged') },
                     ...H_ALIGNMENTS.map((h) => ({ value: h, label: t(H_ALIGN_LABELS[h]) })),
@@ -374,9 +500,13 @@ export function FormatCellsDialog({
               </label>
               <label>
                 {t('dlgFcVertical')}
+                {selectionProtection?.alignment.vertical === null && (
+                  <small> · {t('dlgFcMixed')}</small>
+                )}
                 <Dropdown
                   ariaLabel={t('dlgFcVertical')}
                   value={draft.vAlign}
+                  disabled={selectionProtection === null}
                   options={[
                     { value: '', label: t('dlgFcUnchanged') },
                     ...V_ALIGNMENTS.map((v) => ({ value: v, label: t(V_ALIGN_LABELS[v]) })),
@@ -399,16 +529,87 @@ export function FormatCellsDialog({
               </label>
               <label>
                 {t('dlgFcOrientation')}
+                {selectionProtection?.alignment.rotation === null && (
+                  <small> · {t('dlgFcMixed')}</small>
+                )}
                 <Dropdown
                   ariaLabel={t('dlgFcOrientation')}
                   value={draft.rotation}
+                  disabled={selectionProtection === null}
                   options={[
                     { value: '', label: t('dlgFcUnchanged') },
+                    ...(draft.rotation && !ROTATIONS.some((item) => item.value === draft.rotation)
+                      ? [
+                          {
+                            value: draft.rotation,
+                            label: `${ooxmlRotationDegrees(draft.rotation)}°`,
+                          },
+                        ]
+                      : []),
                     ...ROTATIONS.map((r) => ({ value: r.value, label: t(r.labelKey) })),
                   ]}
                   onPick={(v) => set('rotation', v)}
                 />
               </label>
+              <label>
+                {t('dlgFcDegrees')}
+                <input
+                  type="number"
+                  disabled={selectionProtection === null}
+                  min="-90"
+                  max="90"
+                  step="1"
+                  value={ooxmlRotationDegrees(draft.rotation)}
+                  placeholder={t('dlgFcUnchanged')}
+                  onChange={(event) => set('rotation', degreesToOoxmlRotation(event.target.value))}
+                />
+              </label>
+              <label>
+                {t('dlgFcShrinkToFit')}
+                {selectionProtection?.alignment.shrinkToFit === null && (
+                  <small> · {t('dlgFcMixed')}</small>
+                )}
+                <Dropdown
+                  ariaLabel={t('dlgFcShrinkToFit')}
+                  value={draft.shrinkToFit}
+                  disabled={selectionProtection === null}
+                  options={[
+                    { value: '', label: t('dlgFcUnchanged') },
+                    { value: 'on', label: t('dlgFcOn') },
+                    { value: 'off', label: t('dlgFcOff') },
+                  ]}
+                  onPick={(value) => set('shrinkToFit', value as FormatCellsDraft['shrinkToFit'])}
+                />
+              </label>
+              <label>
+                {t('appMergeCells')}
+                {selectionProtection?.alignment.merged === null && (
+                  <small> · {t('dlgFcMixed')}</small>
+                )}
+                <Dropdown
+                  ariaLabel={t('appMergeCells')}
+                  value={draft.mergeCells}
+                  disabled={
+                    selectionProtection === null ||
+                    (selectionProtection.range.startRow === selectionProtection.range.endRow &&
+                      selectionProtection.range.startColumn ===
+                        selectionProtection.range.endColumn &&
+                      selectionProtection.alignment.merged === false)
+                  }
+                  options={[
+                    { value: '', label: t('dlgFcUnchanged') },
+                    { value: 'on', label: t('dlgFcOn') },
+                    { value: 'off', label: t('dlgFcOff') },
+                  ]}
+                  onPick={(value) => set('mergeCells', value as FormatCellsDraft['mergeCells'])}
+                />
+              </label>
+              {selectionProtection === null && (
+                <p className="dialog-note" role="status">
+                  {t('dlgFcAlignmentUnavailable')}
+                </p>
+              )}
+              <p className="dialog-note">{t('dlgFcAlignmentPreviewNote')}</p>
               <label>
                 {t('dlgFcIndent')}
                 <input
@@ -457,7 +658,6 @@ export function FormatCellsDialog({
                 [
                   ['dlgFcBold', 'bold'],
                   ['dlgFcItalic', 'italic'],
-                  ['dlgFcUnderline', 'underline'],
                   ['dlgFcStrikethrough', 'strike'],
                 ] as const
               ).map(([labelKey, key]) => (
@@ -475,6 +675,69 @@ export function FormatCellsDialog({
                   />
                 </label>
               ))}
+              <label>
+                {t('dlgFcUnderline')}
+                <Dropdown
+                  ariaLabel={t('dlgFcUnderline')}
+                  value={draft.underlineMode}
+                  disabled={selectionProtection === null}
+                  options={[
+                    {
+                      value: '',
+                      label: t(
+                        selectionProtection?.font?.underlineStyle === null
+                          ? 'dlgFcMixed'
+                          : 'dlgFcUnchanged',
+                      ),
+                    },
+                    { value: 'none', label: t('dlgFcUnderlineNone') },
+                    { value: 'single', label: t('dlgFcUnderlineSingle') },
+                    { value: 'double', label: t('dlgFcUnderlineDouble') },
+                    {
+                      value: 'singleAccounting',
+                      label: t('dlgFcUnderlineSingleAccounting'),
+                      disabled: accountingUnavailable,
+                    },
+                    {
+                      value: 'doubleAccounting',
+                      label: t('dlgFcUnderlineDoubleAccounting'),
+                      disabled: accountingUnavailable,
+                    },
+                  ]}
+                  onPick={(value) =>
+                    set('underlineMode', value as FormatCellsDraft['underlineMode'])
+                  }
+                />
+              </label>
+              {accountingUnavailable && selectionProtection !== null && (
+                <p className="dialog-note" role="status">
+                  {t('dlgFcAccountingUnavailable')}
+                </p>
+              )}
+              <label>
+                {t('dlgFcFontPosition')}
+                <Dropdown
+                  ariaLabel={t('dlgFcFontPosition')}
+                  value={draft.fontVerticalAlign}
+                  disabled={selectionProtection === null}
+                  options={[
+                    {
+                      value: '',
+                      label: t(
+                        selectionProtection?.font?.verticalAlign === null
+                          ? 'dlgFcMixed'
+                          : 'dlgFcUnchanged',
+                      ),
+                    },
+                    { value: 'baseline', label: t('dlgFcFontBaseline') },
+                    { value: 'superscript', label: t('dlgFcFontSuperscript') },
+                    { value: 'subscript', label: t('dlgFcFontSubscript') },
+                  ]}
+                  onPick={(value) =>
+                    set('fontVerticalAlign', value as FormatCellsDraft['fontVerticalAlign'])
+                  }
+                />
+              </label>
               <label>
                 {t('dlgFcColor')}
                 <ColorDropdown
@@ -499,13 +762,25 @@ export function FormatCellsDialog({
                     ...BORDER_PRESETS.map((preset) => ({
                       value: preset.value,
                       label: t(preset.labelKey),
+                      disabled: preset.value === 'inside' && !hasHorizontalSeam && !hasVerticalSeam,
                     })),
                   ]}
-                  onPick={(v) => set('border', v)}
+                  disabled={!borderEditable}
+                  onPick={(v) =>
+                    setDraft((previous) => ({
+                      ...previous,
+                      border: v,
+                      borderStyle: v === 'thick-outer' ? 'thick' : previous.borderStyle,
+                      borderEdges: borderPresetEdges(previous.borderEdges, v),
+                    }))
+                  }
                 />
               </label>
               <label>
                 {t('dlgFcBorderStyle')}
+                {selectionProtection?.border?.lineStyle === null && (
+                  <small> · {t('dlgFcMixed')}</small>
+                )}
                 <Dropdown
                   ariaLabel={t('dlgFcBorderStyle')}
                   value={draft.borderStyle}
@@ -518,6 +793,9 @@ export function FormatCellsDialog({
               </label>
               <label>
                 {t('dlgFcColor')}
+                {selectionProtection?.border?.lineColor === null && (
+                  <small> · {t('dlgFcMixed')}</small>
+                )}
                 <ColorDropdown
                   label={t('dlgFcColor')}
                   value={draft.borderColor}
@@ -526,6 +804,55 @@ export function FormatCellsDialog({
                   }}
                 />
               </label>
+              {BORDER_CONTROLS.map((control) => {
+                const key = {
+                  left: 'dlgFcBorderLeft',
+                  top: 'dlgFcBorderTop',
+                  bottom: 'dlgFcBorderBottom',
+                  right: 'dlgFcBorderRight',
+                  insideHorizontal: 'dlgFcBorderInsideHorizontal',
+                  insideVertical: 'dlgFcBorderInsideVertical',
+                  diagonalUp: 'dlgFcBorderDiagonalUp',
+                  diagonalDown: 'dlgFcBorderDiagonalDown',
+                }[control] as StringKey
+                const isInside = control === 'insideHorizontal' || control === 'insideVertical'
+                const cannotApply =
+                  !borderEditable ||
+                  (isInside &&
+                    (control === 'insideHorizontal' ? !hasHorizontalSeam : !hasVerticalSeam))
+                return (
+                  <label key={control}>
+                    {t(key)}
+                    <Dropdown
+                      ariaLabel={t(key)}
+                      value={draft.borderEdges[control]}
+                      disabled={cannotApply}
+                      options={[
+                        {
+                          value: '',
+                          label: t(
+                            selectionProtection?.border?.[control] === null
+                              ? 'dlgFcMixed'
+                              : 'dlgFcUnchanged',
+                          ),
+                        },
+                        { value: 'on', label: t('dlgFcOn') },
+                        { value: 'off', label: t('dlgFcOff') },
+                      ]}
+                      onPick={(value) =>
+                        setDraft((previous) => ({
+                          ...previous,
+                          border: '',
+                          borderEdges: { ...previous.borderEdges, [control]: value },
+                        }))
+                      }
+                    />
+                  </label>
+                )
+              })}
+              {!borderEditable && (
+                <p className="format-cells-note">{t('dlgFcBorderUnavailable')}</p>
+              )}
             </div>
           )}
           {tab === 'Fill' && (
@@ -549,15 +876,84 @@ export function FormatCellsDialog({
                 />
                 {t('dlgFcNoFill')}
               </label>
+              <label>
+                {t('dlgFcPatternColor')}
+                <ColorDropdown
+                  label={t('dlgFcPatternColor')}
+                  value={draft.patternColor || '#000000'}
+                  disabled={draft.noFill}
+                  onPick={(hex) => {
+                    if (hex) set('patternColor', hex)
+                  }}
+                />
+              </label>
+              <div className="fill-pattern-field">
+                {t('dlgFcPatternStyle')}
+                <div
+                  className="fill-pattern-grid"
+                  role="listbox"
+                  aria-label={t('dlgFcPatternStyle')}
+                >
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={draft.fillPattern === ''}
+                    className={draft.fillPattern === '' ? 'active' : ''}
+                    title={t('dlgFcPatternNone')}
+                    disabled={draft.noFill}
+                    onClick={() => set('fillPattern', '')}
+                  >
+                    {t('dlgFcPatternNone')}
+                  </button>
+                  {FILL_PATTERN_TYPES.map((pattern) => (
+                    <button
+                      type="button"
+                      key={pattern}
+                      role="option"
+                      aria-selected={draft.fillPattern === pattern}
+                      className={draft.fillPattern === pattern ? 'active' : ''}
+                      title={t(PATTERN_LABELS[pattern])}
+                      aria-label={t(PATTERN_LABELS[pattern])}
+                      disabled={draft.noFill}
+                      onClick={() => set('fillPattern', pattern)}
+                    >
+                      <i
+                        style={patternPreviewCss({
+                          pattern,
+                          fg: draft.patternColor || '#000000',
+                          bg: draft.fill || '#ffffff',
+                        })}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="fill-pattern-sample" aria-label={t('dlgFcSample')}>
+                <i
+                  style={
+                    draft.noFill
+                      ? undefined
+                      : draft.fillPattern
+                        ? patternPreviewCss({
+                            pattern: draft.fillPattern as CellFillPattern['pattern'],
+                            fg: draft.patternColor || '#000000',
+                            bg: draft.fill || '#ffffff',
+                          })
+                        : { backgroundColor: draft.fill || 'transparent' }
+                  }
+                />
+              </div>
             </div>
           )}
           {tab === 'Protection' && (
             <div className="dialog-grid">
               <label>
                 {t('dlgFcLocked')}
+                {selectionProtection?.locked === null && <small> · {t('dlgFcMixed')}</small>}
                 <Dropdown
                   ariaLabel={t('dlgFcLocked')}
                   value={draft.locked}
+                  disabled={selectionProtection === null}
                   options={[
                     { value: '', label: t('dlgFcUnchanged') },
                     { value: 'on', label: t('dlgFcOn') },
@@ -568,9 +964,11 @@ export function FormatCellsDialog({
               </label>
               <label>
                 {t('dlgFcHidden')}
+                {selectionProtection?.hidden === null && <small> · {t('dlgFcMixed')}</small>}
                 <Dropdown
                   ariaLabel={t('dlgFcHidden')}
                   value={draft.hidden}
+                  disabled={selectionProtection === null}
                   options={[
                     { value: '', label: t('dlgFcUnchanged') },
                     { value: 'on', label: t('dlgFcOn') },
@@ -579,6 +977,11 @@ export function FormatCellsDialog({
                   onPick={(v) => set('hidden', v as FormatCellsDraft['hidden'])}
                 />
               </label>
+              {selectionProtection === null && (
+                <p className="dialog-note" role="status">
+                  {t('dlgFcProtectionUnavailable')}
+                </p>
+              )}
               <p className="dialog-note">{t('dlgFcProtectionNote')}</p>
             </div>
           )}
@@ -587,7 +990,11 @@ export function FormatCellsDialog({
           <button className="secondary" onClick={onClose}>
             {t('dlgCancel')}
           </button>
-          <button className="primary-action" onClick={handleApply}>
+          <button
+            className="primary-action"
+            onClick={handleApply}
+            disabled={accountingChangeBlocked}
+          >
             {t('dlgOk')}
           </button>
         </footer>

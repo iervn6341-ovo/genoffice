@@ -242,26 +242,22 @@ describe('applyCellEditsToXlsx style edits', () => {
     expect(worksheet).not.toContain('</dimension>')
   })
 
-  it('bolds a styled cell via a new deduped xf without touching its content', async () => {
+  it('reuses the existing bold xf without changing styles or cell content', async () => {
     const mutation = await applyCellEditsToXlsx(await buildEditFixture(), [
       styleEdit(0, 0, { bold: true }),
       styleEdit(0, 2, { bold: true }),
     ])
-    expect(mutation.touchedEntries).toEqual([
-      'xl/styles.xml',
-      'xl/workbook.xml',
-      'xl/worksheets/sheet1.xml',
-    ])
+    expect(mutation.touchedEntries).toEqual(['xl/workbook.xml', 'xl/worksheets/sheet1.xml'])
     expect(() => assertOnlyTouchedEntriesChanged(mutation)).not.toThrow()
     const worksheet = await entryText(mutation.buffer, 'xl/worksheets/sheet1.xml')
     // Content untouched: A1 stays a shared-string cell, C1 keeps its value.
-    // Both cells dedupe onto one new xf: bolding font 0 produces the existing
-    // bold font 1, so A1 (already font 1) and C1 resolve identically.
-    expect(worksheet).toContain('<c r="A1" t="s" s="2"><v>0</v></c>')
-    expect(worksheet).toContain('<c r="C1" s="2"><v>5</v></c>')
+    // Bolding font 0 resolves to the existing bold font/XF 1. A1 already
+    // points there; C1 now shares it without appending a duplicate XF.
+    expect(worksheet).toContain('<c r="A1" t="s" s="1"><v>0</v></c>')
+    expect(worksheet).toContain('<c r="C1" s="1"><v>5</v></c>')
     const styles = await entryText(mutation.buffer, 'xl/styles.xml')
     expect(styles).toContain('<fonts count="2">')
-    expect(styles).toContain('<cellXfs count="3">')
+    expect(styles).toContain('<cellXfs count="2">')
   })
 
   it('applies fill, font color, and size as a solid fill plus new font', async () => {
@@ -530,6 +526,53 @@ describe('large edit batches', () => {
 })
 
 describe('text rotation and double underline save', () => {
+  it('writes native advanced alignment while preserving unrelated alignment fields and formula cache', async () => {
+    const zip = await JSZip.loadAsync(await buildEditFixture())
+    const styles = await zip.file('xl/styles.xml')!.async('string')
+    zip.file(
+      'xl/styles.xml',
+      styles.replace(
+        '<cellXfs count="2"><xf/><xf fontId="1" applyFont="1"/></cellXfs>',
+        '<cellXfs count="3"><xf/><xf fontId="1" applyFont="1"/><xf applyAlignment="1"><alignment horizontal="fill" vertical="distributed" textRotation="37" shrinkToFit="1" readingOrder="2"/></xf></cellXfs>',
+      ),
+    )
+    const sheet = await zip.file('xl/worksheets/sheet1.xml')!.async('string')
+    zip.file('xl/worksheets/sheet1.xml', sheet.replace('<c r="B3">', '<c r="B3" s="2">'))
+    const saved = await applyCellEditsToXlsx(await zip.generateAsync({ type: 'nodebuffer' }), [
+      {
+        sheetName: 'Data',
+        row: 2,
+        column: 1,
+        writeValue: false,
+        cell: { value: null },
+        style: { horizontalAlignment: 'centerContinuous' },
+      },
+    ])
+    const savedStyles = await entryText(saved.buffer, 'xl/styles.xml')
+    expect(savedStyles).toContain(
+      '<alignment horizontal="centerContinuous" vertical="distributed" textRotation="37" shrinkToFit="1" readingOrder="2"/>',
+    )
+    expect(await entryText(saved.buffer, 'xl/worksheets/sheet1.xml')).toMatch(
+      /<c r="B3" s="3"><f>SUM\(C1:C2\)<\/f><v>5<\/v><\/c>/,
+    )
+    const second = await applyCellEditsToXlsx(saved.buffer, [
+      {
+        sheetName: 'Data',
+        row: 2,
+        column: 1,
+        writeValue: false,
+        cell: { value: null },
+        style: { shrinkToFit: false, textRotation: 127, verticalAlignment: 'justify' },
+      },
+    ])
+    const secondStyles = await entryText(second.buffer, 'xl/styles.xml')
+    expect(secondStyles).toContain(
+      '<alignment horizontal="centerContinuous" vertical="justify" textRotation="127" readingOrder="2"/>',
+    )
+    expect(await entryText(second.buffer, 'xl/worksheets/sheet1.xml')).toContain(
+      '<f>SUM(C1:C2)</f><v>5</v>',
+    )
+  })
   it('writes textRotation into the alignment and u val=double into the font', async () => {
     const mutation = await applyCellEditsToXlsx(await buildEditFixture(), [
       {
@@ -578,6 +621,128 @@ describe('text rotation and double underline save', () => {
     ])
     const styles = await entryText(mutation.buffer, 'xl/styles.xml')
     expect(styles).not.toContain('<protection')
+  })
+
+  it('changes only Locked across mixed imported cells without copying Hidden between them', async () => {
+    const zip = await JSZip.loadAsync(await buildEditFixture())
+    const styles = await zip.file('xl/styles.xml')!.async('string')
+    zip.file(
+      'xl/styles.xml',
+      styles.replace(
+        '<cellXfs count="2"><xf/><xf fontId="1" applyFont="1"/></cellXfs>',
+        '<cellXfs count="3"><xf/><xf fontId="1" applyFont="1" applyProtection="1"><protection locked="0"/></xf><xf applyProtection="1"><protection hidden="1"/></xf></cellXfs>',
+      ),
+    )
+    const sheet = await zip.file('xl/worksheets/sheet1.xml')!.async('string')
+    zip.file(
+      'xl/worksheets/sheet1.xml',
+      sheet.replace('<c r="C1"><v>5</v></c>', '<c r="B1" s="2"><v>8</v></c><c r="C1"><v>5</v></c>'),
+    )
+    const saved = await applyCellEditsToXlsx(await zip.generateAsync({ type: 'nodebuffer' }), [
+      {
+        sheetName: 'Data',
+        row: 0,
+        column: 0,
+        writeValue: false,
+        cell: { value: null },
+        style: { protectionLocked: true },
+      },
+      {
+        sheetName: 'Data',
+        row: 0,
+        column: 1,
+        writeValue: false,
+        cell: { value: null },
+        style: { protectionLocked: true },
+      },
+    ])
+    const savedStyles = await entryText(saved.buffer, 'xl/styles.xml')
+    const xfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(savedStyles)?.[1] ?? ''
+    const xfList = [...xfs.matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(
+      (match) => match[0],
+    )
+    const savedSheet = await entryText(saved.buffer, 'xl/worksheets/sheet1.xml')
+    const aIndex = Number(/<c r="A1"[^>]*\bs="(\d+)"/.exec(savedSheet)?.[1])
+    const bIndex = Number(/<c r="B1"[^>]*\bs="(\d+)"/.exec(savedSheet)?.[1])
+    expect(xfList[aIndex]).not.toContain('hidden="1"')
+    expect(xfList[aIndex]).not.toContain('locked="0"')
+    expect(xfList[bIndex]).toContain('<protection hidden="1" locked="1"/>')
+    expect(savedSheet).toContain('<c r="A1" t="s" s="3"><v>0</v></c>')
+    expect(savedSheet).toContain('<c r="B3"><f>SUM(C1:C2)</f><v>5</v></c>')
+  })
+
+  it('changes one inherited protection flag while retaining the other and a formula cache', async () => {
+    const zip = await JSZip.loadAsync(await buildEditFixture())
+    const styles = await zip.file('xl/styles.xml')!.async('string')
+    zip.file(
+      'xl/styles.xml',
+      styles
+        .replace(
+          '<cellStyleXfs count="1"><xf/></cellStyleXfs>',
+          '<cellStyleXfs count="2"><xf/><xf><protection locked="0" hidden="1"/></xf></cellStyleXfs>',
+        )
+        .replace(
+          '<cellXfs count="2"><xf/><xf fontId="1" applyFont="1"/></cellXfs>',
+          '<cellXfs count="3"><xf/><xf fontId="1" applyFont="1"/><xf xfId="1"/></cellXfs>',
+        ),
+    )
+    const sheet = await zip.file('xl/worksheets/sheet1.xml')!.async('string')
+    zip.file('xl/worksheets/sheet1.xml', sheet.replace('<c r="B3">', '<c r="B3" s="2">'))
+    const imported = await zip.generateAsync({ type: 'nodebuffer' })
+    const saved = await applyCellEditsToXlsx(imported, [
+      {
+        sheetName: 'Data',
+        row: 2,
+        column: 1,
+        writeValue: false,
+        cell: { value: null },
+        style: { protectionHidden: false },
+      },
+    ])
+    assertOnlyTouchedEntriesChanged(saved)
+    const savedStyles = await entryText(saved.buffer, 'xl/styles.xml')
+    const savedSheet = await entryText(saved.buffer, 'xl/worksheets/sheet1.xml')
+    expect(savedStyles).toContain('<protection locked="0" hidden="0"/>')
+    expect(savedSheet).toMatch(/<c r="B3" s="3"><f>SUM\(C1:C2\)<\/f><v>5<\/v><\/c>/)
+    expect(savedSheet).toContain('<c r="A1" t="s" s="1"><v>0</v></c>')
+    expect(await entryText(saved.buffer, 'xl/sharedStrings.xml')).toBe(
+      await entryText(imported, 'xl/sharedStrings.xml'),
+    )
+  })
+
+  it('honors a direct default override while changing the other inherited flag', async () => {
+    const zip = await JSZip.loadAsync(await buildEditFixture())
+    const styles = await zip.file('xl/styles.xml')!.async('string')
+    zip.file(
+      'xl/styles.xml',
+      styles
+        .replace(
+          '<cellStyleXfs count="1"><xf/></cellStyleXfs>',
+          '<cellStyleXfs count="2"><xf/><xf><protection locked="0" hidden="1"/></xf></cellStyleXfs>',
+        )
+        .replace(
+          '<cellXfs count="2"><xf/><xf fontId="1" applyFont="1"/></cellXfs>',
+          '<cellXfs count="3"><xf/><xf fontId="1" applyFont="1"/><xf xfId="1"><protection locked="1"/></xf></cellXfs>',
+        ),
+    )
+    const sheet = await zip.file('xl/worksheets/sheet1.xml')!.async('string')
+    zip.file('xl/worksheets/sheet1.xml', sheet.replace('<c r="B3">', '<c r="B3" s="2">'))
+    const saved = await applyCellEditsToXlsx(await zip.generateAsync({ type: 'nodebuffer' }), [
+      {
+        sheetName: 'Data',
+        row: 2,
+        column: 1,
+        writeValue: false,
+        cell: { value: null },
+        style: { protectionHidden: false },
+      },
+    ])
+    expect(await entryText(saved.buffer, 'xl/styles.xml')).toContain(
+      '<protection locked="1" hidden="0"/>',
+    )
+    expect(await entryText(saved.buffer, 'xl/worksheets/sheet1.xml')).toMatch(
+      /<c r="B3" s="3"><f>SUM\(C1:C2\)<\/f><v>5<\/v><\/c>/,
+    )
   })
 
   it('clears a rotation with textRotation 0', async () => {

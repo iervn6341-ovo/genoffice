@@ -7,8 +7,10 @@ import JSZip from 'jszip'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { applyCellEditsToXlsx } from '@genoffice/xlsx-gateway/gateway/xlsx-gateway'
 import { handleSave, type SaveContext } from '../src/renderer/save-actions'
+import { t } from '../src/renderer/i18n/locale'
 import { createEditJournal, recordSetRangeValues } from '../src/renderer/edit-journal'
 import { buildEditFixture } from './fixture-builder'
+import { setToastEmitter, type ToastData } from '../src/renderer/toast-bus'
 
 const saveWorkbookEdits = vi.fn()
 const writeWorkbookRecovery = vi.fn()
@@ -102,6 +104,117 @@ describe('handleSave recovery mode', () => {
 })
 
 describe('handleSave formula cache overlay', () => {
+  it('refuses a normal save when the imported-formula calculation has not applied', async () => {
+    const { ctx, journal, messages } = ctxWith({ dirty: false })
+    recordSetRangeValues(journal, 'sheet-1', { 0: { 2: { v: 8 } } })
+    Object.assign(ctx.lazyWorkbookRef.current!, {
+      formulaMode: true,
+      flags: { preloadComplete: true, preloadRunning: false },
+      closure: { status: 'idle', pinned: new Map() },
+      formulaText: new Map([['sheet-1', new Map([['2:1', '=SUM(C1:C2)']])]]),
+    })
+    Object.assign(ctx.univerRef, {
+      current: {
+        univer: { __getInjector: () => ({ get: () => ({ beforeCommandExecuted: vi.fn() }) }) },
+        univerAPI: {
+          getActiveWorkbook: () => null,
+          getFormula: () => ({
+            executeCalculation: vi.fn(),
+            onCalculationResultApplied: vi.fn().mockRejectedValue(new Error('timeout')),
+          }),
+        },
+      },
+    })
+    Object.assign(ctx, { readCells: () => ({ B3: { value: 5, formula: '=SUM(C1:C2)' } }) })
+
+    await expect(handleSave(ctx, 'save')).resolves.toEqual({ ok: false })
+    expect(saveWorkbookEdits).not.toHaveBeenCalled()
+    expect(messages.at(-1)).toBe(t('appSaveCalcPending'))
+  })
+
+  it.each(['preloaded', 'closure'] as const)(
+    'refreshes an unedited imported dependent formula in %s mode',
+    async (mode) => {
+      const { ctx, journal } = ctxWith({ dirty: false })
+      // The fixture's B3 has =SUM(C1:C2) and an old cached result of 5.
+      recordSetRangeValues(journal, 'sheet-1', { 0: { 2: { v: 8 } } })
+      const state = ctx.lazyWorkbookRef.current!
+      Object.assign(state, {
+        formulaMode: mode === 'preloaded',
+        flags: { preloadComplete: mode === 'preloaded', preloadRunning: false },
+        closure: { status: mode === 'closure' ? 'active' : 'idle', pinned: new Map() },
+        formulaText: new Map([['sheet-1', new Map([['2:1', '=SUM(C1:C2)']])]]),
+      })
+      const executeCalculation = vi.fn()
+      const onCalculationResultApplied = vi.fn().mockResolvedValue(undefined)
+      Object.assign(ctx.univerRef, {
+        current: {
+          univer: {
+            __getInjector: () => ({ get: () => ({ beforeCommandExecuted: vi.fn() }) }),
+          },
+          univerAPI: {
+            getActiveWorkbook: () => null,
+            getFormula: () => ({ executeCalculation, onCalculationResultApplied }),
+          },
+        },
+      })
+      Object.assign(ctx, {
+        readCells: () => ({
+          B3: { value: 8, rawValue: 8, formula: '=SUM(C1:C2)' },
+        }),
+      })
+
+      await handleSave(ctx, 'save')
+
+      expect(executeCalculation).toHaveBeenCalledTimes(1)
+      expect(onCalculationResultApplied).toHaveBeenCalledTimes(1)
+      const payload = saveWorkbookEdits.mock.calls[0]![0] as {
+        edits: { row: number; column: number; writeValue: boolean; value: unknown }[]
+        formulaValues: { sheetId: string; row: number; column: number; value: unknown }[]
+      }
+      expect(payload.formulaValues).toContainEqual({
+        sheetId: 'sheet-1',
+        row: 2,
+        column: 1,
+        value: 8,
+      })
+      const mutation = await applyCellEditsToXlsx(
+        await buildEditFixture(),
+        payload.edits.map((edit) => ({
+          sheetName: 'Data',
+          row: edit.row,
+          column: edit.column,
+          writeValue: edit.writeValue,
+          cell: { value: edit.value as string | number | boolean | null },
+        })),
+        [],
+        [],
+        undefined,
+        [],
+        [],
+        [],
+        [],
+        [],
+        null,
+        [],
+        [],
+        [
+          {
+            sheetName: 'Data',
+            cells: payload.formulaValues.map(({ row, column, value }) => ({
+              row,
+              column,
+              value: value as number,
+            })),
+          },
+        ],
+      )
+      const zip = await JSZip.loadAsync(mutation.buffer)
+      const xml = (await zip.file('xl/worksheets/sheet1.xml')?.async('text')) ?? ''
+      expect(xml).toMatch(/<c r="B3"[^>]*><f>SUM\(C1:C2\)<\/f><v>8<\/v><\/c>/)
+    },
+  )
+
   it('never pairs an immediately saved replacement formula with the previous cached value', async () => {
     const { ctx, journal, overlay } = ctxWith({ dirty: false })
     recordSetRangeValues(journal, 'sheet-1', { 2: { 1: { f: '=2+2' } } })
@@ -229,5 +342,48 @@ describe('handleSave restored-recovery write-back', () => {
     expect(writeWorkbookRecovery).toHaveBeenCalledTimes(1)
     const payload = writeWorkbookRecovery.mock.calls[0]![0] as Record<string, unknown>
     expect(payload.restoreWriteBack).toBeUndefined()
+  })
+})
+
+describe('recovery copy failure is visible', () => {
+  const toasts: ToastData[] = []
+  beforeEach(() => {
+    toasts.length = 0
+    setToastEmitter((toast) => toasts.push(toast))
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-15T10:00:00Z'))
+  })
+
+  const fail = (error: string): void => {
+    writeWorkbookRecovery.mockResolvedValue({ ok: false, error })
+  }
+
+  it('shows an error toast with the reason, once, while the same failure repeats', async () => {
+    fail('reason-A')
+    const { ctx } = ctxWith({ dirty: true })
+    await handleSave(ctx, 'recovery')
+    await handleSave(ctx, 'recovery')
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]?.kind).toBe('error')
+    expect(toasts[0]?.text).toContain('reason-A')
+  })
+
+  it('warns again when the reason changes, or after ten minutes', async () => {
+    fail('reason-B')
+    const { ctx } = ctxWith({ dirty: true })
+    await handleSave(ctx, 'recovery')
+    fail('reason-C')
+    await handleSave(ctx, 'recovery')
+    expect(toasts.map((toast) => toast.text.includes('reason-C'))).toEqual([false, true])
+    vi.setSystemTime(new Date('2026-10-15T10:11:00Z'))
+    await handleSave(ctx, 'recovery')
+    expect(toasts).toHaveLength(3)
+  })
+
+  it('stays silent when the copy is simply skipped (no error reported)', async () => {
+    writeWorkbookRecovery.mockResolvedValue({ ok: false })
+    const { ctx } = ctxWith({ dirty: true })
+    await handleSave(ctx, 'recovery')
+    expect(toasts).toHaveLength(0)
   })
 })

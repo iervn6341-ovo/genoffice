@@ -234,6 +234,7 @@ export interface JournaledFormulaCell {
   readonly row: number
   readonly column: number
   readonly formula?: string | undefined
+  readonly hasValue?: boolean | undefined
 }
 
 /**
@@ -287,6 +288,73 @@ export function journaledFormulaValues(
         sheetId,
         row: entry.row,
         column: entry.column,
+        value: isErrorResult(value) ? { error: value } : value,
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * Cache results of imported formulas that were never edited. The importer
+ * installs these formulas in Univer's model, but the edit journal omits their
+ * computed values; without this pass a changed precedent leaves the original
+ * XLSX <v> behind even though the formula itself is still present.
+ *
+ * Only call after a complete preload or active dependency closure and a
+ * finished calculation. A formula whose model source differs from the file
+ * index, or whose content was journaled, is owned by another save path.
+ * Engine failures with a cached display value are deliberately skipped so
+ * the file's usable Excel cache survives.
+ */
+export function residentFormulaValues(
+  formulaText: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  journal: ReadonlyMap<string, ReadonlyMap<string, JournaledFormulaCell>>,
+  read: (addresses: string[], sheetId: string) => Record<string, CellState>,
+  skipSheet: (sheetId: string) => boolean = () => false,
+  limit = JOURNALED_VALUE_LIMIT,
+): CachedFormulaValue[] {
+  const out: CachedFormulaValue[] = []
+  let budget = limit
+  for (const [sheetId, formulas] of formulaText) {
+    if (budget <= 0) break
+    if (skipSheet(sheetId)) continue
+    const journalCells = journal.get(sheetId)
+    const wanted = new Map<string, { row: number; column: number; formula: string }>()
+    for (const [key, formula] of formulas) {
+      if (budget <= 0) break
+      const edit = journalCells?.get(key)
+      if (edit?.hasValue || edit?.formula !== undefined) continue
+      const parts = key.split(':')
+      if (parts.length !== 2) continue
+      const row = Number(parts[0])
+      const column = Number(parts[1])
+      if (!Number.isInteger(row) || !Number.isInteger(column) || row < 0 || column < 0) continue
+      wanted.set(a1Address(row, column), { row, column, formula })
+      budget -= 1
+    }
+    if (wanted.size === 0) continue
+    let live: Record<string, CellState>
+    try {
+      live = read([...wanted.keys()], sheetId)
+    } catch {
+      continue
+    }
+    for (const [address, expected] of wanted) {
+      const cell = live[address]
+      if (!cell?.formula || normalizeFormula(cell.formula) !== normalizeFormula(expected.formula))
+        continue
+      // A fallback may display the file's old cached number while the model
+      // holds an engine error. Rewriting that old number after a precedent
+      // edit would falsely mark it as newly calculated.
+      if (cell.rawValue === '#ERROR!' || cell.rawValue === '#NAME?') continue
+      if (isErrorResult(cell.rawValue) && cell.value !== cell.rawValue) continue
+      const value = modelCellValue(cell)
+      if (value === null || value === '#ERROR!') continue
+      out.push({
+        sheetId,
+        row: expected.row,
+        column: expected.column,
         value: isErrorResult(value) ? { error: value } : value,
       })
     }

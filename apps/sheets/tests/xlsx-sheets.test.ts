@@ -13,6 +13,7 @@ import {
   partPathForRels,
   pivotCacheReadsFromSheet,
   prepareClonedSheetRels,
+  refSheetInFormula,
   renameSheetInFormula,
   renameSheetInPivotCacheSource,
   sanitizeClonedWorksheetXml,
@@ -48,6 +49,17 @@ describe('sheet name rules', () => {
     expect(formatSheetQualifier('A1')).toBe("'A1'")
     expect(formatSheetQualifier('TRUE')).toBe("'TRUE'")
     expect(formatSheetQualifier("O'Brien")).toBe("'O''Brien'")
+  })
+})
+
+describe('refSheetInFormula', () => {
+  it('turns references to the deleted sheet into #REF! and leaves the rest alone', () => {
+    expect(refSheetInFormula('SUM(Gone!A1:B2)+A1', 'Gone')).toBe('SUM(#REF!)+A1')
+    expect(refSheetInFormula("'員工級距表'!$B$2*2", '員工級距表')).toBe('#REF!*2')
+    expect(refSheetInFormula('Gone!A:A+Gone!3:3', 'Gone')).toBe('#REF!+#REF!')
+    expect(refSheetInFormula('\'Gone\'!A1&"Gone!A1"&Other!A1', 'Gone')).toBe(
+      '#REF!&"Gone!A1"&Other!A1',
+    )
   })
 })
 
@@ -220,15 +232,29 @@ describe('sheet remove save', () => {
     expect(rels).not.toContain('sheet2.xml')
   })
 
-  it('fails closed when formulas, charts, or defined names still reference the sheet', async () => {
-    await expect(
-      applyCellEditsToXlsx(await buildSheetsFixture(), [], [], [], {
-        renames: [],
-        additions: [],
-        removals: ['My Sheet'],
-        order: ['Data', 'Other'],
-      }),
-    ).rejects.toThrow('reference "My Sheet"')
+  it('turns formulas and defined names that reference the deleted sheet into #REF!, like Excel', async () => {
+    const mutation = await applyCellEditsToXlsx(await buildSheetsFixture(), [], [], [], {
+      renames: [],
+      additions: [],
+      removals: ['My Sheet'],
+      order: ['Data', 'Other'],
+    })
+    const zip = await JSZip.loadAsync(mutation.buffer)
+    let formulas = ''
+    for (const name of Object.keys(zip.files)) {
+      if (/^xl\/worksheets\/sheet\d+\.xml$/.test(name))
+        formulas += await entryText(mutation.buffer, name)
+    }
+    const workbook = await entryText(mutation.buffer, 'xl/workbook.xml')
+    expect(formulas).not.toMatch(/<f[^>]*>[^<]*My Sheet/)
+    expect(formulas + workbook).toContain('#REF!')
+    expect(workbook).not.toMatch(/<definedName[^>]*>[^<]*My Sheet/)
+    // the rewrite forces Excel to recalculate instead of trusting stale cached values
+    expect(workbook).toContain('fullCalcOnLoad="1"')
+    expect(() => assertOnlyTouchedEntriesChanged(mutation)).not.toThrow()
+  })
+
+  it('still fails closed when a chart reads its data from the deleted sheet', async () => {
     await expect(
       applyCellEditsToXlsx(await buildSheetsFixture(), [], [], [], {
         renames: [],

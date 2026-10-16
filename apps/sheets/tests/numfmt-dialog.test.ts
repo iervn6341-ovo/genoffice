@@ -14,6 +14,7 @@ import {
   sampleValue,
   TIME_PATTERNS,
   todaySerial,
+  SPECIAL_LOCALES,
   type NumfmtOptions,
 } from '../src/renderer/numfmt-dialog'
 
@@ -183,5 +184,37 @@ describe('system short date', () => {
     } finally {
       setSystemShortDate(previous)
     }
+  })
+})
+
+describe('Special category', () => {
+  it('builds and re-detects every locale code', () => {
+    for (const locale of SPECIAL_LOCALES) {
+      for (const format of locale.formats) {
+        const built = options({
+          category: 'special',
+          specialLocale: locale.id,
+          special: format.pattern,
+        })
+        expect(numfmtPattern(built)).toBe(format.pattern)
+        expect(numfmtOptionsOf(format.pattern)).toMatchObject({
+          category: 'special',
+          specialLocale: locale.id,
+          special: format.pattern,
+        })
+      }
+    }
+  })
+
+  it('uses the Excel en-US codes for zip, phone and social security', () => {
+    const us = SPECIAL_LOCALES.find((locale) => locale.id === 'en-US')!
+    expect(us.formats.map((format) => format.pattern)).toEqual([
+      '00000',
+      '00000\\-0000',
+      '[<=9999999]###\\-####;\\(###\\) ###\\-####',
+      '000\\-00\\-0000',
+    ])
+    expect(numfmtPreview('00000', 1234)).toBe('01234')
+    expect(numfmtPreview('000\\-00\\-0000', 123456789)).toBe('123-45-6789')
   })
 })

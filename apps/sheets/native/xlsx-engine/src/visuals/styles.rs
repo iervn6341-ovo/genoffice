@@ -60,6 +60,11 @@ pub fn read_styles(
     let cell_xfs = document
         .descendants()
         .find(|node| node.has_tag_name("cellXfs"));
+    let style_xfs = document
+        .descendants()
+        .find(|node| node.has_tag_name("cellStyleXfs"))
+        .map(|node| mc_children(node, "xf"))
+        .unwrap_or_default();
     // Literal cached <name val> of the Normal (cellXfs[0]) font: for scheme
     // fonts the theme substitution below erases it, but Excel derives the
     // column-width MDW from this face (a ja workbook caches the locale
@@ -96,6 +101,14 @@ pub fn read_styles(
                             })
                     });
                     let alignment = xf.children().find(|child| child.has_tag_name("alignment"));
+                    let inherited_protection = numeric_attribute(xf, "xfId")
+                        .and_then(|index| style_xfs.get(index))
+                        .and_then(|parent| {
+                            parent
+                                .children()
+                                .find(|child| child.has_tag_name("protection"))
+                        });
+                    let protection = xf.children().find(|child| child.has_tag_name("protection"));
                     // Excel resolves scheme fonts against the theme; the
                     // literal <name val> is only a cached copy.
                     let font_family = match (font.scheme.as_deref(), theme_fonts) {
@@ -109,6 +122,8 @@ pub fn read_styles(
                         bold: font.bold,
                         italic: font.italic,
                         underline: font.underline,
+                        underline_style: font.underline_style,
+                        font_vertical_align: font.font_vertical_align,
                         strikethrough: font.strikethrough,
                         wrap_text: alignment
                             .and_then(|node| node.attribute("wrapText"))
@@ -116,8 +131,23 @@ pub fn read_styles(
                         shrink_to_fit: alignment
                             .and_then(|node| node.attribute("shrinkToFit"))
                             .is_some_and(|value| value == "1" || value == "true"),
+                        protection_locked: protection
+                            .and_then(|node| node.attribute("locked"))
+                            .or_else(|| {
+                                inherited_protection.and_then(|node| node.attribute("locked"))
+                            })
+                            .filter(|value| *value == "0" || *value == "false")
+                            .map(|_| false),
+                        protection_hidden: protection
+                            .and_then(|node| node.attribute("hidden"))
+                            .or_else(|| {
+                                inherited_protection.and_then(|node| node.attribute("hidden"))
+                            })
+                            .filter(|value| *value == "1" || *value == "true")
+                            .map(|_| true),
                         font_color: font.color,
                         fill_color: fill.color,
+                        fill_pattern: fill.pattern,
                         font_color_theme: font.color_theme,
                         font_color_tint: font.color_tint,
                         fill_color_theme: fill.theme,
@@ -214,11 +244,16 @@ pub(crate) fn parse_dxf(dxf: Node<'_, '_>, colors: &ColorContext) -> CellStyle {
         bold: font.bold,
         italic: font.italic,
         underline: font.underline,
+        underline_style: font.underline_style,
+        font_vertical_align: font.font_vertical_align,
         strikethrough: font.strikethrough,
         wrap_text: false,
         shrink_to_fit: false,
+        protection_locked: None,
+        protection_hidden: None,
         font_color: font.color,
         fill_color,
+        fill_pattern: None,
         font_color_theme: None,
         font_color_tint: None,
         fill_color_theme: None,
@@ -271,6 +306,22 @@ pub(crate) fn parse_font(font: Node<'_, '_>, colors: &ColorContext) -> FontStyle
             .children()
             .find(|node| node.has_tag_name("u"))
             .is_some_and(|node| node.attribute("val") != Some("none")),
+        underline_style: font
+            .children()
+            .find(|node| node.has_tag_name("u"))
+            .filter(|node| node.attribute("val") != Some("none"))
+            .and_then(|node| match node.attribute("val").unwrap_or("single") {
+                "single" | "double" | "singleAccounting" | "doubleAccounting" => {
+                    Some(node.attribute("val").unwrap_or("single").to_owned())
+                }
+                _ => None,
+            }),
+        font_vertical_align: font
+            .children()
+            .find(|node| node.has_tag_name("vertAlign"))
+            .and_then(|node| node.attribute("val"))
+            .filter(|value| matches!(*value, "baseline" | "superscript" | "subscript"))
+            .map(ToOwned::to_owned),
         strikethrough: font
             .children()
             .find(|node| node.has_tag_name("strike"))
@@ -284,6 +335,32 @@ pub(crate) fn parse_font(font: Node<'_, '_>, colors: &ColorContext) -> FontStyle
             .and_then(|node| node.attribute("val"))
             .filter(|value| *value == "major" || *value == "minor")
             .map(ToOwned::to_owned),
+    }
+}
+
+#[cfg(test)]
+mod font_effect_tests {
+    use super::*;
+
+    #[test]
+    fn imported_underline_modes_and_script_positions_remain_distinct() {
+        let colors = ColorContext::with_theme(Vec::new());
+        for mode in ["single", "double", "singleAccounting", "doubleAccounting"] {
+            let xml = format!("<font><u val=\"{mode}\"/><vertAlign val=\"superscript\"/></font>");
+            let doc = roxmltree::Document::parse(&xml).expect("font XML");
+            let parsed = parse_font(doc.root_element(), &colors);
+            assert!(parsed.underline);
+            assert_eq!(parsed.underline_style.as_deref(), Some(mode));
+            assert_eq!(parsed.font_vertical_align.as_deref(), Some("superscript"));
+        }
+        let doc = roxmltree::Document::parse(
+            "<font><u val=\"none\"/><vertAlign val=\"subscript\"/></font>",
+        )
+        .expect("font XML");
+        let parsed = parse_font(doc.root_element(), &colors);
+        assert!(!parsed.underline);
+        assert_eq!(parsed.underline_style, None);
+        assert_eq!(parsed.font_vertical_align.as_deref(), Some("subscript"));
     }
 }
 
@@ -314,6 +391,7 @@ pub(crate) fn theme_provenance(
 
 #[derive(Clone, Default)]
 pub(crate) struct FillInfo {
+    pub(crate) pattern: Option<FillPattern>,
     pub(crate) color: Option<String>,
     pub(crate) theme: Option<usize>,
     pub(crate) tint: Option<f64>,
@@ -334,6 +412,16 @@ pub(crate) fn parse_fill(fill: Node<'_, '_>, colors: &ColorContext) -> FillInfo 
     let bg_node = pattern.children().find(|node| node.has_tag_name("bgColor"));
     let foreground = fg_node.and_then(|node| parse_color(node, colors));
     let background = bg_node.and_then(|node| parse_color(node, colors));
+    let pattern_info = match pattern_type {
+        Some(kind) if kind != "solid" && kind != "none" && foreground.is_some() => {
+            Some(FillPattern {
+                pattern_type: kind.to_owned(),
+                foreground: foreground.clone(),
+                background: background.clone(),
+            })
+        }
+        _ => None,
+    };
     // Textured patterns (gray125, stripes, …) render as the per-channel blend
     // of both colors — the closest flat-color approximation of the texture.
     // Blends carry no single theme provenance.
@@ -342,6 +430,7 @@ pub(crate) fn parse_fill(fill: Node<'_, '_>, colors: &ColorContext) -> FillInfo 
             if let Some(mixed) = mix_hex(fg, bg) {
                 return FillInfo {
                     color: Some(mixed),
+                    pattern: pattern_info,
                     ..FillInfo::default()
                 };
             }
@@ -356,7 +445,12 @@ pub(crate) fn parse_fill(fill: Node<'_, '_>, colors: &ColorContext) -> FillInfo 
         .filter(|_| color.is_some())
         .map(|node| theme_provenance(node, colors))
         .unwrap_or((None, None));
-    FillInfo { color, theme, tint }
+    FillInfo {
+        pattern: pattern_info,
+        color,
+        theme,
+        tint,
+    }
 }
 
 /// The cell style model carries one flat color, so a gradientFill is

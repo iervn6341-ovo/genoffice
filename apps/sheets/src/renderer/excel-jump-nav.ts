@@ -40,6 +40,7 @@ import {
 import type { ISelectionWithStyle } from '@univerjs/sheets'
 import { whenSheetEditorFocused } from '@univerjs/sheets-ui'
 import type { UniverRuntime } from './univer-state'
+import { EXCEL_MAX_COLUMNS, ensureColumnReachable } from './column-extension'
 
 const MOVE_JUMP_COMMAND_ID = 'genoffice.command.move-selection-excel-jump'
 const EXPAND_JUMP_COMMAND_ID = 'genoffice.command.expand-selection-excel-jump'
@@ -222,9 +223,18 @@ function findNextGapRange(startRange: IRange, direction: Direction, worksheet: W
       currentPositionHasValue = nextRangeHasValue
       firstMove = false
     } else if (Direction.RIGHT === direction) {
+      const columnCount = worksheet.getColumnCount()
       let next = destRange.endColumn + 1
-      while (next < worksheet.getColumnCount() && !worksheet.getColVisible(next)) next += 1
-      if (next === worksheet.getColumnCount()) break
+      while (next < columnCount && !worksheet.getColVisible(next)) next += 1
+      if (next >= EXCEL_MAX_COLUMNS) break
+      if (next >= columnCount) {
+        // Past the materialised grid every column is empty up to XFD (the
+        // grid grows on demand). Mirror Excel: a data block that touches the
+        // grid edge ends there, anything else runs on to the last column.
+        if (currentPositionHasValue && !firstMove) break
+        destRange.startColumn = destRange.endColumn = EXCEL_MAX_COLUMNS - 1
+        break
+      }
       const { hasValue: nextRangeHasValue, matrix } = rangeHasValue(
         worksheet,
         destRange.startRow,
@@ -408,6 +418,13 @@ export function registerExcelJumpNav(runtime: UniverRuntime): void {
       const { range, primary } = selection
       const startRange = getStartRange(range, primary, direction)
       const next = findNextGapRange(startRange, direction, worksheet)
+      // The walk may end on a column beyond the materialised grid (XFD).
+      ensureColumnReachable(
+        accessor.get(ICommandService),
+        workbook.getUnitId(),
+        worksheet,
+        next.endColumn,
+      )
       const destRange = getCellAtRowCol(next.startRow, next.startColumn, worksheet)
       if (Rectangle.equals(destRange, startRange)) return false
       return accessor.get(ICommandService).executeCommand(SetSelectionsOperation.id, {
@@ -458,6 +475,7 @@ export function registerExcelJumpNav(runtime: UniverRuntime): void {
       if (selection.range.rangeType !== undefined) destRange.rangeType = selection.range.rangeType
       if (Rectangle.equals(destRange, startRange)) return false
       const commandService = accessor.get(ICommandService)
+      ensureColumnReachable(commandService, unitId, worksheet, destRange.endColumn)
       const applied = commandService.syncExecuteCommand(SetSelectionsOperation.id, {
         unitId,
         subUnitId,

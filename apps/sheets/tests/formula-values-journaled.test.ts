@@ -4,10 +4,12 @@
  * pandas, mobile viewers) showed empty cells until Excel recalculated.
  */
 import JSZip from 'jszip'
+import { CellValueType } from '@univerjs/core'
 import { describe, expect, it } from 'vitest'
 import type { CellState } from '@genoffice/xlsx-gateway/domain/workbook.types'
 import { applyCellEditsToXlsx } from '@genoffice/xlsx-gateway/gateway/xlsx-gateway'
-import { journaledFormulaValues } from '../src/renderer/formula-values'
+import { journaledFormulaValues, residentFormulaValues } from '../src/renderer/formula-values'
+import { lazyCellReader } from '../src/renderer/univer-sync'
 import { buildStructureFixture } from './fixture-builder'
 
 const reader =
@@ -99,6 +101,24 @@ describe('journaledFormulaValues (C3)', () => {
     )
     expect(values).toHaveLength(1)
   })
+})
+
+it('preserves the boolean type of a recalculated imported formula cache', () => {
+  const worksheet = {
+    getRange: () => ({
+      getFormula: () => '=B1>0',
+      getValue: () => true,
+      getCellDatas: () => [[{ f: '=B1>0', t: CellValueType.BOOLEAN, v: 1 }]],
+    }),
+  }
+  const read = (addresses: string[]) =>
+    Object.fromEntries(
+      addresses.map((address) => [address, lazyCellReader(worksheet as never)(address)]),
+    )
+  expect(read(['F1']).F1?.rawValue).toBe(true)
+  expect(
+    residentFormulaValues(new Map([['sheet-1', new Map([['0:5', '=B1>0']])]]), new Map(), read),
+  ).toEqual([{ sheetId: 'sheet-1', row: 0, column: 5, value: true }])
 })
 
 describe('cached <v> XML per result type (C3)', () => {

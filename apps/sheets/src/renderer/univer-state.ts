@@ -87,6 +87,8 @@ export interface LazyWorkbookState {
   /// File-side saved print settings (pageSetup / margins / headerFooter),
   /// known once a sheet finishes indexing.
   readonly sheetFilePageSetups: Map<string, WorkbookPagePrintSettings>
+  /// Original media bytes fetched when Header & Footer opens, used by cross-save Undo.
+  readonly headerFooterPictureData: Map<string, Map<string, { mediaType: string; base64: string }>>
   /// What the table parts of the file say about their style (Table Design shows the options from
   /// it), by table name in lower case; filled on demand when the active cell enters a file table.
   readonly fileTableInfos: Map<string, WorkbookTableInfo>

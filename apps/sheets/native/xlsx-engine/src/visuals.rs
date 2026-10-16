@@ -26,6 +26,16 @@ pub(crate) use styles::*;
 
 const MAX_MEDIA_BYTES: u64 = 20 * 1024 * 1024;
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FillPattern {
+    pub pattern_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CellStyle {
@@ -36,16 +46,30 @@ pub struct CellStyle {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underline_style: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_vertical_align: Option<String>,
     pub strikethrough: bool,
     pub wrap_text: bool,
     /// alignment/@shrinkToFit — Excel scales the font down to fit the column
     /// instead of clipping. Omitted when false to keep payloads small.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub shrink_to_fit: bool,
+    /// XF protection defaults are locked=true, hidden=false. Only nondefault
+    /// values travel over the wire; absence preserves those Excel defaults.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protection_locked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protection_hidden: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_color: Option<String>,
+    /// Non-solid pattern fill (`patternFill` with a stripe / gray / grid type): the flat
+    /// `fill_color` stays the blended approximation, this keeps the editable parts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_pattern: Option<FillPattern>,
     /// Theme provenance (slot index + tint) for colors resolved from the
     /// theme palette, so the renderer can re-resolve them when the document
     /// theme changes. Absent for literal rgb / indexed colors.
@@ -121,6 +145,8 @@ impl CellStyle {
             || self.text_rotation != default.text_rotation
             || self.wrap_text != default.wrap_text
             || self.shrink_to_fit != default.shrink_to_fit
+            || self.protection_locked != default.protection_locked
+            || self.protection_hidden != default.protection_hidden
     }
 }
 
@@ -598,6 +624,8 @@ pub(crate) struct FontStyle {
     bold: bool,
     italic: bool,
     underline: bool,
+    underline_style: Option<String>,
+    font_vertical_align: Option<String>,
     strikethrough: bool,
     color: Option<String>,
     color_theme: Option<usize>,
@@ -1451,18 +1479,24 @@ pub fn read_header_footer_pictures(
     relationship_id: &str,
     sheet_index: usize,
 ) -> Result<Vec<crate::HeaderFooterPictureInfo>, SidecarError> {
-    let relationships = read_relationships(archive, worksheet_path)?;
+    let Ok(relationships) = read_relationships(archive, worksheet_path) else {
+        return Ok(Vec::new());
+    };
     let Some(relationship) = relationships.get(relationship_id) else {
         return Ok(Vec::new());
     };
-    let vml_path = resolve_part_target(worksheet_path, &relationship.target)?;
+    let Ok(vml_path) = resolve_part_target(worksheet_path, &relationship.target) else {
+        return Ok(Vec::new());
+    };
     let Some(xml) = read_optional_xml(archive, &vml_path)? else {
         return Ok(Vec::new());
     };
     let Ok(document) = Document::parse(&xml) else {
         return Ok(Vec::new());
     };
-    let media_relationships = read_relationships(archive, &vml_path)?;
+    let Ok(media_relationships) = read_relationships(archive, &vml_path) else {
+        return Ok(Vec::new());
+    };
     let mut pictures: Vec<crate::HeaderFooterPictureInfo> = Vec::new();
     for shape in document
         .descendants()
@@ -1488,7 +1522,9 @@ pub fn read_header_footer_pictures(
         let Some(media) = media_relationships.get(relationship_id) else {
             continue;
         };
-        let media_path = resolve_part_target(&vml_path, &media.target)?;
+        let Ok(media_path) = resolve_part_target(&vml_path, &media.target) else {
+            continue;
+        };
         let Some(media_type) = media_type_for_path(&media_path) else {
             continue;
         };

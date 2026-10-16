@@ -109,6 +109,77 @@ describe('applyDvRules', () => {
     expect(xml).toContain('<dataValidation type="list" sqref="A1:A5">')
   })
 
+  it('exports the JSON list authored by the Univer dropdown editor', () => {
+    const xml = applyDvRules(SHEET, [
+      {
+        ranges: [{ startRow: 1, endRow: 3, startColumn: 1, endColumn: 1 }],
+        rule: {
+          type: 'list',
+          formula1: JSON.stringify(['Open', 'Closed']),
+          formula2: ',',
+          showDropDown: true,
+          showInputMessage: true,
+          prompt: 'Choose a status',
+          showErrorMessage: true,
+          error: 'Use the list',
+        },
+      },
+    ])
+    expect(xml).toContain('sqref="B2:B4"')
+    expect(xml).toContain('<formula1>"Open,Closed"</formula1>')
+    expect(xml).toContain('showInputMessage="1"')
+    expect(xml).toContain('showErrorMessage="1"')
+    expect(xml).not.toContain('[&quot;Open')
+    expect(xml).not.toContain('<formula2>')
+    const spaced = applyDvRules(SHEET, [
+      {
+        ranges: [range],
+        rule: { type: 'list', formula1: JSON.stringify(['  Open  ', 'Closed ']) },
+      },
+    ])
+    expect(spaced).toContain('<formula1>"  Open  ,Closed "</formula1>')
+  })
+
+  it('does not export UI list color metadata as a second Excel formula', () => {
+    const xml = applyDvRules(SHEET, [
+      {
+        ranges: [range],
+        rule: {
+          type: 'list',
+          formula1: JSON.stringify(['Open', 'Closed']),
+          formula2: '#ff0000,#00ff00',
+        },
+      },
+    ])
+    expect(xml).toContain('<formula1>"Open,Closed"</formula1>')
+    expect(xml).not.toContain('<formula2>')
+  })
+
+  it('refuses JSON list options that Excel inline lists cannot preserve', () => {
+    for (const options of [
+      ['Red, blue', 'Green'],
+      ['He said "yes"', 'No'],
+      ['First\nline', 'Second'],
+      ['', 'Filled'],
+      [],
+      ['A'.repeat(256)],
+    ]) {
+      expect(() =>
+        applyDvRules(SHEET, [
+          { ranges: [range], rule: { type: 'list', formula1: JSON.stringify(options) } },
+        ]),
+      ).toThrow(/cell-range source/)
+    }
+  })
+
+  it('does not silently emit unsafe legacy CSV literals', () => {
+    for (const formula1 of ['A,,B', 'A,"B"', 'A,\nB']) {
+      expect(() =>
+        applyDvRules(SHEET, [{ ranges: [range], rule: { type: 'list', formula1 } }]),
+      ).toThrow(/cell-range source/)
+    }
+  })
+
   it('writes prompts, errors, and the inverse error-style mapping', () => {
     const xml = applyDvRules(SHEET, [
       {

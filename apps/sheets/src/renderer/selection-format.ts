@@ -1,5 +1,7 @@
 import { BooleanNumber, type IStyleData, WrapStrategy } from '@univerjs/core'
 
+import type { CellFillPattern } from './fill-pattern'
+
 /// One OOXML indent step rendered as left cell padding, in px — roughly the
 /// width of three spaces at the default 11pt font.
 /// The padding is the only on-screen model for indent, so converting back
@@ -33,6 +35,8 @@ export interface SelectionFormat {
   readonly indent: number
   readonly fontColor: string | null
   readonly fillColor: string | null
+  /// Two-color pattern fill of the anchor cell (pattern style + pattern/background colors).
+  readonly fillPattern?: CellFillPattern | null
   readonly numberFormat: string
   /// Hyperlink target of the anchor cell ('#Sheet!A1' internal, URL
   /// external), or null when the cell has no link.
@@ -79,6 +83,7 @@ export function toSelectionFormat(
   style: IStyleData,
   numberFormat: string,
   link: string | null = null,
+  fillPattern: CellFillPattern | null = null,
 ): SelectionFormat {
   return {
     fontFamily: style.ff ?? null,
@@ -94,6 +99,7 @@ export function toSelectionFormat(
     indent: indentStepsOf(style),
     fontColor: normalizeHexColor(style.cl?.rgb ?? null),
     fillColor: normalizeHexColor(style.bg?.rgb ?? null),
+    ...(fillPattern ? { fillPattern } : {}),
     numberFormat: numberFormat || 'General',
     link,
   }
@@ -118,6 +124,7 @@ export function selectionFormatEquals(
     a.indent === b.indent &&
     a.fontColor === b.fontColor &&
     a.fillColor === b.fillColor &&
+    JSON.stringify(a.fillPattern ?? null) === JSON.stringify(b.fillPattern ?? null) &&
     a.numberFormat === b.numberFormat &&
     a.link === b.link
   )

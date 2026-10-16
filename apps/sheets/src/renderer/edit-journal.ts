@@ -1,4 +1,4 @@
-import { CellValueType } from '@univerjs/core'
+import { BaselineOffset, CellValueType } from '@univerjs/core'
 
 import type {
   WorkbookCellEdit,
@@ -7,6 +7,8 @@ import type {
   WorkbookHyperlinkEdit,
   WorkbookRichRun,
   WorkbookSheetOp,
+  WorkbookSheetThread,
+  WorkbookThreadPerson,
   WorkbookStructuralOp,
   WorkbookPivotAdd,
   WorkbookStyleEdit,
@@ -22,6 +24,8 @@ import { splitSheetRef } from '@genoffice/xlsx-gateway/domain/chart-visual'
 import { CHART_CATEGORY_WIRE_MAX, CHART_TEXT_WIRE_MAX } from '../shared/desktop-api'
 import { ADDABLE_SHAPE_TYPES } from '@genoffice/xlsx-gateway/shared/shape-types'
 import { INDENT_STEP_PX } from './selection-format'
+import type { ThreadStashEntry } from './threaded-comments'
+import { blendedDisplayOf, FILL_PATTERN_KEY, fillSpecOf, isFillPattern } from './fill-pattern'
 import type { SharedFormulaResolver } from './shared-formula-journal'
 
 /// Tracks the user's cell edits on a streamed external workbook. Streaming
@@ -35,6 +39,8 @@ export interface JournalEntry {
   readonly value: string | number | boolean | null
   readonly formula?: string
   readonly style?: WorkbookStyleEdit
+  /// Exact pre-edit cell XF for cross-save style Undo; null removes `s=`.
+  readonly styleReference?: number | null
   /// Per-run styling of a rich-text cell; value holds the concatenated text.
   readonly rich?: readonly WorkbookRichRun[]
   /// Clear Formats / Clear All: the cell returns to the default style before
@@ -188,6 +194,13 @@ export interface EditJournal {
   /// Sheets whose notes changed; the save snapshots the live note set (same
   /// recipe as filters).
   readonly noteDirty: Set<string>
+  /// sheetId → the sheet's threaded comments as they stand now (seeded from the file at open;
+  /// a key means the save writes the thread set for that sheet). See threaded-comments.ts.
+  readonly threads: Map<string, WorkbookSheetThread[]>
+  /// The workbook's person list for threaded comments (seeded from the file)
+  readonly threadPersons: { list: WorkbookThreadPerson[] }
+  /// Threads taken out by a row/column delete; an Undo's inverse insert brings them back
+  readonly threadStash: { list: ThreadStashEntry[] }
   /// pivotCacheDefinition part paths whose pivots were recomputed this
   /// session; the save flags them refreshOnLoad so Excel rebuilds its cache.
   readonly pivotCacheRefresh: Set<string>
@@ -213,6 +226,29 @@ export interface HeaderFooterParts {
   readonly left?: string
   readonly center?: string
   readonly right?: string
+}
+
+export interface HeaderFooterPictureEdit {
+  readonly position: string
+  readonly image?:
+    | {
+        readonly mediaType:
+          | 'image/png'
+          | 'image/jpeg'
+          | 'image/gif'
+          | 'image/x-emf'
+          | 'image/x-wmf'
+          | 'image/bmp'
+          | 'image/webp'
+          | 'image/svg+xml'
+          | 'image/x-emz'
+          | 'image/x-wmz'
+        readonly base64: string
+      }
+    | null
+    | undefined
+  readonly widthPt?: number | undefined
+  readonly heightPt?: number | undefined
 }
 
 export interface PageSetupJournalState {
@@ -247,6 +283,13 @@ export interface PageSetupJournalState {
   /// Printed header/footer, or null to clear; saved as <headerFooter>.
   header?: HeaderFooterParts | null
   footer?: HeaderFooterParts | null
+  firstPage?: { header: HeaderFooterParts | null; footer: HeaderFooterParts | null } | null
+  evenPages?: { header: HeaderFooterParts | null; footer: HeaderFooterParts | null } | null
+  /// Retained first/even XML while its different-page flag is off.
+  firstPageStored?: { header: HeaderFooterParts | null; footer: HeaderFooterParts | null } | null
+  evenPagesStored?: { header: HeaderFooterParts | null; footer: HeaderFooterParts | null } | null
+  /// Sparse VML slot edits. An absent slot is never rewritten.
+  headerFooterPictureEdits?: HeaderFooterPictureEdit[]
   /// Manual page breaks (0-based index of the row/column after the break).
   /// Presence replaces the sheet's break set; [] clears all manual breaks.
   rowBreaks?: number[]
@@ -260,8 +303,22 @@ interface CellRange {
   readonly endColumn: number
 }
 
-export function createEditJournal(): EditJournal {
+export function createEditJournal(file?: {
+  readonly sheets: readonly {
+    readonly id: string
+    readonly threads?: WorkbookSheetThread[] | undefined
+  }[]
+  readonly persons?: WorkbookThreadPerson[] | undefined
+}): EditJournal {
+  const threads = new Map<string, WorkbookSheetThread[]>()
+  for (const sheet of file?.sheets ?? []) {
+    if (sheet.threads && sheet.threads.length > 0)
+      threads.set(sheet.id, structuredClone(sheet.threads))
+  }
   return {
+    threads,
+    threadPersons: { list: structuredClone(file?.persons ?? []) },
+    threadStash: { list: [] },
     cells: new Map(),
     bulkConstantFills: new Map(),
     structuralOps: new Map(),
@@ -747,6 +804,7 @@ export interface VisualEditEntry {
   readonly anchor?: WorkbookVisualObject['anchor']
   /// New xfrm ext in EMU (a rotated shape resized through its AABB).
   readonly frameSize?: { readonly width: number; readonly height: number }
+  readonly equation?: { readonly latex: string; readonly omml: string }
 }
 
 /// Records a move/resize or removal of a visual that already lives in the
@@ -759,6 +817,7 @@ export function recordVisualEdit(
     remove?: true
     anchor?: WorkbookVisualObject['anchor']
     frameSize?: { width: number; height: number }
+    equation?: { latex: string; omml: string }
   },
 ): boolean {
   if (visual.drawingPath === undefined || visual.drawingIndex === undefined) return false
@@ -767,6 +826,7 @@ export function recordVisualEdit(
   const remove = changes.remove ?? previous?.remove
   const anchor = changes.anchor ?? previous?.anchor
   const frameSize = changes.frameSize ?? previous?.frameSize
+  const equation = changes.equation ?? previous?.equation
   journal.visualEdits.set(visual.id, {
     sheetId: visual.sheetId,
     drawingPath: visual.drawingPath,
@@ -774,6 +834,7 @@ export function recordVisualEdit(
     ...(remove ? { remove: true as const } : {}),
     ...(anchor ? { anchor } : {}),
     ...(frameSize ? { frameSize } : {}),
+    ...(equation ? { equation } : {}),
   })
   return true
 }
@@ -792,7 +853,12 @@ export function removeVisualAdd(journal: EditJournal, visualId: string): boolean
 export function updateVisualAdd(
   journal: EditJournal,
   visualId: string,
-  changes: { anchor?: WorkbookVisualObject['anchor']; text?: string; fillColor?: string },
+  changes: {
+    anchor?: WorkbookVisualObject['anchor']
+    text?: string
+    fillColor?: string
+    equation?: { latex: string; omml: string }
+  },
 ): boolean {
   const index = journal.visualAdds.findIndex((visual) => visual.id === visualId)
   const current = journal.visualAdds[index]
@@ -802,6 +868,7 @@ export function updateVisualAdd(
     ...(changes.anchor === undefined ? {} : { anchor: changes.anchor }),
     ...(changes.text === undefined ? {} : { text: changes.text }),
     ...(changes.fillColor === undefined ? {} : { fillColor: changes.fillColor }),
+    ...(changes.equation === undefined ? {} : { equation: changes.equation }),
   }
   return true
 }
@@ -835,6 +902,7 @@ export function toSaveVisualEdits(journal: EditJournal): WorkbookVisualEdit[] {
       ...(entry.remove ? { remove: true as const } : {}),
       ...(entry.anchor ? { anchor: entry.anchor } : {}),
       ...(entry.frameSize ? { frameSize: entry.frameSize } : {}),
+      ...(entry.equation ? { equation: entry.equation } : {}),
     })
   }
   return edits
@@ -867,6 +935,14 @@ export function toSaveVisualAdds(journal: EditJournal): WorkbookVisualAdd[] {
         sheetId: visual.sheetId,
         anchor: visual.anchor,
         image: { mediaType, base64 },
+      })
+      continue
+    }
+    if (visual.kind === 'equation' && visual.equation?.latex) {
+      additions.push({
+        sheetId: visual.sheetId,
+        anchor: visual.anchor,
+        equation: { latex: visual.equation.latex, omml: visual.equation.omml },
       })
       continue
     }
@@ -1463,7 +1539,11 @@ export function recordBulkConstantFill(
       )
         continue
       purgedCells.push(cell)
-      if (cell.style !== undefined || cell.styleReset !== undefined) {
+      if (
+        cell.style !== undefined ||
+        cell.styleReset !== undefined ||
+        cell.styleReference !== undefined
+      ) {
         cells.set(key, {
           row: cell.row,
           column: cell.column,
@@ -1471,6 +1551,7 @@ export function recordBulkConstantFill(
           value: null,
           ...(cell.style === undefined ? {} : { style: cell.style }),
           ...(cell.styleReset === undefined ? {} : { styleReset: cell.styleReset }),
+          ...(cell.styleReference === undefined ? {} : { styleReference: cell.styleReference }),
         })
       } else {
         cells.delete(key)
@@ -1692,6 +1773,25 @@ function mergeIntoJournal(
   return entry
 }
 
+/** Restore the entry preceding an undoable cell edit after Univer replays its undo mutation. */
+export function restoreJournalCellSnapshot(
+  journal: EditJournal,
+  sheetId: string,
+  row: number,
+  column: number,
+  snapshot: JournalEntry | null,
+): void {
+  const key = `${row}:${column}`
+  const sheetEntries = journal.cells.get(sheetId)
+  if (snapshot === null) {
+    sheetEntries?.delete(key)
+    if (sheetEntries?.size === 0) journal.cells.delete(sheetId)
+    return
+  }
+  if (sheetEntries) sheetEntries.set(key, snapshot)
+  else journal.cells.set(sheetId, new Map([[key, snapshot]]))
+}
+
 function mergeCellIntoEntry(
   previous: JournalEntry | undefined,
   row: number,
@@ -1710,6 +1810,20 @@ function mergeCellIntoEntry(
       ? toNeutralStyle(data.s as Record<string, unknown>)
       : undefined
   let style = styleDelta ? { ...previous?.style, ...styleDelta } : previous?.style
+  // A pattern fill rides in the cell's `custom` bag next to its blended background; a later
+  // background change without the marker is a plain fill and replaces the pattern.
+  const customBag = data.custom as Record<string, unknown> | null | undefined
+  if (customBag && FILL_PATTERN_KEY in customBag) {
+    const marker = customBag[FILL_PATTERN_KEY]
+    if (isFillPattern(marker)) style = { ...style, fill: fillSpecOf(marker) }
+    else if (style?.fill !== undefined) {
+      const { fill: _dropped, ...rest } = style
+      style = rest
+    }
+  } else if (styleDelta && ('fillColor' in styleDelta || 'fill' in styleDelta) && style?.fill) {
+    const { fill: _dropped, ...rest } = style
+    style = rest
+  }
   let styleReset = previous?.styleReset === true
   // Clear Formats sends an explicit `s: null`: earlier deltas are pre-reset
   // and drop; later deltas stack on the default style.
@@ -1764,7 +1878,7 @@ function mergeCellIntoEntry(
     }
   }
 
-  if (!hasValue && !style && !styleReset) return null
+  if (!hasValue && !style && !styleReset && previous?.styleReference === undefined) return null
   return {
     row,
     column,
@@ -1772,6 +1886,9 @@ function mergeCellIntoEntry(
     value,
     ...(formula === undefined ? {} : { formula }),
     ...(style === undefined ? {} : { style }),
+    ...(styleReset || previous?.styleReference === undefined
+      ? {}
+      : { styleReference: previous.styleReference }),
     ...(rich === undefined ? {} : { rich }),
     ...(styleReset ? { styleReset: true } : {}),
   }
@@ -1954,6 +2071,14 @@ export function toNeutralStyle(s: Record<string, unknown>): WorkbookStyleEdit | 
     }
   }
   if ('st' in s) style.strikethrough = isLineOn(s.st)
+  if ('va' in s) {
+    style.fontVerticalAlign =
+      s.va === BaselineOffset.SUBSCRIPT
+        ? 'subscript'
+        : s.va === BaselineOffset.SUPERSCRIPT
+          ? 'superscript'
+          : 'baseline'
+  }
   if (typeof s.ff === 'string' && s.ff.length > 0) {
     style.fontFamily = unescapeCssLeadingDigit(s.ff)
   }
@@ -2017,6 +2142,13 @@ export function toNeutralStyle(s: Record<string, unknown>): WorkbookStyleEdit | 
       const edge = univerBorderEdgeToNeutral(bd[univerKey])
       if (edge) style[neutralKey] = edge
     }
+    if ('bl_tr' in bd || 'tl_br' in bd) {
+      if ('bl_tr' in bd) style.diagonalUp = bd.bl_tr !== null
+      if ('tl_br' in bd) style.diagonalDown = bd.tl_br !== null
+      const diagonal = univerBorderEdgeToNeutral(bd.bl_tr) ?? univerBorderEdgeToNeutral(bd.tl_br)
+      if (diagonal) style.borderDiagonal = diagonal
+      else if (bd.bl_tr === null && bd.tl_br === null) style.borderDiagonal = null
+    }
   }
   return Object.keys(style).length === 0 ? undefined : (style as WorkbookStyleEdit)
 }
@@ -2050,6 +2182,7 @@ function isColorClear(value: unknown): boolean {
 const XLSX_HORIZONTAL_TO_UNIVER: Record<string, number> = {
   left: 1,
   center: 2,
+  centerContinuous: 2,
   right: 3,
   justify: 4,
   distributed: 6,
@@ -2058,6 +2191,8 @@ const XLSX_VERTICAL_TO_UNIVER: Record<string, number> = {
   top: 1,
   center: 2,
   bottom: 3,
+  justify: 2,
+  distributed: 2,
 }
 
 /// Converts a neutral style delta back to a Univer IStyleData patch, used to
@@ -2068,10 +2203,21 @@ export function fromNeutralStyle(style: WorkbookStyleEdit): Record<string, unkno
   if (style.italic !== undefined) s.it = style.italic ? 1 : null
   if (style.underline !== undefined) {
     s.ul = style.underline
-      ? { s: 1, ...(style.underlineStyle === 'double' ? { t: 10 } : {}) }
+      ? {
+          s: 1,
+          ...(['double', 'doubleAccounting'].includes(style.underlineStyle ?? '') ? { t: 10 } : {}),
+        }
       : null
   }
   if (style.strikethrough !== undefined) s.st = style.strikethrough ? { s: 1 } : null
+  if (style.fontVerticalAlign !== undefined) {
+    s.va =
+      style.fontVerticalAlign === 'subscript'
+        ? BaselineOffset.SUBSCRIPT
+        : style.fontVerticalAlign === 'superscript'
+          ? BaselineOffset.SUPERSCRIPT
+          : BaselineOffset.NORMAL
+  }
   if (style.fontFamily !== undefined) s.ff = escapeCssLeadingDigit(style.fontFamily)
   if (style.fontSize !== undefined) s.fs = style.fontSize
   if (style.fontColor !== undefined) {
@@ -2083,7 +2229,7 @@ export function fromNeutralStyle(style: WorkbookStyleEdit): Record<string, unkno
     style.fill !== undefined
       ? style.fill === null
         ? null
-        : fillDisplayColor(style.fill)
+        : (blendedDisplayOf(style.fill) ?? fillDisplayColor(style.fill))
       : style.fillColor
   if (fill !== undefined) {
     // Same empty-rgb sentinel as toUniverStyle: a bare bg: null is stripped
@@ -2093,7 +2239,12 @@ export function fromNeutralStyle(style: WorkbookStyleEdit): Record<string, unkno
       fill === null || fill === undefined ? { ...NO_FILL_STYLE } : { rgb: resolveStyleColor(fill) }
   }
   if (style.horizontalAlignment !== undefined) {
-    s.ht = XLSX_HORIZONTAL_TO_UNIVER[style.horizontalAlignment]
+    s.ht =
+      style.horizontalAlignment === 'general'
+        ? 0
+        : style.horizontalAlignment === 'fill'
+          ? 1
+          : XLSX_HORIZONTAL_TO_UNIVER[style.horizontalAlignment]
   }
   if (style.verticalAlignment !== undefined) {
     s.vt = XLSX_VERTICAL_TO_UNIVER[style.verticalAlignment]
@@ -2118,6 +2269,22 @@ export function fromNeutralStyle(style: WorkbookStyleEdit): Record<string, unkno
             cl: { rgb: edge.color ?? '#000000' },
           }
   }
+  if (style.diagonalUp !== undefined)
+    bd.bl_tr =
+      style.diagonalUp && style.borderDiagonal
+        ? {
+            s: XLSX_BORDER_TO_UNIVER[style.borderDiagonal.style] ?? 1,
+            cl: { rgb: style.borderDiagonal.color ?? '#000000' },
+          }
+        : null
+  if (style.diagonalDown !== undefined)
+    bd.tl_br =
+      style.diagonalDown && style.borderDiagonal
+        ? {
+            s: XLSX_BORDER_TO_UNIVER[style.borderDiagonal.style] ?? 1,
+            cl: { rgb: style.borderDiagonal.color ?? '#000000' },
+          }
+        : null
   if (Object.keys(bd).length > 0) s.bd = bd
   return s
 }
@@ -2232,6 +2399,7 @@ export function toSaveEdits(journal: EditJournal): WorkbookCellEdit[] {
         value: entry.value,
         ...(entry.formula === undefined ? {} : { formula: entry.formula }),
         ...(entry.style === undefined ? {} : { style: entry.style }),
+        ...(entry.styleReference === undefined ? {} : { styleReference: entry.styleReference }),
         ...(entry.rich === undefined ? {} : { rich: [...entry.rich] }),
         ...(entry.styleReset ? { styleReset: true } : {}),
       })

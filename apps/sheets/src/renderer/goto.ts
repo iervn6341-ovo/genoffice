@@ -91,3 +91,28 @@ export function resolveGoToRef(
   }
   return isA1Reference(trimmed) ? trimmed : null
 }
+
+/// Rightmost 0-based column a resolved A1 reference touches (`XFD1` → 16383,
+/// `Sheet1!B2:D5` → 3), or null for a pure row span. Go To / the Name Box use
+/// it to grow the grid before selecting a column beyond the materialised one.
+export function maxColumnIndexOfRef(ref: string): number | null {
+  const { body } = splitSheetPrefix(ref)
+  let max: number | null = null
+  for (const part of body.split(':')) {
+    const letters = /^\$?([A-Za-z]{1,3})(?:\$?\d+)?$/.exec(part)?.[1]
+    if (letters === undefined) continue
+    try {
+      max = Math.max(max ?? 0, columnIndex(letters.toUpperCase()))
+    } catch {
+      // not a column — caller already validated the shape
+    }
+  }
+  return max
+}
+
+/// Sheet part of a reference (`'My Sheet'!A1` → `My Sheet`), '' when absent.
+export function sheetNameOfRef(ref: string): string {
+  const { sheet } = splitSheetPrefix(ref)
+  const unquoted = /^'(.*)'$/.exec(sheet)?.[1]
+  return (unquoted ?? sheet).replace(/''/g, "'")
+}
