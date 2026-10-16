@@ -10,6 +10,8 @@
     "./drop-open": "./src/drop-open.ts",
     "./generated-images": "./src/generated-images.ts",
     "./headless-export": "./src/headless-export.ts",
+    "./print-job": "./src/print-job.ts",
+    "./print-job-strings": "./src/print-job-strings.ts",
     "./remote-image": "./src/remote-image.ts",
     "./renderer-protocol": "./src/renderer-protocol.ts",
     "./renderer-scheme": "./src/renderer-scheme.ts",

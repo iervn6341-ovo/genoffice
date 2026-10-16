@@ -5,6 +5,7 @@
 
 import type { WorkbookVisualEdit } from '../shared/edit-schemas'
 import { relsPathFor, resolveRelTarget, type MutablePackage } from './xlsx-drawing-add'
+import { rewriteEquationAnchor } from './xlsx-equation-edit'
 import {
   parseRelationships,
   partPathForRels,
@@ -356,33 +357,37 @@ function applyOneEdit(
     return xml.slice(0, match.index) + xml.slice(match.index + anchorXml.length)
   }
   const anchor = edit.anchor
-  if (!anchor) throw new VisualEditError('A visual edit needs a removal or a new anchor.')
-  if (kind === 'absoluteAnchor') {
+  if (!anchor && !edit.equation)
+    throw new VisualEditError('A visual edit needs a removal, a new anchor, or an equation.')
+  if (anchor && kind === 'absoluteAnchor') {
     throw new VisualEditError('This visual uses an absolute anchor — moving it is not supported.')
   }
   const pre = escapeRegExp(p)
-  const from =
-    `<${p}from><${p}col>${anchor.fromColumn}</${p}col>` +
-    `<${p}colOff>${anchor.fromColumnOffset}</${p}colOff>` +
-    `<${p}row>${anchor.fromRow}</${p}row>` +
-    `<${p}rowOff>${anchor.fromRowOffset}</${p}rowOff></${p}from>`
-  let patched = anchorXml.replace(new RegExp(`<${pre}from>[\\s\\S]*?</${pre}from>`), () => from)
-  if (patched === anchorXml && !anchorXml.includes(`<${p}from>`)) {
-    throw new VisualEditError('Drawing anchor has no from marker — moving it is not supported.')
-  }
-  if (kind === 'twoCellAnchor') {
-    const to =
-      `<${p}to><${p}col>${anchor.toColumn}</${p}col>` +
-      `<${p}colOff>${anchor.toColumnOffset}</${p}colOff>` +
-      `<${p}row>${anchor.toRow}</${p}row>` +
-      `<${p}rowOff>${anchor.toRowOffset}</${p}rowOff></${p}to>`
-    // An unchanged edge replaces to an identical string, so presence must be
-    // checked directly (an NW resize touches only the from marker).
-    const withTo = patched.replace(new RegExp(`<${pre}to>[\\s\\S]*?</${pre}to>`), () => to)
-    if (withTo === patched && !patched.includes(`<${p}to>`)) {
-      throw new VisualEditError('Drawing anchor has no to marker — moving it is not supported.')
+  let patched = anchorXml
+  if (anchor) {
+    const from =
+      `<${p}from><${p}col>${anchor.fromColumn}</${p}col>` +
+      `<${p}colOff>${anchor.fromColumnOffset}</${p}colOff>` +
+      `<${p}row>${anchor.fromRow}</${p}row>` +
+      `<${p}rowOff>${anchor.fromRowOffset}</${p}rowOff></${p}from>`
+    patched = anchorXml.replace(new RegExp(`<${pre}from>[\\s\\S]*?</${pre}from>`), () => from)
+    if (patched === anchorXml && !anchorXml.includes(`<${p}from>`)) {
+      throw new VisualEditError('Drawing anchor has no from marker — moving it is not supported.')
     }
-    patched = withTo
+    if (kind === 'twoCellAnchor') {
+      const to =
+        `<${p}to><${p}col>${anchor.toColumn}</${p}col>` +
+        `<${p}colOff>${anchor.toColumnOffset}</${p}colOff>` +
+        `<${p}row>${anchor.toRow}</${p}row>` +
+        `<${p}rowOff>${anchor.toRowOffset}</${p}rowOff></${p}to>`
+      // An unchanged edge replaces to an identical string, so presence must be
+      // checked directly (an NW resize touches only the from marker).
+      const withTo = patched.replace(new RegExp(`<${pre}to>[\\s\\S]*?</${pre}to>`), () => to)
+      if (withTo === patched && !patched.includes(`<${p}to>`)) {
+        throw new VisualEditError('Drawing anchor has no to marker — moving it is not supported.')
+      }
+      patched = withTo
+    }
   }
   if (edit.frameSize) {
     // A rotated shape resized through its AABB: the anchor holds the rotated
@@ -401,6 +406,16 @@ function applyOneEdit(
       )
     }
     patched = withExt
+  }
+  const equation = edit.equation
+  if (equation) {
+    try {
+      patched = rewriteEquationAnchor(patched, equation)
+    } catch (error) {
+      throw new VisualEditError(
+        error instanceof Error ? error.message : 'The Office equation could not be edited.',
+      )
+    }
   }
   return xml.slice(0, match.index) + patched + xml.slice(match.index + anchorXml.length)
 }

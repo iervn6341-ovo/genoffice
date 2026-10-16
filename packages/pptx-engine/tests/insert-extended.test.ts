@@ -27,6 +27,10 @@ import {
   groupElements,
   applyHeaderFooter,
   readHeaderFooter,
+  readDeckHeaderFooter,
+  materializeSlide,
+  setSlideAnimations,
+  getSlideAnimations,
   duplicateSlide,
   type ChartElement,
   type GroupElement,
@@ -698,6 +702,48 @@ describe('setElementLink / getElementLink', () => {
 })
 
 describe('applyHeaderFooter', () => {
+  async function inheritedFooterDeck() {
+    const opened = await openPptx(fx('01_standard_business.pptx'))
+    for (let i = 0; i < opened.deck.slides.length; i++) {
+      const slide = opened.deck.slides[i]!
+      const before = slide.elements.length
+      slide.elements = slide.elements.filter(
+        (el) => !['dt', 'ftr', 'sldNum'].includes(el.placeholder ?? ''),
+      )
+      if (slide.elements.length !== before) {
+        slide.structureDirty = true
+        materializeSlide(opened, i)
+      }
+    }
+    const paths = new Set(
+      opened.deck.slides.map((slide) => slide.layoutPath).filter((path): path is string => !!path),
+    )
+    for (const path of paths) {
+      let xml = opened.archive.readText(path)!
+      xml = xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, (shape) => {
+        if (shape.includes('type="dt"'))
+          return shape.replace(
+            '<a:p><a:endParaRPr',
+            '<a:p><a:fld id="{00000000-0000-0000-0000-000000000002}" type="datetime4"><a:rPr lang="en-US"/><a:t>October 13, 2026</a:t></a:fld><a:endParaRPr',
+          )
+        if (shape.includes('type="ftr"'))
+          return shape.replace(
+            '<a:p><a:endParaRPr',
+            '<a:p><a:r><a:rPr lang="en-US" sz="2400"><a:solidFill><a:srgbClr val="123ABC"/></a:solidFill></a:rPr><a:t>Inherited footer</a:t></a:r><a:endParaRPr',
+          )
+        if (shape.includes('type="sldNum"'))
+          return shape.replace(
+            '<a:p><a:endParaRPr',
+            '<a:p><a:fld id="{00000000-0000-0000-0000-000000000001}" type="slidenum"><a:rPr lang="en-US"/><a:t>1</a:t></a:fld><a:endParaRPr',
+          )
+        return shape
+      })
+      xml = xml.replace('</p:sldLayout>', '<p:hf dt="1" ftr="1" sldNum="1"/></p:sldLayout>')
+      opened.archive.entries.set(path, Buffer.from(xml))
+    }
+    return openPptx(await savePptx(opened))
+  }
+
   it('writes footer + slide number + date placeholders into every slide', async () => {
     const opened = await openPptx(fx('01_standard_business.pptx'))
     const changed = applyHeaderFooter(opened, {
@@ -726,6 +772,268 @@ describe('applyHeaderFooter', () => {
     expect(state.slideNum).toBe(false)
     const ftrCount = slide.elements.filter((e) => e.placeholder === 'ftr').length
     expect(ftrCount).toBe(1)
+  })
+
+  it('round-trips fixed and dynamic date modes, including an imported uncommon field type', async () => {
+    const opened = await openPptx(fx('01_standard_business.pptx'))
+    applyHeaderFooter(opened, { date: 'January 2, 2001', dateAuto: false }, [0])
+    let reopened = await openPptx(await savePptx(opened))
+    expect(readHeaderFooter(reopened.deck.slides[0]!)).toMatchObject({
+      date: 'January 2, 2001',
+      dateAuto: false,
+    })
+    applyHeaderFooter(
+      reopened,
+      { date: '2 Jan 2001', dateAuto: true, dateFormat: 'datetime10' },
+      [0],
+    )
+    reopened = await openPptx(await savePptx(reopened))
+    expect(readHeaderFooter(reopened.deck.slides[0]!)).toMatchObject({
+      dateAuto: true,
+      dateFormat: 'datetime10',
+    })
+    applyHeaderFooter(
+      reopened,
+      { date: 'Imported value', dateAuto: true, dateFormat: 'datetime42' },
+      [0],
+    )
+    reopened = await openPptx(await savePptx(reopened))
+    expect(readHeaderFooter(reopened.deck.slides[0]!)).toMatchObject({
+      dateAuto: true,
+      dateFormat: 'datetime42',
+    })
+  })
+
+  it('preserves edited placeholder geometry, formatting, and shape ID while replacing rich text and fields', async () => {
+    const opened = await openPptx(fx('01_standard_business.pptx'))
+    applyHeaderFooter(opened, { date: 'Old', dateAuto: true }, [0])
+    const slide = opened.deck.slides[0]!
+    const date = slide.elements.find((el) => el.placeholder === 'dt')!
+    const id = /<p:cNvPr id="(\d+)"/.exec(date.anchor.originalXml)![1]
+    date.anchor.originalXml = date.anchor.originalXml
+      .replace(/<a:off x="[^"]+" y="[^"]+"\/>/, '<a:off x="123456" y="654321"/>')
+      .replace(
+        /<a:rPr\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/a:rPr>)/,
+        '<a:rPr lang="en-US" sz="1800"><a:solidFill><a:srgbClr val="123ABC"/></a:solidFill></a:rPr>',
+      )
+      .replace(
+        '</a:fld>',
+        '</a:fld><a:fld id="{00000000-0000-0000-0000-000000000001}" type="datetime2"><a:rPr lang="fr-FR"/><a:t>stale</a:t></a:fld>',
+      )
+    slide.structureDirty = true
+    materializeSlide(opened, 0)
+    setSlideAnimations(opened.deck.slides[0]!, [
+      {
+        spid: Number(id),
+        effect: 'fade',
+        trigger: 'onClick',
+        durationMs: 500,
+        delayMs: 0,
+      },
+    ])
+    applyHeaderFooter(opened, { date: 'Cost $& $1 $$', dateAuto: false }, [0])
+    const reopened = await openPptx(await savePptx(opened))
+    const xml = reopened.deck.slides[0]!.elements.find((el) => el.placeholder === 'dt')!.anchor
+      .originalXml
+    expect(xml).toContain(`<p:cNvPr id="${id}"`)
+    expect(xml).toContain('<a:off x="123456" y="654321"/>')
+    expect(xml).toContain('val="123ABC"')
+    expect(xml).toContain('<a:t>Cost $&amp; $1 $$</a:t>')
+    expect(xml).not.toContain('<a:fld')
+    expect(xml).not.toContain('stale')
+    expect(readHeaderFooter(reopened.deck.slides[0]!)).toMatchObject({
+      date: 'Cost $& $1 $$',
+      dateAuto: false,
+    })
+    expect(
+      getSlideAnimations(reopened.deck.slides[0]!).some(
+        (animation) => animation.spid === Number(id),
+      ),
+    ).toBe(true)
+  })
+
+  it('inserts literal special text into an empty styled placeholder', async () => {
+    const opened = await openPptx(fx('01_standard_business.pptx'))
+    applyHeaderFooter(opened, { footer: 'Old' }, [0])
+    const slide = opened.deck.slides[0]!
+    const footer = slide.elements.find((el) => el.placeholder === 'ftr')!
+    footer.anchor.originalXml = footer.anchor.originalXml.replace(
+      /<a:(?:r|fld)\b[^>]*>[\s\S]*?<\/a:(?:r|fld)>/,
+      '',
+    )
+    slide.structureDirty = true
+    materializeSlide(opened, 0)
+    applyHeaderFooter(opened, { footer: 'Price $& $1 $$' }, [0])
+    const reopened = await openPptx(await savePptx(opened))
+    expect(readHeaderFooter(reopened.deck.slides[0]!)).toMatchObject({ footer: 'Price $& $1 $$' })
+  })
+
+  it('applies only the selected slide and persists title-slide exclusion', async () => {
+    const opened = await openPptx(fx('01_standard_business.pptx'))
+    expect(opened.deck.slides.length).toBeGreaterThan(1)
+    applyHeaderFooter(opened, { footer: 'All', slideNum: true, dontShowOnTitleSlide: true })
+    let reopened = await openPptx(await savePptx(opened))
+    const titleIndex = reopened.deck.slides.findIndex(
+      (s) => s.layoutPath && /type="title"/.test(reopened.archive.readText(s.layoutPath) ?? ''),
+    )
+    expect(titleIndex).toBeGreaterThanOrEqual(0)
+    expect(readHeaderFooter(reopened.deck.slides[titleIndex]!)).toMatchObject({
+      footer: null,
+      slideNum: false,
+    })
+    expect(readDeckHeaderFooter(reopened, titleIndex)).toMatchObject({
+      footer: 'All',
+      dontShowOnTitleSlide: true,
+    })
+    const target = titleIndex === 0 ? 1 : 0
+    const untouched = titleIndex === 0 ? 2 : 1
+    applyHeaderFooter(reopened, { footer: 'Only this slide', slideNum: false }, [target])
+    reopened = await openPptx(await savePptx(reopened))
+    expect(readHeaderFooter(reopened.deck.slides[target]!)).toMatchObject({
+      footer: 'Only this slide',
+      slideNum: false,
+    })
+    expect(readHeaderFooter(reopened.deck.slides[untouched]!)).not.toMatchObject({
+      footer: 'Only this slide',
+    })
+  })
+
+  it('reads inherited footer state and masks it only on the selected slide when cleared', async () => {
+    const opened = await inheritedFooterDeck()
+    expect(readHeaderFooter(opened.deck.slides[0]!)).toMatchObject({
+      footer: 'Inherited footer',
+      slideNum: true,
+      date: expect.any(String),
+      dateAuto: true,
+      dateFormat: 'datetimeFigureOut',
+    })
+    expect(readDeckHeaderFooter(opened, 0)).toMatchObject({
+      footer: 'Inherited footer',
+      slideNum: true,
+      dateAuto: true,
+    })
+    const inherited = opened.deck.slides[1]!.decorations!.find((el) => el.placeholder === 'ftr')!
+    applyHeaderFooter(opened, { footer: null, slideNum: false, date: null }, [0])
+    const reopened = await openPptx(await savePptx(opened))
+    expect(readHeaderFooter(reopened.deck.slides[0]!)).toMatchObject({
+      footer: null,
+      slideNum: false,
+      date: null,
+      dateAuto: false,
+    })
+    expect(
+      reopened.deck.slides[0]!.decorations?.some((el) => el.placeholder === 'ftr') ?? false,
+    ).toBe(false)
+    expect(readHeaderFooter(reopened.deck.slides[1]!)).toMatchObject({
+      footer: 'Inherited footer',
+      slideNum: true,
+      dateAuto: true,
+    })
+    expect(
+      reopened.deck.slides[1]!.decorations!.find((el) => el.placeholder === 'ftr')!.transform
+        .offset,
+    ).toEqual(inherited.transform.offset)
+    expect(reopened.archive.readText(reopened.deck.slides[0]!.path)).not.toContain('<p:hf')
+  })
+
+  it('materializes inherited formatting when enabled and suppresses inherited title footer with Apply current', async () => {
+    const opened = await inheritedFooterDeck()
+    const titleIndex = opened.deck.slides.findIndex(
+      (slide) =>
+        slide.layoutPath && /type="title"/.test(opened.archive.readText(slide.layoutPath) ?? ''),
+    )
+    expect(titleIndex).toBeGreaterThanOrEqual(0)
+    const contentIndex = titleIndex === 0 ? 1 : 0
+    const source = opened.deck.slides[contentIndex]!.decorations!.find(
+      (el) => el.placeholder === 'ftr',
+    )!
+    applyHeaderFooter(opened, { footer: 'Edited footer', slideNum: true }, [contentIndex])
+    applyHeaderFooter(
+      opened,
+      {
+        footer: 'Should hide',
+        slideNum: true,
+        date: 'Should hide date',
+        dateAuto: true,
+        dontShowOnTitleSlide: true,
+      },
+      [titleIndex],
+    )
+    const reopened = await openPptx(await savePptx(opened))
+    const contentFooter = reopened.deck.slides[contentIndex]!.elements.find(
+      (el) => el.placeholder === 'ftr',
+    )!
+    expect(contentFooter.anchor.originalXml).toContain('val="123ABC"')
+    expect(contentFooter.anchor.originalXml).toContain('sz="2400"')
+    expect(contentFooter.transform.offset).toEqual(source.transform.offset)
+    expect(readHeaderFooter(reopened.deck.slides[contentIndex]!)).toMatchObject({
+      footer: 'Edited footer',
+      slideNum: true,
+    })
+    expect(readHeaderFooter(reopened.deck.slides[titleIndex]!)).toMatchObject({
+      footer: null,
+      slideNum: false,
+      date: null,
+    })
+    expect(
+      reopened.deck.slides[titleIndex]!.decorations?.some((el) => el.placeholder === 'ftr') ??
+        false,
+    ).toBe(false)
+    expect(reopened.archive.readText(reopened.deck.slides[titleIndex]!.path)).not.toContain('<p:hf')
+  })
+
+  it('Apply to All can clear inherited footer content without resurfacing after reopen', async () => {
+    const opened = await inheritedFooterDeck()
+    applyHeaderFooter(opened, { footer: null, slideNum: false, date: null })
+    const reopened = await openPptx(await savePptx(opened))
+    for (const slide of reopened.deck.slides) {
+      expect(readHeaderFooter(slide)).toMatchObject({ footer: null, slideNum: false, date: null })
+      expect(
+        slide.decorations?.some((el) => ['ftr', 'sldNum', 'dt'].includes(el.placeholder ?? '')) ??
+          false,
+      ).toBe(false)
+    }
+  })
+
+  it('remaps a styled inherited footer hyperlink into the slide relationships when materialized', async () => {
+    let opened = await inheritedFooterDeck()
+    const slideIndex = 1
+    const layoutPath = opened.deck.slides[slideIndex]!.layoutPath!
+    const layout = opened.archive.readText(layoutPath)!
+    opened.archive.entries.set(
+      layoutPath,
+      Buffer.from(
+        layout.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, (shape) =>
+          shape.includes('type="ftr"')
+            ? shape.replace('</a:rPr>', '<a:hlinkClick r:id="rId99"/></a:rPr>')
+            : shape,
+        ),
+      ),
+    )
+    const relsPath = relsPathFor(layoutPath)
+    const rels = opened.archive.readText(relsPath)!
+    opened.archive.entries.set(
+      relsPath,
+      Buffer.from(
+        rels.replace(
+          '</Relationships>',
+          '<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/footer" TargetMode="External"/></Relationships>',
+        ),
+      ),
+    )
+    opened = await openPptx(await savePptx(opened))
+    applyHeaderFooter(opened, { footer: 'Linked footer' }, [slideIndex])
+    const reopened = await openPptx(await savePptx(opened))
+    const slide = reopened.deck.slides[slideIndex]!
+    const footerXml = slide.elements.find((el) => el.placeholder === 'ftr')!.anchor.originalXml
+    const slideRid = /<a:hlinkClick r:id="([^"]+)"/.exec(footerXml)?.[1]
+    expect(slideRid).toBeTruthy()
+    expect(reopened.archive.readRels(slide.path).get(slideRid!)).toMatchObject({
+      type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink',
+      target: 'https://example.com/footer',
+      targetMode: 'External',
+    })
+    expect(footerXml).toContain('val="123ABC"')
   })
 })
 

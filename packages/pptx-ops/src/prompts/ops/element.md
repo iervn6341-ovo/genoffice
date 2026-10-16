@@ -218,6 +218,39 @@ Common mistakes
 - Percentages such as 10: fractions are 0..1, so 10 percent is 0.1.
 - Opposing crops summing to 1 or more: nothing would remain visible.
 
+### setAltText
+
+`{text?:string|null, decorative?:boolean}`
+
+Sets a picture's alternative text (`descr` on the picture's non-visual properties) or marks it decorative with the native accessibility flag. An empty or null `text` clears the description. A decorative picture carries no description. Other picture formatting, relationships, and unrelated non-visual extensions stay untouched.
+
+```json
+{
+  "op": "setAltText",
+  "target": { "slide": 0, "el": "e_PICTURE" },
+  "text": "Quarterly revenue chart"
+}
+```
+
+Common mistakes
+
+- Targeting a shape or chart: only ordinary pictures are supported.
+- Sending both a description and `decorative: true`: decorative wins and the description is cleared.
+
+### setLockAspect
+
+`{locked:boolean}`
+
+Persists a picture's Lock aspect ratio setting as the native `noChangeAspect` lock. It does not resize the picture.
+
+```json
+{ "op": "setLockAspect", "target": { "slide": 0, "el": "e_PICTURE" }, "locked": true }
+```
+
+Common mistakes
+
+- Expecting the picture to be resized: use `setTransform` to change its frame.
+
 ### setPictureOpacity
 
 `{opacity:0..1}`
@@ -232,6 +265,26 @@ Common mistakes
 
 - Percent values: 60 percent is `0.6`.
 - Non-picture targets: shapes take translucency through `setFill` with an `"#RRGGBBAA"` color.
+
+### setPictureAdjustments
+
+`{adjustments:{lum?:{bright:-1..1,contrast:-1..1}|null,color?:"original"|"grayscale"|"blackWhite"|"sepia"|"blue"}}`
+
+Edits native picture brightness/contrast and recolor effects without replacing its image, crop, border, or other imported effects. Omit one field to leave that aspect unchanged; `lum:null` removes brightness/contrast.
+
+```json
+{
+  "op": "setPictureAdjustments",
+  "target": { "slide": 0, "el": "e_PICTURE" },
+  "adjustments": { "lum": { "bright": 0.2, "contrast": 0.1 } }
+}
+```
+
+### resetPicture (not-ai-callable)
+
+`{baseline:{xml,rels,parts?,contentTypes?}}`
+
+Restores one picture's image and native formatting from the host session's most recent import/save. The app supplies the exact saved XML and related media bytes; AI scripts cannot safely invent this bundle. The current frame and nonvisual metadata stay in place.
 
 ### reorderElement
 

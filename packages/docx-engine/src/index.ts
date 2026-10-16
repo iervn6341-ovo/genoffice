@@ -8,6 +8,12 @@ export { LAZY_MEDIA_SCHEME, isLazyMediaPart, lazyMediaUrl, parseLazyMediaUrl } f
 export { setAltChunkHtmlConverter, type AltChunkHtmlConverter } from './alt-chunk'
 export { tocLevelOf } from './parse-fields'
 export {
+  tocInstructionFromXml,
+  parseTocInstruction,
+  tocOptionsFromField,
+  patchTocCachedPageNumber,
+} from './toc'
+export {
   saveDocx,
   findChartWorkbookPath,
   readDocxPartBase64,
@@ -32,7 +38,14 @@ export {
   generateTableModelXml,
   generateTableXml,
   generateTocFieldXml,
+  tocInstruction,
+  DEFAULT_TOC_OPTIONS,
+  type TocOptions,
+  type TocFormat,
+  type TocLeader,
   mergePPrFormat,
+  patchRunPropertiesXml,
+  splitXmlChildren,
   setPPrChange,
   stripPPrChange,
   patchFieldParagraphXml,
@@ -99,7 +112,15 @@ export {
   notePropsFromXml,
   xmlFlagOn,
 } from './section'
-export { nextNoteId, parseNotesXml, type NoteKind } from './notes'
+export {
+  convertNoteEntryXml,
+  noteEntryXmlForModel,
+  nextNoteId,
+  parseNotesXml,
+  type NoteKind,
+  type NoteStyleMap,
+} from './notes'
+export { wordSymbolForMark } from './note-custom-mark'
 export {
   isPictureWatermark,
   pictureWatermarkPreviewImage,

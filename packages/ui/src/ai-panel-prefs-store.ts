@@ -6,6 +6,7 @@ import {
   sameAiPanelPrefs,
   type AiPanelPrefs,
 } from './ai-panel-prefs'
+import { setSmoothScroll } from './smooth-scroll'
 
 let current: AiPanelPrefs = DEFAULT_AI_PANEL_PREFS
 const listeners = new Set<() => void>()
@@ -23,6 +24,7 @@ function subscribe(listener: () => void): () => void {
  */
 export function applyAiPanelPrefs(raw: unknown): void {
   const next = normalizeAiPanelPrefs(raw)
+  setSmoothScroll(next.smoothScroll)
   if (sameAiPanelPrefs(next, current)) return
   current = next
   const html = document.documentElement

@@ -10,6 +10,16 @@ import {
   listMasterParts,
   parseMasterPart,
   materializeSlide,
+  createBlankPptx,
+  ensureNotesMaster,
+  ensureHandoutMaster,
+  masterPartSize,
+  readNotesMasterPlaceholders,
+  setNotesMasterPlaceholderEnabled,
+  setNotesPageOrientation,
+  setNotesMasterBodyStyle,
+  getSlideNotesParagraphs,
+  setSlideNotes,
 } from '../src/index'
 import type { TextElement } from '../src/types'
 
@@ -17,6 +27,107 @@ const here = dirname(fileURLToPath(import.meta.url))
 const fx = (name: string) => readFileSync(join(here, 'fixtures', name))
 
 describe('listMasterParts / parseMasterPart', () => {
+  it('writes Notes Master body formatting into native notesStyle inherited by notes pages', async () => {
+    const opened = await openPptx(await createBlankPptx())
+    const path = ensureNotesMaster(opened.archive)!
+    setSlideNotes(opened, 0, 'Body inherits style')
+    expect(
+      setNotesMasterBodyStyle(opened.archive, path, {
+        fontFamily: 'Arial',
+        fontSizePt: 20,
+        color: '#336699',
+        bold: true,
+        align: 'right',
+        lineSpacingPct: 145,
+      }),
+    ).toBe(true)
+    const native = opened.archive.readText(path)!
+    expect(native).toContain('<p:notesStyle><a:lvl1pPr algn="r">')
+    expect(native).toContain('<a:lnSpc><a:spcPct val="145000"/></a:lnSpc>')
+    const paragraph = getSlideNotesParagraphs(opened.archive, opened.deck.slides[0]!.path)[0]!
+    expect(paragraph.align).toBe('right')
+    expect(paragraph.runs[0]).toMatchObject({
+      text: 'Body inherits style',
+      fontFamily: 'Arial',
+      fontSize: 20,
+      color: '#336699',
+      bold: true,
+    })
+    const reopened = await openPptx(await savePptx(opened))
+    expect(
+      getSlideNotesParagraphs(reopened.archive, reopened.deck.slides[0]!.path)[0]?.runs[0]
+        ?.fontSize,
+    ).toBe(20)
+  })
+  it('parses imported decorative picture and gradient background from a notes master for print artwork', async () => {
+    const opened = await openPptx(fx('01_standard_business.pptx'))
+    const path = ensureNotesMaster(opened.archive)!
+    const xml = opened.archive.readText(path)!
+    const gradient =
+      '<p:bg><p:bgPr><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="112233"/></a:gs><a:gs pos="100000"><a:srgbClr val="EEDDCC"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="1"/></a:gradFill><a:effectLst/></p:bgPr></p:bg>'
+    const picture =
+      '<p:pic><p:nvPicPr><p:cNvPr id="99" name="Native logo"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId99"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+    const group = `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="98" name="Native Logo Group"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="914400" y="365760"/><a:ext cx="914400" cy="914400"/><a:chOff x="0" y="0"/><a:chExt cx="914400" cy="914400"/></a:xfrm></p:grpSpPr>${picture}</p:grpSp>`
+    opened.archive.entries.set(
+      path,
+      Buffer.from(
+        xml
+          .replace('<p:cSld>', `<p:cSld>${gradient}`)
+          .replace('</p:spTree>', `${group}</p:spTree>`),
+      ),
+    )
+    const relsPath = 'ppt/notesMasters/_rels/notesMaster1.xml.rels'
+    const rels = opened.archive.readText(relsPath)!
+    opened.archive.entries.set(
+      relsPath,
+      Buffer.from(
+        rels.replace(
+          '</Relationships>',
+          '<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/></Relationships>',
+        ),
+      ),
+    )
+    const master = parseMasterPart(opened.archive, path)!
+    expect(master.background?.type).toBe('gradient')
+    const logo = master.elements
+      .find((element) => element.type === 'group')
+      ?.children.find((element) => element.type === 'picture')
+    expect(logo).toBeDefined()
+    expect(JSON.stringify(logo)).toContain('ppt/media/image1.png')
+  })
+  it('lists native notes and handout masters on their notes canvas with editable placeholders', async () => {
+    const opened = await openPptx(await createBlankPptx())
+    const notesPath = ensureNotesMaster(opened.archive)!
+    const handoutPath = ensureHandoutMaster(opened.archive)
+    const parts = listMasterParts(opened.archive)
+    expect(parts.some((p) => p.kind === 'notesMaster' && p.partPath === notesPath)).toBe(true)
+    expect(parts.some((p) => p.kind === 'handoutMaster' && p.partPath === handoutPath)).toBe(true)
+    const notesSize = masterPartSize(opened.archive, notesPath, opened.deck.size)
+    expect(notesSize).toMatchObject({ cx: 6858000, cy: 9144000 })
+    const notes = parseMasterPart(opened.archive, notesPath)!
+    expect(notes.elements.some((e) => e.placeholder === 'sldImg')).toBe(true)
+    expect(notes.elements.some((e) => e.placeholder === 'body')).toBe(true)
+    expect(readNotesMasterPlaceholders(opened.archive, notesPath)).toEqual({
+      sldImg: true,
+      body: true,
+    })
+    const originalBody = opened.archive
+      .readText(notesPath)!
+      .match(/<p:sp\b[^>]*>[\s\S]*?<p:ph type="body"[\s\S]*?<\/p:sp>/)?.[0]
+    expect(setNotesMasterPlaceholderEnabled(opened.archive, notesPath, 'body', false)).toBe(true)
+    expect(readNotesMasterPlaceholders(opened.archive, notesPath)?.body).toBe(false)
+    expect(setNotesMasterPlaceholderEnabled(opened.archive, notesPath, 'body', true)).toBe(true)
+    expect(readNotesMasterPlaceholders(opened.archive, notesPath)?.body).toBe(true)
+    expect(originalBody).toContain('idx="3"')
+    expect(parseMasterPart(opened.archive, handoutPath)).not.toBeNull()
+    expect(setNotesPageOrientation(opened.archive, 'landscape')).toBe(true)
+    expect(masterPartSize(opened.archive, notesPath, opened.deck.size)).toEqual({
+      cx: 9144000,
+      cy: 6858000,
+    })
+    const reopened = await openPptx(await savePptx(opened))
+    expect(listMasterParts(reopened.archive).map((p) => p.kind)).toContain('notesMaster')
+  })
   it('enumeration: master first, layouts after; both part kinds parse into elements', async () => {
     const opened = await openPptx(fx('01_standard_business.pptx'))
     const parts = listMasterParts(opened.archive)

@@ -18,7 +18,8 @@
   "dependencies": {
     "@genoffice/pptx-engine": "*",
     "opentype.js": "^2.0.0",
-    "bidi-js": "^1.0.3"
+    "bidi-js": "^1.0.3",
+    "@genoffice/office-math": "*"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -36,6 +36,15 @@ export interface TextGlow {
 
 export interface Run {
   text: string
+  /** Existing header/footer field kept as one protected editing unit. `xml` is
+   * the exact field fragment, including instruction and formatted cache. */
+  hfField?: {
+    xml: string
+    instruction: string
+    token: string
+    displayText: string
+    resultRuns: Run[]
+  }
   /**
    * Original <w:rPr> slice (serialized from the parse tree). Written back via
    * mergeRPrModel when the run is rebuilt: unmodeled properties (caps/vanish/dstrike/
@@ -43,11 +52,16 @@ export interface Run {
    * modeled fields are only rebuilt when they differ from the raw encoding (i.e. edited).
    */
   rawRPr?: string
+  /** Prefixes bound to the Word 2010 namespace at this run's rPr scope. */
+  rawRPrW14Prefixes?: string[]
   /** character style id (w:rStyle); "Hyperlink" is implied by `link` and never stored here */
   styleId?: string
   bold?: boolean
   italic?: boolean
   underline?: boolean
+  /** w:u style and colour; retained independently so editing another font property keeps them. */
+  underlineStyle?: string
+  underlineColor?: string
   strike?: boolean
   /** hex color without '#', e.g. "FF0000"; 'auto' = explicit w:color auto (Word's automatic
    * colour, overrides an inherited style colour; rendered as the default ink) */
@@ -79,9 +93,9 @@ export interface Run {
   csFont?: string
   /** right-to-left run (w:rtl): text stored in logical order, rendered RTL */
   rtl?: boolean
-  /** Character spacing (w:spacing, twips, may be negative). Display only; saving is kept faithful by rawRPr */
+  /** Character spacing (w:spacing, twips, may be negative). */
   charSpacingTwips?: number
-  /** w:kern threshold in half-points (0 = explicitly off). Display only; saving is kept faithful by rawRPr */
+  /** w:kern threshold in half-points (0 = explicitly off). */
   kernHalfPoints?: number
   /** w:caps ('all') / w:smallCaps ('small') display transform, 'none' = explicit off. Display only; saving is kept faithful by rawRPr */
   caps?: 'all' | 'small' | 'none'
@@ -89,7 +103,7 @@ export interface Run {
    *  run value wins; w:specVanish style separators stay visible). Display only;
    *  saving is kept faithful by rawRPr */
   vanish?: boolean
-  /** Horizontal character scale percent (w:w). Display only (approximated as spacing); saving is kept faithful by rawRPr */
+  /** Horizontal character scale percent (w:w). */
   charScalePct?: number
   /** OOXML named highlight color (w:highlight), e.g. "yellow" */
   highlight?: string
@@ -105,7 +119,7 @@ export interface Run {
   dstrike?: boolean
   /** w14:glow halo. Display only; saving is kept faithful by rawRPr */
   glow?: TextGlow
-  /** w:position baseline shift in half-points (positive = raised). Display only; saving is kept faithful by rawRPr */
+  /** w:position baseline shift in half-points (positive = raised). */
   positionHalfPoints?: number
   /** character border (w:bdr): style keyword, width in eighths of a point, hex color
    *  without '#' (absent = auto), text gap in points. Display only; saving is kept faithful by rawRPr */
@@ -134,7 +148,13 @@ export interface Run {
    * w:endnoteReference). `text` holds the display number; the marker itself
    * is what saves (Word renumbers automatically).
    */
-  noteRef?: { kind: 'footnote' | 'endnote'; id: string }
+  noteRef?: {
+    kind: 'footnote' | 'endnote'
+    id: string
+    customMark?: string
+    /** Original w:sym payload, when Word used a symbol-font glyph. */
+    customMarkSymbol?: { font: string; char: string }
+  }
   /**
    * An index entry (XE) field attached AFTER this run's text. Invisible in
    * Word; kept in the run model so marked paragraphs stay editable.
@@ -213,6 +233,8 @@ export interface Run {
     widthPx?: number
     heightPx?: number
     xml: string
+    /** Unsaved header/footer picture bytes; saveDocx allocates this part's image relationship. */
+    pendingMedia?: { base64: string; mime: 'image/png' | 'image/jpeg' | 'image/gif' }
     wrap?: ImageWrap
     offsetXEmu?: number
     offsetYEmu?: number
@@ -459,6 +481,8 @@ export interface ParaFormat {
   keepLines?: boolean
   /** skip this paragraph's lines in section line numbering (w:suppressLineNumbers) */
   suppressLineNumbers?: boolean
+  /** prevent automatic hyphenation in this paragraph (w:suppressAutoHyphens) */
+  suppressAutoHyphens?: boolean
   /** widow/orphan control (w:widowControl; Word default=true) */
   widowControl?: boolean
   /** snap lines to the section docGrid (w:snapToGrid; default on) — false only when explicitly off */
@@ -467,8 +491,17 @@ export interface ParaFormat {
   autoSpace?: boolean
   /** w:wordWrap (Word default on); false = lines may break inside hangul words */
   wordWrap?: boolean
+  /** East Asian first/last-character line-break rules (w:kinsoku) */
+  kinsoku?: boolean
   /** w:overflowPunct (Word default on); false = a trailing CJK stop never hangs past the margin */
   overflowPunct?: boolean
+  /** compress punctuation at the start of a line (w:topLinePunct) */
+  topLinePunct?: boolean
+  /** independent East Asian/Latin and East Asian/digit spacing controls */
+  autoSpaceDE?: boolean
+  autoSpaceDN?: boolean
+  /** vertical alignment of different-size scripts within a line (w:textAlignment) */
+  textAlignment?: 'auto' | 'baseline' | 'center' | 'top' | 'bottom'
   /** paragraph-style chain w:lang w:eastAsia (BCP-47): runs without their own value inherit it */
   eastAsiaLang?: string
   /** ignore spacing next to same-style paras (w:contextualSpacing); false = explicit off overriding the style */
@@ -672,6 +705,10 @@ export interface SectionInfo {
   pageNumberStart?: number
   /** page number format (w:pgNumType w:fmt): decimal/lowerRoman/upperLetter/... */
   pageNumberFmt?: string
+  /** numbered Heading level (1–9) used as the chapter prefix of PAGE fields */
+  pageNumberChapterStyle?: number
+  /** separator between the chapter and page numbers (w:pgNumType w:chapSep) */
+  pageNumberChapterSeparator?: string
   /** header/footer reference rIds, by variant */
   headerRefs: Partial<Record<'default' | 'first' | 'even', string>>
   footerRefs: Partial<Record<'default' | 'first' | 'even', string>>
@@ -681,6 +718,9 @@ export interface SectionInfo {
 
 /** one rich paragraph of a header / footer part */
 export interface HfParagraph extends ParaFormat {
+  /** The part contains an unsupported field boundary; editing its text is blocked
+   * until the field can be represented without losing its OOXML. */
+  protectedFields?: boolean
   /** w:framePr w:xAlign — text frame floated at the margin edge; the line
    *  overlays the following paragraph's flow line instead of stacking (Word) */
   frameXAlign?: 'left' | 'center' | 'right'
@@ -933,6 +973,14 @@ export interface NoteInfo {
   id: string
   /** plain text, paragraphs joined with \n */
   text: string
+  /** Exact note entry for a pending conversion/history snapshot; never authored as a separate OOXML child. */
+  historyEntryXml?: string
+  /** Namespace bindings inherited from the original note-part root for that entry. */
+  historyEntryNamespaces?: Record<string, string>
+  /** explicit Word custom reference mark; omitted for automatically numbered notes */
+  customMark?: string
+  /** Original w:sym payload, retained when the custom mark uses a symbol font. */
+  customMarkSymbol?: { font: string; char: string }
   /** rich display runs (one group per paragraph); gone when an edit rebuilds the note as plain text */
   richParas?: NoteRun[][]
   /** no w:footnoteRef/w:endnoteRef run in the note body: Word renders the entry without a number mark */
@@ -942,6 +990,8 @@ export interface NoteInfo {
   /** the note body holds a Zotero citation field (note text is displayed flat, so the
    *  field is invisible to the Zotero bridge until note fields are editable) */
   zoteroField?: true
+  /** The body contains structures the plain-text note editor cannot safely rewrite. */
+  protectedContent?: true
   /** direct w:spacing of the first note paragraph (overrides the style chain) */
   spacing?: {
     beforeTwips?: number
@@ -1231,6 +1281,8 @@ export interface TableCell {
   vAlign?: 'top' | 'center' | 'bottom'
   /** vertical text (w:textDirection): tbRl = vertical right-to-left, btLr = horizontal rotated 90° (bottom-up) */
   textDirection?: 'tbRl' | 'btLr'
+  /** explicit edit of the text direction written to w:textDirection ('lrTb' = default, removes the element); undefined leaves the original tcPr alone */
+  textDirectionWrite?: 'lrTb' | 'tbRl' | 'btLr'
   /** legacy horizontal merge (w:hMerge, intermediate parse state): continue cells fold into the restart cell to their left */
   hMerge?: 'restart' | 'continue'
   /** cell borders (w:tcBorders); undefined = no tcBorders (table-level/style borders apply) */
@@ -1319,6 +1371,13 @@ export interface TableModel {
   tableLook?: TableLook
   /** RTL table (tblPr w:bidiVisual): columns display right to left */
   bidiVisual?: boolean
+  /** alternative text title / description (tblPr w:tblCaption / w:tblDescription); written only when defined, '' removes */
+  altTitle?: string
+  altDescription?: string
+  /** per-row "allow row to break across pages" flag (trPr w:cantSplit), aligned with rows; true = may NOT split, null = leave as-is */
+  cantSplitRows?: Array<boolean | null>
+  /** explicit edit of the cell spacing (twips of w:tblCellSpacing, 0/null removes); undefined leaves the original tblPr alone */
+  cellSpacingWriteTwips?: number | null
 }
 
 /**
@@ -2164,6 +2223,8 @@ export interface ThemeColors {
 
 export interface ParsedDoc {
   blocks: Block[]
+  /** dc:creator from docProps/core.xml, when present; used by new AUTHOR fields. */
+  coreCreator?: string
   /** Zotero document preferences stored in Word custom properties */
   zoteroDocumentData: string
   /** comments from word/comments.xml, in file order */
@@ -2176,6 +2237,9 @@ export interface ParsedDoc {
   footnoteProps?: NoteProps
   /** effective document-wide endnote properties (settings.xml overlaid by the final sectPr) */
   endnoteProps?: NoteProps
+  /** settings.xml values before section overrides; needed for sparse cross-save undo. */
+  footnoteSettings?: NoteProps
+  endnoteSettings?: NoteProps
   /** "footnote:<id>" / "endnote:<id>" -> display number (body reference order, numStart / eachSect applied) */
   noteNumbers?: Record<string, number>
   /** bibliography sources from the customXml b:Sources part */
@@ -2231,6 +2295,9 @@ export interface ParsedDoc {
   balanceDbcsSpacing?: boolean
   /** settings.xml w:characterSpacingControl compressPunctuation* — justified CJK lines compress trailing-blank punctuation */
   compressPunctuation?: boolean
+  /** Exact settings.xml Asian punctuation compression mode, when recognized. */
+  characterSpacingControl?:
+    'doNotCompress' | 'compressPunctuation' | 'compressPunctuationAndJapaneseKana'
   /** settings.xml w:compat <w:adjustLineHeightInTable/> — table-cell lines snap to the typed docGrid like body lines */
   adjustLineHeightInTable?: boolean
   /** settings.xml w:defaultTabStop in twips (absent = Word's 720); 0 = zero-width default tabs */
@@ -2257,6 +2324,15 @@ export interface ParsedDoc {
   internal: {
     originalBytes: Uint8Array
     documentXml: string
+    /** Exact native note entries, keyed by part kind and w:id, for safe conversion. */
+    noteEntryXml?: {
+      footnote: Record<string, string>
+      endnote: Record<string, string>
+    }
+    notePartNamespaces?: {
+      footnote: Record<string, string>
+      endnote: Record<string, string>
+    }
     /** inner body range [start, end) in documentXml covered by top-level elements */
     bodyInnerStart: number
     bodyInnerEnd: number

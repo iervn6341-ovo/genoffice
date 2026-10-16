@@ -34,12 +34,14 @@ export interface BackstageProps {
   onSave: () => void
   onSaveAs: () => void
   onPrint?: () => void
+  /** When set, Print opens a pane listing these (e.g. print scopes) instead of running onPrint */
+  printItems?: readonly BackstageExport[] | undefined
 }
 
 /** keep in step with the bs-slide-out duration in backstage.css */
 const CLOSE_MS = 140
 
-type Pane = 'new' | 'open' | 'info' | 'export'
+type Pane = 'new' | 'open' | 'info' | 'export' | 'print'
 
 interface NavItem {
   id: string
@@ -128,7 +130,7 @@ export function Backstage(props: BackstageProps) {
               label: l.navPrint,
               icon: ICONS.print,
               needsDoc: true,
-              action: 'print' as const,
+              ...(props.printItems?.length ? {} : { action: 'print' as const }),
             },
           ]
         : []),
@@ -136,7 +138,7 @@ export function Backstage(props: BackstageProps) {
         ? [{ id: 'export', label: l.navExport, icon: ICONS.export, needsDoc: true }]
         : []),
     ],
-    [l, props.onPrint, props.exports.length],
+    [l, props.onPrint, props.printItems?.length, props.exports.length],
   )
 
   const runAction = (action: string) => {
@@ -254,6 +256,21 @@ export function Backstage(props: BackstageProps) {
                   </div>
                 ))}
               </dl>
+            )}
+            {pane === 'print' && (
+              <div className="bs-exports">
+                {props.printItems?.map((x) => (
+                  <button
+                    key={x.id}
+                    type="button"
+                    className="bs-export"
+                    disabled={x.disabled || !props.hasDoc}
+                    onClick={act(x.run)}
+                  >
+                    {x.label}
+                  </button>
+                ))}
+              </div>
             )}
             {pane === 'export' && (
               <div className="bs-exports">

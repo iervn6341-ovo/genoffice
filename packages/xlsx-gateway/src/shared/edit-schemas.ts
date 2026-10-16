@@ -119,7 +119,8 @@ export const workbookStyleEditSchema = z
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
     underline: z.boolean().optional(),
-    underlineStyle: z.enum(['single', 'double']).optional(),
+    underlineStyle: z.enum(['single', 'double', 'singleAccounting', 'doubleAccounting']).optional(),
+    fontVerticalAlign: z.enum(['baseline', 'superscript', 'subscript']).optional(),
     strikethrough: z.boolean().optional(),
     fontFamily: z.string().min(1).max(128).optional(),
     fontSize: z.number().positive().max(409).optional(),
@@ -129,9 +130,21 @@ export const workbookStyleEditSchema = z
     fillColor: z.union([styleColorSchema, z.null()]).optional(),
     /// pattern or gradient fill; wins over fillColor when both are present
     fill: z.union([fillSpecSchema, z.null()]).optional(),
-    horizontalAlignment: z.enum(['left', 'center', 'right', 'justify', 'distributed']).optional(),
-    verticalAlignment: z.enum(['top', 'center', 'bottom']).optional(),
+    horizontalAlignment: z
+      .enum([
+        'general',
+        'left',
+        'center',
+        'right',
+        'fill',
+        'justify',
+        'centerContinuous',
+        'distributed',
+      ])
+      .optional(),
+    verticalAlignment: z.enum(['top', 'center', 'bottom', 'justify', 'distributed']).optional(),
     wrapText: z.boolean().optional(),
+    shrinkToFit: z.boolean().optional(),
     /// OOXML textRotation: 0-90 counterclockwise, 91-180 clockwise (value-90),
     /// 255 stacked vertical; 0 clears the rotation.
     textRotation: z.union([z.number().int().min(0).max(180), z.literal(255)]).optional(),
@@ -147,6 +160,9 @@ export const workbookStyleEditSchema = z
     borderBottom: styleEditBorderSchema.optional(),
     borderLeft: styleEditBorderSchema.optional(),
     borderRight: styleEditBorderSchema.optional(),
+    borderDiagonal: styleEditBorderSchema.optional(),
+    diagonalUp: z.boolean().optional(),
+    diagonalDown: z.boolean().optional(),
   })
   .strict()
 
@@ -299,11 +315,18 @@ export const workbookVisualEditSchema = z
       })
       .strict()
       .optional(),
+    equation: z
+      .object({ latex: z.string().min(1).max(16_384), omml: z.string().min(1).max(131_072) })
+      .strict()
+      .optional(),
   })
   .strict()
-  .refine((edit) => edit.remove === true || edit.anchor !== undefined, {
-    message: 'A visual edit needs a removal or a new anchor.',
-  })
+  .refine(
+    (edit) => edit.remove === true || edit.anchor !== undefined || edit.equation !== undefined,
+    {
+      message: 'A visual edit needs a removal, a new anchor, or an equation.',
+    },
+  )
 
 export type WorkbookStyleEdit = z.infer<typeof workbookStyleEditSchema>
 export type WorkbookChartEdit = z.infer<typeof workbookChartEditSchema>

@@ -23,6 +23,7 @@ export function RibbonFoldGroup({
   as = 'div',
   itemsRole,
   caption,
+  preserveEditorFocus = false,
 }: {
   /** group name: the folded button's caption and the accessible name */
   label: string
@@ -42,6 +43,8 @@ export function RibbonFoldGroup({
   itemsRole?: string | undefined
   /** show the group name under the items while unfolded (Insert-style groups with a caption row) */
   caption?: boolean | undefined
+  /** Keep a live editor's caret when this folded launcher opens its panel. */
+  preserveEditorFocus?: boolean | undefined
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLElement | null>(null)
@@ -76,7 +79,11 @@ export function RibbonFoldGroup({
         className={`${buttonClassName} rb-fold-btn${open ? ' active' : ''}`}
         data-tip={label}
         aria-expanded={open}
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={preserveEditorFocus ? (e) => e.preventDefault() : undefined}
+        onMouseDown={(e) => {
+          if (preserveEditorFocus) e.preventDefault()
+          e.stopPropagation()
+        }}
         onClick={() => setOpen((v) => !v)}
       >
         <span className={iconClassName}>
@@ -88,9 +95,29 @@ export function RibbonFoldGroup({
       <div
         className={`${itemsClassName} rb-fold-items`}
         role={itemsRole}
-        // a command picked from the panel closes it (the panel is the group's own items)
+        // Keep the group open while a child button opens a nested picker. A click
+        // inside that picker is a completed command and closes the group.
         onClick={(e) => {
-          if (open && (e.target as Element).closest('button')) setOpen(false)
+          if (!open) return
+          const target = e.target as Element
+          const button = target.closest('button')
+          if (!button) return
+          if (button.closest('[data-rb-keep-open]')) return
+          if (button.closest('[data-rb-panel], .menu-select-drop, .gcp-palette')) {
+            setOpen(false)
+            return
+          }
+          // React flushes the child's dropdown state after the click handler.
+          // Check the resulting DOM before treating its launcher as a leaf.
+          window.setTimeout(() => {
+            const root = rootRef.current
+            if (!root?.contains(button)) return
+            if (button.getAttribute('aria-expanded') === 'true') return
+            const panels = root.querySelectorAll('[data-rb-panel], .menu-select-drop, .gcp-palette')
+            if (![...panels].some((panel) => getComputedStyle(panel).display !== 'none')) {
+              setOpen(false)
+            }
+          }, 0)
         }}
       >
         {children}

@@ -20,12 +20,14 @@
  *     top/baselineY.
  */
 import type { TextBody, Paragraph, TextRun } from '@genoffice/pptx-engine'
+import { mathTokensOf, ommlToMathML } from '@genoffice/office-math'
 import type { RenderTextLayout, TextLine, GlyphRun } from './render-tree'
 import bidiFactory from 'bidi-js'
 import { graphemes, isWideChar, type FontMetricsProvider, type RunStyle } from './metrics'
 import { emuToPx, ptToPx, type Viewport } from './coords'
 import type { MediaResolver } from './fill'
 import { formatAutoNum } from './auto-num'
+import { mathWidthPx } from './math-width'
 
 export { formatAutoNum }
 
@@ -39,6 +41,9 @@ export const DEFAULT_INSETS_EMU = { l: 91440, t: 45720, r: 91440, b: 45720 }
 
 interface Token {
   text: string
+  mathML?: string
+  mathAscentPx?: number
+  mathDescentPx?: number
   style: RunStyle
   color: string
   underline: boolean
@@ -130,8 +135,46 @@ function substituteKerning(tok: Token, metrics: FontMetricsProvider): Token {
 /** Token width = font advance width + letter spacing × char count (matches canvas letterSpacing: appended after each char) */
 function tokenWidth(tok: Token, metrics: FontMetricsProvider): number {
   if (tok.wOverride != null) return tok.wOverride
+  if (tok.mathML) {
+    // The raw fallback writes stacked structures linearly and can be several times wider.
+    return mathWidthPx(tok.mathML, metrics, tok.style)
+  }
   const w = metrics.measure(tok.text, tok.style)
   return tok.ls ? w + tok.ls * [...tok.text].length : w
+}
+
+/** Estimate the tallest math branch rather than counting parallel structures as nested. */
+function mathHeightEm(omml: string): number {
+  type Frame = { name: string; childHeight: number; rowHeights: number[] }
+  const stack: Frame[] = []
+  let height = 1.2
+  for (const match of omml.matchAll(/<(\/?)m:([A-Za-z]+)\b[^>]*?(\/?)>/g)) {
+    const closing = match[1] === '/'
+    const name = match[2]!
+    if (!closing) stack.push({ name, childHeight: 1.2, rowHeights: [] })
+    if (!closing && match[3] !== '/') continue
+    const frame = stack.pop()
+    if (!frame) continue
+    let branch = frame.childHeight
+    if (frame.name === 'f') branch += 0.35
+    else if (frame.name === 'rad') branch += 0.25
+    else if (/^(?:sSup|sSub|sSubSup|nary)$/.test(frame.name)) branch += 0.2
+    else if ((frame.name === 'm' || frame.name === 'eqArr') && frame.rowHeights.length)
+      branch = Math.max(
+        branch,
+        frame.rowHeights.reduce((sum, row) => sum + Math.max(1.1, row * 0.9), 0),
+      )
+    const parent = stack.at(-1)
+    if (parent) {
+      parent.childHeight = Math.max(parent.childHeight, branch)
+      if (
+        (frame.name === 'mr' && parent.name === 'm') ||
+        (frame.name === 'e' && parent.name === 'eqArr')
+      )
+        parent.rowHeights.push(branch)
+    } else height = Math.max(height, branch)
+  }
+  return height
 }
 
 /**
@@ -389,6 +432,23 @@ function tokenizeParagraph(p: Paragraph, scale: number, fontScale: number): Toke
           }
         : {}),
     }
+    if (run.rawXml?.includes('<a14:m')) {
+      const omml = run.rawXml
+      const mathML = ommlToMathML(omml)
+      if (mathML) {
+        const structuralHeight = mathHeightEm(omml) * style.fontSizePx
+        tokens.push({
+          ...base,
+          text: run.text || mathTokensOf(omml).join(''),
+          breakable: false,
+          isSpace: false,
+          mathML,
+          mathAscentPx: structuralHeight * 0.78,
+          mathDescentPx: structuralHeight * 0.22,
+        })
+        return
+      }
+    }
     let buf = ''
     const flushWord = () => {
       if (!buf) return
@@ -617,7 +677,9 @@ let bidiApi: ReturnType<typeof bidiFactory> | null = null
  * each line once formed.
  */
 function applyBidi(tokens: Token[], baseRtl?: boolean): Token[] {
-  const text = tokens.map((t) => t.text).join('')
+  // U+FFFC is one neutral object in the bidi stream. The MathML payload and its
+  // fallback string must remain a single token regardless of their inner levels.
+  const text = tokens.map((t) => (t.mathML ? '\ufffc' : t.text)).join('')
   // An explicit RTL base still needs analysis for pure-LTR text (neutrals move to the left edge)
   if (!RTL_RE.test(text) && !baseRtl) return tokens
   bidiApi ??= bidiFactory()
@@ -628,7 +690,12 @@ function applyBidi(tokens: Token[], baseRtl?: boolean): Token[] {
   const out: Token[] = []
   let off = 0
   for (const tok of tokens) {
-    const end = off + tok.text.length
+    const end = off + (tok.mathML ? 1 : tok.text.length)
+    if (tok.mathML) {
+      out.push({ ...tok, level: levels[off] ?? 0 })
+      off = end
+      continue
+    }
     let segStart = off
     for (let i = off + 1; i <= end; i++) {
       if (i === end || levels[i] !== levels[segStart]) {
@@ -836,7 +903,14 @@ function layoutParagraph(
       curW = carry.reduce((s, t) => s + tokenWidth(t, metrics), 0)
     }
     // Hard-break over-long words (a single token wider than the line)
-    if (wrap && !cur.length && w > lineAvail() && tok.text.length > 1 && !tok.isSpace) {
+    if (
+      wrap &&
+      !cur.length &&
+      w > lineAvail() &&
+      tok.text.length > 1 &&
+      !tok.isSpace &&
+      !tok.mathML
+    ) {
       for (const seg of hardBreak(tok, lineAvail(), metrics)) {
         pushLine([seg])
       }
@@ -884,12 +958,15 @@ function buildLine(
   // Lines with RTL levels are reordered into visual order before laying out x (break in logical order → draw in visual order)
   for (const tok of visualOrder(toks)) {
     const m = metrics.metrics(tok.style)
-    ascent = Math.max(ascent, m.ascent)
-    descent = Math.max(descent, m.descent)
+    ascent = Math.max(ascent, tok.mathAscentPx ?? m.ascent)
+    descent = Math.max(descent, tok.mathDescentPx ?? m.descent)
     sizeM = Math.max(sizeM, tok.style.fontSizePx)
     const w = tokenWidth(tok, metrics)
     runs.push({
       text: tok.text,
+      ...(tok.mathML
+        ? { mathML: tok.mathML, mathAscentPx: tok.mathAscentPx, mathDescentPx: tok.mathDescentPx }
+        : {}),
       x,
       baselineY: 0, // filled in later from the line's ascent
       // When a missing font is substituted, draw with the substitute name so drawing and measuring use the same font file
@@ -916,11 +993,14 @@ function buildLine(
       srcRunIdx: tok.srcRun,
       ...(tok.link ? { link: tok.link } : {}),
       ...(tok.logicalOrder != null ? { logicalOrder: tok.logicalOrder } : {}),
-      ascentPx: m.ascent,
+      ascentPx: tok.mathAscentPx ?? m.ascent,
     })
     x += w
   }
-  const box = lineH(p, sizeM, scale, lnSpcRed)
+  const box = Math.max(
+    lineH(p, sizeM, scale, lnSpcRed),
+    toks.some((t) => t.mathML) ? ascent + descent : 0,
+  )
   const leadAbove = baselineOff(p, box, descent) - ascent
   return {
     runs,
@@ -1289,7 +1369,7 @@ function layoutTextRotated(input: TextLayoutInput, vert: 'vert' | 'vert270'): Re
   const lines = h.lines.map((ln) => ({
     ...ln,
     runs: ln.runs.map((r) => {
-      const topOff = 0.8 * r.fontSizePx
+      const topOff = r.mathAscentPx ?? 0.8 * r.fontSizePx
       return vert === 'vert'
         ? { ...r, x: wc - (r.baselineY - topOff), baselineY: r.x + topOff, rotate90: true }
         : { ...r, x: r.baselineY - topOff, baselineY: hc - r.x + topOff, rotate270: true }
@@ -1348,11 +1428,11 @@ function layoutTextVertical(
   const cols: Col[] = []
   const autoNum = new AutoNumCounter()
 
-  for (const p of body.paragraphs) {
+  for (const [pIdx, p] of body.paragraphs.entries()) {
     const paraCols: Col[] = []
     let cur: GlyphRun[] = []
     let curH = 0
-    let agg = { ascent: 0, descent: 0, size: 0 }
+    let agg = { ascent: 0, descent: 0, size: 0, mathWidth: 0 }
 
     const finishCol = (soft?: number) => {
       let size = agg.size
@@ -1365,7 +1445,7 @@ function layoutTextVertical(
         runs: cur,
         usedH: curH,
         // Line height maps to column width: 1.2em of the column's max font size × the paragraph line-spacing setting
-        colW: lineH(p, size, scale, 0),
+        colW: Math.max(lineH(p, size, scale, 0), agg.mathWidth),
         paraStart: false,
         ...(soft != null ? { softBreakAfter: soft } : {}),
         gapBefore: 0,
@@ -1373,7 +1453,7 @@ function layoutTextVertical(
       })
       cur = []
       curH = 0
-      agg = { ascent: 0, descent: 0, size: 0 }
+      agg = { ascent: 0, descent: 0, size: 0, mathWidth: 0 }
     }
 
     const pushCell = (
@@ -1388,6 +1468,7 @@ function layoutTextVertical(
       const adv = m.ascent + m.descent + tok.ls
       if (wrap && cur.length && curH + adv > availHeight) finishCol()
       agg = {
+        ...agg,
         ascent: Math.max(agg.ascent, m.ascent),
         descent: Math.max(agg.descent, m.descent),
         size: Math.max(agg.size, tok.style.fontSizePx),
@@ -1412,7 +1493,7 @@ function layoutTextVertical(
         ...(tok.shadow ? { shadow: tok.shadow } : {}),
         widthPx: metrics.measure(g, tok.style),
         ...(tok.blPct ? { baselinePct: tok.blPct } : {}),
-        ...(isBullet ? { isBullet: true } : { srcRunIdx: tok.srcRun }),
+        ...(isBullet ? { isBullet: true } : { srcRunIdx: tok.srcRun, srcParagraphIdx: pIdx }),
         ...(numType ? { numType } : {}),
         ...(numType && startAt != null ? { startAt } : {}),
         ...(!isBullet && tok.link ? { link: tok.link } : {}),
@@ -1427,6 +1508,7 @@ function layoutTextVertical(
       const adv = tokenWidth(tok, metrics)
       if (wrap && cur.length && curH + adv > availHeight) finishCol()
       agg = {
+        ...agg,
         ascent: Math.max(agg.ascent, m.ascent),
         descent: Math.max(agg.descent, m.descent),
         size: Math.max(agg.size, tok.style.fontSizePx),
@@ -1454,10 +1536,40 @@ function layoutTextVertical(
         ...(tok.style.kerning === false ? { kerningOff: true } : {}),
         rotate90: true,
         srcRunIdx: tok.srcRun,
+        srcParagraphIdx: pIdx,
         ...(tok.link ? { link: tok.link } : {}),
         ascentPx: m.ascent,
       })
       curH += adv
+    }
+
+    const pushMath = (tok: Token) => {
+      const width = tokenWidth(tok, metrics)
+      const ascent = tok.mathAscentPx ?? tok.style.fontSizePx * 0.8
+      const descent = tok.mathDescentPx ?? tok.style.fontSizePx * 0.2
+      const height = ascent + descent
+      if (wrap && cur.length && curH + height > availHeight) finishCol()
+      agg.mathWidth = Math.max(agg.mathWidth, width)
+      agg.size = Math.max(agg.size, tok.style.fontSizePx)
+      cur.push({
+        text: tok.text,
+        mathML: tok.mathML,
+        mathAscentPx: ascent,
+        mathDescentPx: descent,
+        x: 0,
+        baselineY: curH + ascent,
+        fontFamily: metrics.displayFamily?.(tok.style, tok.text) ?? tok.style.fontFamily,
+        fontSizePx: tok.style.fontSizePx,
+        color: tok.color,
+        bold: tok.style.bold,
+        italic: tok.style.italic,
+        underline: tok.underline,
+        widthPx: width,
+        srcRunIdx: tok.srcRun,
+        srcParagraphIdx: pIdx,
+        ascentPx: ascent,
+      })
+      curH += height
     }
 
     const hasText = p.runs.some((r) => r.text.trim())
@@ -1499,6 +1611,10 @@ function layoutTextVertical(
       const tok = substituteKerning(rawTok, metrics)
       if (tok.isBreak) {
         finishCol(tok.srcRun)
+        continue
+      }
+      if (tok.mathML) {
+        pushMath(tok)
         continue
       }
       // Latin/digit words (no wide chars) rotate 90° whole per PowerPoint vertical-writing
@@ -1771,6 +1887,7 @@ function layoutAll(
       }
       const runs = lineRuns.map((r) => ({
         ...r,
+        srcParagraphIdx: pIdx,
         x: r.x + dx,
         baselineY: baseline - (r.baselineShiftPx ?? 0),
       }))
@@ -1785,6 +1902,7 @@ function layoutAll(
           : bulletX + off
         runs.unshift({
           text: bulletText,
+          srcParagraphIdx: pIdx,
           x: bx,
           ...(mirror ? { rtl: true } : {}),
           baselineY:

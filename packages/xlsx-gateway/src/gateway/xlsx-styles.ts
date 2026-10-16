@@ -13,6 +13,7 @@ export class StylesheetEditor {
   private readonly borders: string[]
   private readonly hadBordersSection: boolean
   private readonly cellXfs: string[]
+  private readonly styleXfs: string[]
   private readonly dxfs: string[]
   private readonly hadDxfsSection: boolean
   /// the <tableStyle> elements, and the attributes of their <tableStyles> section (defaults)
@@ -48,6 +49,7 @@ export class StylesheetEditor {
     this.borders = bordersInner === null ? ['<border/>'] : extractElements(bordersInner, 'border')
     if (this.borders.length === 0) this.borders.push('<border/>')
     this.cellXfs = extractElements(cellXfsInner, 'xf')
+    this.styleXfs = extractElements(sectionInner(stylesXml, 'cellStyleXfs') ?? '', 'xf')
     const dxfsInner = sectionInner(stylesXml, 'dxfs')
     this.hadDxfsSection = dxfsInner !== null
     this.dxfs = dxfsInner === null ? [] : extractElements(dxfsInner, 'dxf')
@@ -90,6 +92,10 @@ export class StylesheetEditor {
     )
   }
 
+  hasCellXf(index: number): boolean {
+    return Number.isInteger(index) && index >= 0 && index < this.cellXfs.length
+  }
+
   /// Conditional-formatting highlight styles; deduped like every other list.
   internDxf(dxfXml: string): number {
     return internElement(this.dxfs, dxfXml)
@@ -123,8 +129,6 @@ export class StylesheetEditor {
     let fillId = Number(readAttribute(baseXf, 'fillId') ?? 0)
     let numFmtId = Number(readAttribute(baseXf, 'numFmtId') ?? 0)
     let borderId = Number(readAttribute(baseXf, 'borderId') ?? 0)
-    const xfId = readAttribute(baseXf, 'xfId')
-
     if (hasFontDelta(delta)) {
       fontId = this.internFont(buildFont(this.fonts[fontId] ?? '<font/>', delta))
     }
@@ -143,26 +147,25 @@ export class StylesheetEditor {
         buildBorder(this.borders[borderId] ?? '<border/>', delta),
       )
     }
-    const alignment = buildAlignment(baseXf, delta)
-    const protection = buildProtection(baseXf, delta)
-
-    const attributes = [
-      `numFmtId="${numFmtId}"`,
-      `fontId="${fontId}"`,
-      `fillId="${fillId}"`,
-      `borderId="${borderId}"`,
-      ...(xfId === undefined ? [] : [`xfId="${xfId}"`]),
-      ...(numFmtId !== 0 ? ['applyNumberFormat="1"'] : []),
-      ...(fontId !== 0 ? ['applyFont="1"'] : []),
-      ...(fillId !== 0 ? ['applyFill="1"'] : []),
-      ...(borderId !== 0 ? ['applyBorder="1"'] : []),
-      ...(alignment !== '' ? ['applyAlignment="1"'] : []),
-      ...(protection !== '' ? ['applyProtection="1"'] : []),
-    ].join(' ')
-    const children = `${alignment}${protection}`
-    const xf = children === '' ? `<xf ${attributes}/>` : `<xf ${attributes}>${children}</xf>`
-
-    const index = internElement(this.cellXfs, xf)
+    // Preserve everything the neutral model does not expose: quotePrefix,
+    // namespaced attributes, extension children and the original apply flags.
+    let patched = baseXf
+    if (hasFontDelta(delta)) patched = patchXfFont(patched, fontId)
+    if (delta.fill !== undefined || delta.fillColor !== undefined) {
+      patched = patchXfAttribute(patched, 'fillId', String(fillId))
+      patched = patchXfAttribute(patched, 'applyFill', '1')
+    }
+    if (delta.numberFormat !== undefined) {
+      patched = patchXfAttribute(patched, 'numFmtId', String(numFmtId))
+      patched = patchXfAttribute(patched, 'applyNumberFormat', '1')
+    }
+    if (hasBorderDelta(delta)) patched = patchXfBorder(patched, borderId)
+    if (hasAlignmentDelta(delta)) patched = patchXfAlignment(patched, delta)
+    if (delta.protectionLocked !== undefined || delta.protectionHidden !== undefined) {
+      const parentXf = this.styleXfs[Number(readAttribute(baseXf, 'xfId') ?? -1)] ?? ''
+      patched = patchXfProtection(patched, parentXf, delta)
+    }
+    const index = internElement(this.cellXfs, patched)
     this.cache.set(cacheKey, index)
     return index
   }
@@ -213,10 +216,7 @@ export class StylesheetEditor {
     if (this.numFmts.length > 0) {
       const section = `<numFmts count="${this.numFmts.length}">${this.numFmts.join('')}</numFmts>`
       if (sectionInner(result, 'numFmts') !== null) {
-        result = result.replace(
-          /<numFmts\b[^>]*>[\s\S]*?<\/numFmts>|<numFmts\b[^>]*\/>/,
-          () => section,
-        )
+        result = replaceSection(result, 'numFmts', this.numFmts)
       } else {
         // Schema order: numFmts comes immediately before fonts.
         result = result.replace(/<fonts\b/, () => `${section}<fonts`)
@@ -266,11 +266,38 @@ function hasFontDelta(delta: WorkbookStyleEdit): boolean {
     delta.italic !== undefined ||
     delta.underline !== undefined ||
     delta.underlineStyle !== undefined ||
+    delta.fontVerticalAlign !== undefined ||
     delta.strikethrough !== undefined ||
     delta.fontFamily !== undefined ||
     delta.fontSize !== undefined ||
     delta.fontColor !== undefined
   )
+}
+
+function patchXfFont(baseXf: string, fontId: number): string {
+  const opening = /^<xf\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/.exec(baseXf)?.[0]
+  if (!opening) throw new Error('The original cell format has an invalid opening tag.')
+  const set = (tag: string, name: string, value: string): string => {
+    const existing = new RegExp(`(?<![\\w:.-])${name}=(?:"[^"]*"|'[^']*')`)
+    return existing.test(tag)
+      ? tag.replace(existing, `${name}="${value}"`)
+      : tag.replace(/\/?>$/, (end) => ` ${name}="${value}"${end}`)
+  }
+  const patched = set(set(opening, 'fontId', String(fontId)), 'applyFont', '1')
+  return `${patched}${baseXf.slice(opening.length)}`
+}
+
+function patchXfBorder(baseXf: string, borderId: number): string {
+  const opening = /^<xf\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/.exec(baseXf)?.[0]
+  if (!opening) throw new Error('The original cell format has an invalid opening tag.')
+  const set = (tag: string, name: string, value: string): string => {
+    const existing = new RegExp(`(?<![\\w:.-])${name}=(?:"[^"]*"|'[^']*')`)
+    return existing.test(tag)
+      ? tag.replace(existing, `${name}="${value}"`)
+      : tag.replace(/\/?>$/, (end) => ` ${name}="${value}"${end}`)
+  }
+  const patched = set(set(opening, 'borderId', String(borderId)), 'applyBorder', '1')
+  return `${patched}${baseXf.slice(opening.length)}`
 }
 
 /// Applies the delta to a copy of the base font XML. Only overridden child
@@ -288,7 +315,17 @@ function buildFont(baseFontXml: string, delta: WorkbookStyleEdit): string {
     const on = delta.underline ?? true
     override(
       /<u\b[^>]*\/?>/g,
-      on ? (delta.underlineStyle === 'double' ? '<u val="double"/>' : '<u/>') : '',
+      on
+        ? delta.underlineStyle === undefined || delta.underlineStyle === 'single'
+          ? '<u/>'
+          : `<u val="${delta.underlineStyle}"/>`
+        : '',
+    )
+  }
+  if (delta.fontVerticalAlign !== undefined) {
+    override(
+      /<vertAlign\b[^>]*\/?>/g,
+      delta.fontVerticalAlign === 'baseline' ? '' : `<vertAlign val="${delta.fontVerticalAlign}"/>`,
     )
   }
   if (delta.strikethrough !== undefined) {
@@ -346,12 +383,13 @@ function colorAttributes(color: StyleColor): string {
   return `theme="${color.theme}"${tint}`
 }
 
-const BORDER_EDGE_TAGS = ['left', 'right', 'top', 'bottom'] as const
+const BORDER_EDGE_TAGS = ['left', 'right', 'top', 'bottom', 'diagonal'] as const
 const BORDER_DELTA_KEYS = {
   left: 'borderLeft',
   right: 'borderRight',
   top: 'borderTop',
   bottom: 'borderBottom',
+  diagonal: 'borderDiagonal',
 } as const
 
 function hasBorderDelta(delta: WorkbookStyleEdit): boolean {
@@ -359,114 +397,167 @@ function hasBorderDelta(delta: WorkbookStyleEdit): boolean {
     delta.borderTop !== undefined ||
     delta.borderBottom !== undefined ||
     delta.borderLeft !== undefined ||
-    delta.borderRight !== undefined
+    delta.borderRight !== undefined ||
+    delta.borderDiagonal !== undefined ||
+    delta.diagonalUp !== undefined ||
+    delta.diagonalDown !== undefined
   )
+}
+
+function patchXfAttribute(baseXf: string, name: string, value: string): string {
+  const opening = /^<xf\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/.exec(baseXf)?.[0]
+  if (!opening) throw new Error('The original cell format has an invalid opening tag.')
+  return `${setXmlAttribute(opening, name, value)}${baseXf.slice(opening.length)}`
+}
+
+function setXmlAttribute(opening: string, name: string, value: string | null): string {
+  const existing = new RegExp(`(?<![\\w:.-])${name}=(?:"[^"]*"|'[^']*')`)
+  if (value === null) return opening.replace(new RegExp(`\\s+${existing.source}`), '')
+  return existing.test(opening)
+    ? opening.replace(existing, `${name}="${value}"`)
+    : opening.replace(/\/?>$/, (end) => ` ${name}="${value}"${end}`)
+}
+
+/** Keep imported XF attributes and extension children when borders and alignment change together. */
+function patchXfAlignment(baseXf: string, delta: WorkbookStyleEdit): string {
+  const opening = /^<xf\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/.exec(baseXf)?.[0]
+  if (!opening) throw new Error('The original cell format has an invalid opening tag.')
+  const selfClosing = opening.endsWith('/>')
+  const inner = selfClosing ? '' : baseXf.slice(opening.length, -'</xf>'.length)
+  const direct =
+    /^(\s*)(<alignment\b(?:[^>"']|"[^"]*"|'[^']*')*\/>|<alignment\b(?:[^>"']|"[^"]*"|'[^']*')*><\/alignment>)/.exec(
+      inner,
+    )
+  const prefix = direct?.[1] ?? ''
+  let alignment = (direct?.[2] ?? '<alignment/>').replace(/><\/alignment>$/, '/>')
+  const changes: readonly (readonly [string, string | null | undefined])[] = [
+    ['horizontal', delta.horizontalAlignment],
+    [
+      'vertical',
+      delta.verticalAlignment === undefined ? undefined : XLSX_VERTICAL[delta.verticalAlignment],
+    ],
+    ['wrapText', delta.wrapText === undefined ? undefined : delta.wrapText ? '1' : null],
+    ['shrinkToFit', delta.shrinkToFit === undefined ? undefined : delta.shrinkToFit ? '1' : null],
+    [
+      'textRotation',
+      delta.textRotation === undefined
+        ? undefined
+        : delta.textRotation === 0
+          ? null
+          : String(delta.textRotation),
+    ],
+    [
+      'indent',
+      delta.indent === undefined ? undefined : delta.indent === 0 ? null : String(delta.indent),
+    ],
+  ]
+  for (const [name, value] of changes) {
+    if (value !== undefined) alignment = setXmlAttribute(alignment, name, value)
+  }
+  const rest = direct ? inner.slice(direct[0].length) : inner
+  const content = `${prefix}${alignment}${rest}`
+  const expanded = selfClosing
+    ? `${opening.slice(0, -2)}>${content}</xf>`
+    : `${opening}${content}</xf>`
+  return patchXfAttribute(expanded, 'applyAlignment', '1')
+}
+
+function patchXfProtection(baseXf: string, parentXf: string, delta: WorkbookStyleEdit): string {
+  const opening = /^<xf\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/.exec(baseXf)?.[0]
+  if (!opening) throw new Error('The original cell format has an invalid opening tag.')
+  const selfClosing = opening.endsWith('/>')
+  const inner = selfClosing ? '' : baseXf.slice(opening.length, -'</xf>'.length)
+  const extensionAt = inner.search(/<extLst\b|<mc:AlternateContent\b/)
+  const directRegion = extensionAt < 0 ? inner : inner.slice(0, extensionAt)
+  const direct =
+    /<protection\b(?:[^>"']|"[^"]*"|'[^']*')*\/>|<protection\b(?:[^>"']|"[^"]*"|'[^']*')*><\/protection>/.exec(
+      directRegion,
+    )
+  const parent = /<protection\b[^>]*\/?>/.exec(parentXf)?.[0] ?? ''
+  const locked =
+    delta.protectionLocked ??
+    (readAttribute(direct?.[0] ?? '', 'locked') ?? readAttribute(parent, 'locked')) !== '0'
+  const hidden =
+    delta.protectionHidden ??
+    (readAttribute(direct?.[0] ?? '', 'hidden') ?? readAttribute(parent, 'hidden')) === '1'
+  if (locked && !hidden && !parent && !direct) return baseXf
+  let protection = (direct?.[0] ?? '<protection/>').replace(/><\/protection>$/, '/>')
+  protection = setXmlAttribute(protection, 'locked', locked ? '1' : '0')
+  protection = setXmlAttribute(protection, 'hidden', hidden ? '1' : '0')
+  const content = direct
+    ? `${inner.slice(0, direct.index)}${protection}${inner.slice(direct.index + direct[0].length)}`
+    : `${directRegion}${protection}${inner.slice(directRegion.length)}`
+  const expanded = selfClosing
+    ? `${opening.slice(0, -2)}>${content}</xf>`
+    : `${opening}${content}</xf>`
+  return patchXfAttribute(expanded, 'applyProtection', '1')
 }
 
 /// Applies edge deltas to a copy of the base border XML. Children rebuild in
 /// schema order (left, right, top, bottom, diagonal); untouched edges and the
 /// border element's own attributes (diagonalUp/Down) are kept verbatim.
 function buildBorder(baseBorderXml: string, delta: WorkbookStyleEdit): string {
-  const attributes = /<border\b([^>]*?)\/?>/.exec(baseBorderXml)?.[1] ?? ''
-  const inner = /<border\b[^>]*>([\s\S]*?)<\/border>/.exec(baseBorderXml)?.[1] ?? ''
-  const childOf = (tag: string): string =>
-    new RegExp(`<${tag}\\b[^>]*/>|<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>`).exec(inner)?.[0] ?? ''
-  const children = BORDER_EDGE_TAGS.map((tag) => {
-    const edge = delta[BORDER_DELTA_KEYS[tag]]
-    if (edge === undefined) return childOf(tag)
-    if (edge === null) return `<${tag}/>`
-    const color = edge.color === undefined ? '' : `<color ${colorAttributes(edge.color)}/>`
-    return color === ''
-      ? `<${tag} style="${edge.style}"/>`
-      : `<${tag} style="${edge.style}">${color}</${tag}>`
-  })
-  children.push(childOf('diagonal'))
-  const content = children.join('')
-  return content === '' && attributes.trim() === ''
-    ? '<border/>'
-    : `<border${attributes}>${content}</border>`
-}
-
-/** CT_CellAlignment attributes with no model field; readingOrder is the cell's RTL flag */
-const ALIGNMENT_CARRIED = ['relativeIndent', 'justifyLastLine', 'shrinkToFit', 'readingOrder']
-
-function buildAlignment(baseXf: string, delta: WorkbookStyleEdit): string {
-  const baseAlignment = /<alignment\b[^>]*\/?>/.exec(baseXf)?.[0] ?? ''
-  const horizontal = delta.horizontalAlignment ?? readAttribute(baseAlignment, 'horizontal')
-  const vertical =
-    delta.verticalAlignment !== undefined
-      ? XLSX_VERTICAL[delta.verticalAlignment]
-      : readAttribute(baseAlignment, 'vertical')
-  const wrap =
-    delta.wrapText !== undefined ? delta.wrapText : readAttribute(baseAlignment, 'wrapText') === '1'
-  // 0 clears the rotation (the attribute's absence is "no rotation").
-  const rotation =
-    delta.textRotation !== undefined
-      ? delta.textRotation === 0
-        ? undefined
-        : String(delta.textRotation)
-      : readAttribute(baseAlignment, 'textRotation')
-  const indent =
-    delta.indent !== undefined
-      ? delta.indent === 0
-        ? undefined
-        : String(delta.indent)
-      : readAttribute(baseAlignment, 'indent')
-  const modeled = [
-    ...(horizontal ? [`horizontal="${horizontal}"`] : []),
-    ...(vertical ? [`vertical="${vertical}"`] : []),
-    ...(wrap ? ['wrapText="1"'] : []),
-    ...(rotation ? [`textRotation="${rotation}"`] : []),
-    ...(indent ? [`indent="${indent}"`] : []),
-  ]
-  // carrying must not create an <alignment> that would not otherwise exist, which would
-  // start applying an alignment the cell was inheriting; once the element is there anyway
-  // the cell already applies it, so the rest of its attributes belong with it
-  // applyAlignment is xsd:boolean, which spells true both ways
-  const applyAlignment = readCoreAttribute(baseXf, 'applyAlignment')
-  const applies = modeled.length > 0 || applyAlignment === '1' || applyAlignment === 'true'
-  const attributes =
-    applies && ownsItsAlignment(baseXf)
-      ? [...modeled, ...carriedAttributes(baseAlignment, ALIGNMENT_CARRIED)]
-      : modeled
-  return attributes.length === 0 ? '' : `<alignment ${attributes.join(' ')}/>`
-}
-
-/**
- * Whether the regex reads above can be trusted to have found the cell's own alignment.
- * CT_Xf allows only alignment, protection and extLst, so an xf holding nothing but the
- * first two cannot hide a second <alignment> or an applyAlignment belonging to someone
- * else. Anything further, an extension or an mc:AlternateContent branch, could supply
- * either, and a vendor's reading order is not the cell's; carry nothing and leave the
- * result as it was.
- */
-function ownsItsAlignment(xf: string): boolean {
-  for (const element of xf.matchAll(/<\/?([\w.-]+(?::[\w.-]+)?)/g)) {
-    if (!/^(xf|alignment|protection)$/.test(element[1] ?? '')) return false
+  const opening = /^<border\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/.exec(baseBorderXml)?.[0]
+  if (!opening) throw new Error('The original border has an invalid opening tag.')
+  let tag = opening
+  for (const [attribute, value] of [
+    ['diagonalUp', delta.diagonalUp],
+    ['diagonalDown', delta.diagonalDown],
+  ] as const) {
+    if (value === undefined) continue
+    const existing = new RegExp(`(?<![\\w:.-])${attribute}=(?:"[^"]*"|'[^']*')`)
+    tag = existing.test(tag)
+      ? tag.replace(existing, `${attribute}="${value ? '1' : '0'}"`)
+      : tag.replace(/\/?>$/, (end) => ` ${attribute}="${value ? '1' : '0'}"${end}`)
   }
-  return true
+  let inner = baseBorderXml.slice(opening.length)
+  if (opening.endsWith('/>')) inner = ''
+  else if (inner.endsWith('</border>')) inner = inner.slice(0, -'</border>'.length)
+  else throw new Error('The original border has no closing tag.')
+  for (const [index, edgeTag] of BORDER_EDGE_TAGS.entries()) {
+    const edge = delta[BORDER_DELTA_KEYS[edgeTag]]
+    if (edge === undefined) continue
+    const color =
+      edge === null || edge.color === undefined ? '' : `<color ${colorAttributes(edge.color)}/>`
+    const replacement =
+      edge === null
+        ? `<${edgeTag}/>`
+        : color === ''
+          ? `<${edgeTag} style="${edge.style}"/>`
+          : `<${edgeTag} style="${edge.style}">${color}</${edgeTag}>`
+    const existing = new RegExp(`<${edgeTag}\\b[^>]*/>|<${edgeTag}\\b[^>]*>[\\s\\S]*?</${edgeTag}>`)
+    if (existing.test(inner)) inner = inner.replace(existing, () => replacement)
+    else {
+      const following = [...BORDER_EDGE_TAGS.slice(index + 1), 'vertical', 'horizontal']
+        .map((name) => inner.search(new RegExp(`<${name}\\b`)))
+        .filter((at) => at >= 0)
+      const extension = inner.search(/<extLst\b/)
+      if (extension >= 0) following.push(extension)
+      const at = following.length > 0 ? Math.min(...following) : inner.length
+      inner = `${inner.slice(0, at)}${replacement}${inner.slice(at)}`
+    }
+  }
+  if (inner === '' && !/\s+[\w:.-]+=/.test(tag)) return '<border/>'
+  return `${tag.replace(/\/?>$/, '>')}${inner}</border>`
 }
 
-/// Merges protection flag deltas over the base xf's <protection>. Attributes
-/// at their OOXML defaults (locked=1, hidden=0) are omitted; an empty result
-/// drops the element.
-function buildProtection(baseXf: string, delta: WorkbookStyleEdit): string {
-  const baseProtection = /<protection\b[^>]*\/?>/.exec(baseXf)?.[0] ?? ''
-  const locked =
-    delta.protectionLocked ?? (readAttribute(baseProtection, 'locked') === '0' ? false : undefined)
-  const hidden =
-    delta.protectionHidden ?? (readAttribute(baseProtection, 'hidden') === '1' ? true : undefined)
-  const attributes = [
-    ...(locked === false ? ['locked="0"'] : []),
-    ...(hidden === true ? ['hidden="1"'] : []),
-  ]
-  return attributes.length === 0 ? '' : `<protection ${attributes.join(' ')}/>`
+function hasAlignmentDelta(delta: WorkbookStyleEdit): boolean {
+  return (
+    delta.horizontalAlignment !== undefined ||
+    delta.verticalAlignment !== undefined ||
+    delta.wrapText !== undefined ||
+    delta.shrinkToFit !== undefined ||
+    delta.textRotation !== undefined ||
+    delta.indent !== undefined
+  )
 }
 
 const XLSX_VERTICAL: Record<string, string> = {
   top: 'top',
   center: 'center',
   bottom: 'bottom',
+  justify: 'justify',
+  distributed: 'distributed',
 }
 
 /** key-sorted at every level: a replacer array would drop nested keys (border edges, fills) */
@@ -497,34 +588,57 @@ function sectionInner(xml: string, tag: string): string | null {
 }
 
 function replaceSection(xml: string, tag: string, elements: readonly string[]): string {
-  const section = `<${tag} count="${elements.length}">${elements.join('')}</${tag}>`
-  return xml.replace(
-    new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>|<${tag}\\b[^>]*/>`),
-    () => section,
-  )
+  const start = new RegExp(`<${tag}(?=[\\s/>])`).exec(xml)?.index
+  if (start === undefined) return xml
+  let quote: '"' | "'" | null = null
+  let end = start + tag.length + 1
+  for (; end < xml.length; end += 1) {
+    const char = xml[end]
+    if (quote) {
+      if (char === quote) quote = null
+    } else if (char === '"' || char === "'") quote = char
+    else if (char === '>') break
+  }
+  if (end >= xml.length) throw new Error(`The stylesheet has an invalid <${tag}> tag.`)
+  const opening = xml.slice(start, end + 1)
+  const close = opening.endsWith('/>') ? end + 1 : xml.indexOf(`</${tag}>`, end + 1)
+  if (close < 0) throw new Error(`The stylesheet has an unclosed <${tag}> tag.`)
+  const after = opening.endsWith('/>') ? close : close + `</${tag}>`.length
+  const attributes = setXmlAttribute(opening, 'count', String(elements.length))
+  const expanded = attributes.endsWith('/>') ? `${attributes.slice(0, -2)}>` : attributes
+  return `${xml.slice(0, start)}${expanded}${elements.join('')}</${tag}>${xml.slice(after)}`
 }
 
 function extractElements(inner: string, tag: string): string[] {
-  return [
-    ...inner.matchAll(new RegExp(`<${tag}\\b[^>]*/>|<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>`, 'g')),
-  ].map((match) => match[0])
+  const result: string[] = []
+  const start = new RegExp(`<${tag}(?=[\\s/>])`, 'g')
+  for (let match = start.exec(inner); match; match = start.exec(inner)) {
+    let quote: '"' | "'" | null = null
+    let end = match.index + match[0].length
+    for (; end < inner.length; end += 1) {
+      const char = inner[end]
+      if (quote) {
+        if (char === quote) quote = null
+      } else if (char === '"' || char === "'") quote = char
+      else if (char === '>') break
+    }
+    if (end >= inner.length) throw new Error(`The stylesheet has an invalid <${tag}> tag.`)
+    if (inner[end - 1] === '/') {
+      result.push(inner.slice(match.index, end + 1))
+      start.lastIndex = end + 1
+      continue
+    }
+    const closing = `</${tag}>`
+    const close = inner.indexOf(closing, end + 1)
+    if (close < 0) throw new Error(`The stylesheet has an unclosed <${tag}> tag.`)
+    result.push(inner.slice(match.index, close + closing.length))
+    start.lastIndex = close + closing.length
+  }
+  return result
 }
 
 function readAttribute(element: string, name: string): string | undefined {
   return new RegExp(`\\b${name}="([^"]*)"`).exec(element)?.[1]
-}
-
-/** like readAttribute, but never matches a namespace-prefixed name */
-function readCoreAttribute(element: string, name: string): string | undefined {
-  return new RegExp(`(?<![\\w:.-])${name}="([^"]*)"`).exec(element)?.[1]
-}
-
-/** attributes the style model does not represent, kept verbatim off the base element */
-function carriedAttributes(element: string, names: readonly string[]): string[] {
-  return names.flatMap((name) => {
-    const value = readCoreAttribute(element, name)
-    return value === undefined ? [] : [`${name}="${value}"`]
-  })
 }
 
 function toArgb(hexColor: string): string {

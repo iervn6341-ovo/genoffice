@@ -1025,7 +1025,23 @@ function parsePicture(
   const embedId = blipEmbedId(blip)
   const mediaRef = (embedId && ctx.mediaRels?.get(embedId)) || ''
   const name = node['p:nvPicPr']?.['p:cNvPr']?.['@_name']
-  const descr = node['p:nvPicPr']?.['p:cNvPr']?.['@_descr']
+  const rawDescr = node['p:nvPicPr']?.['p:cNvPr']?.['@_descr']
+  // the XML reader leaves numeric character references (e.g. &#10; newlines) undecoded
+  const descr =
+    typeof rawDescr === 'string'
+      ? rawDescr.replace(/&#(x[0-9a-f]+|\d+);/gi, (m, code: string) => {
+          const n =
+            code[0] === 'x' || code[0] === 'X' ? parseInt(code.slice(1), 16) : parseInt(code, 10)
+          return Number.isFinite(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m
+        })
+      : rawDescr
+  const picLock = node['p:nvPicPr']?.['p:cNvPicPr']?.['a:picLocks']?.['@_noChangeAspect']
+  const picExts = ([] as any[]).concat(
+    node['p:nvPicPr']?.['p:cNvPr']?.['a:extLst']?.['a:ext'] ?? [],
+  )
+  const picDecorative = picExts.some(
+    (e) => e?.['@_uri'] === '{C183D7F6-B498-43B3-948B-1728B52AA6E4}' && e?.['adec:decorative'],
+  )
   const srcRect = parseSrcRect(blipFill?.['a:srcRect'])
   // picture styles outline geometry (ellipse avatars/rounded-corner frames etc.); rect is the default and not recorded
   let picGeom = spPr['a:prstGeom']?.['@_prst']
@@ -1084,6 +1100,8 @@ function parsePicture(
     transform,
     name,
     ...(descr ? { descr } : {}),
+    ...(picLock != null ? { lockAspect: picLock === '1' || picLock === 'true' } : {}),
+    ...(picDecorative ? { decorative: true } : {}),
     mediaRef,
     ...(srcRect ? { srcRect } : {}),
     ...(picGeom && picGeom !== 'rect'

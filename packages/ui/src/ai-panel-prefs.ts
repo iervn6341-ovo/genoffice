@@ -2,6 +2,8 @@ export const AI_FONT_SIZES = ['default', 'large', 'xlarge', 'custom'] as const
 export type AiPanelSide = 'left' | 'right'
 /** Ribbon layout: `classic` keeps groups collapsed to dropdown buttons; `auto` expands them while there is room */
 export type RibbonFold = 'classic' | 'auto'
+/** Document area appearance: follows the app theme, or is pinned light / dark (View ▸ Dark Mode) */
+export type ContentTheme = 'auto' | 'light' | 'dark'
 export type AiFontSize = (typeof AI_FONT_SIZES)[number]
 
 /** Body text size of `.ai-chat` in every app's stylesheet; the presets scale from it */
@@ -24,6 +26,12 @@ export interface AiPanelPrefs {
   readonly spellcheck: boolean
   /** Ribbon overflow style; rides on this record because it reaches every renderer the same way */
   readonly ribbonFold: RibbonFold
+  /** Eases notched mouse-wheel scrolling (see smooth-scroll.ts); rides on this record like `ribbonFold` */
+  readonly smoothScroll: boolean
+  /** GPU-accelerated rendering; read by the shell at startup (a change takes effect after a restart) */
+  readonly gpuAcceleration: boolean
+  /** Light / dark preview of the document content; shared by Docs, Sheets and Slides and kept across launches */
+  readonly contentTheme: ContentTheme
 }
 
 export const DEFAULT_AI_PANEL_PREFS: AiPanelPrefs = {
@@ -32,6 +40,9 @@ export const DEFAULT_AI_PANEL_PREFS: AiPanelPrefs = {
   customFontSize: AI_FONT_BASE_PX,
   spellcheck: true,
   ribbonFold: 'auto',
+  smoothScroll: false,
+  gpuAcceleration: true,
+  contentTheme: 'auto',
 }
 
 export function isAiFontSize(value: unknown): value is AiFontSize {
@@ -64,7 +75,10 @@ export function sameAiPanelPrefs(a: AiPanelPrefs, b: AiPanelPrefs): boolean {
     a.fontSize === b.fontSize &&
     a.customFontSize === b.customFontSize &&
     a.spellcheck === b.spellcheck &&
-    a.ribbonFold === b.ribbonFold
+    a.ribbonFold === b.ribbonFold &&
+    a.smoothScroll === b.smoothScroll &&
+    a.gpuAcceleration === b.gpuAcceleration &&
+    a.contentTheme === b.contentTheme
   )
 }
 
@@ -79,5 +93,15 @@ export function normalizeAiPanelPrefs(raw: unknown): AiPanelPrefs {
     spellcheck:
       typeof obj.spellcheck === 'boolean' ? obj.spellcheck : DEFAULT_AI_PANEL_PREFS.spellcheck,
     ribbonFold: obj.ribbonFold === 'classic' ? 'classic' : 'auto',
+    smoothScroll:
+      typeof obj.smoothScroll === 'boolean'
+        ? obj.smoothScroll
+        : DEFAULT_AI_PANEL_PREFS.smoothScroll,
+    gpuAcceleration:
+      typeof obj.gpuAcceleration === 'boolean'
+        ? obj.gpuAcceleration
+        : DEFAULT_AI_PANEL_PREFS.gpuAcceleration,
+    contentTheme:
+      obj.contentTheme === 'light' || obj.contentTheme === 'dark' ? obj.contentTheme : 'auto',
   }
 }

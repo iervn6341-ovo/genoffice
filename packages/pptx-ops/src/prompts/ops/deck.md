@@ -55,17 +55,19 @@ Common mistakes
 
 ### applyHeaderFooter
 
-`{settings:{footer?,slideNum?,date?,dateAuto?}} — every slide`
+`{settings:{footer?,slideNum?,date?,dateAuto?,firstSlideNum?},slideIndexes?} — current or all slides`
 
 Footer text, slide numbers and date on every page (through the master's
 placeholders).
 
-| Field             | Type             | Notes                                         |
-| ----------------- | ---------------- | --------------------------------------------- |
-| settings.footer   | string or `null` | `null` or empty hides the footer              |
-| settings.slideNum | boolean          | Show page numbers                             |
-| settings.date     | string or `null` | Fixed date text; `null` or empty hides it     |
-| settings.dateAuto | boolean          | Dynamic date field that updates in PowerPoint |
+| Field                  | Type             | Notes                                                       |
+| ---------------------- | ---------------- | ----------------------------------------------------------- |
+| settings.footer        | string or `null` | `null` or empty hides the footer                            |
+| settings.slideNum      | boolean          | Show page numbers                                           |
+| settings.date          | string or `null` | Fixed date text; `null` or empty hides it                   |
+| settings.dateAuto      | boolean          | Dynamic date field that updates in PowerPoint               |
+| settings.firstSlideNum | integer          | First displayed slide number; accepts -9999 through 9999    |
+| slideIndexes           | integer array    | Optional zero-based slide indexes; omitted means all slides |
 
 ```json
 {
@@ -77,6 +79,47 @@ placeholders).
 Common mistakes
 
 - Re-sending identical settings: the op reports "nothing changed" as an error; skip it when the values are already in place.
+
+### applyNotesHandoutsHeaderFooter
+
+`{settings:{headerEnabled,header,footerEnabled,footer,dateEnabled,date,dateAuto,dateFormat,pageNum}} — notes and handouts masters`
+
+Set the native notes and handouts master header, footer, date, and page-number placeholders. Dynamic dates remain `datetime*` fields and page numbers remain `slidenum` fields. Existing local notes-page placeholders are updated in place, so they do not shadow the new master values.
+
+```json
+{
+  "op": "applyNotesHandoutsHeaderFooter",
+  "settings": {
+    "headerEnabled": true,
+    "header": "Training notes",
+    "footerEnabled": true,
+    "footer": "Internal",
+    "dateEnabled": true,
+    "date": "10/13/2026",
+    "dateAuto": true,
+    "dateFormat": "datetime1",
+    "pageNum": true
+  }
+}
+```
+
+### setCustomShows (not-ai-callable)
+
+`{shows:[{id,name,slideIndices},…]} — full native custom-show list replacement`
+
+Writes PowerPoint custom shows into presentation.xml. IDs are unique unsigned
+integers represented as decimal strings. Slide indices are zero-based and retain
+the supplied playback order, including repeated slides.
+
+### setShowSetup (not-ai-callable)
+
+`{settings:{mode,loop,showNarration,showAnimation,useTimings,slides}} — native slide-show setup`
+
+Writes `ppt/presProps.xml` show properties. `mode` is `speaker`, `browse`, or
+`kiosk`; `slides` is `{kind:"all"}`, `{kind:"range",start,end}` using one-based
+inclusive slide positions, or `{kind:"custom",id}` referencing an existing
+native custom show. Boolean options correspond to PowerPoint's loop,
+narration, animation, and timing controls.
 
 ### setSections
 

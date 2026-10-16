@@ -219,7 +219,10 @@ function serializeFormulas(
   date1904: boolean,
 ): string {
   const formula1 = formulaText(type, rule.formula1, date1904)
-  const formula2 = formulaText(type, rule.formula2, date1904)
+  // Univer uses list formula2 for per-item chip colors (often just "," for
+  // two uncolored UI options). Excel list validation has one source formula;
+  // colors are UI metadata, not a second constraint or OOXML formula.
+  const formula2 = type === 'list' ? undefined : formulaText(type, rule.formula2, date1904)
   return (
     (formula1 === undefined ? '' : `<formula1>${escapeXmlText(formula1)}</formula1>`) +
     (formula2 === undefined ? '' : `<formula2>${escapeXmlText(formula2)}</formula2>`)
@@ -238,7 +241,38 @@ function formulaText(
   const text = String(raw)
   if (text === '') return undefined
   if (type === 'list') {
-    return text.startsWith('=') ? text.slice(1) : `"${text}"`
+    if (text.startsWith('=')) return text.slice(1)
+    let literal = text
+    if (text.startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(text)
+        if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) {
+          if (parsed.length === 0 || parsed.some((item) => item === '' || /[,"\r\n]/.test(item))) {
+            throw new DvEditError(
+              'This dropdown contains an empty item or a comma, quote, or newline. ' +
+                'Excel inline lists cannot preserve those items; use a cell-range source.',
+            )
+          }
+          literal = parsed.join(',')
+        }
+      } catch (error) {
+        if (error instanceof DvEditError) throw error
+        // Legacy CSV sources may begin with '['; leave them unchanged.
+      }
+    }
+    if (/["\r\n]/.test(literal) || literal.split(',').some((item) => item === '')) {
+      throw new DvEditError(
+        'This dropdown contains an empty item, quote, or newline that Excel inline lists ' +
+          'cannot preserve; use a cell-range source.',
+      )
+    }
+    if (literal.length > 255) {
+      throw new DvEditError(
+        'This dropdown is longer than Excel’s 255-character inline list limit; ' +
+          'use a cell-range source.',
+      )
+    }
+    return `"${literal}"`
   }
   if (type === 'custom') {
     return text.startsWith('=') ? text.slice(1) : text

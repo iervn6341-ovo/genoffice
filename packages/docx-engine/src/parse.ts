@@ -8,7 +8,8 @@ import { isMetafileMime, metafileToDataUrl } from './metafile'
 import { isTiffMime, tiffToDataUrl } from './tiff'
 import { ommlFragmentsOf, ommlToLatex, ommlToMathML } from './math'
 import { splitXmlChildren } from './generate'
-import { NOTE_PART_PATH, parseNotesXml } from './notes'
+import { NOTE_PART_PATH, noteEntryXmlById, notePartNamespaces, parseNotesXml } from './notes'
+import { noteCustomMarkFromRun } from './note-custom-mark'
 import { scanBody, type BodyElement } from './scan'
 import { notePropsFromXml, sectionSettingsFromXml, xmlFlagOn } from './section'
 import { findSourcesPart, parseSourcesXml } from './sources'
@@ -300,6 +301,36 @@ export interface ParseOptions {
   expandAltChunks?: boolean
 }
 
+/** Core properties may bind the Dublin Core namespace to any prefix or as the default. */
+function coreCreatorOf(xml: string | undefined): string | undefined {
+  if (!xml) return undefined
+  const dcNamespace = 'http://purl.org/dc/elements/1.1/'
+  const visit = (nodes: XNode[], inherited: Map<string, string>): string | undefined => {
+    for (const node of nodes) {
+      const name = nameOf(node)
+      if (!name) continue
+      const namespaces = new Map(inherited)
+      for (const [attr, value] of Object.entries(attrsOf(node))) {
+        if (attr === 'xmlns') namespaces.set('', value)
+        else if (attr.startsWith('xmlns:')) namespaces.set(attr.slice(6), value)
+      }
+      const colon = name.indexOf(':')
+      const prefix = colon < 0 ? '' : name.slice(0, colon)
+      const localName = colon < 0 ? name : name.slice(colon + 1)
+      if (localName === 'creator' && namespaces.get(prefix) === dcNamespace) return textOf(node)
+      const found = visit(childrenOf(node), namespaces)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  try {
+    return visit(xmlParser.parse(xml) as XNode[], new Map())
+  } catch {
+    // Optional metadata must not prevent the document itself from opening.
+    return undefined
+  }
+}
+
 export async function parseDocx(
   bytes: Uint8Array,
   options: ParseOptions = {},
@@ -314,6 +345,8 @@ export async function parseDocx(
     throw new Error('not a docx: missing word/document.xml')
   }
   const documentXml = await zip.file(docPath)!.async('string')
+  const coreXml = await zip.file('docProps/core.xml')?.async('string')
+  const coreCreator = coreCreatorOf(coreXml)
 
   const theme = await parseTheme(zip)
   const { styles, docDefaults } = await parseStyles(zip, theme.colors, theme.fonts)
@@ -335,8 +368,14 @@ export async function parseDocx(
   const protection = await parseProtection(zip)
   const writeProtection = await parseWriteProtection(zip)
   const removePersonalInfo = await parseRemovePersonalInfo(zip)
-  const footnotes = await parseNotesPart(zip, 'footnote')
-  const endnotes = await parseNotesPart(zip, 'endnote')
+  const footnotePart = await parseNotesPart(
+    zip,
+    'footnote',
+    customNoteIdsOf(documentXml, 'footnote'),
+  )
+  const endnotePart = await parseNotesPart(zip, 'endnote', customNoteIdsOf(documentXml, 'endnote'))
+  const footnotes = footnotePart.notes
+  const endnotes = endnotePart.notes
   const sources = await parseSources(zip)
   // a damaged docProps/custom.xml must not keep the document from opening
   const zoteroDocumentData = await readZoteroDocumentData(zip).catch(() => '')
@@ -344,8 +383,27 @@ export async function parseDocx(
   const fontTable = fontTableFile ? parseFontTable(await fontTableFile.async('string')) : []
   const embeddedFonts = await readEmbeddedFonts(zip, fontTable)
 
-  const { footnoteProps, endnoteProps } = await parseNoteProps(zip, documentXml)
-  const noteNumbers = noteNumbersOf(documentXml, footnotes, endnotes, footnoteProps, endnoteProps)
+  const { footnoteProps, endnoteProps, footnoteSettings, endnoteSettings } = await parseNoteProps(
+    zip,
+    documentXml,
+  )
+  const scan = scanBody(documentXml)
+  const noteNumbers = noteNumbersOf(
+    documentXml,
+    scan.elements,
+    footnotes,
+    endnotes,
+    footnoteSettings,
+    endnoteSettings,
+  )
+  const noteMarks = new Map(
+    [
+      ...footnotes.map((note) => ['footnote', note] as const),
+      ...endnotes.map((note) => ['endnote', note] as const),
+    ]
+      .filter(([, note]) => note.customMark)
+      .map(([kind, note]) => [`${kind}:${note.id}`, note] as const),
+  )
 
   const rangedCommentIds = new Set(
     [...documentXml.matchAll(/<w:commentRangeStart [^>]*w:id="([^"]+)"/g)].map((m) => m[1]),
@@ -354,7 +412,6 @@ export async function parseDocx(
     comments.map((c) => c.id).filter((id) => !rangedCommentIds.has(id)),
   )
 
-  const scan = scanBody(documentXml)
   const mediaByRid = await tableBlipMedia(scan.elements, documentXml, zip, rels)
   const externalTxbxByRid = await externalTxbxParts(documentXml, zip, rels)
   // sections end at their w:sectPr: the one governing an offset is the first
@@ -385,7 +442,9 @@ export async function parseDocx(
     numbering,
     chartParts,
     noteNumbers,
+    noteMarks,
     compatibilityMode,
+    namespaceBindings: namespaceBindingsFromRoot(documentXml),
     themeColors: theme.colors,
     themeFonts: theme.fonts,
     mediaByRid,
@@ -536,6 +595,7 @@ export async function parseDocx(
 
   return {
     blocks,
+    ...(coreCreator !== undefined ? { coreCreator } : {}),
     zoteroDocumentData,
     comments,
     protection,
@@ -545,6 +605,8 @@ export async function parseDocx(
     endnotes,
     ...(footnoteProps ? { footnoteProps } : {}),
     ...(endnoteProps ? { endnoteProps } : {}),
+    ...(footnoteSettings ? { footnoteSettings } : {}),
+    ...(endnoteSettings ? { endnoteSettings } : {}),
     noteNumbers: Object.fromEntries(noteNumbers),
     sources,
     inks,
@@ -580,11 +642,39 @@ export async function parseDocx(
     internal: {
       originalBytes: bytes,
       documentXml,
+      noteEntryXml: {
+        footnote: footnotePart.entries,
+        endnote: endnotePart.entries,
+      },
+      notePartNamespaces: {
+        footnote: footnotePart.namespaces,
+        endnote: endnotePart.namespaces,
+      },
       bodyInnerStart: scan.innerStart,
       bodyInnerEnd: scan.innerEnd,
     },
     extras: { elements, chartParts, lazyMediaHashes: [...(lazyHashesByZip.get(zip) ?? [])] },
   }
+}
+
+const W14_NAMESPACE = 'http://schemas.microsoft.com/office/word/2010/wordml'
+
+function addNamespaceBindings(
+  inherited: Readonly<Record<string, string>>,
+  attrs: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const result = { ...inherited }
+  for (const [key, value] of Object.entries(attrs))
+    if (key.startsWith('xmlns:')) result[key.slice(6)] = value
+  return result
+}
+
+function namespaceBindingsFromRoot(xml: string): Record<string, string> {
+  const root = /<w:document\b[^>]*>/.exec(xml)?.[0] ?? ''
+  const attrs: Record<string, string> = {}
+  for (const match of root.matchAll(/\bxmlns:([\w.-]+)\s*=\s*(["'])(.*?)\2/g))
+    attrs[`xmlns:${match[1]}`] = match[3]
+  return addNamespaceBindings({}, attrs)
 }
 
 interface BuildContext {
@@ -598,6 +688,7 @@ interface BuildContext {
   chartParts: Record<string, string>
   /** "footnote:<id>" / "endnote:<id>" -> display number */
   noteNumbers: Map<string, number>
+  noteMarks?: Map<string, NoteInfo>
   /** live palette for w:themeColor resolution (built-in Office palette when the doc has no theme part) */
   themeColors?: ThemeColors | null
   /** theme font scheme for w:asciiTheme/... resolution */
@@ -622,6 +713,8 @@ interface BuildContext {
   floatTableAhead?: { leftTwips: number; rightTwips: number }
   /** settings.xml compatibilityMode (0 = legacy layout) */
   compatibilityMode?: number
+  /** Namespace bindings inherited by document.xml body content. */
+  namespaceBindings?: Record<string, string>
   /** part root declares xml:space="preserve" (inherited XML scope; PDF converters
    *  rely on it instead of per-w:t attributes) */
   xmlSpacePreserve?: boolean
@@ -967,6 +1060,16 @@ async function buildBlock(
   }
   // footnote / endnote references are editable: extractRuns turns them into
   // Run.noteRef markers that regenerate as w:footnoteReference / w:endnoteReference
+  // An unsupported custom-reference run must stay intact: folding it into an
+  // atom would otherwise duplicate or erase an adjacent symbol or text run.
+  if (hasUnsafeCustomNoteRun(detect)) {
+    return {
+      ...base,
+      type: 'passthrough',
+      label: 'Custom note reference',
+      previewText: plainText(detect),
+    }
+  }
   // Run-level w:ins / w:del are parsed into Run.ins / Run.del (editable).
   // Paragraph-property revisions (pPrChange / numberingChange / paragraph-mark
   // ins/del) live in pPr and survive editing via Block.rawPPr passthrough.
@@ -3390,6 +3493,8 @@ function extractParaFormat(
     if (kl !== undefined) format.keepLines = kl
     const sln = onOffOf(pPr, 'w:suppressLineNumbers')
     if (sln !== undefined) format.suppressLineNumbers = sln
+    const sah = onOffOf(pPr, 'w:suppressAutoHyphens')
+    if (sah !== undefined) format.suppressAutoHyphens = sah
   }
   // snapToGrid: default ON; only store when explicitly set to OFF
   const snapEl = findChild(pPr, 'w:snapToGrid')
@@ -3411,8 +3516,25 @@ function extractParaFormat(
   if (autoSpace !== undefined) format.autoSpace = autoSpace
   const wordWrap = onOffOf(pPr, 'w:wordWrap')
   if (wordWrap !== undefined) format.wordWrap = wordWrap
+  const kinsoku = onOffOf(pPr, 'w:kinsoku')
+  if (kinsoku !== undefined) format.kinsoku = kinsoku
   const overflowPunct = onOffOf(pPr, 'w:overflowPunct')
   if (overflowPunct !== undefined) format.overflowPunct = overflowPunct
+  const topLinePunct = onOffOf(pPr, 'w:topLinePunct')
+  if (topLinePunct !== undefined) format.topLinePunct = topLinePunct
+  const autoSpaceDE = onOffOf(pPr, 'w:autoSpaceDE')
+  if (autoSpaceDE !== undefined) format.autoSpaceDE = autoSpaceDE
+  const autoSpaceDN = onOffOf(pPr, 'w:autoSpaceDN')
+  if (autoSpaceDN !== undefined) format.autoSpaceDN = autoSpaceDN
+  const textAlignment = attrsOf(findChild(pPr, 'w:textAlignment') ?? {})['w:val']
+  if (
+    textAlignment === 'auto' ||
+    textAlignment === 'baseline' ||
+    textAlignment === 'center' ||
+    textAlignment === 'top' ||
+    textAlignment === 'bottom'
+  )
+    format.textAlignment = textAlignment
   const shd = findChild(pPr, 'w:shd')
   if (shd) {
     const fill = attrsOf(shd)['w:fill']
@@ -3632,6 +3754,7 @@ function extractRuns(
   zoteroField?: ZoteroFieldParagraph,
 ): Run[] {
   const runs: Run[] = []
+  const namespaceBindings = addNamespaceBindings(ctx.namespaceBindings ?? {}, attrsOf(pNode))
   let mathIndex = 0
   let rubyIndex = 0
   // paragraph-style rtl inherits into runs without their own flag
@@ -3730,7 +3853,12 @@ function extractRuns(
       )
     })
   }
-  const handleRun = (node: XNode, link: Run['link'] | undefined, rev?: RevCtx) => {
+  const handleRun = (
+    node: XNode,
+    link: Run['link'] | undefined,
+    rev?: RevCtx,
+    runNamespaceBindings: Readonly<Record<string, string>> = namespaceBindings,
+  ) => {
     const fldChar = findChild(node, 'w:fldChar')
     if (fldChar) {
       const type = attrsOf(fldChar)['w:fldCharType']
@@ -3880,7 +4008,31 @@ function extractRuns(
       const id = attrsOf(noteRefNode)['w:id']
       if (id) {
         const num = ctx.noteNumbers.get(`${kind}:${id}`)
-        pushRun({ text: String(num ?? '*'), noteRef: { kind, id } }, rev)
+        const mark = ctx.noteMarks?.get(`${kind}:${id}`)
+        const inlineMark = /^(?:1|true)$/.test(
+          String(attrsOf(noteRefNode)['w:customMarkFollows'] ?? ''),
+        )
+          ? noteCustomMarkFromRun(serializeXNode(node))
+          : null
+        pushRun(
+          {
+            text: String(num ?? '*'),
+            ...(findChild(node, 'w:rPr')
+              ? { rawRPr: serializeXNode(findChild(node, 'w:rPr')!) }
+              : {}),
+            noteRef: {
+              kind,
+              id,
+              ...(mark?.customMark || inlineMark?.text
+                ? { customMark: mark?.customMark ?? inlineMark?.text }
+                : {}),
+              ...(mark?.customMarkSymbol || inlineMark?.symbol
+                ? { customMarkSymbol: mark?.customMarkSymbol ?? inlineMark?.symbol }
+                : {}),
+            },
+          },
+          rev,
+        )
         return
       }
     }
@@ -3917,6 +4069,7 @@ function extractRuns(
         paraVanish,
         paraBdr,
         ctx.vmlShapeTypes,
+        runNamespaceBindings,
       )
       if (run) pushRun(run, rev)
     }
@@ -3966,9 +4119,15 @@ function extractRuns(
       )
     }
   }
-  const walk = (nodes: XNode[], link?: Run['link'], rev?: RevCtx) => {
+  const walk = (
+    nodes: XNode[],
+    link?: Run['link'],
+    rev?: RevCtx,
+    inheritedBindings: Readonly<Record<string, string>> = namespaceBindings,
+  ) => {
     for (const node of nodes) {
       const name = nameOf(node)
+      const scopedBindings = addNamespaceBindings(inheritedBindings, attrsOf(node))
       if (name === 'w:commentRangeStart' || name === 'w:commentRangeEnd') {
         const id = attrsOf(node)['w:id']
         if (id && complete.has(id)) {
@@ -3981,7 +4140,7 @@ function extractRuns(
         if (attrs['w:date']) info.date = attrs['w:date']
         if (attrs['w:id']) info.id = attrs['w:id']
         const next: RevCtx = name === 'w:ins' ? { ...rev, ins: info } : { ...rev, del: info }
-        walk(childrenOf(node), link, next)
+        walk(childrenOf(node), link, next, scopedBindings)
       } else if (name === 'w:moveFrom' || name === 'w:moveTo') {
         // Treat moveFrom like del (content was moved away) and moveTo like ins (content arrived here).
         // This allows the existing accept/reject mechanism to handle moves via del/ins marks.
@@ -3990,9 +4149,9 @@ function extractRuns(
         if (attrs['w:date']) info.date = attrs['w:date']
         if (attrs['w:id']) info.id = attrs['w:id']
         const next: RevCtx = name === 'w:moveFrom' ? { ...rev, del: info } : { ...rev, ins: info }
-        walk(childrenOf(node), link, next)
+        walk(childrenOf(node), link, next, scopedBindings)
       } else if (name === 'w:r') {
-        handleRun(node, link, rev)
+        handleRun(node, link, rev, scopedBindings)
       } else if (name === 'm:oMath') {
         // atomic inline formula; the raw fragment saves verbatim on regeneration
         const omml = mathFragments[mathIndex++]
@@ -4003,25 +4162,25 @@ function extractRuns(
         const anchor = attrs['w:anchor']
         const tooltip = attrs['w:tooltip']
         const href = rId ? (ctx.rels.get(rId)?.target ?? '') : anchor ? `#${anchor}` : ''
-        walk(childrenOf(node), { href, rId, ...(tooltip ? { tooltip } : {}) }, rev)
+        walk(childrenOf(node), { href, rId, ...(tooltip ? { tooltip } : {}) }, rev, scopedBindings)
       } else if (name === 'w:sdt' && sdtCheckboxControl(node)) {
         // one glyph run per control, whatever the content held; the state, not
         // the file's text, picks the glyph, as Word does when it draws the box
         const control = sdtCheckboxControl(node)!
         const first = runs.length
-        walk(childrenOf(node), link, rev)
+        walk(childrenOf(node), link, rev, scopedBindings)
         const base = runs.slice(first).find((r) => r.text.trim() !== '') ?? runs[first]
         runs.length = first
         pushRun({ ...(base ?? {}), text: control.glyph, sdtCheckboxXml: control.sdtPrXml }, rev)
       } else if (name === 'w:smartTag' || name === 'w:sdt' || name === 'w:sdtContent') {
-        walk(childrenOf(node), link, rev)
+        walk(childrenOf(node), link, rev, scopedBindings)
       } else if (name === 'w:fldSimple') {
         // single-element field form: the children are the cached result runs
         // (Word shows them until the field refreshes) — MERGEFIELD address
         // labels, DATE stamps... Dropping them blanks mail-merge documents.
         // Skip only inside an enclosing complex field's instruction phase.
         if (fieldDepth === 0) foldSimpleField(node, link, rev)
-        else if (fieldSeparated) walk(childrenOf(node), link, rev)
+        else if (fieldSeparated) walk(childrenOf(node), link, rev, scopedBindings)
       } else if (name === 'w:br') {
         // Word honors a <w:br> sitting outside any <w:r> (direct child of w:p / w:ins)
         pushRun({ text: BREAK_CHAR[attrsOf(node)['w:type'] ?? ''] ?? '\n' }, rev)
@@ -4063,6 +4222,7 @@ function buildRun(
   paraVanish?: boolean,
   paraBdr?: Run['bdr'],
   vmlShapeTypes?: ReadonlyMap<string, Record<string, string>>,
+  namespaceBindings: Readonly<Record<string, string>> = {},
 ): Run | null {
   let text = ''
   let sym: (Run['sym'] & { glyph: string }) | null | undefined
@@ -4206,6 +4366,14 @@ function buildRun(
   if (!rPr && paraBdr) run.bdr = paraBdr
   if (rPr) {
     run.rawRPr = serializeXNode(rPr)
+    const scoped = addNamespaceBindings(
+      addNamespaceBindings(namespaceBindings, attrsOf(rNode)),
+      attrsOf(rPr),
+    )
+    const w14Prefixes = Object.entries(scoped)
+      .filter(([, uri]) => uri === W14_NAMESPACE)
+      .map(([prefix]) => prefix)
+    if (w14Prefixes.length) run.rawRPrW14Prefixes = w14Prefixes
     const rStyle = attrsOf(findChild(rPr, 'w:rStyle') ?? {})['w:val']
     if (rStyle) run.styleId = rStyle
     // hidden text: an explicit run w:vanish wins over the character/paragraph
@@ -4231,8 +4399,11 @@ function buildRun(
     if (bold !== undefined) run.bold = bold
     const italic = onOffOf(rPr, cs ? 'w:iCs' : 'w:i')
     if (italic !== undefined) run.italic = italic
+    const underlineAttrs = attrsOf(findChild(rPr, 'w:u') ?? {})
     if (underlineProp(rPr)) run.underline = true
-    else if (attrsOf(findChild(rPr, 'w:u') ?? {})['w:val'] === 'none') run.underline = false
+    else if (underlineAttrs['w:val'] === 'none') run.underline = false
+    if (underlineAttrs['w:val']) run.underlineStyle = underlineAttrs['w:val']
+    if (underlineAttrs['w:color']) run.underlineColor = underlineAttrs['w:color']
     const strike = onOffOf(rPr, 'w:strike')
     if (strike !== undefined) run.strike = strike
     const color = colorFrom(rPr, theme) ?? w14TextFillHex(rPr, theme) ?? autoColorOf(rPr)
@@ -4772,6 +4943,7 @@ function extractTableModel(
   const rowHeightRules: NonNullable<TableModel['rowHeightRules']> = []
   const repeatHeaderRows: boolean[] = []
   const rowRevisions: NonNullable<TableModel['rowRevisions']> = []
+  const cantSplitRows: boolean[] = []
   for (const tr of childrenThroughSdt(tbl, 'w:tr')) {
     const cells: TableCell[] = []
     const tcws: Array<number | undefined> = []
@@ -4805,6 +4977,7 @@ function extractTableModel(
       rowHeightsTwips.push(hasH ? Math.min(h, 31680) : null)
       rowHeightRules.push(hasH ? (trH['w:hRule'] === 'exact' ? 'exact' : 'atLeast') : null)
       repeatHeaderRows.push(trPr ? boolProp(trPr, 'w:tblHeader') : false)
+      cantSplitRows.push(trPr ? boolProp(trPr, 'w:cantSplit') : false)
       rowRevisions.push(trPr ? rowRevisionOf(trPr) : null)
     }
   }
@@ -4867,6 +5040,11 @@ function extractTableModel(
     model.rowHeightRules = rowHeightRules
   }
   model.repeatHeaderRows = repeatHeaderRows
+  if (cantSplitRows.some(Boolean)) model.cantSplitRows = cantSplitRows
+  const altTitle = attrsOf(findChild(tblPrNode ?? {}, 'w:tblCaption') ?? {})['w:val']
+  const altDescription = attrsOf(findChild(tblPrNode ?? {}, 'w:tblDescription') ?? {})['w:val']
+  if (altTitle) model.altTitle = altTitle
+  if (altDescription) model.altDescription = altDescription
   if (rowRevisions.some((r) => r !== null)) model.rowRevisions = rowRevisions
   return model
 }
@@ -5661,6 +5839,8 @@ async function parseLayoutSettings(zip: JSZip): Promise<{
   defaultTabStopTwips?: number
   balanceDbcsSpacing?: boolean
   compressPunctuation?: boolean
+  characterSpacingControl?:
+    'doNotCompress' | 'compressPunctuation' | 'compressPunctuationAndJapaneseKana'
   adjustLineHeightInTable?: boolean
 }> {
   const file = zip.file('word/settings.xml')
@@ -5668,12 +5848,23 @@ async function parseLayoutSettings(zip: JSZip): Promise<{
   const xml = await file.async('string')
   const tab = /<w:defaultTabStop[^>]*w:val="(-?\d+)"/.exec(xml)
   const csc = /<w:characterSpacingControl[^>]*w:val="(\w+)"/.exec(xml)
+  const spacingControl = csc?.[1]
+  const knownSpacingControl =
+    spacingControl === 'doNotCompress' ||
+    spacingControl === 'compressPunctuation' ||
+    spacingControl === 'compressPunctuationAndJapaneseKana'
   return {
     ...(xmlFlagOn(xml, 'w:autoHyphenation') ? { autoHyphenation: true } : {}),
     ...(xmlFlagOn(xml, 'w:mirrorMargins') ? { mirrorMargins: true } : {}),
     ...(tab ? { defaultTabStopTwips: parseInt(tab[1], 10) } : {}),
     ...(xmlFlagOn(xml, 'w:balanceSingleByteDoubleByteWidth') ? { balanceDbcsSpacing: true } : {}),
     ...(csc && csc[1].startsWith('compressPunctuation') ? { compressPunctuation: true } : {}),
+    ...(knownSpacingControl
+      ? {
+          characterSpacingControl: spacingControl as
+            'doNotCompress' | 'compressPunctuation' | 'compressPunctuationAndJapaneseKana',
+        }
+      : {}),
     ...(xmlFlagOn(xml, 'w:adjustLineHeightInTable') ? { adjustLineHeightInTable: true } : {}),
   }
 }
@@ -5682,14 +5873,21 @@ async function parseLayoutSettings(zip: JSZip): Promise<{
 async function parseNoteProps(
   zip: JSZip,
   documentXml: string,
-): Promise<{ footnoteProps?: NoteProps; endnoteProps?: NoteProps }> {
+): Promise<{
+  footnoteProps?: NoteProps
+  endnoteProps?: NoteProps
+  footnoteSettings?: NoteProps
+  endnoteSettings?: NoteProps
+}> {
   const settingsXml = (await zip.file('word/settings.xml')?.async('string')) ?? ''
+  const footnoteSettings = notePropsFromXml(settingsXml, 'w:footnotePr')
+  const endnoteSettings = notePropsFromXml(settingsXml, 'w:endnotePr')
   // a tracked w:sectPrChange embeds the previous sectPr after the live one
   const bodyXml = documentXml.replace(/<w:sectPrChange\b[\s\S]*?<\/w:sectPrChange>/g, '')
   const at = bodyXml.lastIndexOf('<w:sectPr')
   const lastSectPr = at >= 0 ? bodyXml.slice(at) : ''
   const merged = (tag: 'w:footnotePr' | 'w:endnotePr'): NoteProps | undefined => {
-    const base = notePropsFromXml(settingsXml, tag)
+    const base = tag === 'w:footnotePr' ? footnoteSettings : endnoteSettings
     const own = notePropsFromXml(lastSectPr, tag)
     return base || own ? { ...base, ...own } : undefined
   }
@@ -5698,62 +5896,77 @@ async function parseNoteProps(
   return {
     ...(footnoteProps ? { footnoteProps } : {}),
     ...(endnoteProps ? { endnoteProps } : {}),
+    ...(footnoteSettings ? { footnoteSettings } : {}),
+    ...(endnoteSettings ? { endnoteSettings } : {}),
   }
 }
 
 /**
  * Display numbers for note reference markers: Word counts references in body
- * order from numStart, restarting per section when numRestart=eachSect (a
- * section-break paragraph's own references still belong to the section it
- * closes; nested paragraphs in textboxes do not end it). A note is numbered
- * at its first reference; later references reuse it. Notes never referenced
- * in the body keep their part-order number; references to a missing note are
- * not counted. eachPage cannot be resolved before pagination and counts as
- * continuous.
+ * order using each section's own note settings. A section-break paragraph's
+ * references belong to the section it closes. A note is numbered at its first
+ * reference; later references reuse it. Notes never referenced in the body
+ * keep their part-order number. eachPage needs layout and is continuous here.
  */
 function noteNumbersOf(
   documentXml: string,
+  elements: BodyElement[],
   footnotes: NoteInfo[],
   endnotes: NoteInfo[],
-  footnoteProps?: NoteProps,
-  endnoteProps?: NoteProps,
+  footnoteSettings?: NoteProps,
+  endnoteSettings?: NoteProps,
 ): Map<string, number> {
   const out = new Map<string, number>()
   footnotes.forEach((n, i) => out.set(`footnote:${n.id}`, i + 1))
   endnotes.forEach((n, i) => out.set(`endnote:${n.id}`, i + 1))
-  const props = { footnote: footnoteProps, endnote: endnoteProps }
-  const count = { footnote: 0, endnote: 0 }
+  const defaults = { footnote: footnoteSettings, endnote: endnoteSettings }
+  const sections: Array<{
+    end: number
+    footnote: NoteProps
+    endnote: NoteProps
+  }> = []
+  for (const element of elements) {
+    const original = documentXml.slice(element.start, element.end)
+    if (!original.includes('<w:sectPr')) continue
+    const live = original.replace(/<w:sectPrChange\b[\s\S]*?<\/w:sectPrChange>/g, '')
+    const sectPr = /<w:sectPr\b[^>]*\/>|<w:sectPr\b[\s\S]*?<\/w:sectPr>/.exec(live)?.[0]
+    if (!sectPr) continue
+    sections.push({
+      end: element.end,
+      footnote: { ...defaults.footnote, ...notePropsFromXml(sectPr, 'w:footnotePr') },
+      endnote: { ...defaults.endnote, ...notePropsFromXml(sectPr, 'w:endnotePr') },
+    })
+  }
+  if (!sections.length || sections.at(-1)!.end < (elements.at(-1)?.end ?? 0))
+    sections.push({
+      end: Number.POSITIVE_INFINITY,
+      footnote: { ...defaults.footnote },
+      endnote: { ...defaults.endnote },
+    })
+  const next = {
+    footnote: sections[0].footnote.numStart ?? 1,
+    endnote: sections[0].endnote.numStart ?? 1,
+  }
   const numbered = new Set<string>()
-  let depth = 0
-  let sectDepth = -1
-  const re =
-    /<w:(footnote|endnote)Reference\b([^>]*?)\/?>|<w:sectPr[\s>]|<w:p(?:\s[^>]*)?\/?>|<\/w:p>/g
+  let section = 0
+  const re = /<w:(footnote|endnote)Reference\b([^>]*?)\/?>/g
   for (const m of documentXml.matchAll(re)) {
-    if (m[0].startsWith('<w:sectPr')) {
-      sectDepth = depth
-      continue
-    }
-    if (m[0].startsWith('<w:p')) {
-      if (!m[0].endsWith('/>')) depth++
-      continue
-    }
-    if (m[0] === '</w:p>') {
-      depth--
-      if (sectDepth > depth) {
-        sectDepth = -1
-        for (const kind of ['footnote', 'endnote'] as const) {
-          if (props[kind]?.numRestart === 'eachSect') count[kind] = 0
-        }
+    while (section < sections.length - 1 && (m.index ?? 0) >= sections[section].end) {
+      const previous = sections[section++]
+      const current = sections[section]
+      for (const kind of ['footnote', 'endnote'] as const) {
+        const props = current[kind]
+        if (props.numRestart === 'eachSect' || props.numStart !== previous[kind].numStart)
+          next[kind] = props.numStart ?? 1
       }
-      continue
     }
     const kind = m[1] as 'footnote' | 'endnote'
-    if (/w:customMarkFollows="(?:1|true)"/.test(m[2])) continue
+    if (/\bw:customMarkFollows=(?:"(?:1|true)"|'(?:1|true)')/.test(m[2])) continue
     const id = /w:id="([^"]+)"/.exec(m[2])?.[1]
     const key = `${kind}:${id}`
     if (!id || !out.has(key) || numbered.has(key)) continue
     numbered.add(key)
-    out.set(key, (props[kind]?.numStart ?? 1) + count[kind]++)
+    out.set(key, next[kind]++)
   }
   return out
 }
@@ -5763,6 +5976,181 @@ async function parseSettingsFlag(zip: JSZip, tag: string): Promise<boolean> {
   const file = zip.file('word/settings.xml')
   if (!file) return false
   return xmlFlagOn(await file.async('string'), tag)
+}
+
+interface HfFieldFragment {
+  xml: string
+  instruction: string
+  resultXml: string
+  token: string
+  kind: 'page' | 'total' | 'other'
+}
+
+/** Return non-structural ancestors that a field's replacement must not discard. */
+function hfFieldWrappersAt(xml: string, offset: number): string[] | null {
+  const stack: Array<{ name: string; at: number }> = []
+  for (const match of xml.matchAll(/<\/?([A-Za-z_][\w:.-]*)\b[^>]*>/g)) {
+    if ((match.index ?? 0) >= offset) break
+    const name = match[1]
+    if (match[0].startsWith('</')) {
+      let index = stack.length - 1
+      while (index >= 0 && stack[index].name !== name) index--
+      if (index >= 0) stack.splice(index)
+    } else if (!/\/\s*>$/.test(match[0])) stack.push({ name, at: match.index ?? 0 })
+  }
+  let paragraph = stack.length - 1
+  while (paragraph >= 0 && stack[paragraph].name !== 'w:p') paragraph--
+  if (paragraph < 0) return null
+  const structural = new Set(['w:hdr', 'w:ftr', 'w:tbl', 'w:tr', 'w:tc', 'w:p'])
+  return stack
+    .filter((entry, index) => index > paragraph || !structural.has(entry.name))
+    .map((entry) => `${entry.name}@${entry.at}`)
+}
+
+/** Keep whole existing fields as opaque XML while the surrounding header text is parsed. */
+function protectHfFieldXml(source: string): {
+  xml: string
+  fields: Map<string, HfFieldFragment>
+  unsafe: boolean
+} {
+  const fields = new Map<string, HfFieldFragment>()
+  let xml = source
+  let serial = 0
+  let unsafe = false
+  let wrapped = false
+  for (const simple of source.matchAll(/<w:fldSimple\b[^>]*>([\s\S]*?)<\/w:fldSimple>/g)) {
+    if (/<w:fldChar\b/.test(simple[1])) return { xml: source, fields, unsafe: true }
+  }
+  const instructionOf = (fragment: string) =>
+    (fragment.match(/<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/g) ?? [])
+      .map((part) => decodeEntities(part.replace(/<[^>]+>/g, '')))
+      .join('')
+  const replaceRange = (start: number, end: number, instruction: string, resultXml: string) => {
+    const raw = xml.slice(start, end)
+    const keyword = /^\s*([A-Za-z][A-Za-z0-9]*)/.exec(instruction)?.[1]?.toUpperCase() ?? 'FIELD'
+    const kind = keyword === 'PAGE' ? 'page' : keyword === 'NUMPAGES' ? 'total' : 'other'
+    let token: string
+    let marker: string
+    do {
+      serial++
+      token = `⟦${keyword}·${serial}⟧`
+      marker = `\uE100hf${serial}\uE101`
+    } while (source.includes(token) || source.includes(marker))
+    fields.set(marker, { xml: raw, instruction, resultXml, token, kind })
+    xml = xml.slice(0, start) + `<w:r><w:t>${marker}</w:t></w:r>` + xml.slice(end)
+  }
+
+  // Complex fields are balanced by fldChar depth, so nested fields stay inside
+  // their outer field's exact fragment instead of matching the first inner end.
+  const complex: Array<{ start: number; end: number; instruction: string; resultXml: string }> = []
+  let depth = 0
+  let start = -1
+  let resultStart = -1
+  const runs = [...xml.matchAll(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g)]
+  for (const run of runs) {
+    const at = run.index ?? 0
+    const end = at + run[0].length
+    const fieldTags = run[0].match(/<w:fldChar\b[^>]*>/g) ?? []
+    // A boundary sharing its run with visible text needs child-level surgery.
+    // Until modeled, keep the original part read-only rather than hiding text.
+    if (
+      fieldTags.length > 0 &&
+      (fieldTags.length > 1 || /<w:t\b|<w:drawing\b|<w:br\b/.test(run[0]))
+    ) {
+      unsafe = true
+    }
+    for (const tag of fieldTags) {
+      const type = /\bw:fldCharType\s*=\s*["'](begin|separate|end)["']/.exec(tag)?.[1]
+      if (type === 'begin') {
+        if (depth === 0) {
+          start = at
+          resultStart = -1
+        }
+        depth++
+      } else if (type === 'separate' && depth === 1) {
+        resultStart = end
+      } else if (type === 'end') {
+        if (depth === 0) {
+          unsafe = true
+          continue
+        }
+        depth--
+        if (depth === 0) {
+          const raw = xml.slice(start, end)
+          if (/<\/w:p\s*>|<w:p(?:\s|>)/.test(raw)) unsafe = true
+          const beginWrappers = hfFieldWrappersAt(xml, start)
+          const endWrappers = hfFieldWrappersAt(xml, at)
+          if (
+            !beginWrappers ||
+            !endWrappers ||
+            JSON.stringify(beginWrappers) !== JSON.stringify(endWrappers)
+          )
+            unsafe = true
+          else if (beginWrappers.length > 0) wrapped = true
+          const resultXml = resultStart >= 0 ? xml.slice(resultStart, at) : ''
+          complex.push({ start, end, instruction: instructionOf(raw), resultXml })
+        }
+      }
+    }
+  }
+  if (depth !== 0) unsafe = true
+  const allFieldChars = (xml.match(/<w:fldChar\b/g) ?? []).length
+  const seenFieldChars = runs.reduce(
+    (count, run) => count + (run[0].match(/<w:fldChar\b/g) ?? []).length,
+    0,
+  )
+  if (allFieldChars !== seenFieldChars) unsafe = true
+  if (unsafe) return { xml: source, fields: new Map(), unsafe: true }
+  for (const field of complex.reverse()) {
+    replaceRange(field.start, field.end, field.instruction, field.resultXml)
+  }
+
+  // A simple field is a single XML element. Stack matching also preserves a
+  // nested simple field in its outer field's raw bytes.
+  const simple: Array<{ start: number; end: number; instruction: string; resultXml: string }> = []
+  const stack: Array<{ start: number; openEnd: number; open: string }> = []
+  for (const tag of xml.matchAll(/<\/?w:fldSimple\b[^>]*>/g)) {
+    const at = tag.index ?? 0
+    const close = tag[0].startsWith('</')
+    const selfClosing = /\/\s*>$/.test(tag[0])
+    if (close) {
+      const open = stack.pop()
+      if (!open) {
+        unsafe = true
+        break
+      }
+      if (stack.length === 0) {
+        if (/<\/w:p\s*>|<w:p(?:\s|>)/.test(xml.slice(open.start, at + tag[0].length))) {
+          unsafe = true
+          break
+        }
+        simple.push({
+          start: open.start,
+          end: at + tag[0].length,
+          instruction: decodeEntities(
+            /\bw:instr\s*=\s*["']([^"']*)["']/.exec(open.open)?.[1] ?? '',
+          ),
+          resultXml: xml.slice(open.openEnd, at),
+        })
+      }
+    } else if (selfClosing) {
+      if (stack.length === 0)
+        simple.push({
+          start: at,
+          end: at + tag[0].length,
+          instruction: decodeEntities(/\bw:instr\s*=\s*["']([^"']*)["']/.exec(tag[0])?.[1] ?? ''),
+          resultXml: '',
+        })
+    } else stack.push({ start: at, openEnd: at + tag[0].length, open: tag[0] })
+  }
+  if (stack.length > 0 || unsafe) return { xml: source, fields: new Map(), unsafe: true }
+  for (const field of simple.reverse()) {
+    const wrappers = hfFieldWrappersAt(xml, field.start)
+    if (!wrappers) return { xml: source, fields: new Map(), unsafe: true }
+    if (wrappers.length > 0) wrapped = true
+    replaceRange(field.start, field.end, field.instruction, field.resultXml)
+  }
+  return { xml, fields, unsafe: wrapped }
 }
 
 /** header/footer part XML -> display content (PAGE fields shown as PAGE_MARK) */
@@ -5782,83 +6170,48 @@ function hfContentFromXml(
   watermarkPicture: PictureWatermarkInfo | null
   paras: HfParagraph[]
 } {
-  // Rewrite each field span (begin..end) for display. PAGE and NUMPAGES become
-  // private-use markers (the renderer substitutes real numbers; a literal '#'
-  // in the part text must never be mistaken for the field), dropping their
-  // stale cached results; other fields (DATE, STYLEREF, ...) keep their cached
-  // result runs (Word refreshes them on open). fldChar attribute matching is
-  // tolerant (Pages writes w:fldLock="0" etc.; LibreOffice writes the begin
-  // marker as an empty element pair, not self-closing).
-  // hasPageNumber is set by the same match that emits PAGE_MARK, so the two
-  // can't drift (Word may split "PAGE" across several instrText runs).
-  let hasPageNumber = false
   // mc:AlternateContent carries the same textbox twice (DrawingML Choice + VML
   // Fallback); keeping both prints the content twice (e.g. duplicated "— PAGE —"
   // page numbers), so only the Choice branch feeds text/paragraph extraction
-  let cleaned = xml.replace(/<mc:Fallback[^>]*>[\s\S]*?<\/mc:Fallback>/g, '')
-  cleaned = cleaned.replace(
-    /<w:fldChar[^>]*w:fldCharType="begin"[^>]*?(?:\/>|>\s*<\/w:fldChar>)[\s\S]*?<w:fldChar[^>]*w:fldCharType="end"[^>]*?(?:\/>|>\s*<\/w:fldChar>)/g,
-    (span) => {
-      const instr = (span.match(/<w:instrText[^>]*>[\s\S]*?<\/w:instrText>/g) ?? [])
-        .map((m) => m.replace(/<[^>]+>/g, ''))
-        .join('')
-      const rPr = /<w:rPr>[\s\S]*?<\/w:rPr>/.exec(span)?.[0] ?? ''
-      // the span starts inside the begin run and ends inside the end run, so
-      // the replacement closes/reopens the enclosing w:r to stay balanced
-      // (the leftover edge runs end up empty and are dropped later)
-      const emit = (inner: string) => `</w:r>${inner}<w:r>`
-      if (/\bNUMPAGES\b/.test(instr)) {
-        return emit(`<w:r>${rPr}<w:t>${TOTAL_PAGES_MARK}</w:t></w:r>`)
-      }
-      if (/\bPAGE\b/.test(instr)) {
-        hasPageNumber = true
-        return emit(`<w:r>${rPr}<w:t>${PAGE_MARK}</w:t></w:r>`)
-      }
-      const cached =
-        /<w:fldChar[^>]*w:fldCharType="separate"[^>]*?(?:\/>|>\s*<\/w:fldChar>)([\s\S]*)$/.exec(
-          span,
-        )?.[1]
-      // complete result runs between separate and end (partial run fragments at the edges drop out)
-      return emit(
-        (cached?.match(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g) ?? [])
-          .filter((run) => run.includes('<w:t'))
-          .join(''),
-      )
-    },
-  )
-  // <w:fldSimple w:instr=" PAGE "> single-element field form
-  cleaned = cleaned.replace(
-    /<w:fldSimple[^>]*w:instr="([^"]*)"[^>]*(?:\/>|>([\s\S]*?)<\/w:fldSimple>)/g,
-    (whole, instr: string, inner: string | undefined) => {
-      const rPr = inner ? (/<w:rPr>[\s\S]*?<\/w:rPr>/.exec(inner)?.[0] ?? '') : ''
-      if (/\bNUMPAGES\b/.test(instr)) return `<w:r>${rPr}<w:t>${TOTAL_PAGES_MARK}</w:t></w:r>`
-      if (/\bPAGE\b/.test(instr)) {
-        hasPageNumber = true
-        return `<w:r>${rPr}<w:t>${PAGE_MARK}</w:t></w:r>`
-      }
-      return inner ?? whole
-    },
-  )
+  const source = xml.replace(/<mc:Fallback[^>]*>[\s\S]*?<\/mc:Fallback>/g, '')
+  const protectedXml = protectHfFieldXml(source)
+  let cleaned = protectedXml.xml
   // legacy <w:pgNum/> run element (pre-field page number) renders as a PAGE field
   cleaned = cleaned.replace(/<w:pgNum\s*\/>/g, () => {
-    hasPageNumber = true
     return `<w:t>${PAGE_MARK}</w:t>`
   })
+  const paras = hfParagraphs(
+    cleaned,
+    theme,
+    styles,
+    tableMedia,
+    compatibilityMode,
+    themeFonts,
+    docDefaults,
+    protectedXml.fields,
+  )
+  if (protectedXml.unsafe) {
+    if (paras.length === 0) paras.push({ runs: [], protectedFields: true })
+    else for (const para of paras) para.protectedFields = true
+  }
+  const text = [...protectedXml.fields].reduce(
+    (value, [marker, field]) =>
+      value.replaceAll(
+        marker,
+        field.kind === 'page'
+          ? PAGE_MARK
+          : field.kind === 'total'
+            ? TOTAL_PAGES_MARK
+            : plainText(`<w:p>${field.resultXml}</w:p>`),
+      ),
+    plainText(cleaned),
+  )
   return {
-    text: plainText(cleaned),
-    hasPageNumber,
+    text,
+    hasPageNumber: text.includes(PAGE_MARK),
     watermark: kind === 'header' ? readWatermarkText(xml) : null,
     watermarkPicture: kind === 'header' ? readPictureWatermark(xml) : null,
-    // strip leftover field chars so the page marker parses as plain text
-    paras: hfParagraphs(
-      cleaned.replace(/<w:fldChar[^>]*?(?:\/>|>\s*<\/w:fldChar>)/g, ''),
-      theme,
-      styles,
-      tableMedia,
-      compatibilityMode,
-      themeFonts,
-      docDefaults,
-    ),
+    paras,
   }
 }
 
@@ -6062,6 +6415,7 @@ function hfParagraphs(
   compatibilityMode = 0,
   themeFonts?: ThemeFonts | null,
   docDefaults?: DocDefaults,
+  fields: ReadonlyMap<string, HfFieldFragment> = new Map(),
 ): HfParagraph[] {
   let parsed: XNode[]
   try {
@@ -6080,6 +6434,56 @@ function hfParagraphs(
     styles,
     xmlSpacePreserve: attrsOf(root)['xml:space'] === 'preserve',
   } as unknown as BuildContext
+  const restoreFields = (runs: Run[]): Run[] => {
+    if (fields.size === 0) return runs
+    const out: Run[] = []
+    for (const run of runs) {
+      let at = 0
+      let matched = false
+      for (const match of run.text.matchAll(/\uE100hf\d+\uE101/g)) {
+        matched = true
+        const index = match.index ?? 0
+        if (index > at) out.push({ ...run, text: run.text.slice(at, index) })
+        const field = fields.get(match[0])
+        if (!field) {
+          out.push({ ...run, text: match[0] })
+          at = index + match[0].length
+          continue
+        }
+        let resultRuns: Run[] = []
+        if (field.resultXml) {
+          try {
+            const nodes = xmlParser.parse(`<w:p>${field.resultXml}</w:p>`) as XNode[]
+            const paragraph = nodes.find((node) => nameOf(node) === 'w:p')
+            if (paragraph) resultRuns = extractRuns(paragraph, ctx)
+          } catch {
+            /* the exact field XML still saves even when its cache cannot display */
+          }
+        }
+        const text =
+          field.kind === 'page'
+            ? PAGE_MARK
+            : field.kind === 'total'
+              ? TOTAL_PAGES_MARK
+              : resultRuns.map((part) => part.text).join('')
+        out.push({
+          ...(resultRuns[0] ?? run),
+          text,
+          hfField: {
+            xml: field.xml,
+            instruction: field.instruction,
+            token: field.token,
+            displayText: text,
+            resultRuns,
+          },
+        })
+        at = index + match[0].length
+      }
+      if (at < run.text.length) out.push({ ...run, text: run.text.slice(at) })
+      else if (!matched && run.text === '') out.push(run)
+    }
+    return out
+  }
   const out: HfParagraph[] = []
   // floating tables (w:tblpPr) anchor to the paragraph that follows them in
   // markup; Word draws that paragraph first, so their rows are deferred past it
@@ -6098,14 +6502,19 @@ function hfParagraphs(
         tableMedia ? ({ ...ctx, mediaByRid: tableMedia } as BuildContext) : ctx,
         compatibilityMode,
       )
+      for (const row of rows) {
+        row.runs = restoreFields(row.runs)
+        for (const cell of row.cells ?? []) cell.paras = cell.paras.map(restoreFields)
+      }
       if (findChild(findChild(node, 'w:tblPr') ?? {}, 'w:tblpPr')) deferred.push(...rows)
       else out.push(...rows)
       continue
     }
     if (name !== 'w:p') continue
     const pNode = node
-    const runs = extractRuns(pNode, ctx)
+    const runs = restoreFields(extractRuns(pNode, ctx))
     const boxed = hasDeepChild(pNode, TXBX_CONTENT) ? textboxParagraphs(pNode, ctx) : []
+    for (const para of boxed) para.runs = restoreFields(para.runs)
     if (runs.length === 0 && (findChild(pNode, 'w:r') || findChild(pNode, 'w:pict'))) {
       // Government-style footers keep their text (e.g. the "— PAGE —" page number)
       // inside a VML textbox shape; surface those inner paragraphs instead of dropping
@@ -6560,10 +6969,49 @@ function readVmlInset(textbox: XNode, box: HfTextBox): void {
   ]
 }
 
-async function parseNotesPart(zip: JSZip, kind: 'footnote' | 'endnote'): Promise<NoteInfo[]> {
+function hasUnsafeCustomNoteRun(xml: string): boolean {
+  for (const run of xml.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g) ?? []) {
+    const reference = /<w:(?:footnote|endnote)Reference\b([^>]*?)\/>/.exec(run)
+    if (!reference || !/\bw:customMarkFollows=(?:"(?:1|true)"|'(?:1|true)')/.test(reference[1]))
+      continue
+    const inner = run
+      .replace(/^<w:r\b[^>]*>|<\/w:r>$/g, '')
+      .replace(/<w:rPr\b[^>]*>[\s\S]*?<\/w:rPr>|<w:rPr\b[^>]*\/>/, '')
+    const marker = /<w:sym\b[^>]*\/>|<w:t\b[^>]*>[\s\S]*?<\/w:t>/.exec(inner)
+    if (!marker || marker.index < inner.indexOf(reference[0])) return true
+    if (inner.replace(reference[0], '').replace(marker[0], '').trim()) return true
+  }
+  return false
+}
+
+function customNoteIdsOf(xml: string, kind: 'footnote' | 'endnote'): Set<string> {
+  const ids = new Set<string>()
+  const tag = kind === 'footnote' ? 'w:footnoteReference' : 'w:endnoteReference'
+  for (const match of xml.matchAll(new RegExp(`<${tag}\\b([^>]*)>`, 'g'))) {
+    if (!/\bw:customMarkFollows=(?:"(?:1|true)"|'(?:1|true)')/.test(match[1])) continue
+    const id = /\bw:id=(?:"([^"]+)"|'([^']+)')/.exec(match[1])
+    if (id) ids.add(id[1] ?? id[2])
+  }
+  return ids
+}
+
+async function parseNotesPart(
+  zip: JSZip,
+  kind: 'footnote' | 'endnote',
+  customIds: ReadonlySet<string>,
+): Promise<{
+  notes: NoteInfo[]
+  entries: Record<string, string>
+  namespaces: Record<string, string>
+}> {
   const file = zip.file(NOTE_PART_PATH[kind])
-  if (!file) return []
-  return parseNotesXml(await file.async('string'), kind)
+  if (!file) return { notes: [], entries: {}, namespaces: {} }
+  const xml = await file.async('string')
+  return {
+    notes: parseNotesXml(xml, kind, customIds),
+    entries: noteEntryXmlById(xml, kind),
+    namespaces: notePartNamespaces(xml, kind),
+  }
 }
 
 async function parseSources(zip: JSZip): Promise<SourceInfo[]> {

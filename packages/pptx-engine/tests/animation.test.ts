@@ -343,10 +343,9 @@ describe('pruneTimingForSpids (element removal must not leave dangling spTgt ref
     expect(spidsAfter.has(spids[1]!)).toBe(true)
   })
 
-  it('applyHeaderFooter prunes animations of the placeholders it replaces', async () => {
+  it('applyHeaderFooter preserves animations of the placeholder it edits in place', async () => {
     const opened = await openPptx(fx('01_standard_business.pptx'))
-    // First install footers, animate one, then re-apply: the old placeholder
-    // is removed and its animation must go with it
+    // A text change keeps the existing shape and its animation target.
     expect(applyHeaderFooter(opened, { footer: 'v1', slideNum: true })).toBe(true)
     const slide = opened.deck.slides[0]!
     const ftr = slide.elements.find((el) => el.placeholder === 'ftr')!
@@ -360,7 +359,9 @@ describe('pruneTimingForSpids (element removal must not leave dangling spTgt ref
     for (const m of fresh.bodySuffix.matchAll(/<p:spTgt spid="(\d+)"/g)) {
       expect(ids.has(Number(m[1]))).toBe(true)
     }
-    expect(fresh.bodySuffix).not.toContain(`<p:spTgt spid="${spid}"`)
+    expect(fresh.bodySuffix).toContain(`<p:spTgt spid="${spid}"`)
+    const saved = await openPptx(await savePptx(opened))
+    expect(saved.deck.slides[0]!.bodySuffix).toContain(`<p:spTgt spid="${spid}"`)
   })
 })
 

@@ -9,8 +9,9 @@ import {
   type SaveBlock,
 } from '../src/index'
 import { buildDocx } from './helpers/build-docx'
-import { parseNotesXml } from '../src/notes'
+import { buildNotesXml, parseNotesXml } from '../src/notes'
 
+const SUP = '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>'
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
 
 const FOOTNOTES_XML =
@@ -84,6 +85,35 @@ describe('Zotero fields inside notes', () => {
   })
 })
 
+describe('imported note safety', () => {
+  it('preserves an opaque field entry when another note is added and rejects editing its cached result', () => {
+    const fieldEntry =
+      '<w:footnote w:id="5"><w:p><w:r><w:footnoteRef/></w:r>' +
+      '<w:fldSimple w:instr=" DATE "><w:r><w:t>October</w:t></w:r></w:fldSimple>' +
+      '<w:r><w:t> detail</w:t></w:r></w:p></w:footnote>'
+    const source = FOOTNOTES_XML.replace('</w:footnotes>', fieldEntry + '</w:footnotes>')
+    const notes = parseNotesXml(source, 'footnote')
+    expect(notes.find((note) => note.id === '5')?.protectedContent).toBe(true)
+    expect(buildNotesXml('footnote', [...notes, { id: '6', text: 'new' }], source)).toContain(
+      fieldEntry,
+    )
+    expect(() =>
+      buildNotesXml(
+        'footnote',
+        notes.map((note) => (note.id === '5' ? { ...note, text: 'changed' } : note)),
+        source,
+      ),
+    ).toThrow('protected OOXML content')
+  })
+
+  it('rejects an imported paragraph split instead of rebuilding unknown markup', () => {
+    const notes = parseNotesXml(FOOTNOTES_XML, 'footnote')
+    expect(() =>
+      buildNotesXml('footnote', [{ ...notes[0], text: 'first\nsecond' }], FOOTNOTES_XML),
+    ).toThrow('unsupported paragraph change')
+  })
+})
+
 describe('footnotes / endnotes', () => {
   it('parses word/footnotes.xml and keeps the reference paragraph editable', async () => {
     const doc = await parseDocx(await buildFootnoteDocx())
@@ -93,7 +123,7 @@ describe('footnotes / endnotes', () => {
     expect(p.type).toBe('paragraph')
     expect(p.runs).toEqual([
       { text: '正文' },
-      { text: '1', noteRef: { kind: 'footnote', id: '2' } },
+      { rawRPr: SUP, text: '1', noteRef: { kind: 'footnote', id: '2' } },
       { text: '继续' },
     ])
   })
@@ -173,7 +203,7 @@ describe('footnotes / endnotes', () => {
     const last = reparsed.blocks.filter((b) => !b.hidden).at(-1)!
     expect(last.runs).toEqual([
       { text: '新段落' },
-      { text: '2', noteRef: { kind: 'footnote', id: '3' } },
+      { rawRPr: SUP, text: '2', noteRef: { kind: 'footnote', id: '3' } },
     ])
   })
 
@@ -206,7 +236,7 @@ describe('footnotes / endnotes', () => {
     expect(reparsed.endnotes).toEqual([{ id: '2', text: '尾注内容' }])
     expect(reparsed.blocks[0].runs).toEqual([
       { text: '正文' },
-      { text: '1', noteRef: { kind: 'endnote', id: '2' } },
+      { rawRPr: SUP, text: '1', noteRef: { kind: 'endnote', id: '2' } },
     ])
   })
 })

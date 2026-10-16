@@ -2,6 +2,8 @@
 /// OOXML parts: a chart part, a drawing part (created or extended), the
 /// worksheet/drawing relationships, and the [Content_Types].xml overrides.
 
+import { createHash } from 'node:crypto'
+import { latexToOmml } from '@genoffice/office-math'
 import { ensureRelationshipNamespace } from './xlsx-namespace'
 
 export class VisualAddError extends Error {}
@@ -76,12 +78,20 @@ export interface ImageAdd {
   readonly base64: string
 }
 
+export interface EquationAdd {
+  /// Linear source for GenOffice re-editing; the editable Office equation is OMML.
+  readonly latex: string
+  /// Children of m:oMath, produced by the shared Office math converter.
+  readonly omml: string
+}
+
 export interface VisualAddition {
   readonly worksheetPath: string
   readonly anchor: DrawingAnchor
   readonly chart?: ChartAdd | undefined
   readonly shape?: ShapeAdd | undefined
   readonly image?: ImageAdd | undefined
+  readonly equation?: EquationAdd | undefined
 }
 
 /// Structural view of the gateway's PackageEditor: reads see earlier
@@ -150,8 +160,14 @@ export async function applyVisualAdditions(
       await appendAnchor(pkg, drawing.path, addition.anchor, (shapeId) =>
         pictureXml(shapeId, imageRelId),
       )
+    } else if (addition.equation) {
+      await appendAnchor(pkg, drawing.path, addition.anchor, (shapeId) =>
+        equationXml(shapeId, addition.equation!),
+      )
     } else {
-      throw new VisualAddError('A visual addition carries exactly one of chart, shape, or image.')
+      throw new VisualAddError(
+        'A visual addition carries exactly one of chart, shape, image, or equation.',
+      )
     }
     touchedEntries.add(drawing.path)
   }
@@ -331,6 +347,57 @@ function shapeXml(shapeId: number, shape: ShapeAdd): string {
     '</xdr:spPr>' +
     body +
     '</xdr:sp>'
+  )
+}
+
+/// The choice is a real DrawingML text shape with Office's editable math
+/// extension. The fallback is ordinary text for consumers lacking a14:m.
+/// Source LaTeX is only an editing hint; it is never the Office math payload.
+export function equationSourceDescription(equation: EquationAdd): string {
+  const { latex, omml } = equation
+  if (!latex.trim() || latex.length > 16_384 || !omml.trim() || omml.length > 131_072) {
+    throw new VisualAddError('Equation source or OMML is empty or too large.')
+  }
+  if (latexToOmml(latex) !== omml) {
+    throw new VisualAddError('Equation source and native OMML disagree.')
+  }
+  if (/<!|<\?|&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/.test(omml)) {
+    throw new VisualAddError('Equation OMML contains unsupported XML.')
+  }
+  const source = Buffer.from(latex, 'utf8').toString('base64')
+  const mathDigest = createHash('sha256').update(omml).digest('hex')
+  return `GenOfficeEquationV2:${source}:${mathDigest}`
+}
+
+export function equationXml(shapeId: number, equation: EquationAdd): string {
+  const { latex, omml } = equation
+  const description = equationSourceDescription(equation)
+  const nonvisual =
+    '<xdr:nvSpPr>' +
+    `<xdr:cNvPr id="${shapeId}" name="Equation ${shapeId}" descr="${description}"/>` +
+    '<xdr:cNvSpPr txBox="1"/>' +
+    '</xdr:nvSpPr>'
+  const shapeStart =
+    '<xdr:sp macro="" textlink="">' +
+    nonvisual +
+    '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm>' +
+    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></xdr:spPr>' +
+    '<xdr:txBody><a:bodyPr/><a:lstStyle/><a:p>'
+  return (
+    '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"' +
+    ' xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"' +
+    ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"' +
+    ' xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"' +
+    ' xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">' +
+    '<mc:Choice Requires="a14">' +
+    shapeStart +
+    `<a14:m><m:oMath>${omml}</m:oMath></a14:m>` +
+    '</a:p></xdr:txBody></xdr:sp></mc:Choice>' +
+    '<mc:Fallback>' +
+    shapeStart +
+    `<a:r><a:t>${escapeXmlText(latex)}</a:t></a:r>` +
+    '</a:p></xdr:txBody></xdr:sp></mc:Fallback>' +
+    '</mc:AlternateContent>'
   )
 }
 

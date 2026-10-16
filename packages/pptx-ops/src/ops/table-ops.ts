@@ -7,6 +7,11 @@
 import {
   applyParagraphFormat,
   editChartElement,
+  setChartLegendPosition,
+  canSetChartQuickLayout,
+  setChartQuickLayout,
+  type ChartQuickLayout,
+  setChartAreaFormat,
   editTableCellText,
   editTableStructure,
   ensureBuiltinTableStylePart,
@@ -30,7 +35,15 @@ import {
 } from '@genoffice/pptx-engine'
 import type { EditParagraph } from '../types'
 import { applyEditParagraphs, collectParagraphFormatPatches } from '../edit-text'
-import { GuidedError, register, resolveElement, type Op, type OpRecord } from './registry'
+import {
+  GuidedError,
+  register,
+  requireFinite,
+  requireHexColor,
+  resolveElement,
+  type Op,
+  type OpRecord,
+} from './registry'
 
 register({
   name: 'setTableCell',
@@ -346,6 +359,109 @@ register({
       throw new GuidedError(`op "setTableStyle": table "${el.id}" rejected the style edit.`)
     }
     return { op, after: edit }
+  },
+})
+
+// ── setChart ────────────────────────────────────────────────────────────
+register({
+  name: 'setChartLegendPosition',
+  validate(op, ctx) {
+    resolveElement(ctx, op, { types: ['chart'] })
+    if (!['b', 't', 'r', 'l', 'none'].includes(String(op.position)))
+      throw new GuidedError('op "setChartLegendPosition": position must be b/t/r/l/none.')
+  },
+  apply(op, ctx): OpRecord {
+    const { index, el } = resolveElement(ctx, op, { types: ['chart'] })
+    if (
+      !setChartLegendPosition(
+        ctx.opened,
+        index,
+        el.id,
+        op.position as 'b' | 't' | 'r' | 'l' | 'none',
+      )
+    )
+      throw new GuidedError(`op "setChartLegendPosition": chart "${el.id}" rejected the edit.`)
+    return { op, after: op.position }
+  },
+})
+
+register({
+  name: 'setChartQuickLayout',
+  validate(op, ctx) {
+    const { index, el } = resolveElement(ctx, op, { types: ['chart'] })
+    if (
+      ![
+        'bottom-values',
+        'right-values',
+        'values-only',
+        'mac-1',
+        'mac-2',
+        'mac-3',
+        'mac-4',
+        'mac-5',
+        'mac-6',
+        'mac-7',
+        'mac-8',
+        'mac-9',
+        'mac-10',
+        'mac-11',
+      ].includes(String(op.layout))
+    ) {
+      throw new GuidedError(
+        'op "setChartQuickLayout": layout must be bottom-values, right-values, values-only, mac-1, mac-2, mac-3, mac-4, mac-5, mac-6, mac-7, mac-8, mac-9, mac-10, or mac-11.',
+      )
+    }
+    if (!canSetChartQuickLayout(ctx.opened, index, el.id, op.layout as ChartQuickLayout)) {
+      throw new GuidedError(
+        'op "setChartQuickLayout": chart does not meet the native layout requirements.',
+      )
+    }
+  },
+  apply(op, ctx): OpRecord {
+    const { index, el } = resolveElement(ctx, op, { types: ['chart'] })
+    if (!setChartQuickLayout(ctx.opened, index, el.id, op.layout as ChartQuickLayout)) {
+      throw new GuidedError(`op "setChartQuickLayout": chart "${el.id}" rejected the edit.`)
+    }
+    return { op, after: op.layout }
+  },
+})
+
+register({
+  name: 'setChartAreaFormat',
+  validate(op, ctx) {
+    resolveElement(ctx, op, { types: ['chart'] })
+    const patch = op.format as
+      | {
+          area?: 'chart' | 'plot'
+          fill?: string | null
+          stroke?: { color: string; widthEmu: number } | null
+        }
+      | undefined
+    if (!patch || (patch.fill === undefined && patch.stroke === undefined))
+      throw new GuidedError('op "setChartAreaFormat" needs fill or stroke.')
+    if (patch.area !== undefined && !['chart', 'plot'].includes(patch.area))
+      throw new GuidedError('op "setChartAreaFormat": area must be chart or plot.')
+    if (patch.fill !== undefined && patch.fill !== null)
+      requireHexColor(patch.fill, 'setChartAreaFormat', 'format.fill')
+    if (patch.stroke) {
+      requireHexColor(patch.stroke.color, 'setChartAreaFormat', 'format.stroke.color')
+      requireFinite(patch.stroke.widthEmu, 'setChartAreaFormat', 'format.stroke.widthEmu')
+      if (patch.stroke.widthEmu <= 0)
+        throw new GuidedError('op "setChartAreaFormat": outline width must be positive.')
+    }
+  },
+  apply(op, ctx): OpRecord {
+    const { index, el } = resolveElement(ctx, op, { types: ['chart'] })
+    if (
+      !setChartAreaFormat(
+        ctx.opened,
+        index,
+        el.id,
+        op.format as Parameters<typeof setChartAreaFormat>[3],
+      )
+    )
+      throw new GuidedError(`op "setChartAreaFormat": chart "${el.id}" rejected the edit.`)
+    return { op, after: op.format }
   },
 })
 

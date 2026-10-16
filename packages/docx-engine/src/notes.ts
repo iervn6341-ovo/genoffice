@@ -1,4 +1,5 @@
 import { decodeEntities } from './parse-xml-text'
+import { firstNoteMarkRun, noteCustomMarkFromRun, noteCustomMarkXml } from './note-custom-mark'
 import { patchParagraphTexts } from './text-patch'
 import type { NoteInfo, NoteRun, TextOutline } from './types'
 import { escapeXmlAttr, escapeXmlText } from './xml-utils'
@@ -69,10 +70,19 @@ export function rootAttributes(
  */
 const NOTE_REF_MARK_RE = /<w:(?:footnote|endnote)Ref\b\s*\/?>/
 
+/** Structures outside the plain-text editor's patch contract stay read-only. */
+const OPAQUE_NOTE_RE =
+  /<(?:w:(?:fldSimple|fldChar|instrText|drawing|object|pict|tbl|hyperlink|sdt|ins|del|smartTag|customXml|altChunk|bookmarkStart|bookmarkEnd|commentRangeStart|commentRangeEnd)|m:oMath|mc:AlternateContent)\b/
+
 /** real notes (separator entries excluded), in file order */
-export function parseNotesXml(xml: string, kind: NoteKind): NoteInfo[] {
-  return noteEntriesOf(xml, kind).map(({ id, text, xml: entryXml }) => {
-    const richParas = noteRichParas(entryXml)
+export function parseNotesXml(
+  xml: string,
+  kind: NoteKind,
+  customIds: ReadonlySet<string> = new Set(),
+): NoteInfo[] {
+  return noteEntriesOf(xml, kind, customIds).map(({ id, text, xml: entryXml, markRun, mark }) => {
+    const contentXml = markRun ? entryXml.replace(markRun, '') : entryXml
+    const richParas = noteRichParas(contentXml)
     const hasFormat = richParas.some((paras) =>
       paras.some(
         (r) =>
@@ -91,13 +101,20 @@ export function parseNotesXml(xml: string, kind: NoteKind): NoteInfo[] {
     const spacing = noteDirectSpacing(entryXml)
     // Word draws the entry number only where a self-reference mark run exists
     // (empty-body notes keep their line but show no numeral — Word probe 2026-09-01)
-    const noRefMark = !NOTE_REF_MARK_RE.test(entryXml)
+    const noRefMark = !NOTE_REF_MARK_RE.test(entryXml) && !mark
     return {
       id,
       text,
+      ...(mark ? { customMark: mark.text } : {}),
+      ...(mark?.symbol ? { customMarkSymbol: mark.symbol } : {}),
       ...(hasFormat ? { richParas } : {}),
       ...(styleId ? { styleId } : {}),
       ...(/ADDIN\s+(?:ZOTERO_|CSL_)/.test(entryXml) ? { zoteroField: true as const } : {}),
+      ...(OPAQUE_NOTE_RE.test(contentXml) ||
+      /<w:sym\b/.test(contentXml) ||
+      (customIds.has(id) && !mark)
+        ? { protectedContent: true as const }
+        : {}),
       ...(spacing ? { spacing } : {}),
       ...(noRefMark ? { noRefMark: true as const } : {}),
     }
@@ -198,8 +215,21 @@ function noteTextOutline(rPr: string): TextOutline | undefined {
 function noteEntriesOf(
   xml: string,
   kind: NoteKind,
-): Array<{ id: string; text: string; xml: string }> {
-  const out: Array<{ id: string; text: string; xml: string }> = []
+  customIds: ReadonlySet<string> = new Set(),
+): Array<{
+  id: string
+  text: string
+  xml: string
+  markRun: string | null
+  mark: ReturnType<typeof noteCustomMarkFromRun>
+}> {
+  const out: Array<{
+    id: string
+    text: string
+    xml: string
+    markRun: string | null
+    mark: ReturnType<typeof noteCustomMarkFromRun>
+  }> = []
   const entry = ENTRY[kind]
   const re = new RegExp(`<${entry}(\\s[^>]*)?>([\\s\\S]*?)</${entry}>`, 'g')
   let m: RegExpExecArray | null
@@ -208,15 +238,86 @@ function noteEntriesOf(
     if (/w:type=(?:"[^"]*"|'[^']*')/.test(attrs)) continue // separator / continuation entries
     const id = /w:id=(?:"([^"]+)"|'([^']+)')/.exec(attrs)?.slice(1, 3).find(Boolean)
     if (!id) continue
+    const markRun = customIds.has(id) ? firstNoteMarkRun(m[0]) : null
+    const mark = markRun ? noteCustomMarkFromRun(markRun) : null
     const paras: string[] = []
     const pRe = /<w:p[\s>][\s\S]*?<\/w:p>|<w:p\/>/g
     let p: RegExpExecArray | null
-    while ((p = pRe.exec(m[2])) !== null) paras.push(notePlainText(p[0]))
+    while ((p = pRe.exec(m[2])) !== null)
+      paras.push(notePlainText(markRun ? p[0].replace(markRun, '') : p[0]))
     // the first paragraph starts with the self-reference mark + a spacer
     if (paras.length > 0) paras[0] = paras[0].replace(/^\s+/, '')
-    out.push({ id, text: paras.join('\n'), xml: m[0] })
+    out.push({ id, text: paras.join('\n'), xml: m[0], markRun, mark })
   }
   return out
+}
+
+/** Exact typeless entries needed when a note moves between parts and across save/undo. */
+export function noteEntryXmlById(xml: string, kind: NoteKind): Record<string, string> {
+  return Object.fromEntries(noteEntriesOf(xml, kind).map((entry) => [entry.id, entry.xml]))
+}
+
+/** Prefix bindings inherited by note entries from their part root. */
+export function notePartNamespaces(xml: string, kind: NoteKind): Record<string, string> {
+  const root = new RegExp(`<${ROOT[kind]}\\b([^>]*)>`).exec(xml)?.[1] ?? ''
+  return Object.fromEntries(
+    [...root.matchAll(/\bxmlns:([\w.-]+)\s*=\s*["']([^"']+)["']/g)].map((match) => [
+      match[1],
+      match[2],
+    ]),
+  )
+}
+
+export interface NoteStyleMap {
+  sourceText?: string
+  targetText?: string
+  sourceReference?: string
+  targetReference?: string
+}
+
+/** Move only a simple note entry; unknown body structures and part relationships remain untouched. */
+export function convertNoteEntryXml(
+  xml: string,
+  from: NoteKind,
+  to: NoteKind,
+  id: string,
+  styles: NoteStyleMap = {},
+): string | null {
+  const sourceTag = ENTRY[from]
+  const targetTag = ENTRY[to]
+  const opening = new RegExp(`^<${sourceTag}\\b([^>]*)>`).exec(xml)
+  if (!opening || !xml.endsWith(`</${sourceTag}>`)) return null
+  if (OPAQUE_NOTE_RE.test(xml) || /\br:(?:id|embed|link)\s*=/.test(xml)) return null
+  if (/\bw:type\s*=/.test(opening[1])) return null
+  const idAttr = /\bw:id\s*=\s*(["'])([^"']*)\1/.exec(opening[1])
+  if (!idAttr) return null
+  const attrs = opening[1].replace(idAttr[0], `w:id=${idAttr[1]}${escapeXmlAttr(id)}${idAttr[1]}`)
+  let moved = `<${targetTag}${attrs}>${xml.slice(opening[0].length, -`</${sourceTag}>`.length)}</${targetTag}>`
+  if (from !== to) {
+    const originalRef = from === 'footnote' ? 'w:footnoteRef' : 'w:endnoteRef'
+    const replacementRef = to === 'footnote' ? 'w:footnoteRef' : 'w:endnoteRef'
+    moved = moved.replace(new RegExp(`<${originalRef}\\b`, 'g'), `<${replacementRef}`)
+    moved = moved.replace(new RegExp(`</${originalRef}>`, 'g'), `</${replacementRef}>`)
+    const replaceStyle = (tag: 'w:pStyle' | 'w:rStyle', source?: string, target?: string) => {
+      if (!source) return true
+      const styleRe = new RegExp(
+        `<${tag}\\b[^>]*\\bw:val=(["'])${source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1[^>]*>`,
+        'g',
+      )
+      if (!styleRe.test(moved)) return true
+      if (!target) return false
+      moved = moved.replace(styleRe, (match) =>
+        match.replace(/\bw:val=(["'])[^"']*\1/, `w:val="${escapeXmlAttr(target)}"`),
+      )
+      return true
+    }
+    if (
+      !replaceStyle('w:pStyle', styles.sourceText, styles.targetText) ||
+      !replaceStyle('w:rStyle', styles.sourceReference, styles.targetReference)
+    )
+      return null
+  }
+  return moved
 }
 
 function notePlainText(xml: string): string {
@@ -262,6 +363,12 @@ function noteRunXml(run: NoteRun): string {
 function noteEntryXml(kind: NoteKind, note: NoteInfo): string {
   const entry = ENTRY[kind]
   const refTag = kind === 'footnote' ? 'w:footnoteRef' : 'w:endnoteRef'
+  const markXml = note.customMark
+    ? noteCustomMarkXml({
+        text: note.customMark,
+        ...(note.customMarkSymbol ? { symbol: note.customMarkSymbol } : {}),
+      })
+    : `<${refTag}/>`
   if (note.richParas?.length) {
     // rich rebuild (P17): runs keep their measured size/font, the reference
     // mark + spacer shrink to the first run's size, and the paragraph pins
@@ -273,7 +380,7 @@ function noteEntryXml(kind: NoteKind, note: NoteInfo): string {
       const szXml = sz ? `<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/>` : ''
       const refRun =
         i === 0
-          ? `<w:r><w:rPr><w:vertAlign w:val="superscript"/>${szXml}</w:rPr><${refTag}/></w:r>` +
+          ? `<w:r><w:rPr><w:vertAlign w:val="superscript"/>${szXml}</w:rPr>${markXml}</w:r>` +
             `<w:r>${sz ? `<w:rPr>${szXml}</w:rPr>` : ''}<w:t xml:space="preserve"> </w:t></w:r>`
           : ''
       const pPr = '<w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
@@ -285,7 +392,7 @@ function noteEntryXml(kind: NoteKind, note: NoteInfo): string {
     // OOXML convention: the note body starts with the self-reference mark
     const refRun =
       i === 0
-        ? `<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><${refTag}/></w:r>` +
+        ? `<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr>${markXml}</w:r>` +
           '<w:r><w:t xml:space="preserve"> </w:t></w:r>'
         : ''
     const textRun =
@@ -295,46 +402,91 @@ function noteEntryXml(kind: NoteKind, note: NoteInfo): string {
   return `<${entry} w:id="${escapeXmlAttr(note.id)}">${paras.join('')}</${entry}>`
 }
 
+/** Native entry for a newly authored note that has no original part entry yet. */
+export function noteEntryXmlForModel(kind: NoteKind, note: NoteInfo): string {
+  return noteEntryXml(kind, note)
+}
+
 /**
  * Regenerate the notes part from the full desired list. Structural entries
  * (separator/continuation) from the original part are kept byte-identical;
  * when there is no original part, standard separators are created.
  * Surgical: existing entries whose text is unchanged keep their original bytes (inline
  * formatting, images, and hyperlinks are preserved); entries with changed text first try
- * an in-paragraph w:t-level patch (formatting still preserved), and only fall back to a
- * plain-text rebuild when patching fails (paragraph count changed, etc.).
+ * an in-paragraph w:t-level patch (formatting still preserved). An imported entry
+ * cannot be rebuilt if the patch fails, because its unmodeled children would be lost.
  */
 export function buildNotesXml(
   kind: NoteKind,
   notes: NoteInfo[],
   originalXml: string | null,
+  originalNotes: readonly NoteInfo[] = [],
 ): string {
   const entry = ENTRY[kind]
   let structural = ''
-  const originals = new Map<string, { text: string; xml: string }>()
+  const originals = new Map<string, ReturnType<typeof noteEntriesOf>[number]>()
   if (originalXml) {
     const re = new RegExp(
       `<${entry}\\s[^>]*w:type=(?:"[^"]*"|'[^']*')[^>]*>[\\s\\S]*?</${entry}>`,
       'g',
     )
     structural = (originalXml.match(re) ?? []).join('')
-    for (const e of noteEntriesOf(originalXml, kind)) originals.set(e.id, e)
+    const customIds = new Set(
+      originalNotes.filter((note) => note.customMark).map((note) => note.id),
+    )
+    for (const e of noteEntriesOf(originalXml, kind, customIds)) originals.set(e.id, e)
   }
   if (!structural) structural = separatorEntries(kind)
   const body = notes
     .map((n) => {
-      const orig = originals.get(n.id)
+      const history = n.historyEntryXml
+        ? noteEntriesOf(n.historyEntryXml, kind, n.customMark ? new Set([n.id]) : new Set())[0]
+        : undefined
+      const orig = history ?? originals.get(n.id)
       if (!orig) return noteEntryXml(kind, n)
-      if (orig.text === n.text) return orig.xml
-      const patched = patchParagraphTexts(orig.xml, n.text, {
+      const sameMark =
+        (orig.mark?.text ?? undefined) === n.customMark &&
+        (orig.mark?.symbol?.font ?? undefined) === n.customMarkSymbol?.font &&
+        (orig.mark?.symbol?.char ?? undefined) === n.customMarkSymbol?.char
+      if (orig.text === n.text && sameMark) return orig.xml
+      if (OPAQUE_NOTE_RE.test(orig.xml))
+        throw new Error(`Cannot safely edit ${kind} ${n.id}: protected OOXML content`)
+      let source = orig.xml
+      if (!sameMark) {
+        const oldRun = firstNoteMarkRun(source)
+        const refTag = kind === 'footnote' ? 'w:footnoteRef' : 'w:endnoteRef'
+        const nextMark = n.customMark
+          ? noteCustomMarkXml({
+              text: n.customMark,
+              ...(n.customMarkSymbol ? { symbol: n.customMarkSymbol } : {}),
+            })
+          : `<${refTag}/>`
+        const updatedRun = oldRun?.replace(
+          /<w:(?:footnoteRef|endnoteRef|sym)\b[^>]*\/>|<w:t\b[^>]*>[\s\S]*?<\/w:t>/,
+          nextMark,
+        )
+        if (!oldRun || !updatedRun || updatedRun === oldRun)
+          throw new Error(`Cannot safely change ${kind} ${n.id}: unsupported reference mark`)
+        source = source.replace(oldRun, updatedRun)
+      }
+      if (orig.text === n.text) return source
+      const markerRun = n.customMark ? firstNoteMarkRun(source) : null
+      const hasTextMark = markerRun?.includes('<w:t') ?? false
+      let placeholder = '<w:r w:customMarkPlaceholder="genoffice"/>'
+      while (source.includes(placeholder)) placeholder = placeholder.replace('/>', 'x="1"/>')
+      const originalForPatch =
+        hasTextMark && markerRun ? source.replace(markerRun, placeholder) : source
+      const patched = patchParagraphTexts(originalForPatch, n.text, {
         stripFirstParaLeadingSpace: true,
       })
-      return patched ?? noteEntryXml(kind, n)
+      if (patched)
+        return hasTextMark && markerRun ? patched.replace(placeholder, markerRun) : patched
+      throw new Error(`Cannot safely edit ${kind} ${n.id}: unsupported paragraph change`)
     })
     .join('')
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-    `<${ROOT[kind]} ${rootAttributes(originalXml, ROOT[kind], NOTE_NS)}>${structural}${body}</${ROOT[kind]}>`
+    `<${ROOT[kind]} ${rootAttributes(originalXml, ROOT[kind], NOTE_NS, Object.assign({}, ...notes.map((note) => note.historyEntryNamespaces ?? {})))}>${structural}${body}</${ROOT[kind]}>`
   )
 }
 

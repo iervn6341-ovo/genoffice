@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@genoffice/docx-engine": "*",
-    "@genoffice/pptx-engine": "*"
+    "@genoffice/pptx-engine": "*",
+    "@genoffice/office-math": "*"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

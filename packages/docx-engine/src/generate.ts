@@ -1,4 +1,5 @@
 import { sdtCheckboxGlyphs, sdtCheckboxIsChecked, syncSdtCheckbox } from './checkbox-control'
+import { noteCustomMarkXml } from './note-custom-mark'
 import type {
   CharIndents,
   GeneratedBlock,
@@ -1173,7 +1174,23 @@ function paraSpacingXml(format: ParaFormat): string {
 function formatPPrChildren(format: ParaFormat | undefined): PPrChild[] {
   if (!format) return []
   const out: PPrChild[] = []
-  if (format.pageBreakBefore) out.push({ name: 'w:pageBreakBefore', xml: '<w:pageBreakBefore/>' })
+  const flag = (name: string, value: boolean | undefined) => {
+    if (value !== undefined) out.push({ name, xml: value ? `<${name}/>` : `<${name} w:val="0"/>` })
+  }
+  flag('w:keepNext', format.keepNext)
+  flag('w:keepLines', format.keepLines)
+  flag('w:pageBreakBefore', format.pageBreakBefore)
+  flag('w:widowControl', format.widowControl)
+  flag('w:suppressLineNumbers', format.suppressLineNumbers)
+  flag('w:suppressAutoHyphens', format.suppressAutoHyphens)
+  flag('w:kinsoku', format.kinsoku)
+  flag('w:wordWrap', format.wordWrap)
+  flag('w:overflowPunct', format.overflowPunct)
+  flag('w:topLinePunct', format.topLinePunct)
+  flag('w:autoSpaceDE', format.autoSpaceDE)
+  flag('w:autoSpaceDN', format.autoSpaceDN)
+  if (format.textAlignment)
+    out.push({ name: 'w:textAlignment', xml: `<w:textAlignment w:val="${format.textAlignment}"/>` })
   if (format.borders) {
     const style = format.borderStyle
     const defaultSz = Math.max(2, Math.round(style?.szEighths ?? 4))
@@ -1511,8 +1528,42 @@ function pprGroupUnchanged(
   original?: ParaFormat,
 ): boolean {
   switch (tag) {
+    case 'w:keepNext':
+    case 'w:keepLines':
     case 'w:pageBreakBefore':
-      return rawBool(raw) === !!f.pageBreakBefore
+    case 'w:widowControl':
+    case 'w:suppressLineNumbers':
+    case 'w:suppressAutoHyphens':
+    case 'w:kinsoku':
+    case 'w:wordWrap':
+    case 'w:overflowPunct':
+    case 'w:topLinePunct':
+    case 'w:autoSpaceDE':
+    case 'w:autoSpaceDN': {
+      const key = (
+        {
+          'w:keepNext': 'keepNext',
+          'w:keepLines': 'keepLines',
+          'w:pageBreakBefore': 'pageBreakBefore',
+          'w:widowControl': 'widowControl',
+          'w:suppressLineNumbers': 'suppressLineNumbers',
+          'w:suppressAutoHyphens': 'suppressAutoHyphens',
+          'w:kinsoku': 'kinsoku',
+          'w:wordWrap': 'wordWrap',
+          'w:overflowPunct': 'overflowPunct',
+          'w:topLinePunct': 'topLinePunct',
+          'w:autoSpaceDE': 'autoSpaceDE',
+          'w:autoSpaceDN': 'autoSpaceDN',
+        } as const
+      )[tag]
+      const value = f[key]
+      if (value === undefined) return original?.[key] === undefined
+      return raw !== undefined && rawBool(raw) === value
+    }
+    case 'w:textAlignment':
+      return f.textAlignment === undefined
+        ? original?.textAlignment === undefined
+        : rawAttr(raw, 'w:val') === f.textAlignment
     case 'w:bidi':
       return rawBool(raw) === !!f.bidi
     case 'w:jc': {
@@ -1601,6 +1652,21 @@ export function mergePPrFormat(
   const inner = rawPPr.slice(open.length, rawPPr.length - '</w:pPr>'.length)
   // build set of managed tags for this format (base + conditional)
   const managedTags = new Set(FORMAT_MANAGED_TAGS)
+  for (const [key, tag] of [
+    ['keepNext', 'w:keepNext'],
+    ['keepLines', 'w:keepLines'],
+    ['widowControl', 'w:widowControl'],
+    ['suppressLineNumbers', 'w:suppressLineNumbers'],
+    ['suppressAutoHyphens', 'w:suppressAutoHyphens'],
+    ['kinsoku', 'w:kinsoku'],
+    ['wordWrap', 'w:wordWrap'],
+    ['overflowPunct', 'w:overflowPunct'],
+    ['topLinePunct', 'w:topLinePunct'],
+    ['autoSpaceDE', 'w:autoSpaceDE'],
+    ['autoSpaceDN', 'w:autoSpaceDN'],
+    ['textAlignment', 'w:textAlignment'],
+  ] as const)
+    if (format?.[key] !== undefined || original?.[key] !== undefined) managedTags.add(tag)
   if (format?.tabStops !== undefined) managedTags.add('w:tabs')
   if (format?.dropCap !== undefined || format?.frame !== undefined) managedTags.add('w:framePr')
   if (format?.textDirection !== undefined) managedTags.add('w:textDirection')
@@ -1873,6 +1939,14 @@ function tableCellXml(
     'w:shd',
     cell.fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${escapeXmlAttr(cell.fill)}"/>` : null,
   )
+  if (cell.textDirectionWrite !== undefined)
+    setTcPrChild(
+      children,
+      'w:textDirection',
+      cell.textDirectionWrite === 'lrTb'
+        ? null
+        : `<w:textDirection w:val="${cell.textDirectionWrite}"/>`,
+    )
   setTcPrChild(
     children,
     'w:vAlign',
@@ -1932,6 +2006,9 @@ const TBL_PR_ORDER = [
   'w:tblLayout',
   'w:tblCellMar',
   'w:tblLook',
+  'w:tblCaption',
+  'w:tblDescription',
+  'w:tblPrChange',
 ] as const
 
 /** Replace/remove/insert one tblPr child while keeping the OOXML schema order. */
@@ -2063,6 +2140,22 @@ export function generateTableModelXml(model: TableModel, originalTableXml?: stri
           trPr = ''
         }
       }
+      const cantSplit = model.cantSplitRows?.[ri]
+      if (cantSplit !== null && cantSplit !== undefined) {
+        trPr = trPr.replace(/<w:cantSplit(?:\s[^>]*)?\/>/g, '')
+        if (cantSplit) {
+          const tag = '<w:cantSplit/>'
+          // revision records (ins/del/trPrChange) must stay last in CT_TrPr
+          const tail = /<w:(?:ins|del|trPrChange)\b/.exec(trPr)?.index
+          trPr = !trPr
+            ? `<w:trPr>${tag}</w:trPr>`
+            : tail !== undefined
+              ? trPr.slice(0, tail) + tag + trPr.slice(tail)
+              : trPr.replace('</w:trPr>', `${tag}</w:trPr>`)
+        } else if (/^<w:trPr(?:\s[^>]*)?>\s*<\/w:trPr>$/.test(trPr)) {
+          trPr = ''
+        }
+      }
       const h = model.rowHeightsTwips?.[ri]
       if (h != null && h > 0) {
         const rule = model.rowHeightRules?.[ri] === 'exact' ? 'exact' : 'atLeast'
@@ -2147,6 +2240,30 @@ export function generateTableModelXml(model: TableModel, originalTableXml?: stri
   if (model.cellMarTwips !== undefined) {
     tblPr = setTblPrChild(tblPr, 'w:tblCellMar', cellMar || null)
   }
+  if (model.cellSpacingWriteTwips !== undefined) {
+    const spacing = Math.round(model.cellSpacingWriteTwips ?? 0)
+    tblPr = setTblPrChild(
+      tblPr,
+      'w:tblCellSpacing',
+      spacing > 0 ? `<w:tblCellSpacing w:w="${spacing}" w:type="dxa"/>` : null,
+    )
+  }
+  if (model.altTitle !== undefined) {
+    tblPr = setTblPrChild(
+      tblPr,
+      'w:tblCaption',
+      model.altTitle ? `<w:tblCaption w:val="${escapeXmlAttr(model.altTitle)}"/>` : null,
+    )
+  }
+  if (model.altDescription !== undefined) {
+    tblPr = setTblPrChild(
+      tblPr,
+      'w:tblDescription',
+      model.altDescription
+        ? `<w:tblDescription w:val="${escapeXmlAttr(model.altDescription)}"/>`
+        : null,
+    )
+  }
   if (model.tableLook) {
     tblPr = setTblPrChild(tblPr, 'w:tblLook', tableLookXml(model.tableLook))
   } else if (model.tblStyleId && !/<w:tblLook[\s/>]/.test(tblPr)) {
@@ -2214,7 +2331,69 @@ export interface TocEntry {
   level: number
   text: string
   /** page number computed by real pagination (cached text; begin is dirty, so Word still recalculates on open) */
-  pageNo?: number
+  pageNo?: number | string
+}
+
+export type TocLeader = 'none' | 'dot' | 'hyphen' | 'underscore' | 'heavy' | 'middleDot'
+export type TocFormat =
+  'template' | 'classic' | 'distinctive' | 'fancy' | 'modern' | 'formal' | 'simple'
+
+/** The options represented by Word's custom Table of Contents dialog. */
+export interface TocOptions {
+  levels: number
+  showPageNumbers: boolean
+  rightAlignPageNumbers: boolean
+  leader: TocLeader
+  useHyperlinks: boolean
+  useHeadingStyles: boolean
+  useOutlineLevels: boolean
+  useTcFields: boolean
+  /** Style name to TOC level; Word stores this as the TOC field's \t switch. */
+  styleLevels: Record<string, number>
+  format: TocFormat
+}
+
+export const DEFAULT_TOC_OPTIONS: TocOptions = {
+  levels: 3,
+  showPageNumbers: true,
+  rightAlignPageNumbers: true,
+  leader: 'dot',
+  useHyperlinks: true,
+  useHeadingStyles: true,
+  useOutlineLevels: true,
+  useTcFields: false,
+  styleLevels: {},
+  format: 'template',
+}
+
+/** Build the native TOC field instruction. Do not use this to rewrite unknown imported switches. */
+export function tocInstruction(options: TocOptions): string {
+  const parts = ['TOC']
+  const levels = Math.min(9, Math.max(1, Math.round(options.levels)))
+  if (options.useHeadingStyles) parts.push(`\\o "1-${levels}"`)
+  const styles = Object.entries(options.styleLevels)
+    .filter(
+      ([name, level]) =>
+        name.trim() && !/[",]/.test(name) && Number.isInteger(level) && level >= 1 && level <= 9,
+    )
+    .map(([name, level]) => `${name.trim()},${level}`)
+  if (styles.length) parts.push(`\\t "${styles.join(',')}"`)
+  if (options.useTcFields) parts.push('\\f')
+  if (options.useHyperlinks) parts.push('\\h')
+  if (!options.showPageNumbers) parts.push('\\n')
+  parts.push('\\z')
+  if (options.useOutlineLevels) parts.push('\\u')
+  return ` ${parts.join(' ')} `
+}
+
+const TOC_FORMAT_RUN: Record<TocFormat, string> = {
+  template: '',
+  classic: '<w:sz w:val="22"/>',
+  distinctive: '<w:b/><w:sz w:val="22"/>',
+  fancy: '<w:i/><w:sz w:val="22"/>',
+  modern: '<w:color w:val="4472C4"/><w:sz w:val="22"/>',
+  formal: '<w:smallCaps/><w:sz w:val="22"/>',
+  simple: '<w:sz w:val="20"/>',
 }
 
 /**
@@ -2222,20 +2401,35 @@ export interface TocEntry {
  * marked dirty so Word recalculates entries and page numbers on open; the
  * static entry texts serve as the visible result until then.
  */
-export function generateTocFieldXml(entries: TocEntry[]): string[] {
+export function generateTocFieldXml(
+  entries: TocEntry[],
+  options?: TocOptions,
+  instruction?: string,
+): string[] {
   if (entries.length === 0) return []
-  const maxLevel = Math.min(Math.max(...entries.map((e) => e.level), 1), 9)
+  const resolved = options ?? {
+    ...DEFAULT_TOC_OPTIONS,
+    levels: Math.min(Math.max(...entries.map((entry) => entry.level), 1), 9),
+  }
+  const leader = resolved.leader === 'none' ? '' : ` w:leader="${resolved.leader}"`
+  const tab =
+    resolved.showPageNumbers && resolved.rightAlignPageNumbers
+      ? `<w:tabs><w:tab w:val="right"${leader} w:pos="9350"/></w:tabs>`
+      : ''
   const pPr = (level: number) =>
     `<w:pPr><w:pStyle w:val="TOC${Math.min(Math.max(level, 1), 9)}"/>` +
-    '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9350"/></w:tabs>' +
+    tab +
     '<w:rPr><w:noProof/></w:rPr></w:pPr>'
-  const entryRuns = (text: string, pageNo?: number) =>
-    `<w:r><w:rPr><w:noProof/></w:rPr><w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r>` +
-    '<w:r><w:rPr><w:noProof/></w:rPr><w:tab/></w:r>' +
-    (pageNo !== undefined ? `<w:r><w:rPr><w:noProof/></w:rPr><w:t>${pageNo}</w:t></w:r>` : '')
+  const resultRPr = `<w:rPr><w:noProof/>${TOC_FORMAT_RUN[resolved.format]}</w:rPr>`
+  const entryRuns = (text: string, pageNo?: number | string) =>
+    `<w:r>${resultRPr}<w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r>` +
+    (resolved.showPageNumbers ? `<w:r>${resultRPr}<w:tab/></w:r>` : '') +
+    (resolved.showPageNumbers && pageNo !== undefined
+      ? `<w:r>${resultRPr}<w:t>${escapeXmlText(String(pageNo))}</w:t></w:r>`
+      : '')
   const begin =
     '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>' +
-    `<w:r><w:instrText xml:space="preserve"> TOC \\o "1-${maxLevel}" \\h \\z \\u </w:instrText></w:r>` +
+    `<w:r><w:instrText xml:space="preserve">${escapeXmlText(instruction ?? tocInstruction(resolved))}</w:instrText></w:r>` +
     '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
   const end = '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
 
@@ -2471,9 +2665,15 @@ function runFragmentXml(run: Run, insideLink: boolean): string {
   }
   if (run.noteRef) {
     const tag = run.noteRef.kind === 'footnote' ? 'w:footnoteReference' : 'w:endnoteReference'
+    const mark = run.noteRef.customMark
+      ? noteCustomMarkXml({
+          text: run.noteRef.customMark,
+          ...(run.noteRef.customMarkSymbol ? { symbol: run.noteRef.customMarkSymbol } : {}),
+        })
+      : ''
     return (
-      '<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr>' +
-      `<${tag} w:id="${escapeXmlAttr(run.noteRef.id)}"/></w:r>`
+      `<w:r>${run.rawRPr ?? '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>'}` +
+      `<${tag}${mark ? ' w:customMarkFollows="1"' : ''} w:id="${escapeXmlAttr(run.noteRef.id)}"/>${mark}</w:r>`
     )
   }
   if (run.refField !== undefined) {
@@ -2618,7 +2818,51 @@ export const RPR_CHILD_ORDER = [
   'w:specVanish',
   'w:oMath',
   'w:rPrChange',
+  'w14:ligatures',
+  'w14:stylisticSets',
+  'w14:numSpacing',
+  'w14:numForm',
+  'w14:cntxtAlts',
 ]
+
+/** Replace only requested run-property children, retaining every other imported child. */
+export function patchRunPropertiesXml(
+  rawRPr: string | null | undefined,
+  replacements: Readonly<Record<string, string | null>>,
+  w14Prefixes: readonly string[] = [],
+): string {
+  const open = /^<w:rPr(?: [^>]*)?>/.exec(rawRPr ?? '')?.[0] ?? '<w:rPr>'
+  const inner =
+    rawRPr?.startsWith(open) && rawRPr.endsWith('</w:rPr>')
+      ? rawRPr.slice(open.length, -'</w:rPr>'.length)
+      : ''
+  const kept = splitXmlChildren(inner).filter((child) => !(child.name in replacements))
+  const rank = (name: string) => {
+    const split = name.indexOf(':')
+    const canonical =
+      split >= 0 && w14Prefixes.includes(name.slice(0, split))
+        ? `w14:${name.slice(split + 1)}`
+        : name
+    return RPR_CHILD_ORDER.indexOf(canonical)
+  }
+  const additions = Object.entries(replacements)
+    .filter((entry): entry is [string, string] => entry[1] !== null)
+    .map(([name, xml]) => ({ name, xml }))
+    .sort((a, b) => rank(a.name) - rank(b.name))
+  const parts: string[] = []
+  let next = 0
+  let previous = -1
+  for (const child of kept) {
+    const childRank = rank(child.name)
+    const effective = childRank < 0 ? previous : Math.max(previous, childRank)
+    while (next < additions.length && rank(additions[next].name) < effective)
+      parts.push(additions[next++].xml)
+    parts.push(child.xml)
+    previous = effective
+  }
+  while (next < additions.length) parts.push(additions[next++].xml)
+  return parts.length ? `${open}${parts.join('')}</w:rPr>` : ''
+}
 
 /** rPr children modeled by the run model, grouped by modeled field (tags within a group are kept or rebuilt together) */
 const RUN_MANAGED_GROUPS: Array<{ key: string; tags: string[] }> = [

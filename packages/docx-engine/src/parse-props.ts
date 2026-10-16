@@ -352,7 +352,7 @@ export function ptabDisplayStops(pNode: XNode): import('./types').TabStop[] {
 /** paragraphs whose only fields are XE / REF stay editable (extractRuns round-trips them) */
 /** Simple instructions foldable into an editable inline-field run (the cached result is the display text) */
 export const SIMPLE_INLINE_FIELD_RE =
-  /^\s*(DATE|TIME|CREATEDATE|SAVEDATE|NUMPAGES|FILENAME|AUTHOR|PAGE)\b/
+  /^\s*(?:(?:DATE|TIME|CREATEDATE|SAVEDATE|NUMPAGES|FILENAME|AUTHOR|PAGE)\b|=)/
 
 /** Zotero Word fields. Their cached result is the visible citation/bibliography text. */
 export const ZOTERO_INLINE_FIELD_RE = /^\s*(?:ADDIN\s+)?(?:ZOTERO_|CSL_)(?:ITEM|BIBL|TEMP)\b/i

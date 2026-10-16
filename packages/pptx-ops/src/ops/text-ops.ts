@@ -286,11 +286,11 @@ register({
       resolveGroup(op, index, slide.elements)
       return
     }
-    resolveElement(ctx, op)
+    resolveElement(ctx, op, { allowPart: true })
   },
   apply(op, ctx): OpRecord {
     const font = op.font as ElementFontPatch
-    const { index, slide } = resolveSlide(ctx, op)
+    const { index, slide } = resolveSlide(ctx, op, { allowPart: true })
     let id = String(op.target?.el ?? '')
     let ok: boolean
     if (op.group) {
@@ -298,7 +298,7 @@ register({
       id = resolveGroupChildId(slide, groupId, id)
       ok = setGroupChildFont(slide, groupId, id, font)
     } else {
-      id = resolveElement(ctx, op).el.id
+      id = resolveElement(ctx, op, { allowPart: true }).el.id
       ok = setElementFont(slide, id, font)
     }
     if (!ok) {
@@ -367,10 +367,10 @@ register({
       resolveGroup(op, index, slide.elements)
       return
     }
-    resolveElement(ctx, op)
+    resolveElement(ctx, op, { allowPart: true })
   },
   apply(op, ctx): OpRecord {
-    const { index, slide } = resolveSlide(ctx, op)
+    const { index, slide } = resolveSlide(ctx, op, { allowPart: true })
     const format = landBulletImage(
       ctx.opened,
       slide,
@@ -385,7 +385,7 @@ register({
       id = resolveGroupChildId(slide, groupId, id)
       ok = setGroupChildParagraphFormat(slide, groupId, id, format)
     } else {
-      id = resolveElement(ctx, op).el.id
+      id = resolveElement(ctx, op, { allowPart: true }).el.id
       ok = setElementParagraphFormat(slide, id, format)
     }
     if (!ok) {

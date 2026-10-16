@@ -84,6 +84,10 @@ export interface SlideAnimation {
   presetXml?: string
   /** presetID/presetClass/presetSubtype of a kept-verbatim effect (read-back, with presetXml) */
   preset?: { id: number; cls: string; sub: number }
+  /** Stable native effect cTn id. The editor passes this back instead of raw XML. */
+  nativeId?: number
+  /** Original effect node, kept inside the engine when its effect semantics are unchanged. */
+  nativeXml?: string
 }
 
 export type AnimAfter = 'hideOnNextClick' | 'hideAfter'
@@ -279,6 +283,35 @@ function moveAnimXml(
 /** Default motionPath (straight line to the right, 1/4 of the slide width). */
 export const DEFAULT_MOTION_PATH = 'M 0 0 L 0.25 0'
 
+/** Authorable subset shared by the native writer and the editor preview. Imported
+ * paths outside this subset stay in their original effect XML until replaced. */
+export function isSupportedMotionPath(path: string): boolean {
+  const source = path.trim()
+  if (!source || source.length > 4096) return false
+  const tokens = source.match(/[MLCZ]|[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/g)
+  if (!tokens || tokens.join('') !== source.replace(/[\s,]+/g, '')) return false
+  let i = 0
+  let drew = false
+  while (i < tokens.length) {
+    const command = tokens[i++]!
+    if (!/^[MLCZ]$/.test(command)) return false
+    if (i === 1 && command !== 'M') return false
+    if (command === 'Z') {
+      if (i !== tokens.length) return false
+      continue
+    }
+    const count = command === 'C' ? 6 : 2
+    if (i + count > tokens.length) return false
+    for (let n = 0; n < count; n++) {
+      const value = tokens[i++]!
+      if (/^[MLCZ]$/.test(value) || !Number.isFinite(Number(value)) || Math.abs(Number(value)) > 10)
+        return false
+    }
+    if (command !== 'M') drew = true
+  }
+  return drew
+}
+
 /** Off-slide position a fly effect starts from / ends at, per side. */
 function flyOffscreen(d: AnimDirection): { x: string; y: string } {
   switch (d) {
@@ -309,6 +342,8 @@ const WIPE_OUT_FILTER: Record<AnimDirection, string> = {
 /** Move along a path (<p:animMotion>); the path gets the " E" end marker per OOXML convention. */
 function motionAnimXml(gen: IdGen, tgt: string, dur: number, path: string): string {
   const p = path.trim() || DEFAULT_MOTION_PATH
+  if (!isSupportedMotionPath(p))
+    throw new Error('Unsupported motion path; expected M/L/C/Z coordinates.')
   const pathAttr = /\bE$/.test(p) ? p : `${p} E`
   return (
     `<p:animMotion origin="layout" path="${pathAttr}" pathEditMode="relative">` +
@@ -516,6 +551,7 @@ function afterSubTnLstXml(a: SlideAnimation): string {
 
 /** One effect's <p:par> (cTn with presetID/presetClass + start + behaviors). */
 function effectParXml(gen: IdGen, p: Placed): string {
+  if (p.a.nativeXml) return placeNativeXml(p)
   if (p.a.presetXml) return placePresetXml(gen, p)
   const preset = PRESET[p.a.effect]
   return (
@@ -526,6 +562,50 @@ function effectParXml(gen: IdGen, p: Placed): string {
     afterSubTnLstXml(p.a) +
     '</p:cTn></p:par>'
   )
+}
+
+/** Keep a modeled or imported effect's native children and cTn ids while changing its placement/timing. */
+function placeNativeXml(p: Placed): string {
+  let xml = p.a.nativeXml!
+  const originalDuration = durationOfEffectXml(xml)
+  const requestedDuration = Math.max(1, Math.round(p.a.durationMs))
+  if (originalDuration > 0 && requestedDuration !== originalDuration) {
+    const factor = requestedDuration / originalDuration
+    // Duration-bearing child cTns define the behavior. Instantaneous 1 ms visibility
+    // switches stay instantaneous; other native attributes and children stay intact.
+    xml = xml.replace(/(<p:cTn\b[^>]*\bdur=")(\d+)(")/g, (_m, a, value, c) => {
+      const n = Number(value)
+      return `${a}${n <= 1 ? n : Math.max(1, Math.round(n * factor))}${c}`
+    })
+    xml = xml.replace(/(<p:cond\b[^>]*\bdelay=")(\d+)(")/g, (_m, a, value, c) => {
+      const n = Number(value)
+      return `${a}${Math.max(0, Math.round(n * factor))}${c}`
+    })
+  }
+  xml = xml.replace(/<p:cTn\b[^>]*>/, (open) => {
+    let next = open
+    for (const [name, value] of [
+      ['grpId', String(p.grpId)],
+      ['nodeType', NODE_TYPE[p.a.trigger]],
+    ]) {
+      const attr = new RegExp(`(\\b${name}=")[^"]*(")`)
+      next = attr.test(next)
+        ? next.replace(attr, (_m, a, b) => `${a}${value}${b}`)
+        : next.replace(/>$/, ` ${name}="${value}">`)
+    }
+    return next
+  })
+  return xml.replace(
+    /(<p:stCondLst>\s*<p:cond\b[^>]*\bdelay=")[^"]*(")/,
+    (_m, a, b) => `${a}${p.startMs}${b}`,
+  )
+}
+
+function durationOfEffectXml(xml: string): number {
+  let duration = 0
+  for (const match of xml.matchAll(/<p:cTn\b[^>]*\bdur="(\d+)"/g))
+    duration = Math.max(duration, Number(match[1]))
+  return /\bautoRev="1"/.test(xml) ? duration * 2 : duration
 }
 
 /**
@@ -588,7 +668,14 @@ function bldPsXml(anims: SlideAnimation[]): string {
 
 export function buildTimingXml(anims: SlideAnimation[]): string {
   if (anims.length === 0) return ''
-  let idCounter = 0
+  // Native effect subtrees keep their original cTn ids; synthetic wrappers must
+  // start above every one of those ids.
+  let idCounter = Math.max(
+    0,
+    ...anims.flatMap((a) =>
+      [...(a.nativeXml ?? '').matchAll(/<p:cTn\b[^>]*\bid="(\d+)"/g)].map((m) => Number(m[1])),
+    ),
+  )
   const gen: IdGen = { next: () => ++idCounter }
   const rootId = gen.next() // 1 tmRoot
   const seqId = gen.next() // 2 mainSeq
@@ -758,7 +845,7 @@ function findCTnEnd(xml: string, openEnd: number): number {
  * delay per the write convention (withPrev minus previous start / afterPrev minus
  * previous end).
  */
-export function readSlideTimingXml(bodySuffix: string): SlideAnimation[] {
+export function readSlideTimingXml(bodySuffix: string, includeNative = false): SlideAnimation[] {
   const timing = TIMING_RE.exec(bodySuffix)?.[0]
   if (!timing) return []
   // Read only the main sequence: interactiveSeq trigger animations etc. are not modeled, avoiding mistakenly absorbing them as click animations on rewrite
@@ -809,7 +896,17 @@ export function readSlideTimingXml(bodySuffix: string): SlideAnimation[] {
     prevStart = startMs
     prevEnd = startMs + Math.max(1, durationMs)
 
-    const anim: SlideAnimation = { spid, effect, trigger, durationMs, delayMs }
+    const anim: SlideAnimation = {
+      spid,
+      effect,
+      trigger,
+      durationMs,
+      delayMs,
+      ...(includeNative ? { nativeId: Number(/\bid="(\d+)"/.exec(attrs)?.[1] ?? '0') } : {}),
+      ...(includeNative && parStart >= 0 && parClose >= 0
+        ? { nativeXml: timing.slice(parStart, parClose + '</p:par>'.length) }
+        : {}),
+    }
     const direction = directionFromPreset(effect, psub)
     if (direction && psub !== PRESET[effect].sub) anim.direction = direction
     if (!modeled && parStart >= 0 && parClose >= 0) {
@@ -967,7 +1064,7 @@ export function patchSlideTimingIncrementalXml(
   const timingM = TIMING_RE.exec(bodySuffix)
   if (!timingM) return null
   const timing = timingM[0]
-  const old = readSlideTimingXml(bodySuffix)
+  const old = readSlideTimingXml(bodySuffix, true)
   if (!old.length || !anims.length) return null
   const splice = (newTiming: string) =>
     bodySuffix.slice(0, timingM.index) + newTiming + bodySuffix.slice(timingM.index + timing.length)
@@ -1044,8 +1141,8 @@ export function setSlideAnimations(slide: Slide, anims: SlideAnimation[]): void 
 }
 
 /** Read the current slide's animation list. */
-export function getSlideAnimations(slide: Slide): SlideAnimation[] {
-  return readSlideTimingXml(slide.bodySuffix)
+export function getSlideAnimations(slide: Slide, includeNative = false): SlideAnimation[] {
+  return readSlideTimingXml(slide.bodySuffix, includeNative)
 }
 
 /** Innermost balanced <tag>…</tag> span containing the given index. */

@@ -5,7 +5,7 @@
  * linearized text as its display text, so older readers and our renderer see
  * the fallback while PowerPoint shows the typeset formula.
  */
-import { latexToOmml } from '@genoffice/docx-engine/math'
+import { latexToOmml, ommlToLatex } from '@genoffice/office-math'
 import { addElement, type Paragraph, type TextElement, type TextRun } from '@genoffice/pptx-engine'
 import { ommlToText } from './omml-linear'
 import {
@@ -23,6 +23,28 @@ const M_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math'
 
 function escapeText(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function editableEquationRun(el: TextElement): { paragraphIndex: number; runIndex: number } {
+  const matches: Array<{ paragraphIndex: number; runIndex: number }> = []
+  el.text?.paragraphs.forEach((p, paragraphIndex) =>
+    p.runs.forEach((run, runIndex) => {
+      if (run.rawXml?.includes('<a14:m')) matches.push({ paragraphIndex, runIndex })
+    }),
+  )
+  if (matches.length !== 1) {
+    throw new GuidedError(
+      'This shape must contain exactly one equation to edit it without changing other math.',
+    )
+  }
+  const raw = el.text!.paragraphs[matches[0]!.paragraphIndex]!.runs[matches[0]!.runIndex]!.rawXml!
+  const omml = /<m:oMath\b[^>]*>[\s\S]*?<\/m:oMath>/.exec(raw)?.[0]
+  if (!omml || !ommlToLatex(omml)) {
+    throw new GuidedError(
+      'This equation uses unsupported imported OMML. Its original math is preserved; insert a new equation to replace it explicitly.',
+    )
+  }
+  return matches[0]!
 }
 
 /** The run PowerPoint writes for an inline equation, with `text` as its fallback. */
@@ -119,5 +141,28 @@ register({
     else paragraphs.push(paragraph)
     te.dirty = true
     return { op, after: { text: run.text, paragraphs: paragraphs.length } }
+  },
+})
+
+register({
+  name: 'replaceEquation',
+  validate(op, ctx) {
+    requireLatex(op)
+    const { el } = resolveElement(ctx, op, { types: ['text', 'shape'] })
+    editableEquationRun(el as TextElement)
+  },
+  apply(op, ctx): OpRecord {
+    const latex = requireLatex(op)
+    const { el } = resolveElement(ctx, op, { types: ['text', 'shape'] })
+    const te = el as TextElement
+    const { paragraphIndex, runIndex } = editableEquationRun(te)
+    const previous = te.text!.paragraphs[paragraphIndex]!.runs[runIndex]!
+    te.text!.paragraphs[paragraphIndex]!.runs[runIndex] = equationRun(latex)
+    te.dirty = true
+    return {
+      op,
+      before: { text: previous.text },
+      after: { text: te.text!.paragraphs[paragraphIndex]!.runs[runIndex]!.text },
+    }
   },
 })

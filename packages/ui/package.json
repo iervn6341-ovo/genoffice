@@ -27,7 +27,8 @@
     "./craft-icons/deck": "./src/craft-icons/deck.ts",
     "./craft-icons/grid": "./src/craft-icons/grid.ts",
     "./craft-icon.css": "./src/craft-icon.css",
-    "./backstage.css": "./src/backstage.css"
+    "./backstage.css": "./src/backstage.css",
+    "./math-tools.css": "./src/math-tools.css"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -43,6 +44,7 @@
   },
   "dependencies": {
     "@genoffice/i18n": "*",
-    "@genoffice/pptx-render": "*"
+    "@genoffice/pptx-render": "*",
+    "@genoffice/office-math": "*"
   }
 }

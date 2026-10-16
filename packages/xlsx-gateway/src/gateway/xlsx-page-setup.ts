@@ -4,6 +4,7 @@
 /// name in workbook.xml. Untouched attributes and elements stay verbatim.
 
 import { parseSheetElements } from './xlsx-sheets'
+import type { HeaderFooterPictureEdit } from './xlsx-header-footer-pictures'
 
 export class PageSetupError extends Error {}
 
@@ -39,6 +40,24 @@ export interface SheetPageSetupState {
   /// Printed header/footer; null clears that half, undefined keeps it.
   readonly header?: HeaderFooterParts | null | undefined
   readonly footer?: HeaderFooterParts | null | undefined
+  readonly firstPage?:
+    | { readonly header: HeaderFooterParts | null; readonly footer: HeaderFooterParts | null }
+    | null
+    | undefined
+  readonly evenPages?:
+    | { readonly header: HeaderFooterParts | null; readonly footer: HeaderFooterParts | null }
+    | null
+    | undefined
+  /// Edit retained XML independently of the first/even print-enable flags.
+  readonly firstPageStored?:
+    | { readonly header: HeaderFooterParts | null; readonly footer: HeaderFooterParts | null }
+    | null
+    | undefined
+  readonly evenPagesStored?:
+    | { readonly header: HeaderFooterParts | null; readonly footer: HeaderFooterParts | null }
+    | null
+    | undefined
+  readonly headerFooterPictureEdits?: readonly HeaderFooterPictureEdit[] | undefined
   /// Manual page breaks (0-based index of the row/column after the break).
   /// Presence replaces the sheet's break set; [] clears all manual breaks.
   readonly rowBreaks?: readonly number[] | undefined
@@ -246,39 +265,65 @@ export function buildHeaderFooterXml(
 
 /// One `<tag>…</tag>` (or self-closing) child of headerFooter.
 function headerFooterSectionPattern(tag: string): RegExp {
-  return new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>|<${tag}\\b[^>]*/>`)
+  const attributes = `(?:[^<>"']|"[^"]*"|'[^']*')*`
+  return new RegExp(`<${tag}\\b${attributes}>[\\s\\S]*?</${tag}>|<${tag}\\b${attributes}/>`)
 }
 
-/// Rewrites the odd header/footer inside the first `<headerFooter>` (or
-/// inserts the element after pageSetup). An undefined half keeps its
-/// existing odd text verbatim, null (or all-empty parts) clears it. The
-/// element's attributes (differentOddEven, differentFirst, scaleWithDoc,
-/// alignWithMargins) and its even/first-page sections stay byte-identical —
-/// Excel's own dialog edits the odd sections the same way, and the export
-/// honors the variants. The element is removed only when nothing is left.
-function setHeaderFooter(
-  xml: string,
-  header: HeaderFooterParts | null | undefined,
-  footer: HeaderFooterParts | null | undefined,
-): string {
+function sectionOpeningEnd(section: string): number {
+  let quote: '"' | "'" | null = null
+  for (let index = 1; index < section.length; index += 1) {
+    const character = section[index]
+    if (quote !== null) {
+      if (character === quote) quote = null
+    } else if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === '>') {
+      return index
+    }
+  }
+  throw new PageSetupError('Invalid header/footer section tag.')
+}
+
+/// Rewrites only the requested header/footer sections while preserving every
+/// untouched variant and attribute byte-for-byte.
+function setHeaderFooter(xml: string, state: SheetPageSetupState): string {
   const existing = /<headerFooter\b([^>]*?)(?:\/>|>([\s\S]*?)<\/headerFooter>)/.exec(xml)
-  const attributes = existing?.[1] ?? ''
+  let attributes = existing?.[1] ?? ''
   let body = existing?.[2] ?? ''
-  const setSection = (tag: 'oddHeader' | 'oddFooter', text: string | undefined): void => {
+  const order = [
+    'oddHeader',
+    'oddFooter',
+    'evenHeader',
+    'evenFooter',
+    'firstHeader',
+    'firstFooter',
+  ] as const
+  type SectionTag = (typeof order)[number]
+  const setSection = (tag: SectionTag, text: string | undefined): void => {
     if (text === undefined) return
     const pattern = headerFooterSectionPattern(tag)
-    const element = text === '' ? '' : `<${tag}>${text}</${tag}>`
-    if (pattern.test(body)) {
+    const existingSection = pattern.exec(body)
+    if (existingSection) {
+      const original = existingSection[0]
+      const opening = original.slice(0, sectionOpeningEnd(original) + 1).replace(/\/>$/, '>')
+      if (text === '' && (original.endsWith('/>') || original === `${opening}</${tag}>`)) {
+        return
+      }
+      const element = text === '' ? '' : `${opening}${text}</${tag}>`
+      if (original === element) return
       // function replacer: the element carries user text, and "$'000" / "$&"
       // in a header would otherwise expand as String.replace patterns
       body = body.replace(pattern, () => element)
       return
     }
-    if (element === '') return
-    // CT_HeaderFooter order: oddHeader, oddFooter, even*, first*.
-    const oddHeader =
-      tag === 'oddFooter' ? headerFooterSectionPattern('oddHeader').exec(body) : null
-    const at = oddHeader ? oddHeader.index + oddHeader[0].length : 0
+    if (text === '') return
+    const element = `<${tag}>${text}</${tag}>`
+    const following = order
+      .slice(order.indexOf(tag) + 1)
+      .map((candidate) => headerFooterSectionPattern(candidate).exec(body))
+      .filter((match): match is RegExpExecArray => match !== null)
+      .sort((a, b) => a.index - b.index)[0]
+    const at = following?.index ?? body.length
     body = body.slice(0, at) + element + body.slice(at)
   }
   const encode = (parts: HeaderFooterParts | null | undefined): string | undefined =>
@@ -287,8 +332,35 @@ function setHeaderFooter(
       : parts === null
         ? ''
         : escapeXml(encodeHeaderFooterSections(parts))
-  setSection('oddHeader', encode(header))
-  setSection('oddFooter', encode(footer))
+  const setFlag = (name: 'differentFirst' | 'differentOddEven', enabled: boolean): void => {
+    const pattern = new RegExp(`\\s${name}="[^"]*"`)
+    attributes = attributes.replace(pattern, '')
+    if (enabled) attributes += ` ${name}="1"`
+  }
+  setSection('oddHeader', encode(state.header))
+  setSection('oddFooter', encode(state.footer))
+  if (state.firstPageStored !== undefined) {
+    setSection('firstHeader', encode(state.firstPageStored?.header ?? null))
+    setSection('firstFooter', encode(state.firstPageStored?.footer ?? null))
+  }
+  if (state.evenPagesStored !== undefined) {
+    setSection('evenHeader', encode(state.evenPagesStored?.header ?? null))
+    setSection('evenFooter', encode(state.evenPagesStored?.footer ?? null))
+  }
+  if (state.firstPage !== undefined) {
+    setFlag('differentFirst', state.firstPage !== null)
+    if (state.firstPage !== null) {
+      setSection('firstHeader', encode(state.firstPage.header))
+      setSection('firstFooter', encode(state.firstPage.footer))
+    }
+  }
+  if (state.evenPages !== undefined) {
+    setFlag('differentOddEven', state.evenPages !== null)
+    if (state.evenPages !== null) {
+      setSection('evenHeader', encode(state.evenPages.header))
+      setSection('evenFooter', encode(state.evenPages.footer))
+    }
+  }
   const element =
     body.trim() === ''
       ? attributes.trim() === ''
@@ -406,8 +478,15 @@ export function applyPageSetupState(worksheetXml: string, state: SheetPageSetupS
   if (state.fitToPage !== undefined) {
     xml = setFitToPage(xml, state.fitToPage)
   }
-  if (state.header !== undefined || state.footer !== undefined) {
-    xml = setHeaderFooter(xml, state.header, state.footer)
+  if (
+    state.header !== undefined ||
+    state.footer !== undefined ||
+    state.firstPage !== undefined ||
+    state.evenPages !== undefined ||
+    state.firstPageStored !== undefined ||
+    state.evenPagesStored !== undefined
+  ) {
+    xml = setHeaderFooter(xml, state)
   }
   if (state.rowBreaks !== undefined) {
     xml = setPageBreaks(xml, 'rowBreaks', state.rowBreaks, AFTER_ROW_BREAKS)

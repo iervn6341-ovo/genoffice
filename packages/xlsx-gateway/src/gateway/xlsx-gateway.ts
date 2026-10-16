@@ -26,6 +26,7 @@ import {
   applyVisualAdditions,
   type ChartAdd,
   type DrawingAnchor,
+  type EquationAdd,
   type ImageAdd,
   relsPathFor,
   resolveRelTarget,
@@ -73,6 +74,8 @@ import {
   SheetEditError,
   stripPageSetupRelIds,
   validateSheetName,
+  refSheetReferencesInDefinedNames,
+  refSheetReferencesInWorksheet,
   worksheetReferencesSheet,
 } from './xlsx-sheets'
 import type { StructuralOp } from './xlsx-structure'
@@ -84,6 +87,7 @@ import {
 } from './xlsx-defined-names'
 import { applyDvRules, type DvCellArea, type DvWireRule } from './xlsx-dv'
 import { applyPageSetupState, applyPrintAreas, type SheetPageSetupState } from './xlsx-page-setup'
+import { applyHeaderFooterPictureEdits } from './xlsx-header-footer-pictures'
 import {
   applyProtectedRanges,
   applySheetProtection,
@@ -92,6 +96,13 @@ import {
 } from './xlsx-protection'
 import { applyThemeState, type WorkbookThemeState } from './xlsx-theme'
 import { applySheetNotes, type SheetNote } from './xlsx-notes'
+import {
+  applySheetThreads,
+  readPersons,
+  readSheetThreads,
+  type SheetThread,
+  type ThreadPerson,
+} from './xlsx-threaded-comments'
 import {
   applySparklineAdditions,
   type SheetSparklineAddition,
@@ -207,6 +218,8 @@ export interface CellEdit {
   readonly writeValue: boolean
   readonly cell: CellState
   readonly style?: WorkbookStyleEdit | undefined
+  /// Exact existing XF to restore, or null to remove an explicit cell `s=`.
+  readonly styleReference?: number | null | undefined
   /// Per-run styling for a rich-text string value.
   readonly rich?: readonly WorkbookRichRun[] | undefined
   /// Reset the cell to the default style (xf 0) before applying `style`.
@@ -614,6 +627,10 @@ export async function applyCellEditsToXlsx(
 export interface SheetNoteState {
   readonly sheetName: string
   readonly notes: readonly SheetNote[]
+  /// Threaded comments of the sheet and the workbook's person list; absent = the sheet has none
+  /// (and none are written, so a file's threads are only touched when the editor sends them).
+  readonly threads?: readonly SheetThread[] | undefined
+  readonly persons?: readonly ThreadPerson[] | undefined
 }
 
 export interface SheetVisualAddition {
@@ -622,6 +639,7 @@ export interface SheetVisualAddition {
   readonly chart?: ChartAdd | undefined
   readonly shape?: ShapeAdd | undefined
   readonly image?: ImageAdd | undefined
+  readonly equation?: EquationAdd | undefined
 }
 
 export interface SheetTableAddition {
@@ -863,7 +881,7 @@ export async function planCellEditsToXlsx(
   let stylesheet: StylesheetEditor | null = null
   const stylesPath = 'xl/styles.xml'
   if (
-    edits.some((edit) => edit.style !== undefined) ||
+    edits.some((edit) => edit.style !== undefined || typeof edit.styleReference === 'number') ||
     cfStates.length > 0 ||
     structuralOps.some(({ ops }) => ops.some((op) => op.kind === 'set-col-style'))
   ) {
@@ -966,6 +984,7 @@ export async function planCellEditsToXlsx(
   const cellMutationSheets = new Set([...fillsBySheet.keys(), ...editsBySheet.keys()])
   for (const sheetName of cellMutationSheets) {
     const worksheetXml = worksheetXmls.get(sheetName) ?? ''
+    const columnStyleAt = inheritedColumnStyleLookup(worksheetXml)
     const cellMutations = groupCellMutations(
       fillsBySheet.get(sheetName) ?? [],
       editsBySheet.get(sheetName) ?? [],
@@ -975,7 +994,7 @@ export async function planCellEditsToXlsx(
     const edited = transformWorksheetCells(
       materialized,
       cellMutations,
-      (cellXml, rowNumber, column, mutation) => {
+      (cellXml, rowNumber, column, mutation, rowStyleIndex) => {
         let result = cellXml
         if (mutation.fill) {
           result = applyEditToCellXml(
@@ -992,7 +1011,14 @@ export async function planCellEditsToXlsx(
           )
         }
         return mutation.edits
-          ? applyCellEdits(result, rowNumber, column, mutation.edits, stylesheet)
+          ? applyCellEdits(
+              result,
+              rowNumber,
+              column,
+              mutation.edits,
+              stylesheet,
+              rowStyleIndex ?? columnStyleAt(column) ?? 0,
+            )
           : result
       },
       true,
@@ -1168,6 +1194,17 @@ export async function planCellEditsToXlsx(
     }
     touchedEntries.add(worksheetPath)
   }
+  for (const state of pageSetupStates) {
+    if (!state.headerFooterPictureEdits?.length) continue
+    const worksheetPath =
+      additionPaths.get(state.sheetName) ?? (await resolveWorksheetPath(pkg, state.sheetName))
+    await applyHeaderFooterPictureEdits(
+      pkg,
+      worksheetPath,
+      state.headerFooterPictureEdits,
+      touchedEntries,
+    )
+  }
   if (stylesheet?.changed) {
     pkg.write(stylesPath, stylesheet.serialize())
     touchedEntries.add(stylesPath)
@@ -1200,6 +1237,7 @@ export async function planCellEditsToXlsx(
         chart: addition.chart,
         shape: addition.shape,
         image: addition.image,
+        equation: addition.equation,
       })
     }
     await applyVisualAdditions(pkg, resolved, touchedEntries)
@@ -1211,7 +1249,31 @@ export async function planCellEditsToXlsx(
   for (const state of noteStates) {
     const worksheetPath =
       additionPaths.get(state.sheetName) ?? (await resolveWorksheetPath(pkg, state.sheetName))
-    await applySheetNotes(pkg, worksheetPath, state.notes, touchedEntries)
+    // A notes-only snapshot must not strip the placeholders of threads the file already has:
+    // without them the threaded part would be orphaned. Keep the file's own threads then.
+    const fileThreads =
+      state.threads === undefined ? await readSheetThreads(pkg, worksheetPath) : []
+    if (state.threads === undefined && fileThreads.length === 0) {
+      await applySheetNotes(pkg, worksheetPath, state.notes, touchedEntries)
+    } else if (state.threads === undefined) {
+      await applySheetThreads(
+        pkg,
+        worksheetPath,
+        state.notes,
+        fileThreads,
+        await readPersons(pkg),
+        touchedEntries,
+      )
+    } else {
+      await applySheetThreads(
+        pkg,
+        worksheetPath,
+        state.notes,
+        state.threads,
+        state.persons ?? [],
+        touchedEntries,
+      )
+    }
   }
 
   // Recomputed pivots: their output cells were saved as ordinary edits above;
@@ -1557,15 +1619,17 @@ async function applySheetPlanToPackage(
       if (!(await pkg.canPatch(path))) {
         if (await pkg.containsText(path, removal)) {
           throw new SheetEditError(
-            `Another sheet's formulas reference "${removal}" — deleting it is not allowed.`,
+            `Another sheet's formulas reference "${removal}" and ${path} is too large to rewrite — ` +
+              'deleting it cannot be saved.',
           )
         }
         continue
       }
-      if (worksheetReferencesSheet(await pkg.readText(path), removal)) {
-        throw new SheetEditError(
-          `Another sheet's formulas reference "${removal}" — deleting it is not allowed.`,
-        )
+      // Like Excel, references to the deleted sheet become #REF!
+      const xml = await pkg.readText(path)
+      if (worksheetReferencesSheet(xml, removal)) {
+        pkg.write(path, refSheetReferencesInWorksheet(xml, removal))
+        touchedEntries.add(path)
       }
     }
     for (const chartPath of chartPaths) {
@@ -1579,9 +1643,7 @@ async function applySheetPlanToPackage(
       }
     }
     if (definedNamesReferenceSheet(workbookXml, removal, removedLocalIds)) {
-      throw new SheetEditError(
-        `A workbook defined name references "${removal}" — deleting it is not allowed.`,
-      )
+      workbookXml = refSheetReferencesInDefinedNames(workbookXml, removal, removedLocalIds)
     }
     // A pivot hosted on a surviving sheet may read its source rows from the
     // removed sheet; only the pivotCacheDefinition records that link
@@ -1969,6 +2031,24 @@ async function resolveWorksheetPath(
   return `xl/${target.replace(/^\.\//, '')}`
 }
 
+/// Threaded comments of every sheet plus the workbook's persons, read once at open. A sheet whose
+/// worksheet part cannot be resolved simply has none.
+export async function readWorkbookThreads(
+  reader: Pick<EntrySource, 'readText'> & { has(path: string): Promise<boolean> },
+  sheetNames: readonly string[],
+): Promise<{ sheets: Map<string, SheetThread[]>; persons: ThreadPerson[] }> {
+  const sheets = new Map<string, SheetThread[]>()
+  for (const name of sheetNames) {
+    try {
+      const threads = await readSheetThreads(reader, await resolveWorksheetPath(reader, name))
+      if (threads.length > 0) sheets.set(name, threads)
+    } catch {
+      // unreadable sheet part: leave the sheet's comments to the legacy path
+    }
+  }
+  return { sheets, persons: sheets.size > 0 ? await readPersons(reader) : [] }
+}
+
 function replaceSheetName(workbookXml: string, before: string, after: string): string {
   const element = findSheetElement(workbookXml, before)
   if (!element) throw new Error(`Sheet "${before}" was not found.`)
@@ -2163,6 +2243,41 @@ function readCellStyleIndex(worksheetXml: string, address: string): number | und
   return index === undefined ? undefined : Number(index)
 }
 
+/** A row xf applies only when customFormat is enabled. */
+function inheritedRowStyleIndex(rowOpenTag: string): number | undefined {
+  const customFormat = readXmlAttribute(rowOpenTag, 'customFormat')
+  if (customFormat !== '1' && customFormat !== 'true') return undefined
+  const style = Number(readXmlAttribute(rowOpenTag, 's'))
+  return Number.isInteger(style) && style >= 0 ? style : undefined
+}
+
+/** Last matching column span wins when no explicit cell or row xf applies. */
+function inheritedColumnStyleLookup(worksheetXml: string): (column: number) => number | undefined {
+  const sheetDataStart = worksheetXml.indexOf('<sheetData')
+  const prefix = sheetDataStart < 0 ? '' : worksheetXml.slice(0, sheetDataStart)
+  const cols = /<cols\b[^>]*>([\s\S]*?)<\/cols>/.exec(prefix)?.[1] ?? ''
+  const spans: Array<{ min: number; max: number; style: number }> = []
+  for (const match of cols.matchAll(/<col\b[^>]*\/?\s*>/g)) {
+    const tag = match[0]
+    const min = Number(readXmlAttribute(tag, 'min'))
+    const max = Number(readXmlAttribute(tag, 'max'))
+    const style = Number(readXmlAttribute(tag, 'style'))
+    if (!Number.isInteger(min) || min < 1 || !Number.isInteger(max) || max < min) continue
+    if (!Number.isInteger(style) || style < 0) continue
+    spans.push({ min: min - 1, max: max - 1, style })
+  }
+  const cache = new Map<number, number | undefined>()
+  return (column) => {
+    if (cache.has(column)) return cache.get(column)
+    let style: number | undefined
+    for (const span of spans) {
+      if (column >= span.min && column <= span.max) style = span.style
+    }
+    cache.set(column, style)
+    return style
+  }
+}
+
 /// Sets only the style index of a cell, leaving its stored content (value,
 /// type, formula) byte-for-byte untouched. Missing cells become empty styled
 /// cells so formatting applies to blanks too.
@@ -2267,7 +2382,13 @@ function patchFormulaCachedValue(
 /// themselves. '' in = the cell does not exist; '' out = the cell is removed
 /// (or stays absent).
 type SheetCellItems<T> = Map<number, Map<number, T>>
-type CellItemApply<T> = (cellXml: string, rowNumber: number, column: number, item: T) => string
+type CellItemApply<T> = (
+  cellXml: string,
+  rowNumber: number,
+  column: number,
+  item: T,
+  rowStyleIndex?: number,
+) => string
 
 /// One journaled edit applied to a single cell's XML — the same
 /// patchCellKeepingStyle / patchCellStyleOnly semantics the save path always
@@ -2277,24 +2398,51 @@ function applyEditToCellXml(
   address: string,
   edit: CellEdit,
   stylesheet: StylesheetEditor | null,
+  inheritedStyleIndex = 0,
 ): string {
   let styleOverride: number | undefined
+  const restoreReference = edit.styleReference
+  if (restoreReference !== undefined && edit.styleReset) {
+    throw new Error('A cell style edit cannot reset and restore an XF at the same time.')
+  }
+  if (
+    typeof restoreReference === 'number' &&
+    (!stylesheet || !stylesheet.hasCellXf(restoreReference))
+  ) {
+    throw new Error(`The original cell format ${restoreReference} is no longer available.`)
+  }
   if (edit.styleReset) {
     styleOverride = edit.style && stylesheet ? stylesheet.resolveStyle(0, edit.style) : 0
   } else if (edit.style && stylesheet) {
-    const baseIndex = (cellXml === '' ? undefined : readCellStyleIndex(cellXml, address)) ?? 0
+    const baseIndex =
+      restoreReference === null
+        ? inheritedStyleIndex
+        : (restoreReference ??
+          (cellXml === '' ? undefined : readCellStyleIndex(cellXml, address)) ??
+          inheritedStyleIndex)
     styleOverride = stylesheet.resolveStyle(baseIndex, edit.style)
+  } else if (typeof restoreReference === 'number') {
+    styleOverride = restoreReference
   }
   if (edit.writeValue) {
     if (cellXml !== '') {
-      return patchCellKeepingStyle(cellXml, address, edit.cell, styleOverride, edit.rich)
+      const patched = patchCellKeepingStyle(cellXml, address, edit.cell, styleOverride, edit.rich)
+      return restoreReference === null && styleOverride === undefined
+        ? removeCellStyleReference(patched)
+        : patched
     }
     const styleIndex = styleOverride === undefined ? undefined : String(styleOverride)
     return serializeStyledCell(address, edit.cell, styleIndex, edit.rich)
   }
-  if (styleOverride === undefined) return cellXml
+  if (styleOverride === undefined) {
+    return restoreReference === null ? removeCellStyleReference(cellXml) : cellXml
+  }
   if (cellXml === '') return `<c r="${address}" s="${styleOverride}"/>`
   return patchCellStyleOnly(cellXml, address, styleOverride)
+}
+
+function removeCellStyleReference(cellXml: string): string {
+  return cellXml.replace(/<c\b[^>]*>/, (opening) => opening.replace(/\s+s=(?:"[^"]*"|'[^']*')/, ''))
 }
 
 function groupBySheet<T extends { readonly sheetName: string }>(
@@ -2466,11 +2614,13 @@ function applyCellEdits(
   column: number,
   item: CellEdit | CellEdit[],
   stylesheet: StylesheetEditor | null,
+  inheritedStyleIndex = 0,
 ): string {
   const address = toA1Address(rowNumber - 1, column)
-  if (!Array.isArray(item)) return applyEditToCellXml(cellXml, address, item, stylesheet)
+  if (!Array.isArray(item))
+    return applyEditToCellXml(cellXml, address, item, stylesheet, inheritedStyleIndex)
   return item.reduce(
-    (current, edit) => applyEditToCellXml(current, address, edit, stylesheet),
+    (current, edit) => applyEditToCellXml(current, address, edit, stylesheet, inheritedStyleIndex),
     cellXml,
   )
 }
@@ -2606,6 +2756,7 @@ function transformRowCells<T>(
   const openEnd = rowXml.indexOf('>') + 1
   const selfClosing = rowXml.slice(0, openEnd).endsWith('/>')
   const openTag = selfClosing ? `${rowXml.slice(0, openEnd - 2)}>` : rowXml.slice(0, openEnd)
+  const rowStyleIndex = inheritedRowStyleIndex(openTag)
   const body = selfClosing ? '' : rowXml.slice(openEnd, rowXml.length - '</row>'.length)
   const remaining = new Map(rowItems)
   const targetColumns = [...rowItems.keys()].sort((left, right) => left - right)
@@ -2613,7 +2764,7 @@ function transformRowCells<T>(
     const item = remaining.get(column)
     if (item === undefined) return ''
     remaining.delete(column)
-    return applyItem('', rowNumber, column, item)
+    return applyItem('', rowNumber, column, item, rowStyleIndex)
   }
 
   const parts: string[] = []
@@ -2654,7 +2805,7 @@ function transformRowCells<T>(
       continue
     }
     remaining.delete(column)
-    parts.push(applyItem(cellXml, rowNumber, column, item))
+    parts.push(applyItem(cellXml, rowNumber, column, item, rowStyleIndex))
   }
   parts.push(body.slice(cursor))
   if (insertMissing) {

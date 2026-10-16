@@ -143,11 +143,19 @@ function parseNotesBody(archive: PackageArchive, notesPath: string): TextElement
   const xml = archive.readText(notesPath)
   if (!xml) return null
   const ctx: ParseContext = {}
+  const imageRels = (part: string): Map<string, string> =>
+    new Map(
+      [...archive.readRels(part).values()]
+        .filter((rel) => rel.type.endsWith('/image'))
+        .map((rel) => [rel.id, resolveTarget(part, rel.target)]),
+    )
+  ctx.mediaRels = imageRels(notesPath)
   let masterPath: string | undefined
   for (const rel of archive.readRels(notesPath).values()) {
     if (rel.type === NOTES_MASTER_REL) masterPath = resolveTarget(notesPath, rel.target)
   }
   const masterXml = masterPath ? (archive.readText(masterPath) ?? undefined) : undefined
+  if (masterPath) ctx.masterMediaRels = imageRels(masterPath)
   if (masterPath) {
     for (const rel of archive.readRels(masterPath).values()) {
       if (rel.type !== THEME_REL) continue
@@ -159,8 +167,8 @@ function parseNotesBody(archive: PackageArchive, notesPath: string): TextElement
     }
   }
   if (masterXml) {
-    ctx.masterPlaceholders = parsePlaceholderMap(masterXml, ctx.theme)
-    ctx.masterTextStyles = parseMasterTextStyles(masterXml, ctx.theme)
+    ctx.masterPlaceholders = parsePlaceholderMap(masterXml, ctx.theme, ctx.masterMediaRels)
+    ctx.masterTextStyles = parseMasterTextStyles(masterXml, ctx.theme, ctx.masterMediaRels)
   }
   let slide
   try {
@@ -226,7 +234,7 @@ export function setSlideNotesParagraphs(
 }
 
 /** Add an Override to [Content_Types].xml (skipped if already present). */
-function addContentTypeOverride(
+export function addContentTypeOverride(
   archive: PackageArchive,
   partPath: string,
   contentType: string,
@@ -268,7 +276,7 @@ export function appendRelationship(
 }
 
 /** Ensure a notesMaster exists and return its part path. Created and registered in the presentation if missing. */
-function ensureNotesMaster(archive: PackageArchive): string | null {
+export function ensureNotesMaster(archive: PackageArchive): string | null {
   for (const path of archive.entries.keys()) {
     if (/^ppt\/notesMasters\/notesMaster\d+\.xml$/.test(path)) return path
   }
@@ -276,7 +284,17 @@ function ensureNotesMaster(archive: PackageArchive): string | null {
   const emptyTree =
     '<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
     '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>' +
-    '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree>'
+    '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' +
+    '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder"/><p:cNvSpPr/>' +
+    '<p:nvPr><p:ph type="sldImg" idx="2"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm>' +
+    '<a:off x="685800" y="1143000"/><a:ext cx="5486400" cy="3086100"/>' +
+    '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>' +
+    '<p:txBody><a:bodyPr anchor="ctr"/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp>' +
+    '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes Body Placeholder"/><p:cNvSpPr/>' +
+    '<p:nvPr><p:ph type="body" sz="quarter" idx="3"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm>' +
+    '<a:off x="685800" y="4400550"/><a:ext cx="5486400" cy="3600450"/>' +
+    '</a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p>' +
+    '<a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp></p:spTree>'
   const xml =
     XMLDECL +
     `<p:notesMaster xmlns:a="${NS_A}" xmlns:r="${NS_R}" xmlns:p="${NS_P}">` +

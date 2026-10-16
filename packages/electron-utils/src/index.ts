@@ -99,3 +99,11 @@ export {
   type PrinterJob,
   type PrinterListEntry,
 } from './printer-settings'
+export {
+  outcomeForExit,
+  planHelper,
+  printPdfWithSystemPanel,
+  type HelperLocation,
+  type HelperPlan,
+  type SystemPrintOutcome,
+} from './mac-print'

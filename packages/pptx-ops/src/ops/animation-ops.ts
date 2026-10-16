@@ -12,6 +12,7 @@ import {
   elementDurableId,
   elementSpid,
   getSlideAnimations,
+  isSupportedMotionPath,
   setSlideAnimations,
   type AnimClass,
   type AnimDirection,
@@ -266,7 +267,7 @@ function buildAnimation(op: Op, el: SlideElement): SlideAnimation {
     anim.paragraph = op.paragraph
   }
   if (op.motionPath !== undefined) {
-    if (typeof op.motionPath !== 'string' || !op.motionPath.trim()) {
+    if (typeof op.motionPath !== 'string' || !isSupportedMotionPath(op.motionPath)) {
       throw new GuidedError(
         `op "${op.op}": "motionPath" must be an SVG-like path (M/L/C/Z, coordinates 0..1 of the slide).`,
       )
@@ -290,7 +291,7 @@ register({
   apply(op, ctx): OpRecord {
     const { slide, el } = resolveElement(ctx, op)
     const anim = buildAnimation(op, el)
-    const anims = getSlideAnimations(slide)
+    const anims = getSlideAnimations(slide, true)
     const after = parseSeq(op, 'after', false)
     if (after !== undefined && after >= anims.length) {
       throw new GuidedError(
@@ -318,7 +319,7 @@ register({
     const seq = parseSeq(op, 'seq', false)
     if (seq !== undefined) {
       const { slide } = resolveSlide(ctx, op)
-      const anims = getSlideAnimations(slide)
+      const anims = getSlideAnimations(slide, true)
       if (seq >= anims.length) {
         throw new GuidedError(
           `op "removeAnimation": no animation at seq ${seq}; the timeline is ${timelineRange(anims)}.`,
@@ -330,7 +331,7 @@ register({
     }
     const { slide, el } = resolveElement(ctx, op)
     const spid = elementSpid(el)
-    const anims = getSlideAnimations(slide)
+    const anims = getSlideAnimations(slide, true)
     const kept = anims.filter((a) => a.spid !== spid)
     if (kept.length !== anims.length) setSlideAnimations(slide, kept)
     return { op, after: { removed: anims.length - kept.length, count: kept.length } }
@@ -348,7 +349,7 @@ register({
     const { slide } = resolveSlide(ctx, op)
     const seq = parseSeq(op, 'seq', true)!
     const to = parseSeq(op, 'to', true)!
-    const anims = getSlideAnimations(slide)
+    const anims = getSlideAnimations(slide, true)
     if (seq >= anims.length || to >= anims.length) {
       throw new GuidedError(
         `op "reorderAnimation": seq/to must be inside the timeline (${timelineRange(anims)}).`,

@@ -349,7 +349,7 @@ describe('rich header / footer', () => {
     })
     const zip = await (await import('jszip')).default.loadAsync(saved)
     const xml = await zip.file('word/footer1.xml')!.async('string')
-    expect(xml.match(/<w:instrText[^>]*> PAGE <\/w:instrText>/g)).toHaveLength(1)
+    expect(xml.match(/<w:instrText[^>]*>PAGE<\/w:instrText>/g)).toHaveLength(1)
     expect(xml).toContain('[Course #] | Page ')
     expect(xml).not.toContain(PAGE_MARK)
     const reparsed = await parseDocx(saved)

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import JSZip from 'jszip'
 import { parseDocx, saveDocx } from '../src/index'
 import { buildDocx } from './helpers/build-docx'
 
@@ -46,6 +47,54 @@ async function buildHeaderLogoDocx(headerXml: string = HEADER_XML): Promise<Uint
 }
 
 describe('header/footer images (display-only Logo)', () => {
+  it('authors a native picture in a header part with its own media relationship', async () => {
+    const source = await buildDocx({ bodyXml: '<w:p><w:r><w:t>Body</w:t></w:r></w:p>' })
+    const parsed = await parseDocx(source)
+    const base64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=='
+    const picture = {
+      text: 'Title',
+      paras: [
+        { runs: [{ text: 'Title' }] },
+        {
+          runs: [
+            {
+              text: '',
+              image: {
+                dataUrl: `data:image/png;base64,${base64}`,
+                xml: '',
+                widthPx: 120,
+                heightPx: 40,
+                pendingMedia: { base64, mime: 'image/png' as const },
+              },
+            },
+          ],
+        },
+      ],
+    }
+    const blocks = [{ kind: 'original' as const, docxIndex: 0 }]
+    const saved = await saveDocx(parsed, blocks, { header: picture })
+    const zip = await JSZip.loadAsync(saved)
+    const headerXml = await zip.file('word/header1.xml')!.async('string')
+    const relsXml = await zip.file('word/_rels/header1.xml.rels')!.async('string')
+    expect(headerXml).toContain('<w:drawing><wp:inline')
+    expect(headerXml).toContain('<wp:extent cx="1143000" cy="381000"/>')
+    expect(headerXml).toMatch(/r:embed="rId\d+"/)
+    expect(relsXml).toMatch(/Type="[^"]+\/image" Target="media\/aidocs\d+\.png"/)
+    expect(Object.keys(zip.files).some((path) => /^word\/media\/aidocs\d+\.png$/.test(path))).toBe(
+      true,
+    )
+    expect(await zip.file('word/document.xml')!.async('string')).toContain('Body')
+
+    const reopened = await parseDocx(saved)
+    expect(reopened.headerImages?.[0]).toMatchObject({ widthPx: 120, heightPx: 40 })
+    const repeated = await saveDocx(reopened, blocks)
+    expect((await parseDocx(repeated)).headerImages?.[0]).toMatchObject({
+      widthPx: 120,
+      heightPx: 40,
+    })
+  })
+
   it('parses header images with size, text paragraphs unaffected', async () => {
     const doc = await parseDocx(await buildHeaderLogoDocx())
     expect(doc.headerImages).toHaveLength(1)

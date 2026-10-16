@@ -272,11 +272,11 @@ interface Span {
   raw?: boolean
 }
 
-/** Locate all top-level <a:r>…</a:r> and <a:br/> (incl. paired form) spans in document order. */
+/** Locate native runs, field runs and breaks in document order. */
 function findRunSpans(xml: string): Span[] {
   const spans: Span[] = []
   const re =
-    /<a:r>|<a:r\s[^>]*>|<a:br\b[^>]*\/>|<a:br\b[^>]*>|<mc:AlternateContent\b[^>]*>|<a14:m\b[^>]*>/g
+    /<a:r>|<a:r\s[^>]*>|<a:fld\b[^>]*>|<a:br\b[^>]*\/>|<a:br\b[^>]*>|<mc:AlternateContent\b[^>]*>|<a14:m\b[^>]*>/g
   let m: RegExpExecArray | null
   while ((m = re.exec(xml)) !== null) {
     const start = m.index
@@ -312,9 +312,11 @@ function findRunSpans(xml: string): Span[] {
       }
       continue
     }
-    const close = xml.indexOf('</a:r>', re.lastIndex)
+    const field = m[0].startsWith('<a:fld')
+    const closeTag = field ? '</a:fld>' : '</a:r>'
+    const close = xml.indexOf(closeTag, re.lastIndex)
     if (close < 0) break
-    const end = close + '</a:r>'.length
+    const end = close + closeTag.length
     // A run whose text is only a line break parses as a soft-break sentinel (XML folds
     // CRLF to LF); keeping its bytes preserves the formatting a bare <a:br/> would drop
     const newlineOnly = /<a:t(?:\s[^>]*)?>\r?\n<\/a:t>/.test(xml.slice(start, end))
@@ -466,7 +468,7 @@ function patchRunProps(runXml: string, run: TextRun): string {
     // schema order: fill, highlight, font slots, hlinkClick
     const inner = color + highlight + font + hlinkXml(run)
     const rpr = inner ? `<a:rPr${attrs}>${inner}</a:rPr>` : `<a:rPr${attrs}/>`
-    runXml = runXml.replace(/(<a:r(?:\s[^>]*)?>)/, `$1${rpr}`)
+    runXml = runXml.replace(/(<a:(?:r|fld)(?:\s[^>]*)?>)/, `$1${rpr}`)
   }
   return runXml
 }

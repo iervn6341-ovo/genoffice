@@ -86,6 +86,56 @@ export function renameSheetInFormula(formula: string, oldName: string, newName: 
     .join('"')
 }
 
+/// Deleting a sheet turns every reference to it into `#REF!`, as Excel does:
+/// `=SUM(Gone!A1:B2)+A1` becomes `=SUM(#REF!)+A1`. String literals are left untouched.
+export function refSheetInFormula(formula: string, sheetName: string): string {
+  return formula
+    .split('"')
+    .map((segment, index) =>
+      index % 2 === 1
+        ? segment
+        : segment.replace(
+            FORMULA_REFERENCE_PATTERN,
+            (full, lead: string, qualifier: string | undefined) =>
+              qualifier !== undefined && qualifierMatches(qualifier, sheetName)
+                ? `${lead}#REF!`
+                : full,
+          ),
+    )
+    .join('"')
+}
+
+/// `#REF!` for the removed sheet in a worksheet part: formula bodies and CF/DV rule formulas.
+export function refSheetReferencesInWorksheet(worksheetXml: string, sheetName: string): string {
+  const xml = worksheetXml.replace(
+    /<f\b([^>]*[^/>])?>([\s\S]*?)<\/f>/g,
+    (_full, attributes: string | undefined, body: string) =>
+      `<f${attributes ?? ''}>${escapeXmlText(refSheetInFormula(decodeEntities(body), sheetName))}</f>`,
+  )
+  return xml.replace(
+    /<(formula[12]?)>([\s\S]*?)<\/\1>/g,
+    (_full, tag: string, body: string) =>
+      `<${tag}>${escapeXmlText(refSheetInFormula(decodeEntities(body), sheetName))}</${tag}>`,
+  )
+}
+
+/// `#REF!` for the removed sheet in workbook definedName bodies (names scoped to a sheet that is
+/// being removed go away with it and are left alone).
+export function refSheetReferencesInDefinedNames(
+  workbookXml: string,
+  sheetName: string,
+  removedLocalIds: ReadonlySet<number>,
+): string {
+  return workbookXml.replace(
+    /(<definedName\b([^>]*)>)([\s\S]*?)(<\/definedName>)/g,
+    (full, open: string, attributes: string, body: string, close: string) => {
+      const localId = readAttribute(`<definedName${attributes}/>`, 'localSheetId')
+      if (localId !== undefined && removedLocalIds.has(Number(localId))) return full
+      return `${open}${escapeXmlText(refSheetInFormula(decodeEntities(body), sheetName))}${close}`
+    },
+  )
+}
+
 /// True when the formula contains a reference qualified with sheetName.
 export function formulaReferencesSheet(formula: string, sheetName: string): boolean {
   let found = false

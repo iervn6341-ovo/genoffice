@@ -1,6 +1,6 @@
 # Text ops
 
-> Replace or restyle the text of a text box, shape or table: whole-body rewrite (setText), run-level font patch (setFont), paragraph format patch (setParagraphFormat), typeset math (insertEquation).
+> Replace or restyle the text of a text box, shape or table: whole-body rewrite (setText), run-level font patch (setFont), paragraph format patch (setParagraphFormat), typeset math (insertEquation, replaceEquation).
 
 All three take `target:{slide, el}`. `el` is an element id from the outline or
 `read_slide` (`e_*` ids are durable). For a direct child of a group put the
@@ -130,9 +130,9 @@ Common mistakes
 
 Adds a typeset equation (PowerPoint's own math format) as a centered paragraph
 at the `position` (`"end"`, default, or `"start"`) of a text or shape element,
-or in a new text box at `box` (EMU, unit suffixes allowed). Older readers and
-the GenOffice preview show the linearized text (`E=mc²`); PowerPoint 2010+
-renders the formula. LaTeX subset: `\frac`, `\sqrt[n]`, `^`, `_`,
+or in a new text box at `box` (EMU, unit suffixes allowed). Older readers use
+the linearized fallback text (`E=mc²`); GenOffice and PowerPoint 2010+ render
+the formula from native math. LaTeX subset: `\frac`, `\sqrt[n]`, `^`, `_`,
 `\sum`/`\int`/`\prod` with limits, `\left(` `\right)`, matrices, Greek
 letters, accents, `\text{}`.
 
@@ -150,5 +150,24 @@ letters, accents, `\text{}`.
   "target": { "slide": 0 },
   "box": { "x": 914400, "y": 2743200, "cx": 4572000, "cy": 914400 },
   "latex": "\\frac{a}{b} + \\sqrt{x^2 + y^2}"
+}
+```
+
+### replaceEquation
+
+`{latex} — target:{slide, el}`
+
+Replaces one existing native OMML equation run inside a text or shape element.
+The operation retains the element ID, box, animation references, and every
+other paragraph and run. It accepts equations whose current OMML can be
+strictly converted back to editable LaTeX; unsupported imported OMML is
+left unchanged with a guided error. Read the current equation first and use
+its element ID as `target.el`.
+
+```json
+{
+  "op": "replaceEquation",
+  "target": { "slide": 0, "el": "e_TEXT" },
+  "latex": "x_1^2 + \\frac{a}{b}"
 }
 ```

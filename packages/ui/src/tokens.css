@@ -137,6 +137,52 @@
   color-scheme: dark;
 }
 
+/* Gray: the dark family with Office's softer, stepped dark-gray chrome (title bar darker than
+ * the ribbon, panels lifted above the canvas). Only chrome tokens differ from dark. */
+[data-theme='dark'][data-theme-variant='gray'] {
+  --surface: #3b3b3b;
+  --surface-subtle: #444;
+  --chrome-bg: #4a4a4a;
+  --canvas: #2f2f2f;
+  --border: #5c5c5c;
+  --border-subtle: #525252;
+  --border-strong: #707070;
+  --border-hover: #707070;
+  --text: #f0f0f0;
+  --text-primary: #f0f0f0;
+  --text-secondary: #c4c4c4;
+  --text-tertiary: #b0b0b0;
+  --text-muted: #9c9c9c;
+  --text-dim: #c4c4c4;
+  --hover: #555;
+  --pressed: #606060;
+  --active-bg: #6a6a6a;
+  --bg-hover: #555;
+  --bg-hover-subtle: #505050;
+  --bg-hover-strong: #626262;
+  --bg-hover-accent: #626262;
+  --bg-content: #353535;
+  --icon-muted: #8c8c8c;
+  --danger-bg: #4a2d2d;
+  --danger-border: #6a4040;
+  --success-bg: #2f4a3a;
+  --success-border: #46684f;
+  --shadow-modal-strong: 0 20px 25px rgb(0 0 0 / 35%);
+  --shadow-btn-hover: 0 2px 8px rgb(0 0 0 / 45%);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 50%);
+
+  --color-btn-primary: #f0f0f0;
+  --color-btn-primary-hover: #dcdcdc;
+  --color-btn-primary-text: #2f2f2f;
+  --color-text-primary: #f0f0f0;
+  --color-text-secondary: #c4c4c4;
+  --color-text-tertiary: #b0b0b0;
+  --color-bg-page: #3b3b3b;
+  --color-bg-subtle: #444;
+  --color-border-default: #5c5c5c;
+  --color-border-strong: #707070;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
     --surface: #1e1e1e;

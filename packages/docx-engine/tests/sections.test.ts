@@ -326,7 +326,7 @@ describe('sectionHf per-section headers/footers', () => {
     expect(docXml).toMatch(/<w:sectPr[^>]*><w:headerReference w:type="default"/)
   })
 
-  it('section with an existing reference: rewrites the referenced part instead of creating one', async () => {
+  it('section with an existing reference: clones the part and keeps the previous bytes for Undo', async () => {
     const HDR =
       '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
       '<w:p><w:r><w:t>旧页眉</w:t></w:r></w:p></w:hdr>'
@@ -357,8 +357,11 @@ describe('sectionHf per-section headers/footers', () => {
     })
     const zip = await (await import('jszip')).default.loadAsync(saved)
     const hdr = await zip.file('word/header1.xml')!.async('string')
-    expect(hdr).toContain('新页眉')
-    expect(zip.file('word/header2.xml')).toBeNull()
+    expect(hdr).toBe(HDR)
+    const reparsed = await parseDocx(saved)
+    const editedId = readSections(reparsed)[0].headerRefs.default!
+    expect(editedId).not.toBe('rId60')
+    expect(reparsed.hfParts?.[editedId]?.text).toContain('新页眉')
     // Reference count unchanged (no duplicate injection)
     const docXml = await zip.file('word/document.xml')!.async('string')
     expect(docXml.match(/<w:headerReference/g)).toHaveLength(1)
@@ -595,6 +598,58 @@ describe('pgNumType page numbering', () => {
     expect(applyPageNumType(noCols, 'decimal', undefined)).toContain(
       '<w:pgNumType w:fmt="decimal"/></w:sectPr>',
     )
+  })
+
+  it('preserves imported page numbering attributes while editing chapter and start', async () => {
+    const { applyPageNumType, sectionFromSectPr } = await import('../src/index')
+    const base =
+      '<w:sectPr><w:pgNumType w:fmt="upperRoman" w:start="4" w:chapStyle="2" w:chapSep="period" w:custom="keep"/><w:cols w:space="425"/></w:sectPr>'
+    const section = sectionFromSectPr(base, 0, 0)
+    expect(section.pageNumberFmt).toBe('upperRoman')
+    expect(section.pageNumberStart).toBe(4)
+    expect(section.pageNumberChapterStyle).toBe(2)
+    expect(section.pageNumberChapterSeparator).toBe('period')
+    const edited = applyPageNumType(base, 'decimalFullWidth', undefined, 1, 'hyphen')
+    expect(edited).toContain('w:custom="keep"')
+    expect(edited).toContain('w:fmt="decimalFullWidth"')
+    expect(edited).toContain('w:chapStyle="1"')
+    expect(edited).toContain('w:chapSep="hyphen"')
+    expect(edited).not.toContain('w:start=')
+    const noChapter = applyPageNumType(edited, 'decimalFullWidth', undefined, null, null)
+    expect(noChapter).not.toContain('w:chapStyle=')
+    expect(noChapter).not.toContain('w:chapSep=')
+    expect(noChapter).toContain('w:custom="keep"')
+    expect(applyPageNumType(base, 'upperLetter', 2)).toContain('w:chapStyle="2"')
+    expect(applyPageNumType('<w:sectPr/>', 'upperRoman', 2)).toBe(
+      '<w:sectPr><w:pgNumType w:fmt="upperRoman" w:start="2"/></w:sectPr>',
+    )
+    const expanded = applyPageNumType(
+      base.replace('/><w:cols', '></w:pgNumType><w:cols'),
+      'decimal',
+      undefined,
+    )
+    expect(expanded.match(/<w:pgNumType/g)).toHaveLength(1)
+    expect(expanded).toContain('w:fmt="decimal"')
+  })
+
+  it('saves chapter page numbering in final section without changing native PAGE fields', async () => {
+    const parsed = await parseDocx(await buildDocx({ bodyXml: P('正文') }))
+    const blocks: SaveBlock[] = parsed.blocks
+      .filter((b) => !b.hidden && b.docxIndex !== null)
+      .map((b) => ({ kind: 'original', docxIndex: b.docxIndex! }))
+    const saved = await saveDocx(parsed, blocks, {
+      pgNumType: {
+        fmt: 'decimalEnclosedCircle',
+        start: 7,
+        chapStyle: 1,
+        chapSep: 'colon',
+      },
+    })
+    const section = readSections(await parseDocx(saved))[0]
+    expect(section.pageNumberFmt).toBe('decimalEnclosedCircle')
+    expect(section.pageNumberStart).toBe(7)
+    expect(section.pageNumberChapterStyle).toBe(1)
+    expect(section.pageNumberChapterSeparator).toBe('colon')
   })
 
   it('SaveOptions.pgNumType writes the final section and round-trips', async () => {

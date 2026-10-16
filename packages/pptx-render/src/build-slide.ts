@@ -19,6 +19,7 @@ import type {
 import { tableRowGridCols } from '@genoffice/pptx-engine/table-grid'
 import { elementDurableId, groupChildDurableId } from '@genoffice/pptx-engine/identity'
 import { isBackgroundLikeElement } from '@genoffice/pptx-engine/background-promote'
+import { ommlToLatex, ommlToMathML } from '@genoffice/office-math'
 import { buildChartNode } from './build-chart'
 import type {
   RenderSlide,
@@ -437,6 +438,21 @@ function buildShape(
   if (reflection) node.reflection = reflection
   if (el.scene3d) applyScene3D(el, node, vp)
   if (el.text && el.text.paragraphs.length) {
+    const mathRuns = el.text.paragraphs
+      .flatMap((p) => p.runs)
+      .filter((r) => r.rawXml?.includes('<a14:m'))
+    if (mathRuns.length) {
+      node.hasEquation = true
+      node.equationStandalone =
+        el.text.paragraphs.length === 1 && el.text.paragraphs[0]!.runs.length === 1
+      if (mathRuns.length === 1) {
+        const omml = /<m:oMath\b[^>]*>[\s\S]*?<\/m:oMath>/.exec(mathRuns[0]!.rawXml!)?.[0]
+        if (omml) {
+          node.equationMathML = ommlToMathML(omml)
+          node.equationLatex = ommlToLatex(omml) ?? undefined
+        }
+      }
+    }
     node.text = layoutText({
       body: el.text,
       boxWidthPx: box.w,
@@ -566,6 +582,8 @@ function buildPicture(
     ...(el.media ? { media: el.media.kind } : {}),
     ...(el.name ? { name: el.name } : {}),
     ...(el.descr ? { descr: el.descr } : {}),
+    ...(el.lockAspect != null ? { lockAspect: el.lockAspect } : {}),
+    ...(el.decorative ? { decorative: true } : {}),
     ...(el.fill && el.fill.type !== 'none' ? { fill: resolveFill(el.fill, vp, media) } : {}),
     // clrChange applies to the metafile playback result including that white DC:
     // a clrChange keyed to white recolors the backing (an alpha-0 target drops it —
@@ -797,6 +815,9 @@ function chartStyleInfo(m: ChartElement['chart']): import('./render-tree').Chart
     legendPos: m.legendPos == null ? 'none' : m.legendPos === 'tr' ? 'r' : m.legendPos,
     dataLabels: !!m.dataLabels,
     gridlines: !!m.valAxis?.gridColor,
+    valAxisHidden: !!m.valAxis?.hidden,
+    ...(m.dataTable ? { dataTable: true } : {}),
+    ...(m.pointValueLabels ? { pointValueLabels: true } : {}),
     ...(m.title ? { title: m.title } : {}),
     ...(m.catAxis?.title ? { catAxisTitle: m.catAxis.title } : {}),
     ...(m.valAxis?.title ? { valAxisTitle: m.valAxis.title } : {}),

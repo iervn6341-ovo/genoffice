@@ -15,6 +15,11 @@ import {
   type NoteKind,
 } from './notes'
 import {
+  patchExistingSectionNoteProps,
+  patchNotePropsElement,
+  type NotePropsPatch,
+} from './note-props'
+import {
   INK_MEDIA_PREFIX,
   anchoredInkRunXml,
   injectInkRunsIntoParagraph,
@@ -87,7 +92,7 @@ export type ParsedDocFull = ParsedDoc & { extras: ParseExtras }
 /** Body content in final editor order (hidden trailing elements are appended automatically). */
 export type SaveBlock = (
   | { kind: 'original'; docxIndex: number }
-  | { kind: 'generated'; block: GeneratedBlock }
+  | { kind: 'generated'; block: GeneratedBlock; docxIndex?: number }
   /** self-contained OOXML fragment created by the editor (e.g. a new table);
    *  docxIndex marks the source block (kept when a section-break paragraph is
    *  rewritten, used to inject per-section header references); replaceImage
@@ -122,8 +127,16 @@ export interface SaveOptions {
   section?: SectionSettings
   /** last-section start type (w:type); rewrites the trailing sectPr when inserting a continuous section break; undefined = keep */
   sectionStartType?: 'nextPage' | 'continuous' | 'evenPage' | 'oddPage' | 'nextColumn'
-  /** last-section page numbering (w:pgNumType): both fmt/start unset = remove the tag; undefined = keep */
-  pgNumType?: { fmt?: string; start?: number }
+  /** last-section page numbering (w:pgNumType); undefined = keep */
+  pgNumType?: { fmt?: string; start?: number; chapStyle?: number | null; chapSep?: string | null }
+  /** Sparse document note settings (settings.xml); section overrides are separate. */
+  noteProps?: { footnote?: NotePropsPatch; endnote?: NotePropsPatch }
+  /** Sparse edits to existing section note properties, keyed by the section's closing block. */
+  sectionNoteProps?: Array<{
+    lastBlockIndex: number
+    footnote?: NotePropsPatch
+    endnote?: NotePropsPatch
+  }>
   /** page color: hex without '#' to set, null to remove, undefined to keep as-is */
   pageColor?: string | null
   /** replace/create the default page header (single centered line); undefined = keep */
@@ -139,19 +152,41 @@ export interface SaveOptions {
   /** "different first page": set/remove w:titlePg in the trailing sectPr */
   titlePg?: boolean
   /**
-   * Per-section header/footer edits (non-last sections of multi-section docs, default
-   * variant). lastBlockIndex locates the section's break paragraph: if the section
-   * already has a matching reference, the referenced part is rewritten (earlier sections
-   * sharing the part change with it — Word's "same as previous" semantics); if there is
-   * no reference (inherited from the previous section), a new part is created and the
-   * reference injected into this section's sectPr (the section becomes independent,
-   * earlier sections are unaffected).
+   * Per-section header/footer edits. lastBlockIndex locates the section's sectPr,
+   * including the trailing hidden sectPr of the final section. Each edit gets a
+   * new part and a local reference for the requested variant, leaving older
+   * parts available for cross-save undo.
    */
-  sectionHf?: Array<{ lastBlockIndex: number; kind: 'header' | 'footer'; hf: HeaderFooter }>
+  sectionHf?: Array<{
+    lastBlockIndex: number
+    kind: 'header' | 'footer'
+    hf: HeaderFooter
+    variant?: 'default' | 'first' | 'even'
+    /** Effective inherited part, used as the source when a section gets a new reference. */
+    sourceRId?: string
+  }>
+  /** Link an existing section variant to the preceding section by removing its local reference. */
+  sectionHfLinks?: Array<{
+    lastBlockIndex: number
+    kind: 'header' | 'footer'
+    variant: 'default' | 'first' | 'even'
+  }>
+  /** Restore an earlier local reference on undo; the target part must still exist. */
+  sectionHfRefs?: Array<{
+    lastBlockIndex: number
+    kind: 'header' | 'footer'
+    variant: 'default' | 'first' | 'even'
+    rId: string
+  }>
   /** "different odd & even pages": set/remove settings.xml w:evenAndOddHeaders */
   evenAndOddHeaders?: boolean
   /** automatic hyphenation: set/remove settings.xml w:autoHyphenation (undefined keeps the file's value) */
   autoHyphenation?: boolean
+  /** document-wide Asian character compression (settings.xml w:characterSpacingControl) */
+  characterSpacingControl?:
+    'doNotCompress' | 'compressPunctuation' | 'compressPunctuationAndJapaneseKana' | null
+  /** settings.xml w:defaultTabStop in twips; null removes an explicit value */
+  defaultTabStopTwips?: number | null
   /** mirrored margins: set/remove settings.xml w:mirrorMargins (undefined keeps the file's value) */
   mirrorMargins?: boolean
   /**
@@ -366,6 +401,8 @@ export async function saveDocx(
     options.zoteroDocumentData === undefined &&
     options.sectionStartType === undefined &&
     options.pgNumType === undefined &&
+    options.noteProps === undefined &&
+    (options.sectionNoteProps === undefined || options.sectionNoteProps.length === 0) &&
     options.pageColor === undefined &&
     options.header === undefined &&
     options.footer === undefined &&
@@ -375,10 +412,14 @@ export async function saveDocx(
     options.footerEven === undefined &&
     options.titlePg === undefined &&
     (options.sectionHf === undefined || options.sectionHf.length === 0) &&
+    (options.sectionHfLinks === undefined || options.sectionHfLinks.length === 0) &&
+    (options.sectionHfRefs === undefined || options.sectionHfRefs.length === 0) &&
     options.numbering === undefined &&
     (options.styleUpserts === undefined || options.styleUpserts.length === 0) &&
     options.evenAndOddHeaders === undefined &&
     options.autoHyphenation === undefined &&
+    options.characterSpacingControl === undefined &&
+    options.defaultTabStopTwips === undefined &&
     options.mirrorMargins === undefined &&
     options.comments === undefined &&
     options.protection === undefined &&
@@ -720,6 +761,52 @@ export async function saveDocx(
     if (relsChanged) hfRelsOut.set(relsPath, relsXml)
     return xml
   }
+  const prepareHfImages = async (
+    partPath: string,
+    hf: HeaderFooter,
+    originalXml: string | null = null,
+  ): Promise<HeaderFooter> => {
+    if (!hf.paras?.some((para) => para.runs.some((run) => run.image?.pendingMedia))) return hf
+    for (const match of originalXml?.matchAll(/<wp:docPr\b[^>]*\bid="(\d+)"/g) ?? []) {
+      docPrSeq = Math.max(docPrSeq, Number(match[1]) + 1)
+    }
+    const partRelsPath = partPath.replace(/([^/]+)$/, '_rels/$1.rels')
+    let partRels =
+      hfRelsOut.get(partRelsPath) ??
+      (await zip.file(partRelsPath)?.async('string')) ??
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+    let nextPartRel = maxRelId(partRels) + 1
+    const paras = hf.paras.map((para) => ({
+      ...para,
+      runs: para.runs.map((run) => {
+        const image = run.image
+        if (!image?.pendingMedia) return run
+        const mediaPath = landMedia(image.pendingMedia)
+        const rId = `rId${nextPartRel++}`
+        partRels = partRels.replace(
+          '</Relationships>',
+          `<Relationship Id="${rId}" Type="${IMAGE_REL_TYPE}" Target="${mediaPath.replace(/^word\//, '')}"/></Relationships>`,
+        )
+        const id = docPrSeq++
+        const cx = Math.max(1, Math.round((image.widthPx ?? 1) * EMU_PER_PX))
+        const cy = Math.max(1, Math.round((image.heightPx ?? 1) * EMU_PER_PX))
+        const name = `Header picture ${id}`
+        const xml =
+          `<w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">` +
+          `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="${name}"/>` +
+          '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+          '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+          `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+          `<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+          `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>` +
+          '</a:graphicData></a:graphic></wp:inline></w:drawing>'
+        return { ...run, image: { ...image, xml } }
+      }),
+    }))
+    hfRelsOut.set(partRelsPath, partRels)
+    return { ...hf, paras }
+  }
   const planHeaderFooter = async (
     kind: 'header' | 'footer',
     hf: HeaderFooter | undefined,
@@ -750,7 +837,13 @@ export async function saveDocx(
       if (watermarkOnly && kind === 'header' && originalXml && wmXml !== undefined) {
         partXml = patchWatermarkInPart(originalXml, wmXml)
       }
-      if (partXml === null) partXml = headerFooterPartXml(kind, hf, wmXml, originalXml)
+      if (partXml === null)
+        partXml = headerFooterPartXml(
+          kind,
+          await prepareHfImages(path, hf, originalXml),
+          wmXml,
+          originalXml,
+        )
       hfParts.push({ path, xml: partXml })
     } else {
       let n = 1
@@ -762,7 +855,11 @@ export async function saveDocx(
       const filename = `${kind}${n}.xml`
       const wmXml =
         kind === 'header' ? await watermarkXmlFor(watermark, `word/${filename}`, null) : undefined
-      const partXml = headerFooterPartXml(kind, hf, wmXml)
+      const partXml = headerFooterPartXml(
+        kind,
+        await prepareHfImages(`word/${filename}`, hf),
+        wmXml,
+      )
       const newRId = `rId${nextRelNum++}`
       newRels.push({ rId: newRId, type: HF_REL_TYPE[kind], target: filename, external: false })
       hfParts.push({ path: `word/${filename}`, xml: partXml })
@@ -791,43 +888,112 @@ export async function saveDocx(
   await planHeaderFooter('header', options.headerEven, undefined, 'even')
   await planHeaderFooter('footer', options.footerEven, undefined, 'even')
 
-  // ---- Per-section header/footer (non-last sections): with a reference, rewrite the
-  // part; without one, create a part + inject the reference ----
+  // ---- Per-section header/footer: edit an exclusive part, or clone a shared or
+  // inherited part and replace only this section's reference. ----
   const sectionRefTags = new Map<number, string[]>()
+  const linkedRefs = new Map<
+    number,
+    Array<{ kind: 'header' | 'footer'; variant: 'default' | 'first' | 'even' }>
+  >()
+  const contentEditKeys = new Set(
+    (options.sectionHf ?? []).map(
+      (edit) => `${edit.lastBlockIndex}:${edit.kind}:${edit.variant ?? 'default'}`,
+    ),
+  )
+  for (const link of options.sectionHfLinks ?? []) {
+    // A content edit makes this variant independent, even if an older link
+    // command is still present in a caller's pending state.
+    if (contentEditKeys.has(`${link.lastBlockIndex}:${link.kind}:${link.variant}`)) continue
+    const entries = linkedRefs.get(link.lastBlockIndex) ?? []
+    entries.push(link)
+    linkedRefs.set(link.lastBlockIndex, entries)
+  }
+  for (const restore of options.sectionHfRefs ?? []) {
+    if (contentEditKeys.has(`${restore.lastBlockIndex}:${restore.kind}:${restore.variant}`))
+      continue
+    const target = relTargets.get(restore.rId)
+    const path = target?.startsWith('/') ? target.slice(1) : target ? `word/${target}` : null
+    if (!path || !zip.file(path))
+      throw new Error(`header/footer reference ${restore.rId} is unavailable`)
+    const removals = linkedRefs.get(restore.lastBlockIndex) ?? []
+    removals.push(restore)
+    linkedRefs.set(restore.lastBlockIndex, removals)
+    const tags = sectionRefTags.get(restore.lastBlockIndex) ?? []
+    tags.push(`<w:${restore.kind}Reference w:type="${restore.variant}" r:id="${restore.rId}"/>`)
+    sectionRefTags.set(restore.lastBlockIndex, tags)
+  }
+  const removeLinkedRefs = (xml: string, index: number | undefined): string => {
+    if (index === undefined) return xml
+    let next = xml
+    for (const link of linkedRefs.get(index) ?? []) {
+      next = next.replace(new RegExp(`<w:${link.kind}Reference\\b[^>]*/>`, 'g'), (tag) => {
+        const type = /w:type="([^"]+)"/.exec(tag)?.[1] ?? 'default'
+        return type === link.variant || (link.variant === 'default' && type === 'odd') ? '' : tag
+      })
+    }
+    return next
+  }
+  const insertSectionRefs = (xml: string, tags: string[]): string => {
+    if (tags.length === 0) return xml
+    return xml.replace(/<w:sectPr\b[^>]*\/>|<w:sectPr\b[^>]*>/, (open) =>
+      open.endsWith('/>')
+        ? `${open.slice(0, -2)}>${tags.join('')}</w:sectPr>`
+        : `${open}${tags.join('')}`,
+    )
+  }
   for (const edit of options.sectionHf ?? []) {
+    const variant = edit.variant ?? 'default'
     const block = parsed.blocks.find((b) => b.docxIndex === edit.lastBlockIndex)
     const sectPr =
       block?.originalXml?.match(/<w:sectPr[^>]*\/>|<w:sectPr[\s\S]*?<\/w:sectPr>/)?.[0] ?? ''
     const refs = sectPr.match(new RegExp(`<w:${edit.kind}Reference[^>]*/>`, 'g')) ?? []
     const existing =
-      refs.find((r) => r.includes('w:type="default"')) ??
-      refs.find((r) => r.includes('w:type="odd"')) ??
-      refs.find((r) => !/w:type="/.test(r))
+      refs.find((r) => r.includes(`w:type="${variant}"`)) ??
+      (variant === 'default'
+        ? (refs.find((r) => r.includes('w:type="odd"')) ?? refs.find((r) => !/w:type="/.test(r)))
+        : undefined)
     const rId = existing ? /r:id="([^"]+)"/.exec(existing)?.[1] : undefined
     const target = rId ? relTargets.get(rId) : undefined
-    if (target) {
-      const path = target.startsWith('/') ? target.slice(1) : `word/${target}`
-      const file = zip.file(path)
-      const originalXml = file ? await file.async('string') : null
-      hfParts.push({ path, xml: headerFooterPartXml(edit.kind, edit.hf, undefined, originalXml) })
-    } else {
-      const partXml = headerFooterPartXml(edit.kind, edit.hf)
-      let n = 1
-      while (
-        zip.file(`word/${edit.kind}${n}.xml`) ||
-        hfParts.some((p) => p.path === `word/${edit.kind}${n}.xml`)
-      )
-        n++
-      const filename = `${edit.kind}${n}.xml`
-      const newRId = `rId${nextRelNum++}`
-      newRels.push({ rId: newRId, type: HF_REL_TYPE[edit.kind], target: filename, external: false })
-      hfParts.push({ path: `word/${filename}`, xml: partXml })
-      hfOverrides.push(
-        `<Override PartName="/word/${filename}" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.${edit.kind}+xml"/>`,
-      )
-      const tags = sectionRefTags.get(edit.lastBlockIndex) ?? []
-      tags.push(`<w:${edit.kind}Reference w:type="default" r:id="${newRId}"/>`)
-      sectionRefTags.set(edit.lastBlockIndex, tags)
+    const sourceTarget = target ?? (edit.sourceRId ? relTargets.get(edit.sourceRId) : undefined)
+    const sourcePath = sourceTarget
+      ? sourceTarget.startsWith('/')
+        ? sourceTarget.slice(1)
+        : `word/${sourceTarget}`
+      : undefined
+    const sourceXml = sourcePath ? ((await zip.file(sourcePath)?.async('string')) ?? null) : null
+    // An inherited header may contain a logo or layout table. Clone the part
+    // and its relationships before merging edited text into the new section.
+    let n = 1
+    while (
+      zip.file(`word/${edit.kind}${n}.xml`) ||
+      hfParts.some((p) => p.path === `word/${edit.kind}${n}.xml`)
+    )
+      n++
+    const filename = `${edit.kind}${n}.xml`
+    if (sourcePath) {
+      const sourceRelsPath = sourcePath.replace(/([^/]+)$/, '_rels/$1.rels')
+      const sourceRels = await zip.file(sourceRelsPath)?.async('string')
+      if (sourceRels) hfRelsOut.set(`word/_rels/${filename}.rels`, sourceRels)
+    }
+    const partXml = headerFooterPartXml(
+      edit.kind,
+      await prepareHfImages(`word/${filename}`, edit.hf, sourceXml),
+      undefined,
+      sourceXml,
+    )
+    const newRId = `rId${nextRelNum++}`
+    newRels.push({ rId: newRId, type: HF_REL_TYPE[edit.kind], target: filename, external: false })
+    hfParts.push({ path: `word/${filename}`, xml: partXml })
+    hfOverrides.push(
+      `<Override PartName="/word/${filename}" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.${edit.kind}+xml"/>`,
+    )
+    const tags = sectionRefTags.get(edit.lastBlockIndex) ?? []
+    tags.push(`<w:${edit.kind}Reference w:type="${variant}" r:id="${newRId}"/>`)
+    sectionRefTags.set(edit.lastBlockIndex, tags)
+    if (rId) {
+      const replacements = linkedRefs.get(edit.lastBlockIndex) ?? []
+      replacements.push({ kind: edit.kind, variant })
+      linkedRefs.set(edit.lastBlockIndex, replacements)
     }
   }
 
@@ -970,7 +1136,17 @@ export async function saveDocx(
     const path = NOTE_PART_PATH[kind]
     const file = zip.file(path)
     const originalXml = file ? await file.async('string') : null
-    notesParts.push({ path, xml: buildNotesXml(kind, notes, originalXml), isNew: !file, kind })
+    notesParts.push({
+      path,
+      xml: buildNotesXml(
+        kind,
+        notes,
+        originalXml,
+        kind === 'footnote' ? parsed.footnotes : parsed.endnotes,
+      ),
+      isNew: !file,
+      kind,
+    })
     if (!file) {
       newRels.push({
         rId: `rId${nextRelNum++}`,
@@ -1039,6 +1215,9 @@ export async function saveDocx(
   }
 
   const parts: string[] = []
+  const notePropsBySection = new Map(
+    (options.sectionNoteProps ?? []).map(({ lastBlockIndex, ...patch }) => [lastBlockIndex, patch]),
+  )
   for (let i = 0; i < finalBlocks.length; i++) {
     const fb = finalBlocks[i]
     let xml: string
@@ -1050,6 +1229,7 @@ export async function saveDocx(
       fbDocxIndex = fb.docxIndex
     } else if (fb.kind === 'generated') {
       xml = generateParagraphXml(fb.block, genCtx)
+      fbDocxIndex = fb.docxIndex
       // If the original paragraph was inside a w:sdt shell, re-wrap it
       if (fb.block.sdtShell) {
         xml = fb.block.sdtShell.openXml + xml + fb.block.sdtShell.closeXml
@@ -1068,9 +1248,11 @@ export async function saveDocx(
     // Inject newly created per-section header/footer references into the section's sectPr
     // (the reference must be the first sectPr child)
     const refTags = fbDocxIndex !== undefined ? sectionRefTags.get(fbDocxIndex) : undefined
-    if (refTags && refTags.length > 0) {
-      xml = xml.replace(/(<w:sectPr[^>]*>)/, `$1${refTags.join('')}`)
-    }
+    xml = removeLinkedRefs(xml, fbDocxIndex)
+    if (refTags) xml = insertSectionRefs(xml, refTags)
+    const sectionNoteProps =
+      fbDocxIndex === undefined ? undefined : notePropsBySection.get(fbDocxIndex)
+    if (sectionNoteProps) xml = patchExistingSectionNoteProps(xml, sectionNoteProps)
     // The ink list is authoritative: old aidocs-ink runs go away, the desired
     // set is re-injected at its (possibly new) anchor paragraphs.
     if (options.inks !== undefined) xml = stripInkRuns(xml)
@@ -1102,12 +1284,23 @@ export async function saveDocx(
         if (options.section) xml = applySectionSettings(xml, options.section)
         if (options.sectionStartType) xml = applySectionStartType(xml, options.sectionStartType)
         if (options.pgNumType)
-          xml = applyPageNumType(xml, options.pgNumType.fmt, options.pgNumType.start)
+          xml = applyPageNumType(
+            xml,
+            options.pgNumType.fmt,
+            options.pgNumType.start,
+            options.pgNumType.chapStyle,
+            options.pgNumType.chapSep,
+          )
         if (options.titlePg !== undefined) xml = applyTitlePg(xml, options.titlePg)
         // headerReference/footerReference must be the first sectPr children
+        xml = removeLinkedRefs(xml, block.docxIndex)
         if (hfRefTags.length > 0) {
-          xml = xml.replace(/(<w:sectPr[^>]*>)/, `$1${hfRefTags.join('')}`)
+          xml = insertSectionRefs(xml, hfRefTags)
         }
+        const refTags = sectionRefTags.get(block.docxIndex)
+        if (refTags?.length) xml = insertSectionRefs(xml, refTags)
+        const sectionNoteProps = notePropsBySection.get(block.docxIndex)
+        if (sectionNoteProps) xml = patchExistingSectionNoteProps(xml, sectionNoteProps)
       }
       parts.push(xml)
     }
@@ -1117,6 +1310,32 @@ export async function saveDocx(
     documentXml.slice(0, bodyInnerStart) +
     balanceFieldChars(parts.join('')) +
     documentXml.slice(bodyInnerEnd)
+  if (/<w14:/.test(newDocumentXml)) {
+    newDocumentXml = newDocumentXml.replace(/<w:document\b[^>]*>/, (root) => {
+      let next = root
+      if (!/\bxmlns:w14=/.test(next))
+        next = next.replace(
+          '<w:document',
+          '<w:document xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"',
+        )
+      if (!/\bxmlns:mc=/.test(next))
+        next = next.replace(
+          '<w:document',
+          '<w:document xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"',
+        )
+      const ignorable = /\bmc:Ignorable=(["'])(.*?)\1/.exec(next)
+      if (ignorable) {
+        if (!ignorable[2].split(/\s+/).includes('w14'))
+          next = next.replace(
+            ignorable[0],
+            `mc:Ignorable=${ignorable[1]}${ignorable[2]} w14${ignorable[1]}`,
+          )
+      } else {
+        next = next.replace(/>$/, ' mc:Ignorable="w14">')
+      }
+      return next
+    })
+  }
 
   // every ref-less body sectPr picks up the new header/footer references
   // (the trailing sectPr already received them above and is skipped by the
@@ -1158,6 +1377,9 @@ export async function saveDocx(
     options.removePersonalInfo !== undefined ||
     options.evenAndOddHeaders !== undefined ||
     options.autoHyphenation !== undefined ||
+    options.characterSpacingControl !== undefined ||
+    options.defaultTabStopTwips !== undefined ||
+    options.noteProps !== undefined ||
     options.mirrorMargins !== undefined
   ) {
     const file = zip.file(settingsPath)
@@ -1206,9 +1428,26 @@ export async function saveDocx(
       xml = applySettingsFlag(xml, 'autoHyphenation', options.autoHyphenation)
       touched = true
     }
+    if (options.characterSpacingControl !== undefined) {
+      xml = applyCharacterSpacingControl(xml, options.characterSpacingControl)
+      touched = true
+    }
+    if (options.defaultTabStopTwips !== undefined) {
+      xml = applyDefaultTabStop(xml, options.defaultTabStopTwips)
+      touched = true
+    }
     if (options.mirrorMargins !== undefined) {
       xml = applySettingsFlag(xml, 'mirrorMargins', options.mirrorMargins)
       touched = true
+    }
+    if (options.noteProps) {
+      for (const kind of ['footnote', 'endnote'] as const) {
+        const patch = options.noteProps[kind]
+        if (patch) {
+          xml = patchNotePropsElement(xml, kind, patch, true)
+          touched = true
+        }
+      }
     }
     if (touched) settingsXml = xml
   }
@@ -1487,6 +1726,16 @@ function headerFooterPartXml(
   watermarkXml: string | undefined = undefined,
   originalXml: string | null = null,
 ): string {
+  if (hf.paras?.some((para) => para.protectedFields)) {
+    if (!originalXml)
+      throw new Error(
+        'Cannot regenerate an unsupported header/footer field without its original part',
+      )
+    if (watermarkXml === undefined) return originalXml
+    const patched = patchWatermarkInPart(originalXml, watermarkXml)
+    if (patched) return patched
+    throw new Error('Cannot update watermark in an unsupported header/footer part')
+  }
   const root = kind === 'header' ? 'w:hdr' : 'w:ftr'
   const textRun = (t: string) =>
     t ? `<w:r><w:t xml:space="preserve">${escapeXmlText(t)}</w:t></w:r>` : ''
@@ -1516,13 +1765,19 @@ function headerFooterPartXml(
     let pageEmitted = !hf.pageNumber || hasPageMark
     content = hf.paras
       // table-row paragraphs are display-only: the part's original w:tbl bytes are kept below
-      .filter((para) => !para.cells)
+      .filter(
+        (para) => !para.cells && !para.runs.some((run) => run.image && !run.image.pendingMedia),
+      )
       .map((para) => {
         // the parsed format, not just w:jc: hand-building it here dropped w:bidi and wrote
         // the visual align back as the logical one, flipping RTL headers to LTR
         const pPr = mergePPrFormat('<w:pPr/>', para)
         let runs = ''
         for (const run of para.runs) {
+          if (run.hfField) {
+            runs += run.hfField.xml
+            continue
+          }
           if (
             run.text.includes(TOTAL_PAGES_MARK) ||
             run.text.includes(PAGE_MARK) ||
@@ -1603,6 +1858,8 @@ function headerFooterPartXml(
         const rootOpen = watermarkXml ? withWatermarkNs(open) : open
         return `${originalXml.slice(0, openIdx)}${rootOpen}${parts.join('')}</${root}>`
       }
+      // Existing field fragments may use namespaces declared only on this part.
+      return `${originalXml.slice(0, openIdx)}${watermarkXml ? withWatermarkNs(open) : open}${body}</${root}>`
     }
   }
   return (
@@ -2067,6 +2324,43 @@ export function applySettingsFlag(xml: string, name: string, on: boolean): strin
   }
   if (at >= 0) return `${out.slice(0, at)}${tag}${out.slice(at)}`
   return out.replace(/<\/w:settings>/, `${tag}</w:settings>`)
+}
+
+/** Replace the document-wide Asian compression mode at its CT_Settings position. */
+export function applyCharacterSpacingControl(
+  xml: string,
+  value: 'doNotCompress' | 'compressPunctuation' | 'compressPunctuationAndJapaneseKana' | null,
+): string {
+  const out = xml.replace(/<w:characterSpacingControl\b[^>]*\/>/g, '')
+  if (value === null) return out
+  const tag = `<w:characterSpacingControl w:val="${value}"/>`
+  const after = SETTINGS_ORDER.slice(SETTINGS_ORDER.indexOf('characterSpacingControl') + 1)
+  let at = -1
+  for (const child of after) {
+    const match = new RegExp(`<w:${child}[\\s/>]`).exec(out)
+    if (match && (at < 0 || match.index < at)) at = match.index
+  }
+  return at >= 0
+    ? `${out.slice(0, at)}${tag}${out.slice(at)}`
+    : out.replace(/<\/w:settings>/, `${tag}</w:settings>`)
+}
+
+/** Replace the document's default tab grid without disturbing unrelated settings. */
+export function applyDefaultTabStop(xml: string, twips: number | null): string {
+  const out = xml.replace(/<w:defaultTabStop\b[^>]*\/>/g, '')
+  if (twips === null) return out
+  if (!Number.isInteger(twips) || twips <= 0 || twips > 31680)
+    throw new Error('Invalid default tab stop')
+  const tag = `<w:defaultTabStop w:val="${twips}"/>`
+  const after = SETTINGS_ORDER.slice(SETTINGS_ORDER.indexOf('defaultTabStop') + 1)
+  let at = -1
+  for (const child of after) {
+    const match = new RegExp(`<w:${child}[\\s/>]`).exec(out)
+    if (match && (at < 0 || match.index < at)) at = match.index
+  }
+  return at >= 0
+    ? `${out.slice(0, at)}${tag}${out.slice(at)}`
+    : out.replace(/<\/w:settings>/, `${tag}</w:settings>`)
 }
 
 /** set or remove <w:titlePg/> ("different first page"), before w:docGrid per schema order */

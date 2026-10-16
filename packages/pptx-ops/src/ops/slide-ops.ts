@@ -12,6 +12,7 @@ import {
   addSection,
   addSlideComment,
   applyHeaderFooter,
+  applyNotesHandoutsHeaderFooter,
   applyThemeToArchive,
   commitSaved,
   materializeSlide,
@@ -34,6 +35,11 @@ import {
   resetSlideBackground,
   resetSlideLayout,
   setSections,
+  setCustomShows,
+  canSetCustomShows,
+  setShowSetup,
+  canSetShowSetup,
+  getShowSetup,
   setSlideAdvanceTime,
   setSlideAnimations,
   setSlideBackground,
@@ -42,6 +48,8 @@ import {
   setSlideHidden,
   setSlideLayout,
   getSlideNotes,
+  getSlideAnimations,
+  isSupportedMotionPath,
   getSlideNotesParagraphs,
   setSlideNotes,
   setSlideNotesParagraphs,
@@ -54,6 +62,8 @@ import {
   ANIM_TRIGGERS,
   TRANSITION_KINDS,
   type SectionInfo,
+  type CustomShowInfo,
+  type ShowSetup,
   type ThemeSpec,
   type SlideAnimation,
   type SlideTransitionDetailPatch,
@@ -388,7 +398,7 @@ function repaintFullBleedBackdrops(
 register({
   name: 'setBackground',
   validate(op, ctx) {
-    resolveSlide(ctx, op)
+    resolveSlide(ctx, op, { allowPart: true })
     const kind = op.kind
     if (kind === 'solid') {
       requireHexColor(op.color, 'setBackground', 'color')
@@ -419,10 +429,12 @@ register({
     }
   },
   apply(op, ctx): OpRecord {
-    const { slide } = resolveSlide(ctx, op)
+    const { slide } = resolveSlide(ctx, op, { allowPart: true })
+    const masterPart = !!op.target?.part
     if (op.kind === 'solid') {
       setSlideBackground(ctx.opened, slide, String(op.color))
-      repaintFullBleedBackdrops(ctx, slide, { type: 'solid', color: String(op.color) })
+      if (!masterPart)
+        repaintFullBleedBackdrops(ctx, slide, { type: 'solid', color: String(op.color) })
       return { op, after: { kind: 'solid' } }
     }
     if (op.kind === 'gradient') {
@@ -435,11 +447,12 @@ register({
         stops,
         ...(op.radial ? { radial: true } : { angle }),
       })
-      repaintFullBleedBackdrops(ctx, slide, {
-        type: 'gradient',
-        stops,
-        ...(op.radial ? { path: 'circle' as const } : { angle }),
-      })
+      if (!masterPart)
+        repaintFullBleedBackdrops(ctx, slide, {
+          type: 'gradient',
+          stops,
+          ...(op.radial ? { path: 'circle' as const } : { angle }),
+        })
       return { op, after: { kind: 'gradient' } }
     }
     if (op.kind === 'image') {
@@ -450,13 +463,15 @@ register({
         op.tile === true,
       )
       if (!used) throw new GuidedError('op "setBackground": the image could not be landed.')
-      repaintFullBleedBackdrops(ctx, slide, { type: 'none' })
+      if (!masterPart) repaintFullBleedBackdrops(ctx, slide, { type: 'none' })
       return { op, after: { kind: 'image', mediaPath: used } }
     }
     if (op.kind === 'reset') {
       resetSlideBackground(ctx.opened, slide)
       return { op, after: { kind: 'reset' } }
     }
+    if (masterPart)
+      throw new GuidedError('op "setBackground": graphics toggle applies only to slides.')
     setSlideBgGraphicsHidden(ctx.opened, slide, op.hidden === true)
     return { op, after: { kind: 'graphics', hidden: op.hidden === true } }
   },
@@ -548,8 +563,14 @@ register({
 register({
   name: 'setAnimations',
   validate(op, ctx) {
-    resolveSlide(ctx, op)
+    const { slide } = resolveSlide(ctx, op)
     if (!Array.isArray(op.items)) throw new GuidedError('op "setAnimations" needs "items".')
+    const nativeIds = new Set<number>()
+    const currentById = new Map(
+      getSlideAnimations(slide, true)
+        .filter((a) => a.nativeId)
+        .map((a) => [a.nativeId!, a]),
+    )
     for (const [i, raw] of (op.items as Array<Record<string, unknown>>).entries()) {
       if (typeof raw?.sourceId !== 'string' || !raw.sourceId) {
         throw new GuidedError(`op "setAnimations": items[${i}] needs "sourceId": an element id.`)
@@ -573,10 +594,63 @@ register({
           throw new GuidedError(`op "setAnimations": items[${i}].${f} must be >= 0 milliseconds.`)
         }
       }
+      if (
+        raw.nativeId !== undefined &&
+        (typeof raw.nativeId !== 'number' ||
+          !Number.isSafeInteger(raw.nativeId) ||
+          raw.nativeId < 1)
+      ) {
+        throw new GuidedError(
+          `op "setAnimations": items[${i}].nativeId must be a positive integer.`,
+        )
+      }
+      if (typeof raw.nativeId === 'number') {
+        if (nativeIds.has(raw.nativeId))
+          throw new GuidedError(`op "setAnimations": native effect ${raw.nativeId} is repeated.`)
+        nativeIds.add(raw.nativeId)
+      }
+      if (
+        raw.direction !== undefined &&
+        !['top', 'bottom', 'left', 'right'].includes(String(raw.direction))
+      ) {
+        throw new GuidedError(`op "setAnimations": items[${i}].direction is invalid.`)
+      }
+      if (raw.after !== undefined && raw.after !== 'hideAfter' && raw.after !== 'hideOnNextClick') {
+        throw new GuidedError(`op "setAnimations": items[${i}].after is invalid.`)
+      }
+      if (
+        raw.paragraph !== undefined &&
+        (typeof raw.paragraph !== 'number' ||
+          !Number.isSafeInteger(raw.paragraph) ||
+          raw.paragraph < 0)
+      ) {
+        throw new GuidedError(`op "setAnimations": items[${i}].paragraph is invalid.`)
+      }
+      if (raw.motionPath !== undefined) {
+        if (raw.effect !== 'motionPath')
+          throw new GuidedError(
+            `op "setAnimations": items[${i}].motionPath requires motionPath effect.`,
+          )
+        const original =
+          typeof raw.nativeId === 'number' ? currentById.get(raw.nativeId) : undefined
+        if (
+          typeof raw.motionPath !== 'string' ||
+          (raw.motionPath !== original?.motionPath && !isSupportedMotionPath(raw.motionPath))
+        ) {
+          throw new GuidedError(
+            `op "setAnimations": items[${i}].motionPath needs a supported M/L/C/Z path.`,
+          )
+        }
+      }
     }
   },
   apply(op, ctx): OpRecord {
     const { slide } = resolveSlide(ctx, op)
+    const existingById = new Map(
+      getSlideAnimations(slide, true)
+        .filter((a) => a.nativeId)
+        .map((a) => [a.nativeId!, a]),
+    )
     const anims: SlideAnimation[] = []
     const unresolved: string[] = []
     for (const raw of op.items as Array<Record<string, unknown>>) {
@@ -589,6 +663,20 @@ register({
         unresolved.push(String(raw.sourceId))
         continue
       }
+      const nativeId = typeof raw.nativeId === 'number' ? raw.nativeId : undefined
+      const existing = nativeId === undefined ? undefined : existingById.get(nativeId)
+      if (nativeId !== undefined && (!existing || existing.spid !== spid)) {
+        throw new GuidedError(
+          `op "setAnimations": native effect ${nativeId} is no longer attached to this element; refresh the animation pane.`,
+        )
+      }
+      const sameNativeBehavior =
+        existing &&
+        existing.effect === raw.effect &&
+        (existing.paragraph ?? null) === (raw.paragraph ?? null) &&
+        (existing.direction ?? null) === (raw.direction ?? null) &&
+        (existing.after ?? null) === (raw.after ?? null) &&
+        (existing.motionPath ?? null) === (raw.motionPath ?? null)
       anims.push({
         spid,
         effect: raw.effect as SlideAnimation['effect'],
@@ -606,6 +694,14 @@ register({
           ? { after: raw.after }
           : {}),
         ...(typeof raw.presetXml === 'string' ? { presetXml: raw.presetXml } : {}),
+        ...(sameNativeBehavior && existing?.nativeXml
+          ? {
+              nativeId,
+              nativeXml: existing.nativeXml,
+              ...(existing.presetXml ? { presetXml: existing.presetXml } : {}),
+              ...(existing.preset ? { preset: existing.preset } : {}),
+            }
+          : {}),
       })
     }
     if (unresolved.length) {
@@ -648,16 +744,93 @@ register({
     if (typeof op.settings !== 'object' || op.settings === null) {
       throw new GuidedError('op "applyHeaderFooter" needs "settings".')
     }
+    if (
+      op.slideIndexes !== undefined &&
+      (!Array.isArray(op.slideIndexes) ||
+        op.slideIndexes.some((index: unknown) => !Number.isInteger(index) || (index as number) < 0))
+    ) {
+      throw new GuidedError('op "applyHeaderFooter": slideIndexes must be non-negative integers.')
+    }
+    const first = (op.settings as { firstSlideNum?: unknown }).firstSlideNum
+    if (
+      first !== undefined &&
+      (!Number.isInteger(first) || (first as number) < -9999 || (first as number) > 9999)
+    )
+      throw new GuidedError(
+        'op "applyHeaderFooter": firstSlideNum must be an integer from -9999 to 9999.',
+      )
   },
   apply(op, ctx): OpRecord {
-    if (!applyHeaderFooter(ctx.opened, op.settings as Parameters<typeof applyHeaderFooter>[1])) {
+    if (
+      !applyHeaderFooter(
+        ctx.opened,
+        op.settings as Parameters<typeof applyHeaderFooter>[1],
+        op.slideIndexes as number[] | undefined,
+      )
+    ) {
       throw new GuidedError('op "applyHeaderFooter": nothing changed (same settings as before).')
     }
     return { op, after: op.settings }
   },
 })
 
+register({
+  name: 'applyNotesHandoutsHeaderFooter',
+  validate(op) {
+    const settings = op.settings as Record<string, unknown> | undefined
+    if (!settings || typeof settings !== 'object')
+      throw new GuidedError('op "applyNotesHandoutsHeaderFooter" needs "settings".')
+    for (const key of ['headerEnabled', 'footerEnabled', 'dateEnabled', 'dateAuto', 'pageNum'])
+      if (typeof settings[key] !== 'boolean')
+        throw new GuidedError(`op "applyNotesHandoutsHeaderFooter": ${key} must be boolean.`)
+    for (const key of ['header', 'footer', 'date', 'dateFormat'])
+      if (typeof settings[key] !== 'string')
+        throw new GuidedError(`op "applyNotesHandoutsHeaderFooter": ${key} must be text.`)
+  },
+  apply(op, ctx): OpRecord {
+    if (
+      !applyNotesHandoutsHeaderFooter(
+        ctx.opened,
+        op.settings as Parameters<typeof applyNotesHandoutsHeaderFooter>[1],
+      )
+    )
+      throw new GuidedError(
+        'op "applyNotesHandoutsHeaderFooter": nothing changed (same settings as before).',
+      )
+    return { op, after: op.settings }
+  },
+})
+
 // ── sections ────────────────────────────────────────────────────────────
+
+register({
+  name: 'setCustomShows',
+  validate(op, ctx) {
+    if (!canSetCustomShows(ctx.opened, op.shows as CustomShowInfo[]))
+      throw new GuidedError('op "setCustomShows": invalid show id, name, or slide index.')
+  },
+  apply(op, ctx): OpRecord {
+    if (!setCustomShows(ctx.opened, op.shows as CustomShowInfo[]))
+      throw new GuidedError('op "setCustomShows": invalid show id, name, or slide index.')
+    return { op, after: op.shows }
+  },
+})
+
+register({
+  name: 'setShowSetup',
+  validate(op, ctx) {
+    if (!canSetShowSetup(ctx.opened, op.settings as ShowSetup))
+      throw new GuidedError(
+        'op "setShowSetup": invalid show mode, slide selection, or custom show.',
+      )
+  },
+  apply(op, ctx): OpRecord {
+    const before = getShowSetup(ctx.opened)
+    if (!setShowSetup(ctx.opened, op.settings as ShowSetup))
+      throw new GuidedError('op "setShowSetup": show settings could not be saved.')
+    return { op, before, after: op.settings }
+  },
+})
 
 const sectionOp = (
   name: string,

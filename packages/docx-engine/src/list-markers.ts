@@ -84,6 +84,8 @@ const CN_LEGAL_TRADITIONAL = [
   '\u7396',
 ]
 const CN_LEGAL_UNITS = ['', '\u62fe', '\u4f70', '\u4edf']
+const JAPANESE_LEGAL = ['零', '壱', '弐', '参', '四', '五', '六', '七', '八', '九']
+const JAPANESE_LEGAL_UNITS = ['', '拾', '百', '千']
 
 function toCjkCounting(
   value: number,
@@ -245,6 +247,8 @@ export function formatNumber(value: number, numFmt: string, customFormat?: strin
       return toCjkCounting(value, CN_LEGAL_SIMPLIFIED, CN_LEGAL_UNITS, false)
     case 'ideographLegalTraditional':
       return toCjkCounting(value, CN_LEGAL_TRADITIONAL, CN_LEGAL_UNITS, false)
+    case 'japaneseLegal':
+      return toCjkCounting(value, JAPANESE_LEGAL, JAPANESE_LEGAL_UNITS, false)
     case 'ideographDigital':
     case 'japaneseDigitalTenThousand':
     case 'taiwaneseDigital':

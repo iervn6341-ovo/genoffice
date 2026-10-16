@@ -82,6 +82,11 @@ export class PackageArchive {
     return new PackageArchive(zip, entries, originalHash)
   }
 
+  /** Read-only snapshot view over immutable entry buffers retained by history. */
+  viewWithEntries(entries: ReadonlyMap<string, Uint8Array>): PackageArchive {
+    return new PackageArchive(this.zip, new Map(entries), this.originalHash)
+  }
+
   has(path: string): boolean {
     return this.entries.has(path)
   }

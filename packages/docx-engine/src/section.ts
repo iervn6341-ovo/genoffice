@@ -287,6 +287,8 @@ export function sectionFromSectPr(
   )?.[1]
   const pgNumStart = /<w:pgNumType[^>]*w:start="(\d+)"/.exec(sectPrXml)?.[1]
   const pgNumFmt = /<w:pgNumType[^>]*w:fmt="([^"]+)"/.exec(sectPrXml)?.[1]
+  const pgNumChapterStyle = /<w:pgNumType[^>]*w:chapStyle="([1-9])"/.exec(sectPrXml)?.[1]
+  const pgNumChapterSeparator = /<w:pgNumType[^>]*w:chapSep="([^"]+)"/.exec(sectPrXml)?.[1]
   return {
     settings: sectionSettingsFromXml(sectPrXml, { gutterAtTop }),
     startType: (type as SectionInfo['startType']) ?? 'nextPage',
@@ -296,25 +298,48 @@ export function sectionFromSectPr(
     titlePg: xmlFlagOn(sectPrXml, 'w:titlePg'),
     ...(pgNumStart !== undefined ? { pageNumberStart: parseInt(pgNumStart, 10) } : {}),
     ...(pgNumFmt !== undefined ? { pageNumberFmt: pgNumFmt } : {}),
+    ...(pgNumChapterStyle !== undefined
+      ? { pageNumberChapterStyle: Number(pgNumChapterStyle) }
+      : {}),
+    ...(pgNumChapterSeparator !== undefined
+      ? { pageNumberChapterSeparator: pgNumChapterSeparator }
+      : {}),
     headerRefs: hfRefs(sectPrXml, 'header'),
     footerRefs: hfRefs(sectPrXml, 'footer'),
   }
 }
 
 /**
- * Rewrite the sectPr page numbering w:pgNumType (fmt = number format, start = starting
- * page number; undefined fields are omitted, and the tag is removed when both are unset).
+ * Update managed attributes of sectPr page numbering without discarding imported
+ * attributes that this editor does not model. Undefined managed values are removed.
  * Schema order: pgNumType comes after pgMar/pgBorders and before cols/docGrid.
  */
 export function applyPageNumType(
   sectPrXml: string,
   fmt: string | undefined,
   start: number | undefined,
+  chapStyle?: number | null,
+  chapSep?: string | null,
 ): string {
-  const xml = sectPrXml.replace(/<w:pgNumType[^>]*\/>/, '')
-  if (fmt === undefined && start === undefined) return xml
-  const tag = `<w:pgNumType${fmt !== undefined ? ` w:fmt="${fmt}"` : ''}${start !== undefined ? ` w:start="${start}"` : ''}/>`
-  return insertBefore(xml, tag, PG_NUM_TYPE_FOLLOWERS)
+  const original = /<w:pgNumType\b[^>]*(?:\/>|><\/w:pgNumType>)/.exec(sectPrXml)?.[0]
+  let tag = original?.replace(/><\/w:pgNumType>$/, '/>') ?? '<w:pgNumType/>'
+  for (const [name, value] of [
+    ['fmt', fmt],
+    ['start', start],
+    ['chapStyle', chapStyle],
+    ['chapSep', chapStyle === null ? null : chapSep],
+  ] as const) {
+    if ((name === 'chapStyle' || name === 'chapSep') && value === undefined) continue
+    tag = tag.replace(new RegExp(`\\s+w:${name}="[^"]*"`), '')
+    if (value !== undefined && value !== null)
+      tag = tag.replace(/\s*\/>$/, ` w:${name}="${value}"/>`)
+  }
+  const hasAttributes = /\s+[\w:.-]+="[^"]*"/.test(tag)
+  if (original) return sectPrXml.replace(original, hasAttributes ? tag : '')
+  if (hasAttributes && /<w:sectPr\b[^>]*\/>/.test(sectPrXml)) {
+    return sectPrXml.replace(/<w:sectPr\b([^>]*)\/>/, `<w:sectPr$1>${tag}</w:sectPr>`)
+  }
+  return hasAttributes ? insertBefore(sectPrXml, tag, PG_NUM_TYPE_FOLLOWERS) : sectPrXml
 }
 
 /** CT_SectPr children that follow pgNumType / titlePg, in schema order */

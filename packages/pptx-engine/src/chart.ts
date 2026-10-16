@@ -156,6 +156,10 @@ export interface ChartModel {
   legendRtl?: boolean
   /** Chart part has a Microsoft chartStyle companion (style1.xml); without one PowerPoint uses black label text */
   hasStylePart?: boolean
+  /** c:plotArea/c:dTable is present (native chart data table); not drawn by the canvas renderer */
+  dataTable?: boolean
+  /** Some series carry point-level c:dLbl overrides (e.g. PowerPoint Mac Quick Layout 6) */
+  pointValueLabels?: boolean
   /** Plot-area inner rectangle (c:plotArea/c:layout/c:manualLayout layoutTarget=inner), fractions of the chart frame */
   plotLayout?: { x: number; y: number; w: number; h: number }
   valAxis?: ChartAxisStyle
@@ -642,6 +646,12 @@ export function parseChartXml(
     if (legPPr?.['@_rtl'] === '1') model.legendRtl = true
   }
 
+  if (plotArea['c:dTable']) model.dataTable = true
+  {
+    const sers = ([] as any[]).concat(plot?.['c:ser'] ?? [])
+    if (sers.some((ser) => ser?.['c:dLbls']?.['c:dLbl'])) model.pointValueLabels = true
+  }
+
   // Plot-area inner rectangle (edge-mode fractions of the chart frame); PowerPoint positions
   // gridlines/bars exactly here, with axis labels outside it
   const mLay = plotArea['c:layout']?.['c:manualLayout']
@@ -1043,7 +1053,9 @@ function parseAxis(ax: any, theme?: Theme): ChartAxisStyle | undefined {
   if (Number.isFinite(markSkip) && markSkip > 1) out.tickMarkSkip = markSkip
   // Axis title (all a:t inside c:title/c:tx/c:rich concatenated)
   const titleNode = ax['c:title']
-  const title = collectText(titleNode?.['c:tx']?.['c:rich'])
+  const title =
+    collectText(titleNode?.['c:tx']?.['c:rich']) ||
+    (titleNode && !titleNode['c:tx'] ? 'Axis Title' : '')
   if (title) {
     out.title = title
     if (titleNode?.['c:overlay']?.['@_val'] === '1') out.titleOverlay = true

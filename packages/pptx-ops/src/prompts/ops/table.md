@@ -176,6 +176,44 @@ Common mistakes
 - A built-in name in `styleName`: gallery names and GUIDs go in `styleId`.
 - Restyling one cell's text: that is `setTableCell` with styled runs, not this op.
 
+### setChartLegendPosition
+
+`{position:"b"|"t"|"r"|"l"|"none"}`
+
+Repositions or removes a chart legend through a focused native chartSpace patch. Preserves imported series, linked data, unrelated formatting, and extensions. `none` removes the legend subtree, including its own formatting, as in a native chart without a legend.
+
+```json
+{ "op": "setChartLegendPosition", "target": { "slide": 0, "el": "e_CHART" }, "position": "b" }
+```
+
+### setChartQuickLayout
+
+`{layout:"bottom-values"|"right-values"|"values-only"|"mac-1"|"mac-2"|"mac-3"|"mac-4"|"mac-5"|"mac-6"|"mac-7"|"mac-8"|"mac-9"|"mac-10"|"mac-11"}`
+
+Applies a narrow native Quick Layout. The three named layouts show value labels with a bottom, right, or absent legend. PowerPoint Mac clustered-column Layout 2 adds native value labels to all three series, hides the value axis with c:delete=1, removes known major gridlines, and places the legend above the chart at gap 150/overlap -25. It preserves imported hidden-axis formatting rather than removing spPr/txPr. Layouts 1/3 hide value labels, move the legend right/bottom, and set gap/overlap to 150/omitted or 75/-25. Layout 4 adds native value labels to all three series, removes a safe chart title and known Mac major gridlines, and sets gap 75 with a bottom legend. Layout 7 removes a safe chart title, adds automatic axis titles and styled value-axis minor gridlines, and sets gap 300. Layout 8 adds automatic axis titles, removes the known Mac major-gridline and legend subtrees, and sets gap 0. Layout 9 adds native automatic category/value axis titles and turns out value-axis major ticks. Layout 10 adds value labels to the third series, with gap 75 and overlap 40. Layout 11 removes the chart title, sets autoTitleDeleted=1 and turns out both axes' major ticks. Layout 5 adds the value-axis automatic title and a native data table (with legend keys) and removes the legend. Layout 6 adds the value-axis title, removes the legend, and labels the last category of every series with value and series name; both require no existing axis titles, data table or series-local labels. The Mac layouts require no data table. Existing series-local labels are unsupported except compatible labels on all three series for Layouts 2/4 or the third series for Layout 10; Layout 7 accepts only absent or its own exact minor-gridline subtree. Layouts 2/4/8 accept only absent or the known Mac major-gridline structure, so unknown imported children are never discarded. Edits only the required native chart elements, preserving imported series, linked workbooks, chart relationships, unrelated styling, and unknown extensions.
+
+```json
+{
+  "op": "setChartQuickLayout",
+  "target": { "slide": 0, "el": "e_CHART" },
+  "layout": "bottom-values"
+}
+```
+
+### setChartAreaFormat
+
+`{format:{area?:"chart"|"plot",fill?:"#RRGGBB"|null,stroke?:{color:"#RRGGBB",widthEmu:number}|null}}`
+
+Changes chart-area or plot-area fill and outline through a focused native chartSpace/plotArea shape-property patch. Omit `area` for the whole chart. Other chart content and unselected effects remain intact. `null` sets a native no-fill marker.
+
+```json
+{
+  "op": "setChartAreaFormat",
+  "target": { "slide": 0, "el": "e_CHART" },
+  "format": { "area": "plot", "fill": "#F2F2F2" }
+}
+```
+
 ### setChart (not-ai-callable)
 
 `{patch:ChartEdit} — use the edit_chart tool instead`

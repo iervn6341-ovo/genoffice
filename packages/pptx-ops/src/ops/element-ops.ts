@@ -22,6 +22,11 @@ import {
   setElementEffects,
   type EffectsPatch,
   setPictureOpacity,
+  setPictureAltText,
+  setPictureAspectLock,
+  setPictureAdjustments,
+  resetPictureFromBaseline,
+  type ElementClipboardItem,
   setShapePresetGeometry,
   setGroupChildShapePresetGeometry,
   setShapeAdjustValues,
@@ -350,6 +355,115 @@ register({
       throw new GuidedError(`op "setPictureOpacity": element "${el.id}" is not a picture.`)
     }
     return { op, after: op.opacity }
+  },
+})
+
+// ── setAltText ──────────────────────────────────────────────────────────
+register({
+  name: 'setAltText',
+  validate(op, ctx) {
+    resolveElement(ctx, op, { types: ['picture'] })
+    if (op.text != null && typeof op.text !== 'string') {
+      throw new GuidedError('op "setAltText": "text" must be a string (empty or null clears it).')
+    }
+    if (op.decorative != null && typeof op.decorative !== 'boolean') {
+      throw new GuidedError('op "setAltText": "decorative" must be true or false.')
+    }
+    if (!op.decorative && op.text == null) {
+      throw new GuidedError('op "setAltText" needs "text" (empty clears) or "decorative": true.')
+    }
+  },
+  apply(op, ctx): OpRecord {
+    const { slide, el } = resolveElement(ctx, op, { types: ['picture'] })
+    const text = typeof op.text === 'string' ? op.text : null
+    if (!setPictureAltText(slide, el.id, text, op.decorative === true)) {
+      throw new GuidedError(
+        `op "setAltText": element "${el.id}" is not an ordinary picture (ink strokes keep their own payload).`,
+      )
+    }
+    return {
+      op,
+      after: { text: op.decorative === true ? '' : (text ?? ''), decorative: !!op.decorative },
+    }
+  },
+})
+
+// ── setLockAspect ───────────────────────────────────────────────────────
+register({
+  name: 'setLockAspect',
+  validate(op, ctx) {
+    resolveElement(ctx, op, { types: ['picture'] })
+    if (typeof op.locked !== 'boolean') {
+      throw new GuidedError('op "setLockAspect" needs "locked": true or false.')
+    }
+  },
+  apply(op, ctx): OpRecord {
+    const { slide, el } = resolveElement(ctx, op, { types: ['picture'] })
+    if (!setPictureAspectLock(slide, el.id, op.locked as boolean)) {
+      throw new GuidedError(`op "setLockAspect": element "${el.id}" is not an ordinary picture.`)
+    }
+    return { op, after: op.locked }
+  },
+})
+
+// ── reorderElement ──────────────────────────────────────────────────────
+register({
+  name: 'setPictureAdjustments',
+  validate(op, ctx) {
+    resolveElement(ctx, op)
+    const p = op.adjustments as
+      | {
+          lum?: { bright: number; contrast: number } | null
+          color?: string
+        }
+      | undefined
+    if (!p || (p.lum === undefined && p.color === undefined))
+      throw new GuidedError('op "setPictureAdjustments" needs brightness/contrast or color.')
+    if (p.lum) {
+      for (const key of ['bright', 'contrast'] as const) {
+        requireFinite(p.lum[key], 'setPictureAdjustments', `adjustments.lum.${key}`)
+        if (p.lum[key] < -1 || p.lum[key] > 1)
+          throw new GuidedError(`op "setPictureAdjustments": ${key} must be between -1 and 1.`)
+      }
+    }
+    if (
+      p.color !== undefined &&
+      !['original', 'grayscale', 'blackWhite', 'sepia', 'blue'].includes(p.color)
+    )
+      throw new GuidedError('op "setPictureAdjustments": unsupported color preset.')
+  },
+  apply(op, ctx): OpRecord {
+    const { slide, el } = resolveElement(ctx, op)
+    if (
+      !setPictureAdjustments(
+        slide,
+        el.id,
+        op.adjustments as Parameters<typeof setPictureAdjustments>[2],
+      )
+    )
+      throw new GuidedError(`op "setPictureAdjustments": element "${el.id}" is not a picture.`)
+    return { op, after: op.adjustments }
+  },
+})
+
+register({
+  name: 'resetPicture',
+  validate(op, ctx) {
+    const { el } = resolveElement(ctx, op)
+    if (el.type !== 'picture' || !op.baseline || typeof op.baseline !== 'object') {
+      throw new GuidedError('op "resetPicture" needs a picture and its saved picture baseline.')
+    }
+    const baseline = op.baseline as ElementClipboardItem
+    if (typeof baseline.xml !== 'string' || !Array.isArray(baseline.rels)) {
+      throw new GuidedError('op "resetPicture": saved picture baseline is invalid.')
+    }
+  },
+  apply(op, ctx): OpRecord {
+    const { index, el } = resolveElement(ctx, op)
+    if (!resetPictureFromBaseline(ctx.opened, index, el.id, op.baseline as ElementClipboardItem)) {
+      throw new GuidedError('op "resetPicture": picture already matches its saved formatting.')
+    }
+    return { op, after: 'saved-picture-format' }
   },
 })
 

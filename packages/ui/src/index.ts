@@ -14,6 +14,7 @@ export {
   type AiFontSize,
   type AiPanelPrefs,
   type AiPanelSide,
+  type ContentTheme,
   type RibbonFold,
 } from './ai-panel-prefs'
 export { applyAiPanelPrefs, useAiPanelPrefs, aiPanelWidthAtPointer } from './ai-panel-prefs-store'
@@ -126,3 +127,16 @@ export {
   type BackstageRecent,
 } from './backstage'
 export { backstageLabels, type BackstageLabels } from './strings-backstage'
+
+export {
+  MathWorkbench,
+  latexToLinear,
+  linearToLatex,
+  mathPreview,
+  insertMathTemplate,
+  type MathWorkbenchLabels,
+} from './MathWorkbench'
+export { SymbolPicker, type SymbolPickerLabels } from './SymbolPicker'
+export { applyUiTheme, type UiThemeName } from './ui-theme'
+export { setSmoothScroll, isNotchedWheel, easeStep, wheelPixels } from './smooth-scroll'
+export { resolveContentDark, useContentDarkPref } from './content-theme'

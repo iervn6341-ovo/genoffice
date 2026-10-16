@@ -188,10 +188,14 @@ describe('ommlToLatex', () => {
 
   it('returns null for structures outside the subset', () => {
     expect(
+      ommlToLatex('<m:oMath><m:box><m:e><m:r><m:t>X</m:t></m:r></m:e></m:box></m:oMath>'),
+    ).toBeNull()
+    // left scripts are part of the editable subset since the M1 extension
+    expect(
       ommlToLatex(
         '<m:oMath><m:sPre><m:sub><m:r><m:t>a</m:t></m:r></m:sub><m:e><m:r><m:t>X</m:t></m:r></m:e></m:sPre></m:oMath>',
       ),
-    ).toBeNull()
+    ).toBe('{}_{a}^{}{X}')
     expect(
       ommlToLatex(`<m:oMath>${latexToOmml('a')}</m:oMath><m:oMath>${latexToOmml('b')}</m:oMath>`),
     ).toBeNull()

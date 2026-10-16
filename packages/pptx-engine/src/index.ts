@@ -5,6 +5,7 @@
  * path (proving fidelity). Element-level patch regeneration is left for Phase 3.
  */
 import JSZip from 'jszip'
+import { parseChartXml } from './chart'
 import { PackageArchive, relsPathFor, resolveTarget, type Relationship } from './zip'
 import { parseClrMap, parseTheme, type Theme } from './theme'
 import { builtinTableStyleDefXml } from './table-style'
@@ -66,6 +67,7 @@ import { elementSpid } from './animation'
 import { stripStaleEmbeddedFonts } from './embedded-fonts'
 import { ensureCreationId, matchesElementRef } from './identity'
 import { listMasterParts, parseMasterPart } from './master-edit'
+import { getFirstSlideNumber } from './numbering'
 import type {
   Paragraph,
   PPrDirty,
@@ -107,6 +109,7 @@ export {
   animClassOf,
   buildTimingXml,
   DEFAULT_MOTION_PATH,
+  isSupportedMotionPath,
   elementSpid,
   getSlideAnimations,
   patchSlideTimingIncrementalXml,
@@ -282,6 +285,7 @@ export {
   setSlideNotesParagraphs,
   NOTES_DEFAULT_FONT_PT,
   notesPathForSlide,
+  ensureNotesMaster,
   unescapeXml,
 } from './notes'
 export {
@@ -300,6 +304,7 @@ export {
   decodeRunLink,
   type LinkTarget,
 } from './hyperlink'
+export { setPictureAltText, setPictureAspectLock, readPictureAltText } from './element-meta'
 export { NAMED_ACTIONS, namedActionOf, type NamedAction } from './named-action'
 export {
   addChart,
@@ -321,7 +326,28 @@ export {
   type NewMediaOptions,
   type NewModel3dOptions,
 } from './media-insert'
-export { applyHeaderFooter, readHeaderFooter, type HeaderFooterOptions } from './headerfooter'
+export {
+  applyHeaderFooter,
+  readHeaderFooter,
+  readDeckHeaderFooter,
+  type HeaderFooterOptions,
+  type HeaderFooterState,
+} from './headerfooter'
+export { getFirstSlideNumber, setFirstSlideNumber } from './numbering'
+export {
+  applyNotesHandoutsHeaderFooter,
+  ensureHandoutMaster,
+  readNotesHandoutsHeaderFooter,
+  readNotesHandoutsPrintFields,
+  readMasterHeaderFooterFlags,
+  setMasterHeaderFooterFlag,
+  type NotesHandoutsHeaderFooterOptions,
+  type NotesHandoutsHeaderFooterState,
+  type PrintHeaderFooterField,
+  type PrintHeaderFooterPage,
+  type PrintPageBox,
+  type PrintNotesParagraph,
+} from './notes-handouts-hf'
 export {
   getSections,
   setSections,
@@ -333,6 +359,20 @@ export {
   normalizeSections,
   type SectionInfo,
 } from './sections'
+export {
+  getCustomShows,
+  canSetCustomShows,
+  setCustomShows,
+  type CustomShowInfo,
+} from './custom-shows'
+export {
+  getShowSetup,
+  canSetShowSetup,
+  setShowSetup,
+  type ShowSetup,
+  type ShowSelection,
+  type ShowMode,
+} from './show-setup'
 export {
   collectSlideBundle,
   importSourceLayout,
@@ -350,7 +390,16 @@ export {
   type TableStyleEdit,
   type TableStylePreset,
 } from './table-edit'
-export { listMasterParts, parseMasterPart, type MasterPartInfo } from './master-edit'
+export {
+  listMasterParts,
+  masterPartSize,
+  parseMasterPart,
+  readNotesMasterPlaceholders,
+  setNotesMasterPlaceholderEnabled,
+  setNotesPageOrientation,
+  setNotesMasterBodyStyle,
+  type MasterPartInfo,
+} from './master-edit'
 
 // The following functions are implemented in this file and exposed directly via
 // export function (see below): editPictureSrcRect, setSlideBackground,
@@ -587,7 +636,7 @@ function buildDecorations(
   let slideNum: number | undefined
   try {
     const idx = archive.readPresentation().slidePaths.indexOf(slidePath)
-    if (idx >= 0) slideNum = idx + 1
+    if (idx >= 0) slideNum = getFirstSlideNumber(archive) + idx
   } catch {
     /* missing slide-number substitution is acceptable */
   }
@@ -1140,14 +1189,16 @@ export function editPictureSrcRect(
 export function setShapePresetGeometry(slide: Slide, elementId: string, prst: string): boolean {
   if (!isPresetShapeType(prst)) return false
   const el = slide.elements.find((e) => e.id === elementId)
-  if (!el || (el.type !== 'text' && el.type !== 'shape')) return false
+  // pictures take a preset outline too (Picture Styles: rounded rectangle, oval, ...)
+  if (!el || (el.type !== 'text' && el.type !== 'shape' && el.type !== 'picture')) return false
   const xml = swapGeometryXml(patchedElementXml(el), prst)
   if (xml == null) return false
   el.dirty = el.dirtyTransform = el.dirtyFill = el.dirtyStroke = false
   el.dirtyPPr = undefined
   el.anchor.originalXml = xml
   const shape = el as TextElement
-  shape.presetGeometry = prst
+  if (el.type === 'picture' && prst === 'rect') delete shape.presetGeometry
+  else shape.presetGeometry = prst
   delete shape.adjust
   delete shape.customGeometry
   slide.structureDirty = true
@@ -1758,6 +1809,91 @@ export function setPictureOpacity(slide: Slide, sourceId: string, opacity: numbe
   return true
 }
 
+export interface PictureAdjustmentsPatch {
+  /** Native a:lum brightness and contrast, each in the range -1..1. */
+  lum?: { bright: number; contrast: number } | null
+  /** Native blip recolor. Undefined leaves the imported color effects untouched. */
+  color?: 'original' | 'grayscale' | 'blackWhite' | 'sepia' | 'blue'
+}
+
+/**
+ * Edit only the requested direct a:blip children. Unknown effects, extensions,
+ * media relationships and the rest of the picture stay byte-for-byte intact.
+ */
+export function setPictureAdjustments(
+  slide: Slide,
+  sourceId: string,
+  patch: PictureAdjustmentsPatch,
+): boolean {
+  const el = slide.elements.find((e) => e.id === sourceId && e.type === 'picture')
+  if (!el || (patch.lum === undefined && patch.color === undefined)) return false
+  const pic = el as import('./types').PictureElement
+  const xml = patchedElementXml(el)
+  const blipOpen = /<a:blip\b(?:"[^"]*"|'[^']*'|[^'">])*?(\/?)>/.exec(xml)
+  if (!blipOpen) return false
+  const start = blipOpen.index
+  const openEnd = start + blipOpen[0].length
+  const selfClosing = blipOpen[0].endsWith('/>')
+  const closeStart = selfClosing ? openEnd : xml.indexOf('</a:blip>', openEnd)
+  if (closeStart < 0) return false
+  const closeEnd = selfClosing ? openEnd : closeStart + '</a:blip>'.length
+  const children = selfClosing ? [] : topLevelChildren(xml, openEnd, closeStart)
+  const remove = new Set<string>()
+  if (patch.lum !== undefined) remove.add('a:lum')
+  if (patch.color !== undefined) {
+    remove.add('a:grayscl')
+    remove.add('a:biLevel')
+    remove.add('a:duotone')
+  }
+  let inner = ''
+  let inserted = false
+  const additions: string[] = []
+  if (patch.color === 'grayscale') additions.push('<a:grayscl/>')
+  if (patch.color === 'blackWhite') additions.push('<a:biLevel thresh="50000"/>')
+  if (patch.color === 'sepia')
+    additions.push('<a:duotone><a:srgbClr val="704214"/><a:srgbClr val="F5DEB3"/></a:duotone>')
+  if (patch.color === 'blue')
+    additions.push('<a:duotone><a:srgbClr val="17365D"/><a:srgbClr val="DDEBF7"/></a:duotone>')
+  if (patch.lum && (patch.lum.bright !== 0 || patch.lum.contrast !== 0)) {
+    additions.push(
+      `<a:lum bright="${Math.round(patch.lum.bright * 100000)}" contrast="${Math.round(patch.lum.contrast * 100000)}"/>`,
+    )
+  }
+  let cursor = openEnd
+  for (const child of children) {
+    inner += xml.slice(cursor, child.start)
+    if (child.name === 'a:extLst' && !inserted) {
+      inner += additions.join('')
+      inserted = true
+    }
+    if (!remove.has(child.name)) inner += xml.slice(child.start, child.end)
+    cursor = child.end
+  }
+  inner += xml.slice(cursor, closeStart)
+  if (!inserted) inner += additions.join('')
+  const open = selfClosing ? blipOpen[0].slice(0, -2) + '>' : blipOpen[0]
+  const rebuilt = selfClosing && !inner ? blipOpen[0] : `${open}${inner}</a:blip>`
+  el.anchor.originalXml = xml.slice(0, start) + rebuilt + xml.slice(closeEnd)
+  el.dirty = el.dirtyTransform = el.dirtyFill = el.dirtyStroke = false
+  el.dirtySrcRect = false
+  el.dirtyPPr = undefined
+  if (patch.lum !== undefined) {
+    if (patch.lum && (patch.lum.bright !== 0 || patch.lum.contrast !== 0))
+      pic.lum = { ...patch.lum }
+    else delete pic.lum
+  }
+  if (patch.color !== undefined) {
+    delete pic.duotone
+    delete pic.biLevel
+    if (patch.color === 'grayscale') pic.duotone = ['#000000', '#FFFFFF']
+    if (patch.color === 'blackWhite') pic.biLevel = 0.5
+    if (patch.color === 'sepia') pic.duotone = ['#704214', '#F5DEB3']
+    if (patch.color === 'blue') pic.duotone = ['#17365D', '#DDEBF7']
+  }
+  slide.structureDirty = true
+  return true
+}
+
 /**
  * Swap a picture's backing image for new bytes, keeping frame, z-order, border
  * and effects. New media part + rel; the <a:blip> reference is re-pointed via
@@ -2235,7 +2371,14 @@ export function deleteSlide(opened: OpenedPptx, index: number): boolean {
 
   const sldTag = new RegExp(`<p:sldId\\s[^>]*r:id="${rid}"[^>]*/>`).exec(pres)?.[0]
   if (!sldTag) return false
-  archive.entries.set(presPath, Buffer.from(pres.replace(sldTag, ''), 'utf8'))
+  let nextPres = pres.replace(sldTag, '')
+  // A deleted slide must leave no dangling custom-show relationship reference.
+  nextPres = nextPres.replace(/<p:custShowLst\b[^>]*>[\s\S]*?<\/p:custShowLst>/, (list) =>
+    list.replace(/<p:sld\b[^>]*\/>/g, (tag) =>
+      /(?:^|\s)r:id="([^"]+)"/.exec(tag)?.[1] === rid ? '' : tag,
+    ),
+  )
+  archive.entries.set(presPath, Buffer.from(nextPres, 'utf8'))
   const relTag = new RegExp(`<Relationship\\s[^>]*Id="${rid}"[^>]*/>`).exec(presRels)?.[0]
   if (relTag) {
     archive.entries.set(presRelsPath, Buffer.from(presRels.replace(relTag, ''), 'utf8'))
@@ -2536,9 +2679,18 @@ export function setSlideSize(opened: OpenedPptx, cx: number, cy: number): boolea
   const presPath = 'ppt/presentation.xml'
   const pres = archive.readText(presPath)
   if (!pres || !/<p:sldSz\b[^>]*\/?>/.test(pres)) return false
-  const next = pres.replace(/<p:sldSz\b[^>]*?(\/?)>/, (tag) =>
-    tag.replace(/\bcx="\d+"/, `cx="${cx}"`).replace(/\bcy="\d+"/, `cy="${cy}"`),
-  )
+  const type =
+    cx === 12192000 && cy === 6858000
+      ? 'screen16x9'
+      : cx === 9144000 && cy === 6858000
+        ? 'screen4x3'
+        : 'custom'
+  const next = pres.replace(/<p:sldSz\b[^>]*?(\/?)>/, (tag) => {
+    const resized = tag.replace(/\bcx="\d+"/, `cx="${cx}"`).replace(/\bcy="\d+"/, `cy="${cy}"`)
+    return /\btype="[^"]*"/.test(resized)
+      ? resized.replace(/\btype="[^"]*"/, `type="${type}"`)
+      : resized.replace(/\s*\/?>(?=$)/, (end) => ` type="${type}"${end}`)
+  })
   archive.entries.set(presPath, Buffer.from(next, 'utf8'))
   deck.size = { cx, cy }
 
@@ -2953,6 +3105,969 @@ export function editChartElement(
   }
   const newXml = buildChartSpaceXml(opts)
   archive.entries.set(chartPath, Buffer.from(newXml, 'utf8'))
+  slide.structureDirty = true
+  return true
+}
+
+/** Resolve the existing chart part referenced by a slide graphicFrame. */
+function chartPartPath(opened: OpenedPptx, slide: Slide, el: ChartElement): string | null {
+  const rels = opened.archive.readText(relsPathFor(slide.path))
+  const rId = /<c:chart\b[^>]*r:id="([^"]+)"/.exec(el.anchor.originalXml)?.[1]
+  if (!rels || !rId) return null
+  const rel = new RegExp(
+    `<Relationship\\b(?=[^>]*\\bId="${escapeRegex(rId)}")(?=[^>]*\\bType="[^"]*/chart")([^>]*)>`,
+  ).exec(rels)
+  const target = rel?.[1]?.match(/\bTarget="([^"]+)"/)?.[1]
+  return target ? resolveTarget(slide.path, target) : null
+}
+
+/**
+ * Move an existing chart legend without rebuilding its chartSpace. This is safe
+ * for imported charts with rich series formatting, linked data and extensions.
+ * Choosing None removes only the legend subtree, the native no-legend form.
+ * Legend-specific formatting is intentionally removed with that element.
+ */
+export function setChartLegendPosition(
+  opened: OpenedPptx,
+  slideIndex: number,
+  elementId: string,
+  position: 'b' | 't' | 'r' | 'l' | 'none',
+): boolean {
+  const slide = opened.deck.slides[slideIndex]
+  const el = slide?.elements.find((item) => item.id === elementId)
+  if (!slide || !el || el.type !== 'chart') return false
+  const path = chartPartPath(opened, slide, el as ChartElement)
+  const xml = path ? opened.archive.readText(path) : null
+  if (!path || !xml) return false
+  const chartOpen = /<c:chart\b[^>]*>/.exec(xml)
+  if (!chartOpen) return false
+  const from = chartOpen.index + chartOpen[0].length
+  const to = xml.indexOf('</c:chart>', from)
+  if (to < 0) return false
+  const children = topLevelChildren(xml, from, to)
+  const legend = children.find((child) => child.name === 'c:legend')
+  let next: string
+  if (position === 'none') {
+    next = legend ? xml.slice(0, legend.start) + xml.slice(legend.end) : xml
+  } else if (legend) {
+    let fragment = xml.slice(legend.start, legend.end)
+    const tag = /<c:legendPos\b[^>]*\/?>(?:<\/c:legendPos>)?/.exec(fragment)
+    if (tag) {
+      const replacement = /\bval="[^"]*"/.test(tag[0])
+        ? tag[0].replace(/\bval="[^"]*"/, `val="${position}"`)
+        : tag[0].replace(/(\/?>)/, ` val="${position}"$1`)
+      fragment =
+        fragment.slice(0, tag.index) + replacement + fragment.slice(tag.index + tag[0].length)
+    } else {
+      fragment = fragment.replace(
+        /<c:legend\b[^>]*>/,
+        (open) => `${open}<c:legendPos val="${position}"/>`,
+      )
+    }
+    next = xml.slice(0, legend.start) + fragment + xml.slice(legend.end)
+  } else {
+    const afterPlot = children.find((child) => child.name === 'c:plotArea')
+    if (!afterPlot) return false
+    const fragment = `<c:legend><c:legendPos val="${position}"/><c:overlay val="0"/></c:legend>`
+    next = xml.slice(0, afterPlot.end) + fragment + xml.slice(afterPlot.end)
+  }
+  if (next !== xml) opened.archive.entries.set(path, Buffer.from(next, 'utf8'))
+  if (position === 'none') delete (el as ChartElement).chart.legendPos
+  else (el as ChartElement).chart.legendPos = position
+  if (next !== xml) slide.structureDirty = true
+  return true
+}
+
+export type ChartQuickLayout =
+  | 'bottom-values'
+  | 'right-values'
+  | 'values-only'
+  | 'mac-1'
+  | 'mac-2'
+  | 'mac-3'
+  | 'mac-4'
+  | 'mac-5'
+  | 'mac-6'
+  | 'mac-7'
+  | 'mac-8'
+  | 'mac-9'
+  | 'mac-10'
+  | 'mac-11'
+
+type MacColumnLayout = Exclude<ChartQuickLayout, 'bottom-values' | 'right-values' | 'values-only'>
+
+/** Existing local labels may be reused only if they express Mac Layout 10's last-series values. */
+function mac10LabelsCompatible(labels: string): boolean {
+  return (
+    !/<c:dLbl\b|<c:delete\b[^>]*\bval="1"/.test(labels) &&
+    /<c:dLblPos\b[^>]*\bval="inEnd"/.test(labels) &&
+    /<c:showVal\b[^>]*\bval="1"/.test(labels) &&
+    !/<c:(?:showLegendKey|showCatName|showSerName|showPercent|showBubbleSize)\b[^>]*\bval="1"/.test(
+      labels,
+    )
+  )
+}
+
+function mac4LabelsCompatible(labels: string): boolean {
+  return (
+    !/<c:dLbl\b|<c:dLblPos\b|<c:delete\b[^>]*\bval="1"/.test(labels) &&
+    /<c:showVal\b[^>]*\bval="1"/.test(labels) &&
+    !/<c:(?:showLegendKey|showCatName|showSerName|showPercent|showBubbleSize)\b[^>]*\bval="1"/.test(
+      labels,
+    )
+  )
+}
+
+/** Find the one plot whose value labels can be changed without rebuilding a chart. */
+function quickLayoutPlot(
+  xml: string,
+  layout?: ChartQuickLayout,
+): { start: number; end: number; xml: string } | null {
+  const plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  if (!plotArea) return null
+  const open = /<c:plotArea\b[^>]*>/.exec(plotArea)
+  if (!open) return null
+  const from = open.index + open[0].length
+  const to = plotArea.indexOf('</c:plotArea>', from)
+  if (to < 0) return null
+  const chartChildren = topLevelChildren(plotArea, from, to).filter((child) =>
+    /^c:[A-Za-z0-9]+Chart$/.test(child.name),
+  )
+  if (chartChildren.length !== 1) return null
+  const plot = chartChildren[0]!
+  if (!['c:barChart', 'c:lineChart', 'c:pieChart'].includes(plot.name)) return null
+  const plotXml = plotArea.slice(plot.start, plot.end)
+  const plotOpen = new RegExp(`<${plot.name}\\b[^>]*>`).exec(plotXml)
+  if (!plotOpen) return null
+  const bodyStart = plotOpen.index + plotOpen[0].length
+  const bodyEnd = plotXml.indexOf(`</${plot.name}>`, bodyStart)
+  if (bodyEnd < 0) return null
+  const children = topLevelChildren(plotXml, bodyStart, bodyEnd)
+  if (!children.some((child) => child.name === 'c:ser')) return null
+  // Series-local labels override plot flags. Layouts 2/4 accept compatible values
+  // on every series; Layout 10 accepts them only on its last series.
+  const series = children.filter((child) => child.name === 'c:ser')
+  if (
+    series.some((child, index) => {
+      const fragment = plotXml.slice(child.start, child.end)
+      const labels = directXmlChild(fragment, 'c:ser', 'c:dLbls')
+      if (!labels) return false
+      if (layout === 'mac-2' || layout === 'mac-4') return !mac4LabelsCompatible(labels)
+      if (layout === 'mac-10') return index !== series.length - 1 || !mac10LabelsCompatible(labels)
+      return true
+    })
+  )
+    return null
+  const plotLabels = children.find((child) => child.name === 'c:dLbls')
+  if (plotLabels) {
+    const fragment = plotXml.slice(plotLabels.start, plotLabels.end)
+    // Point overrides and explicitly deleted labels would defeat showVal.
+    if (/<c:dLbl\b|<c:delete\b[^>]*\bval="1"/.test(fragment)) return null
+  }
+  const offset = xml.indexOf(plotArea)
+  return { start: offset + plot.start, end: offset + plot.end, xml: plotXml }
+}
+
+/** Imported chart data, linked workbooks and extension XML remain untouched. */
+export function canSetChartQuickLayout(
+  opened: OpenedPptx,
+  slideIndex: number,
+  elementId: string,
+  layout?: ChartQuickLayout,
+): boolean {
+  const slide = opened.deck.slides[slideIndex]
+  const el = slide?.elements.find((item) => item.id === elementId && item.type === 'chart')
+  const path = slide && el ? chartPartPath(opened, slide, el as ChartElement) : null
+  const xml = path ? opened.archive.readText(path) : null
+  const plot = xml ? quickLayoutPlot(xml, layout) : null
+  if (!xml || !plot) return false
+  return !layout || !isMacColumnLayout(layout) || canUseMacColumnLayout(xml, plot.xml, layout)
+}
+
+function isMacColumnLayout(layout: ChartQuickLayout): layout is MacColumnLayout {
+  return (
+    layout === 'mac-1' ||
+    layout === 'mac-2' ||
+    layout === 'mac-3' ||
+    layout === 'mac-4' ||
+    layout === 'mac-5' ||
+    layout === 'mac-6' ||
+    layout === 'mac-7' ||
+    layout === 'mac-8' ||
+    layout === 'mac-9' ||
+    layout === 'mac-10' ||
+    layout === 'mac-11'
+  )
+}
+
+function canUseMacColumnLayout(xml: string, plot: string, layout: MacColumnLayout): boolean {
+  const plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  const valAxis = plotArea && directXmlChild(plotArea, 'c:plotArea', 'c:valAx')
+  const catAxis = plotArea && directXmlChild(plotArea, 'c:plotArea', 'c:catAx')
+  const major = valAxis && directXmlChild(valAxis, 'c:valAx', 'c:majorGridlines')
+  const legend = directXmlChild(xml, 'c:chart', 'c:legend')
+  const lang =
+    directXmlChild(xml, 'c:chartSpace', 'c:lang')?.match(/\bval="([A-Za-z0-9-]+)"/)?.[1] ?? 'en-US'
+  const labels = directXmlChild(plot, 'c:barChart', 'c:dLbls')
+  const overlap = directXmlChild(plot, 'c:barChart', 'c:overlap')
+  const title = directXmlChild(xml, 'c:chart', 'c:title')
+  const autoTitle = directXmlChild(xml, 'c:chart', 'c:autoTitleDeleted')
+  const catTick = catAxis && directXmlChild(catAxis, 'c:catAx', 'c:majorTickMark')
+  const valTick = valAxis && directXmlChild(valAxis, 'c:valAx', 'c:majorTickMark')
+  const valMinor = valAxis && directXmlChild(valAxis, 'c:valAx', 'c:minorGridlines')
+  const valDelete = valAxis && directXmlChild(valAxis, 'c:valAx', 'c:delete')
+  const safeTick = (tick: string | null): boolean =>
+    !!tick && /^<c:majorTickMark\s+val="(?:none|in|out|cross)"\s*\/>$/.test(tick)
+  const barOpen = /<c:barChart\b[^>]*>/.exec(plot)
+  const barEnd = plot.lastIndexOf('</c:barChart>')
+  const seriesCount =
+    barOpen && barEnd >= 0
+      ? topLevelChildren(plot, barOpen.index + barOpen[0].length, barEnd).filter(
+          (child) => child.name === 'c:ser',
+        ).length
+      : 0
+  return (
+    /<c:barChart\b/.test(plot) &&
+    /<c:barDir\b[^>]*\bval="col"/.test(plot) &&
+    /<c:grouping\b[^>]*\bval="clustered"/.test(plot) &&
+    ((layout !== 'mac-10' && layout !== 'mac-4' && layout !== 'mac-2') || seriesCount === 3) &&
+    (layout === 'mac-11' || layout === 'mac-7' || layout === 'mac-4'
+      ? ((!title && autoTitle === '<c:autoTitleDeleted val="1"/>') ||
+          (!!title &&
+            !/<c:(?:extLst|strRef|numRef)\b|<mc:AlternateContent\b|\br:(?:id|embed|link)=/.test(
+              title,
+            ))) &&
+        (!autoTitle || /^<c:autoTitleDeleted\s+val="[01]"\s*\/>$/.test(autoTitle))
+      : !!title) &&
+    !!valAxis &&
+    !!catAxis &&
+    (layout === 'mac-8' || layout === 'mac-4' || layout === 'mac-2'
+      ? !major || major === mac8MajorGridlines()
+      : !!major) &&
+    ((layout !== 'mac-8' && layout !== 'mac-5' && layout !== 'mac-6') ||
+      !legend ||
+      mac8RemovableLegend(legend, lang)) &&
+    (layout !== 'mac-6' || mac6PointIndex(plot) !== null) &&
+    (layout === 'mac-7' ? !valMinor || valMinor === mac7MinorGridlines() : !valMinor) &&
+    !directXmlChild(catAxis, 'c:catAx', 'c:majorGridlines') &&
+    !directXmlChild(catAxis, 'c:catAx', 'c:minorGridlines') &&
+    (layout === 'mac-9' ||
+      layout === 'mac-7' ||
+      layout === 'mac-8' ||
+      (!directXmlChild(valAxis, 'c:valAx', 'c:title') &&
+        !directXmlChild(catAxis, 'c:catAx', 'c:title'))) &&
+    (layout === 'mac-2'
+      ? !valDelete || /^<c:delete val="[01]"\/>$/.test(valDelete)
+      : !/<c:delete\b[^>]*\bval="1"/.test(valAxis)) &&
+    !/<c:delete\b[^>]*\bval="1"/.test(catAxis) &&
+    !directXmlChild(plotArea!, 'c:plotArea', 'c:dTable') &&
+    (layout === 'mac-11' || layout === 'mac-9' || layout === 'mac-7' || layout === 'mac-8'
+      ? safeTick(catTick) && safeTick(valTick)
+      : (!catTick || catTick === '<c:majorTickMark val="none"/>') &&
+        (!valTick || valTick === '<c:majorTickMark val="none"/>')) &&
+    (layout === 'mac-3' || !overlap || /^<c:overlap\s+val="-?\d+"\s*\/>$/.test(overlap)) &&
+    (!labels ||
+      !/<c:(?:showLegendKey|showCatName|showSerName|showPercent|showBubbleSize)\b[^>]*\bval="1"/.test(
+        labels,
+      ))
+  )
+}
+
+function withValueLabels(plot: string, visible = true): string | null {
+  const open = /<c:(?:barChart|lineChart|pieChart)\b[^>]*>/.exec(plot)
+  if (!open) return null
+  const bodyStart = open.index + open[0].length
+  const bodyEnd = plot.lastIndexOf('</c:')
+  if (bodyEnd < 0) return null
+  const children = topLevelChildren(plot, bodyStart, bodyEnd)
+  const labels = children.find((child) => child.name === 'c:dLbls')
+  if (!labels) {
+    if (!visible) return plot
+    const lastSeries = children.filter((child) => child.name === 'c:ser').at(-1)
+    if (!lastSeries) return null
+    return (
+      plot.slice(0, lastSeries.end) +
+      '<c:dLbls><c:showVal val="1"/></c:dLbls>' +
+      plot.slice(lastSeries.end)
+    )
+  }
+  let fragment = plot.slice(labels.start, labels.end)
+  if (/^<c:dLbls\b[^>]*\/>$/.test(fragment)) {
+    fragment = fragment.replace(/\/>$/, `><c:showVal val="${visible ? 1 : 0}"/></c:dLbls>`)
+  } else {
+    const show = /<c:showVal\b[^>]*\/?>(?:<\/c:showVal>)?/.exec(fragment)
+    if (show) {
+      const updated = /\bval="[^"]*"/.test(show[0])
+        ? show[0].replace(/\bval="[^"]*"/, `val="${visible ? 1 : 0}"`)
+        : show[0].replace(/(\/?>)/, ` val="${visible ? 1 : 0}"$1`)
+      fragment =
+        fragment.slice(0, show.index) + updated + fragment.slice(show.index + show[0].length)
+    } else {
+      const next =
+        /<c:(?:showCatName|showSerName|showPercent|showBubbleSize|separator|showLeaderLines|extLst)\b/.exec(
+          fragment,
+        )
+      const at = next?.index ?? fragment.lastIndexOf('</c:dLbls>')
+      if (at < 0) return null
+      fragment =
+        fragment.slice(0, at) + `<c:showVal val="${visible ? 1 : 0}"/>` + fragment.slice(at)
+    }
+  }
+  return plot.slice(0, labels.start) + fragment + plot.slice(labels.end)
+}
+
+function withColumnSpacing(plot: string, layout: MacColumnLayout): string | null {
+  const gap =
+    layout === 'mac-8'
+      ? 0
+      : layout === 'mac-7'
+        ? 300
+        : layout === 'mac-3' || layout === 'mac-4' || layout === 'mac-10'
+          ? 75
+          : 150
+  const patchLeaf = (
+    xml: string,
+    tag: 'c:gapWidth' | 'c:overlap',
+    value: number,
+  ): string | null => {
+    const existing = directXmlChild(xml, 'c:barChart', tag)
+    const replacement = existing
+      ? existing.replace(new RegExp(`<${tag}\\b[^>]*>`), (open) =>
+          /\bval="[^"]*"/.test(open)
+            ? open.replace(/\bval="[^"]*"/, `val="${value}"`)
+            : open.replace(/(\/?>)$/, ` val="${value}"$1`),
+        )
+      : `<${tag} val="${value}"/>`
+    return replaceDirectXmlChild(
+      xml,
+      'c:barChart',
+      tag,
+      replacement,
+      new Set(tag === 'c:gapWidth' ? ['c:overlap', 'c:axId'] : ['c:axId']),
+    )
+  }
+  const withGap = patchLeaf(plot, 'c:gapWidth', gap)
+  return withGap
+    ? layout !== 'mac-2' && layout !== 'mac-3' && layout !== 'mac-10'
+      ? replaceDirectXmlChild(withGap, 'c:barChart', 'c:overlap', null, new Set())
+      : patchLeaf(withGap, 'c:overlap', layout === 'mac-10' ? 40 : -25)
+    : null
+}
+
+/** Series-local value labels from PowerPoint Mac's clustered-column Layout 10. */
+function mac10ValueLabels(lang: string): string {
+  return (
+    '<c:dLbls><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln><a:effectLst/></c:spPr>' +
+    '<c:txPr><a:bodyPr rot="0" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" lIns="38100" tIns="19050" rIns="38100" bIns="19050" anchor="ctr" anchorCtr="1"><a:spAutoFit/></a:bodyPr>' +
+    '<a:lstStyle/><a:p><a:pPr><a:defRPr sz="1197" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0">' +
+    '<a:solidFill><a:schemeClr val="tx1"><a:lumMod val="75000"/><a:lumOff val="25000"/></a:schemeClr></a:solidFill>' +
+    '<a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:pPr>' +
+    `<a:endParaRPr lang="${lang}"/></a:p></c:txPr>` +
+    '<c:dLblPos val="inEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/><c:showLeaderLines val="0"/>' +
+    '<c:extLst><c:ext uri="{CE6537A1-D6FC-4f65-9D91-7224C49458BB}" xmlns:c15="http://schemas.microsoft.com/office/drawing/2012/chart">' +
+    '<c15:showLeaderLines val="1"/><c15:leaderLines><c:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">' +
+    '<a:solidFill><a:schemeClr val="tx1"><a:lumMod val="35000"/><a:lumOff val="65000"/></a:schemeClr></a:solidFill>' +
+    '<a:round/></a:ln><a:effectLst/></c:spPr></c15:leaderLines></c:ext></c:extLst></c:dLbls>'
+  )
+}
+
+function withMac10SeriesLabels(plot: string, lang: string): string | null {
+  const open = /<c:barChart\b[^>]*>/.exec(plot)
+  const end = plot.lastIndexOf('</c:barChart>')
+  if (!open || end < 0) return null
+  const series = topLevelChildren(plot, open.index + open[0].length, end).filter(
+    (child) => child.name === 'c:ser',
+  )
+  if (series.length !== 3) return null
+  const last = series[2]!
+  const fragment = plot.slice(last.start, last.end)
+  const existing = directXmlChild(fragment, 'c:ser', 'c:dLbls')
+  if (existing) return mac10LabelsCompatible(existing) ? plot : null
+  const updated = replaceDirectXmlChild(
+    fragment,
+    'c:ser',
+    'c:dLbls',
+    mac10ValueLabels(lang),
+    new Set(['c:cat', 'c:val', 'c:xVal', 'c:yVal']),
+  )
+  return updated ? plot.slice(0, last.start) + updated + plot.slice(last.end) : null
+}
+
+function withMac4SeriesLabels(plot: string, lang: string): string | null {
+  const open = /<c:barChart\b[^>]*>/.exec(plot)
+  const end = plot.lastIndexOf('</c:barChart>')
+  if (!open || end < 0) return null
+  const series = topLevelChildren(plot, open.index + open[0].length, end).filter(
+    (child) => child.name === 'c:ser',
+  )
+  if (series.length !== 3) return null
+  const template = mac10ValueLabels(lang).replace('<c:dLblPos val="inEnd"/>', '')
+  let next = plot
+  for (const child of series.reverse()) {
+    const fragment = plot.slice(child.start, child.end)
+    const existing = directXmlChild(fragment, 'c:ser', 'c:dLbls')
+    if (existing && !mac4LabelsCompatible(existing)) return null
+    if (existing) continue
+    const updated = replaceDirectXmlChild(
+      fragment,
+      'c:ser',
+      'c:dLbls',
+      template,
+      new Set(['c:cat', 'c:val', 'c:xVal', 'c:yVal']),
+    )
+    if (!updated) return null
+    next = next.slice(0, child.start) + updated + next.slice(child.end)
+  }
+  return next
+}
+
+function withMacDeletedTitle(xml: string): string | null {
+  let next = replaceDirectXmlChild(xml, 'c:chart', 'c:title', null, new Set())
+  if (!next) return null
+  next = replaceDirectXmlChild(
+    next,
+    'c:chart',
+    'c:autoTitleDeleted',
+    '<c:autoTitleDeleted val="1"/>',
+    new Set(['c:plotArea']),
+  )
+  return next
+}
+
+function withMac11TitleAndTicks(xml: string): string | null {
+  const next = withMacDeletedTitle(xml)
+  if (!next) return null
+  let plotArea = directXmlChild(next, 'c:chart', 'c:plotArea')
+  if (!plotArea) return null
+  for (const axisTag of ['c:catAx', 'c:valAx'] as const) {
+    const axis = directXmlChild(plotArea, 'c:plotArea', axisTag)
+    if (!axis) return null
+    const updatedAxis = replaceDirectXmlChild(
+      axis,
+      axisTag,
+      'c:majorTickMark',
+      '<c:majorTickMark val="out"/>',
+      new Set(),
+    )
+    if (!updatedAxis) return null
+    plotArea = replaceDirectXmlChild(plotArea, 'c:plotArea', axisTag, updatedAxis, new Set())
+    if (!plotArea) return null
+  }
+  return replaceDirectXmlChild(next, 'c:chart', 'c:plotArea', plotArea, new Set())
+}
+
+/** PowerPoint Mac 16.113's lightly styled value-axis minor gridlines for Layout 7. */
+function mac7MinorGridlines(): string {
+  return '<c:minorGridlines><c:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="5000"/><a:lumOff val="95000"/></a:schemeClr></a:solidFill><a:round/></a:ln><a:effectLst/></c:spPr></c:minorGridlines>'
+}
+
+/** Layout 8 removes only the known Mac gridline and legend structures. */
+function mac8MajorGridlines(): string {
+  return '<c:majorGridlines><c:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln><a:effectLst/></c:spPr></c:majorGridlines>'
+}
+
+function mac8RemovableLegend(legend: string, lang: string): boolean {
+  const normalized = legend.replace(/<c:legendPos val="[btrl]"\/>/, '<c:legendPos val="r"/>')
+  const simple = '<c:legend><c:legendPos val="r"/><c:overlay val="0"/></c:legend>'
+  const native =
+    '<c:legend><c:legendPos val="r"/><c:overlay val="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln><a:effectLst/></c:spPr>' +
+    '<c:txPr><a:bodyPr rot="0" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" anchor="ctr" anchorCtr="1"/>' +
+    '<a:lstStyle/><a:p><a:pPr><a:defRPr sz="1197" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0">' +
+    '<a:solidFill><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></a:solidFill>' +
+    '<a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:pPr>' +
+    `<a:endParaRPr lang="${lang}"/></a:p></c:txPr></c:legend>`
+  return normalized === native || normalized === simple
+}
+
+function withMac8NoGridlines(xml: string): string | null {
+  const plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  const axis = plotArea && directXmlChild(plotArea, 'c:plotArea', 'c:valAx')
+  if (!plotArea || !axis) return null
+  const updatedAxis = replaceDirectXmlChild(axis, 'c:valAx', 'c:majorGridlines', null, new Set())
+  const updatedPlot =
+    updatedAxis && replaceDirectXmlChild(plotArea, 'c:plotArea', 'c:valAx', updatedAxis, new Set())
+  return updatedPlot && replaceDirectXmlChild(xml, 'c:chart', 'c:plotArea', updatedPlot, new Set())
+}
+
+/** Keep imported axis formatting available if the hidden value axis is shown again. */
+function withMac2HiddenValueAxis(xml: string): string | null {
+  const plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  const axis = plotArea && directXmlChild(plotArea, 'c:plotArea', 'c:valAx')
+  if (!plotArea || !axis) return null
+  const updatedAxis = replaceDirectXmlChild(
+    axis,
+    'c:valAx',
+    'c:delete',
+    '<c:delete val="1"/>',
+    new Set(['c:axPos', 'c:majorGridlines', 'c:minorGridlines', 'c:title', 'c:numFmt']),
+  )
+  const updatedPlot =
+    updatedAxis && replaceDirectXmlChild(plotArea, 'c:plotArea', 'c:valAx', updatedAxis, new Set())
+  return updatedPlot && replaceDirectXmlChild(xml, 'c:chart', 'c:plotArea', updatedPlot, new Set())
+}
+
+function withMac7MinorGridlines(xml: string): string | null {
+  const plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  const axis = plotArea && directXmlChild(plotArea, 'c:plotArea', 'c:valAx')
+  if (!plotArea || !axis) return null
+  const updatedAxis = replaceDirectXmlChild(
+    axis,
+    'c:valAx',
+    'c:minorGridlines',
+    mac7MinorGridlines(),
+    new Set([
+      'c:title',
+      'c:numFmt',
+      'c:majorTickMark',
+      'c:minorTickMark',
+      'c:tickLblPos',
+      'c:crossAx',
+    ]),
+  )
+  const updatedPlot =
+    updatedAxis && replaceDirectXmlChild(plotArea, 'c:plotArea', 'c:valAx', updatedAxis, new Set())
+  return updatedPlot && replaceDirectXmlChild(xml, 'c:chart', 'c:plotArea', updatedPlot, new Set())
+}
+
+/** PowerPoint Mac 16.113's automatic axis title: no c:tx, so Office supplies the placeholder. */
+function macAutoAxisTitle(axisTag: 'c:catAx' | 'c:valAx', lang: string): string {
+  const rot = axisTag === 'c:catAx' ? '0' : '-5400000'
+  return (
+    '<c:title><c:overlay val="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln><a:effectLst/></c:spPr>' +
+    `<c:txPr><a:bodyPr rot="${rot}" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" anchor="ctr" anchorCtr="1"/>` +
+    '<a:lstStyle/><a:p><a:pPr><a:defRPr sz="1330" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0">' +
+    '<a:solidFill><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></a:solidFill>' +
+    '<a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:pPr>' +
+    `<a:endParaRPr lang="${lang}"/></a:p></c:txPr></c:title>`
+  )
+}
+
+function withMac9AxisTitlesAndTicks(xml: string): string | null {
+  const lang =
+    directXmlChild(xml, 'c:chartSpace', 'c:lang')?.match(/\bval="([A-Za-z0-9-]+)"/)?.[1] ?? 'en-US'
+  let plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  if (!plotArea) return null
+  for (const axisTag of ['c:catAx', 'c:valAx'] as const) {
+    const axis = directXmlChild(plotArea, 'c:plotArea', axisTag)
+    if (!axis) return null
+    let updatedAxis = axis
+    if (!directXmlChild(axis, axisTag, 'c:title')) {
+      updatedAxis =
+        replaceDirectXmlChild(
+          updatedAxis,
+          axisTag,
+          'c:title',
+          macAutoAxisTitle(axisTag, lang),
+          new Set(['c:numFmt', 'c:majorTickMark', 'c:minorTickMark', 'c:tickLblPos', 'c:crossAx']),
+        ) ?? ''
+    }
+    if (!updatedAxis) return null
+    updatedAxis =
+      replaceDirectXmlChild(
+        updatedAxis,
+        axisTag,
+        'c:majorTickMark',
+        `<c:majorTickMark val="${axisTag === 'c:catAx' ? 'none' : 'out'}"/>`,
+        new Set(),
+      ) ?? ''
+    if (!updatedAxis) return null
+    plotArea = replaceDirectXmlChild(plotArea, 'c:plotArea', axisTag, updatedAxis, new Set())
+    if (!plotArea) return null
+  }
+  return replaceDirectXmlChild(xml, 'c:chart', 'c:plotArea', plotArea, new Set())
+}
+
+/** PowerPoint Mac 16.113's native data table (Quick Layout 5): borders on, legend keys on. */
+function mac5DataTable(lang: string): string {
+  return (
+    '<c:dTable><c:showHorzBorder val="1"/><c:showVertBorder val="1"/><c:showOutline val="1"/><c:showKeys val="1"/>' +
+    '<c:spPr><a:noFill/><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln><a:effectLst/></c:spPr>' +
+    '<c:txPr><a:bodyPr rot="0" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" anchor="ctr" anchorCtr="1"/>' +
+    '<a:lstStyle/><a:p><a:pPr rtl="0"><a:defRPr sz="1197" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0">' +
+    '<a:solidFill><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></a:solidFill>' +
+    '<a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:pPr>' +
+    `<a:endParaRPr lang="${lang}"/></a:p></c:txPr></c:dTable>`
+  )
+}
+
+function withMac5DataTable(xml: string, lang: string): string | null {
+  const plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  if (!plotArea || directXmlChild(plotArea, 'c:plotArea', 'c:dTable')) return null
+  const updated = replaceDirectXmlChild(
+    plotArea,
+    'c:plotArea',
+    'c:dTable',
+    mac5DataTable(lang),
+    new Set(['c:spPr', 'c:extLst']),
+  )
+  return updated && replaceDirectXmlChild(xml, 'c:chart', 'c:plotArea', updated, new Set())
+}
+
+/** Layouts 5/6 add only the value-axis automatic title (the category axis stays untitled). */
+function withMacValueAxisTitle(xml: string, lang: string): string | null {
+  const plotArea = directXmlChild(xml, 'c:chart', 'c:plotArea')
+  const axis = plotArea && directXmlChild(plotArea, 'c:plotArea', 'c:valAx')
+  if (!plotArea || !axis || directXmlChild(axis, 'c:valAx', 'c:title')) return null
+  const updatedAxis = replaceDirectXmlChild(
+    axis,
+    'c:valAx',
+    'c:title',
+    macAutoAxisTitle('c:valAx', lang),
+    new Set(['c:numFmt', 'c:majorTickMark', 'c:minorTickMark', 'c:tickLblPos', 'c:crossAx']),
+  )
+  const updatedPlot =
+    updatedAxis && replaceDirectXmlChild(plotArea, 'c:plotArea', 'c:valAx', updatedAxis, new Set())
+  return updatedPlot && replaceDirectXmlChild(xml, 'c:chart', 'c:plotArea', updatedPlot, new Set())
+}
+
+/**
+ * Layout 6 labels one data point per series (value + series name). The native
+ * sample has four categories and labels idx 3, the last point; for other sizes
+ * the last point is used (inferred, not observed).
+ */
+function mac6PointIndex(plot: string): number | null {
+  const open = /<c:barChart\b[^>]*>/.exec(plot)
+  const end = plot.lastIndexOf('</c:barChart>')
+  if (!open || end < 0) return null
+  const series = topLevelChildren(plot, open.index + open[0].length, end).filter(
+    (child) => child.name === 'c:ser',
+  )
+  if (!series.length) return null
+  const counts = series.map((child) => {
+    const cat = directXmlChild(plot.slice(child.start, child.end), 'c:ser', 'c:cat')
+    const n = cat && /<c:ptCount\s+val="(\d+)"\s*\/>/.exec(cat)?.[1]
+    return n ? parseInt(n, 10) : 0
+  })
+  return counts[0]! > 0 && counts.every((n) => n === counts[0]) ? counts[0]! - 1 : null
+}
+
+function mac6PointLabels(index: number, lang: string): string {
+  return (
+    `<c:dLbls><c:dLbl><c:idx val="${index}"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="1"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>` +
+    '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln><a:effectLst/></c:spPr>' +
+    '<c:txPr><a:bodyPr rot="0" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" lIns="38100" tIns="19050" rIns="38100" bIns="19050" anchor="ctr" anchorCtr="1"><a:spAutoFit/></a:bodyPr>' +
+    '<a:lstStyle/><a:p><a:pPr><a:defRPr sz="1197" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0">' +
+    '<a:solidFill><a:schemeClr val="tx1"><a:lumMod val="75000"/><a:lumOff val="25000"/></a:schemeClr></a:solidFill>' +
+    '<a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:pPr>' +
+    `<a:endParaRPr lang="${lang}"/></a:p></c:txPr>` +
+    '<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/>' +
+    '<c:extLst><c:ext uri="{CE6537A1-D6FC-4f65-9D91-7224C49458BB}" xmlns:c15="http://schemas.microsoft.com/office/drawing/2012/chart">' +
+    '<c15:showLeaderLines val="1"/><c15:leaderLines><c:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">' +
+    '<a:solidFill><a:schemeClr val="tx1"><a:lumMod val="35000"/><a:lumOff val="65000"/></a:schemeClr></a:solidFill>' +
+    '<a:round/></a:ln><a:effectLst/></c:spPr></c15:leaderLines></c:ext></c:extLst></c:dLbls>'
+  )
+}
+
+function withMac6PointLabels(plot: string, lang: string): string | null {
+  const index = mac6PointIndex(plot)
+  const open = /<c:barChart\b[^>]*>/.exec(plot)
+  const end = plot.lastIndexOf('</c:barChart>')
+  if (index === null || !open || end < 0) return null
+  const series = topLevelChildren(plot, open.index + open[0].length, end).filter(
+    (child) => child.name === 'c:ser',
+  )
+  let next = plot
+  for (const child of [...series].reverse()) {
+    const fragment = plot.slice(child.start, child.end)
+    if (directXmlChild(fragment, 'c:ser', 'c:dLbls')) return null
+    const updated = replaceDirectXmlChild(
+      fragment,
+      'c:ser',
+      'c:dLbls',
+      mac6PointLabels(index, lang),
+      new Set(['c:trendline', 'c:errBars', 'c:cat', 'c:val', 'c:xVal', 'c:yVal']),
+    )
+    if (!updated) return null
+    next = next.slice(0, child.start) + updated + next.slice(child.end)
+  }
+  return next
+}
+
+/** Native Quick Layouts patch plot labels, legend placement, and Mac column spacing. */
+export function setChartQuickLayout(
+  opened: OpenedPptx,
+  slideIndex: number,
+  elementId: string,
+  layout: ChartQuickLayout,
+): boolean {
+  if (
+    ![
+      'bottom-values',
+      'right-values',
+      'values-only',
+      'mac-1',
+      'mac-2',
+      'mac-3',
+      'mac-4',
+      'mac-5',
+      'mac-6',
+      'mac-7',
+      'mac-8',
+      'mac-9',
+      'mac-10',
+      'mac-11',
+    ].includes(layout)
+  )
+    return false
+  const slide = opened.deck.slides[slideIndex]
+  const el = slide?.elements.find((item) => item.id === elementId && item.type === 'chart')
+  const path = slide && el ? chartPartPath(opened, slide, el as ChartElement) : null
+  const xml = path ? opened.archive.readText(path) : null
+  if (!slide || !el || !path || !xml) return false
+  const plot = quickLayoutPlot(xml, layout)
+  if (!plot) return false
+  if (isMacColumnLayout(layout) && !canUseMacColumnLayout(xml, plot.xml, layout)) return false
+  const visible = !isMacColumnLayout(layout) || layout === 'mac-2' || layout === 'mac-4'
+  const labelsPlot = withValueLabels(plot.xml, visible)
+  const spacedPlot =
+    labelsPlot && isMacColumnLayout(layout) ? withColumnSpacing(labelsPlot, layout) : labelsPlot
+  const lang =
+    directXmlChild(xml, 'c:chartSpace', 'c:lang')?.match(/\bval="([A-Za-z0-9-]+)"/)?.[1] ?? 'en-US'
+  const updatedPlot =
+    spacedPlot && layout === 'mac-10'
+      ? withMac10SeriesLabels(spacedPlot, lang)
+      : spacedPlot && (layout === 'mac-2' || layout === 'mac-4')
+        ? withMac4SeriesLabels(spacedPlot, lang)
+        : spacedPlot && layout === 'mac-6'
+          ? withMac6PointLabels(spacedPlot, lang)
+          : spacedPlot
+  if (!updatedPlot) return false
+  const withPlot = xml.slice(0, plot.start) + updatedPlot + xml.slice(plot.end)
+  const next =
+    layout === 'mac-11'
+      ? withMac11TitleAndTicks(withPlot)
+      : layout === 'mac-7' || layout === 'mac-4'
+        ? withMacDeletedTitle(withPlot)
+        : withPlot
+  const withAxes =
+    next && (layout === 'mac-9' || layout === 'mac-7' || layout === 'mac-8')
+      ? withMac9AxisTitlesAndTicks(next)
+      : next
+  const finalXml =
+    withAxes && layout === 'mac-7'
+      ? withMac7MinorGridlines(withAxes)
+      : withAxes && (layout === 'mac-2' || layout === 'mac-8' || layout === 'mac-4')
+        ? withMac8NoGridlines(withAxes)
+        : withAxes
+  const withValueTitle =
+    finalXml && (layout === 'mac-5' || layout === 'mac-6')
+      ? withMacValueAxisTitle(finalXml, lang)
+      : finalXml
+  const withTable =
+    withValueTitle && layout === 'mac-5' ? withMac5DataTable(withValueTitle, lang) : withValueTitle
+  const finalWithAxis =
+    withTable && layout === 'mac-2' ? withMac2HiddenValueAxis(withTable) : withTable
+  if (!finalWithAxis) return false
+  if (finalWithAxis !== xml) opened.archive.entries.set(path, Buffer.from(finalWithAxis, 'utf8'))
+  const position =
+    layout === 'bottom-values' || layout === 'mac-3' || layout === 'mac-4'
+      ? 'b'
+      : layout === 'right-values' ||
+          layout === 'mac-1' ||
+          layout === 'mac-7' ||
+          layout === 'mac-9' ||
+          layout === 'mac-10' ||
+          layout === 'mac-11'
+        ? 'r'
+        : layout === 'mac-2'
+          ? 't'
+          : 'none'
+  if (!setChartLegendPosition(opened, slideIndex, elementId, position)) return false
+  if (opened.archive.readText(path) !== xml) slide.structureDirty = true
+  ;(el as ChartElement).chart.dataLabels = visible || layout === 'mac-10'
+  if (isMacColumnLayout(layout)) {
+    ;(el as ChartElement).chart.gapWidthPct =
+      layout === 'mac-8'
+        ? 0
+        : layout === 'mac-7'
+          ? 300
+          : layout === 'mac-3' || layout === 'mac-4' || layout === 'mac-10'
+            ? 75
+            : 150
+    ;(el as ChartElement).chart.overlapPct =
+      layout === 'mac-2' || layout === 'mac-3' ? -25 : layout === 'mac-10' ? 40 : 0
+    if (layout === 'mac-10' || layout === 'mac-4' || layout === 'mac-2') {
+      const series = (el as ChartElement).chart.series
+      series.forEach((item, index) => {
+        item.dataLabels = layout === 'mac-2' || layout === 'mac-4' || index === series.length - 1
+      })
+    }
+    if (layout === 'mac-5' || layout === 'mac-6') {
+      if ((el as ChartElement).chart.valAxis)
+        (el as ChartElement).chart.valAxis!.title ??= 'Axis Title'
+      if (layout === 'mac-5') (el as ChartElement).chart.dataTable = true
+      else (el as ChartElement).chart.pointValueLabels = true
+    }
+    if (layout === 'mac-11' || layout === 'mac-7' || layout === 'mac-4')
+      delete (el as ChartElement).chart.title
+    if (layout === 'mac-9' || layout === 'mac-7' || layout === 'mac-8') {
+      if ((el as ChartElement).chart.catAxis)
+        (el as ChartElement).chart.catAxis!.title ??= 'Axis Title'
+      if ((el as ChartElement).chart.valAxis)
+        (el as ChartElement).chart.valAxis!.title ??= 'Axis Title'
+    }
+    if (
+      (layout === 'mac-2' || layout === 'mac-8' || layout === 'mac-4') &&
+      (el as ChartElement).chart.valAxis
+    ) {
+      const target = (el as ChartElement).chart.valAxis!
+      delete target.gridColor
+      delete target.gridColorAuto
+      delete target.gridDash
+      delete target.gridDashVal
+      delete target.gridWidthEmu
+      if (layout === 'mac-2') target.hidden = true
+    }
+    if (layout === 'mac-7' && (el as ChartElement).chart.valAxis) {
+      const themePath = opened.archive.resolveSlideChain(slide.path).themePath
+      const themeXml = themePath ? opened.archive.readText(themePath) : null
+      const parsed = parseChartXml(
+        opened.archive.readText(path)!,
+        themeXml ? parseTheme(themeXml) : undefined,
+      )
+      const target = (el as ChartElement).chart.valAxis!
+      if (parsed?.valAxis) {
+        target.minorGridColor = parsed.valAxis.minorGridColor
+        target.minorGridAuto = parsed.valAxis.minorGridAuto
+        target.minorGridWidthEmu = parsed.valAxis.minorGridWidthEmu
+      }
+    }
+  }
+  return true
+}
+
+export interface ChartAreaFormatPatch {
+  /** c:chartSpace/c:spPr or c:chart/c:plotArea/c:spPr. */
+  area?: 'chart' | 'plot'
+  /** #RRGGBB; null = native a:noFill. */
+  fill?: string | null
+  /** Native chart-space outline; null hides it while retaining other line children. */
+  stroke?: { color: string; widthEmu: number } | null
+}
+
+const CHART_FILL_CHILDREN = new Set([
+  'a:noFill',
+  'a:solidFill',
+  'a:gradFill',
+  'a:blipFill',
+  'a:pattFill',
+  'a:grpFill',
+])
+
+/** Replace only the fill choice inside a shape-property or line fragment. */
+function patchChartFillChoice(xml: string, tag: 'c:spPr' | 'a:ln', fillXml: string): string {
+  const open = new RegExp(`<${tag}\\b[^>]*>`).exec(xml)
+  if (!open) return xml
+  const from = open.index + open[0].length
+  const to = xml.indexOf(`</${tag}>`, from)
+  if (to < 0) return xml
+  const children = topLevelChildren(xml, from, to)
+  const firstFill = children.find((child) => CHART_FILL_CHILDREN.has(child.name))
+  const insertion =
+    firstFill ??
+    children.find((child) =>
+      ['a:ln', 'a:effectLst', 'a:effectDag', 'a:scene3d', 'a:sp3d', 'a:extLst'].includes(
+        child.name,
+      ),
+    )
+  const at = insertion?.start ?? to
+  let next = xml.slice(0, at) + fillXml + xml.slice(at)
+  for (const child of [...children].reverse()) {
+    if (!CHART_FILL_CHILDREN.has(child.name)) continue
+    const start = child.start >= at ? child.start + fillXml.length : child.start
+    const end = child.end >= at ? child.end + fillXml.length : child.end
+    next = next.slice(0, start) + next.slice(end)
+  }
+  return next
+}
+
+/** Native chart-area fill/outline surgery; every unselected child remains intact. */
+export function setChartAreaFormat(
+  opened: OpenedPptx,
+  slideIndex: number,
+  elementId: string,
+  patch: ChartAreaFormatPatch,
+): boolean {
+  const slide = opened.deck.slides[slideIndex]
+  const el = slide?.elements.find((item) => item.id === elementId)
+  if (
+    !slide ||
+    !el ||
+    el.type !== 'chart' ||
+    (patch.area !== undefined && !['chart', 'plot'].includes(patch.area)) ||
+    (patch.fill === undefined && patch.stroke === undefined)
+  )
+    return false
+  if (patch.fill != null && !/^#?[0-9a-fA-F]{6}$/.test(patch.fill)) return false
+  if (
+    patch.stroke &&
+    (!/^#?[0-9a-fA-F]{6}$/.test(patch.stroke.color) ||
+      !Number.isFinite(patch.stroke.widthEmu) ||
+      patch.stroke.widthEmu <= 0)
+  )
+    return false
+  const path = chartPartPath(opened, slide, el as ChartElement)
+  const xml = path ? opened.archive.readText(path) : null
+  if (!path || !xml) return false
+  const rootName = patch.area === 'plot' ? 'c:plotArea' : 'c:chartSpace'
+  const root = new RegExp(`<${rootName}\\b[^>]*>`).exec(xml)
+  if (!root) return false
+  const from = root.index + root[0].length
+  const to = xml.indexOf(`</${rootName}>`, from)
+  if (to < 0) return false
+  const children = topLevelChildren(xml, from, to)
+  const existing = children.find((child) => child.name === 'c:spPr')
+  let spPr = existing ? xml.slice(existing.start, existing.end) : '<c:spPr></c:spPr>'
+  if (/^<c:spPr\b[^>]*\/>$/.test(spPr)) spPr = spPr.replace(/\/>$/, '></c:spPr>')
+  if (patch.fill !== undefined) {
+    const fillXml =
+      patch.fill === null
+        ? '<a:noFill/>'
+        : `<a:solidFill><a:srgbClr val="${patch.fill.replace(/^#/, '').toUpperCase()}"/></a:solidFill>`
+    spPr = patchChartFillChoice(spPr, 'c:spPr', fillXml)
+  }
+  if (patch.stroke !== undefined) {
+    const lineMatch = /<a:ln\b[^>]*(?:\/>|>[\s\S]*?<\/a:ln>)/.exec(spPr)
+    const colorXml =
+      patch.stroke === null
+        ? '<a:noFill/>'
+        : `<a:solidFill><a:srgbClr val="${patch.stroke.color.replace(/^#/, '').toUpperCase()}"/></a:solidFill>`
+    let line = lineMatch?.[0] ?? '<a:ln></a:ln>'
+    if (line.endsWith('/>')) line = line.slice(0, -2) + '></a:ln>'
+    if (patch.stroke) {
+      const width = Math.max(1, Math.round(patch.stroke.widthEmu))
+      line = /\bw="[^"]*"/.test(line)
+        ? line.replace(/\bw="[^"]*"/, `w="${width}"`)
+        : line.replace(/<a:ln\b/, `<a:ln w="${width}"`)
+    }
+    line = patchChartFillChoice(line, 'a:ln', colorXml)
+    if (lineMatch)
+      spPr =
+        spPr.slice(0, lineMatch.index) + line + spPr.slice(lineMatch.index + lineMatch[0].length)
+    else {
+      const start = spPr.indexOf('>') + 1
+      const end = spPr.lastIndexOf('</c:spPr>')
+      const after = topLevelChildren(spPr, start, end).find((child) =>
+        ['a:effectLst', 'a:effectDag', 'a:scene3d', 'a:sp3d', 'a:extLst'].includes(child.name),
+      )
+      const at = after?.start ?? end
+      spPr = spPr.slice(0, at) + line + spPr.slice(at)
+    }
+  }
+  const next = existing
+    ? xml.slice(0, existing.start) + spPr + xml.slice(existing.end)
+    : (() => {
+        if (patch.area === 'plot') {
+          const extension = children.find((child) => child.name === 'c:extLst')
+          const at = extension?.start ?? to
+          return xml.slice(0, at) + spPr + xml.slice(at)
+        }
+        const chart = children.find((child) => child.name === 'c:chart')
+        if (!chart) return null
+        return xml.slice(0, chart.end) + spPr + xml.slice(chart.end)
+      })()
+  if (!next) return false
+  opened.archive.entries.set(path, Buffer.from(next, 'utf8'))
   slide.structureDirty = true
   return true
 }
@@ -4132,6 +5247,200 @@ export function pasteElements(
 
   if (relsDirty) archive.entries.set(relsPath, Buffer.from(relsXml, 'utf8'))
   return appendRawElements(opened, slideIndex, xmls)
+}
+
+function directXmlChild(xml: string, parentTag: string, childTag: string): string | null {
+  const open = new RegExp(`<${parentTag}\\b[^>]*>`).exec(xml)
+  if (!open) return null
+  const from = open.index + open[0].length
+  const to = xml.indexOf(`</${parentTag}>`, from)
+  if (to < 0) return null
+  const child = topLevelChildren(xml, from, to).find((item) => item.name === childTag)
+  return child ? xml.slice(child.start, child.end) : null
+}
+
+function replaceDirectXmlChild(
+  xml: string,
+  parentTag: string,
+  childTag: string,
+  replacement: string | null,
+  before: ReadonlySet<string>,
+): string | null {
+  const open = new RegExp(`<${parentTag}\\b[^>]*>`).exec(xml)
+  if (!open) return null
+  const from = open.index + open[0].length
+  const to = xml.indexOf(`</${parentTag}>`, from)
+  if (to < 0) return null
+  const children = topLevelChildren(xml, from, to)
+  const existing = children.find((item) => item.name === childTag)
+  if (existing) {
+    return xml.slice(0, existing.start) + (replacement ?? '') + xml.slice(existing.end)
+  }
+  if (!replacement) return xml
+  const insertion = children.find((item) => before.has(item.name))
+  const at = insertion?.start ?? to
+  return xml.slice(0, at) + replacement + xml.slice(at)
+}
+
+function pictureBranches(xml: string): Array<{ start: number; end: number; xml: string }> {
+  const out: Array<{ start: number; end: number; xml: string }> = []
+  const tags = /<p:pic\b[^>]*>/g
+  let match: RegExpExecArray | null
+  while ((match = tags.exec(xml))) {
+    const start = match.index
+    const close = xml.indexOf('</p:pic>', start + match[0].length)
+    if (close < 0) return []
+    const end = close + '</p:pic>'.length
+    out.push({ start, end, xml: xml.slice(start, end) })
+    tags.lastIndex = end
+  }
+  return out
+}
+
+/**
+ * Reset one picture to its last imported/saved formatting and image. The frame's
+ * current xfrm and nonvisual metadata stay in place, so moving/resizing or editing
+ * alt text/hyperlinks does not get reverted. Baseline parts are restored through
+ * the same relationship remapper as paste; unknown picture formatting is copied
+ * verbatim instead of being reconstructed from the parsed model.
+ */
+export function resetPictureFromBaseline(
+  opened: OpenedPptx,
+  slideIndex: number,
+  elementId: string,
+  baseline: ElementClipboardItem,
+): boolean {
+  const slide = opened.deck.slides[slideIndex]
+  const el = slide?.elements.find((item) => item.id === elementId && item.type === 'picture')
+  if (!slide || !el || !baseline?.xml) return false
+  const currentXml = patchedElementXml(el)
+  const currentBranches = pictureBranches(currentXml)
+  const savedBranches = pictureBranches(baseline.xml)
+  if (!currentBranches.length || currentBranches.length !== savedBranches.length) return false
+
+  const formatSignature = (branch: string): string => {
+    const blip = directXmlChild(branch, 'p:pic', 'p:blipFill') ?? ''
+    const spPr = directXmlChild(branch, 'p:pic', 'p:spPr') ?? ''
+    const withoutFrame = spPr.replace(/<a:xfrm\b[^>]*>[\s\S]*?<\/a:xfrm>|<a:xfrm\b[^>]*\/>/, '')
+    const style = directXmlChild(branch, 'p:pic', 'p:style') ?? ''
+    return blip + withoutFrame + style
+  }
+  if (
+    currentBranches.every(
+      (branch, i) => formatSignature(branch.xml) === formatSignature(savedBranches[i]!.xml),
+    )
+  ) {
+    return false
+  }
+
+  // Only formatting branches come from the baseline. Current nonvisual metadata
+  // can have the same rId with a different target (for example a new hyperlink).
+  const neededRidSet = new Set<string>()
+  for (const saved of savedBranches) {
+    const formatting = ['p:blipFill', 'p:spPr', 'p:style']
+      .map((tag) => directXmlChild(saved.xml, 'p:pic', tag) ?? '')
+      .join('')
+    for (const match of formatting.matchAll(RID_ATTR_RE)) neededRidSet.add(match[1]!)
+  }
+  const neededRels = baseline.rels.filter((rel) => neededRidSet.has(rel.rid))
+  if (neededRidSet.size !== neededRels.length) return false
+
+  const pathMap = baseline.parts
+    ? importClipboardParts(opened.archive, baseline.parts, baseline.contentTypes ?? {})
+    : null
+  const relsPath = relsPathFor(slide.path)
+  let relsXml =
+    opened.archive.readText(relsPath) ??
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+  let maxRid = 0
+  for (const m of relsXml.matchAll(/\bId="rId(\d+)"/g)) maxRid = Math.max(maxRid, Number(m[1]))
+  const byKey = new Map<string, string>()
+  for (const rel of opened.archive.readRels(slide.path).values()) {
+    const target =
+      rel.targetMode === 'External' ? rel.target : resolveTarget(slide.path, rel.target)
+    byKey.set(`${rel.type} ${target}`, rel.id)
+  }
+  const ridMap = new Map<string, string>()
+  for (const rel of neededRels) {
+    const landed = rel.external ? rel.target : (pathMap?.get(rel.target) ?? rel.target)
+    const key = `${rel.type} ${landed}`
+    let rid = byKey.get(key)
+    if (!rid) {
+      rid = `rId${++maxRid}`
+      const target = rel.external ? rel.target : relTargetFromSlide(landed)
+      const mode = rel.external ? ' TargetMode="External"' : ''
+      relsXml = relsXml.replace(
+        '</Relationships>',
+        `<Relationship Id="${rid}" Type="${rel.type}" Target="${escapeXmlAttr(target)}"${mode}/></Relationships>`,
+      )
+      byKey.set(key, rid)
+    }
+    ridMap.set(rel.rid, rid)
+  }
+  const remapSaved = (xml: string): string =>
+    xml.replace(/\br:(embed|link|id)="(rId\d+)"/g, (full, kind: string, rid: string) => {
+      const mapped = ridMap.get(rid)
+      return mapped ? `r:${kind}="${mapped}"` : full
+    })
+
+  let replacementXml = currentXml
+  for (let i = currentBranches.length - 1; i >= 0; i--) {
+    const current = currentBranches[i]!
+    const saved = savedBranches[i]!
+    const savedBlip = directXmlChild(saved.xml, 'p:pic', 'p:blipFill')
+    const savedSpPr = directXmlChild(saved.xml, 'p:pic', 'p:spPr')
+    if (!savedBlip || !savedSpPr) return false
+    const currentSpPr = directXmlChild(current.xml, 'p:pic', 'p:spPr')
+    const currentXfrm = currentSpPr && directXmlChild(currentSpPr, 'p:spPr', 'a:xfrm')
+    const savedXfrm = directXmlChild(savedSpPr, 'p:spPr', 'a:xfrm')
+    const spPr = replaceDirectXmlChild(
+      savedSpPr,
+      'p:spPr',
+      'a:xfrm',
+      currentXfrm ?? savedXfrm,
+      new Set(['a:prstGeom', 'a:custGeom', 'a:noFill', 'a:solidFill', 'a:ln', 'a:effectLst']),
+    )
+    if (!spPr) return false
+    let branch = replaceDirectXmlChild(
+      current.xml,
+      'p:pic',
+      'p:blipFill',
+      remapSaved(savedBlip),
+      new Set(['p:spPr', 'p:style', 'p:extLst']),
+    )
+    if (!branch) return false
+    branch = replaceDirectXmlChild(
+      branch,
+      'p:pic',
+      'p:spPr',
+      remapSaved(spPr),
+      new Set(['p:style', 'p:extLst']),
+    )
+    if (!branch) return false
+    branch = replaceDirectXmlChild(
+      branch,
+      'p:pic',
+      'p:style',
+      directXmlChild(saved.xml, 'p:pic', 'p:style')
+        ? remapSaved(directXmlChild(saved.xml, 'p:pic', 'p:style')!)
+        : null,
+      new Set(['p:extLst']),
+    )
+    if (!branch) return false
+    replacementXml =
+      replacementXml.slice(0, current.start) + branch + replacementXml.slice(current.end)
+  }
+  if (replacementXml === currentXml) return false
+  const previousXml = patchSlideXml(slide)
+  if (relsXml !== opened.archive.readText(relsPath))
+    opened.archive.entries.set(relsPath, Buffer.from(relsXml, 'utf8'))
+  el.anchor.originalXml = replacementXml
+  el.dirty = el.dirtyTransform = el.dirtyFill = el.dirtyStroke = false
+  el.dirtySrcRect = false
+  el.dirtyPPr = undefined
+  slide.structureDirty = true
+  cleanupSupersededSlideResources(opened, slide, previousXml, patchSlideXml(slide))
+  return true
 }
 
 // ── Slide transitions ───────────────────────────────────────────────────

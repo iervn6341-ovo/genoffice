@@ -15,7 +15,7 @@ export interface SheetNote {
   readonly text: string
 }
 
-interface MutableNotePackage {
+export interface MutableNotePackage {
   paths(): Promise<readonly string[]>
   has(path: string): Promise<boolean>
   readText(path: string): Promise<string>
@@ -32,7 +32,7 @@ const COMMENTS_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml'
 const CONTENT_TYPES_PATH = '[Content_Types].xml'
 
-function escapeXml(value: string): string {
+export function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -48,11 +48,11 @@ function columnName(index: number): string {
   return label
 }
 
-function worksheetRelsPath(worksheetPath: string): string {
+export function worksheetRelsPath(worksheetPath: string): string {
   return worksheetPath.replace(/^(xl\/worksheets\/)([^/]+)$/, '$1_rels/$2.rels')
 }
 
-function relTarget(relsXml: string, type: string): string | null {
+export function relTarget(relsXml: string, type: string): string | null {
   const pattern = new RegExp(`<Relationship\\b[^>]*Type="${type}"[^>]*/?>`)
   const found = pattern.exec(relsXml)
   if (!found) return null
@@ -61,7 +61,7 @@ function relTarget(relsXml: string, type: string): string | null {
 }
 
 /// "../comments1.xml" or "/xl/comments1.xml" → package path.
-function resolveRelTarget(worksheetPath: string, target: string): string {
+export function resolveRelTarget(worksheetPath: string, target: string): string {
   if (target.startsWith('/')) return target.slice(1)
   const base = worksheetPath.split('/').slice(0, -1)
   for (const part of target.split('/')) {
@@ -71,12 +71,12 @@ function resolveRelTarget(worksheetPath: string, target: string): string {
   return base.join('/')
 }
 
-function nextFreeRid(relsXml: string): string {
+export function nextFreeRid(relsXml: string): string {
   const ids = [...relsXml.matchAll(/ Id="rId(\d+)"/g)].map((match) => Number(match[1]))
   return `rId${ids.length === 0 ? 1 : Math.max(...ids) + 1}`
 }
 
-async function nextFreePath(
+export async function nextFreePath(
   pkg: MutableNotePackage,
   template: (index: number) => string,
 ): Promise<string> {
@@ -87,7 +87,7 @@ async function nextFreePath(
   throw new NoteEditError('No free part name for the comments part.')
 }
 
-function decodeXml(value: string): string {
+export function decodeXml(value: string): string {
   return value.replace(/&(#x[0-9a-fA-F]+|#\d+|lt|gt|amp|quot|apos);/g, (_, entity: string) => {
     if (entity[0] === '#') {
       const code = entity[1] === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10)
@@ -256,18 +256,18 @@ function ensureVmlDefault(contentTypes: string): string {
   )
 }
 
-function appendRel(relsXml: string, id: string, type: string, target: string): string {
+export function appendRel(relsXml: string, id: string, type: string, target: string): string {
   return relsXml.replace(
     '</Relationships>',
     `<Relationship Id="${id}" Type="${type}" Target="${target}"/></Relationships>`,
   )
 }
 
-function removeRel(relsXml: string, type: string): string {
+export function removeRel(relsXml: string, type: string): string {
   return relsXml.replace(new RegExp(`<Relationship\\b[^>]*Type="${type}"[^>]*/?>`), '')
 }
 
-const EMPTY_RELS =
+export const EMPTY_RELS =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
   '</Relationships>'

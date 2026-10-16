@@ -560,6 +560,10 @@ export interface PictureElement extends ElementBase {
   dataUrl?: string
   /** Source crop <a:srcRect>: fraction cropped from each edge (0..1) */
   srcRect?: { l: number; t: number; r: number; b: number }
+  /** <a:picLocks noChangeAspect="1">: resizing keeps the aspect ratio (undefined = attribute absent) */
+  lockAspect?: boolean
+  /** cNvPr carries the a16 decorative flag ("Mark as decorative") */
+  decorative?: boolean
   /** Whole-image opacity <a:blip><a:alphaModFix amt> (0..1, 1 = opaque; default 1) */
   opacity?: number
   /** Soft edges <a:softEdge rad> (EMU feather radius) */

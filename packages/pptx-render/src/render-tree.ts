@@ -157,6 +157,11 @@ export interface RenderShadow {
 /** A laid-out text glyph block (one contiguous same-format span within a line). */
 export interface GlyphRun {
   text: string
+  /** Derived MathML for a native equation run; the model's raw OMML remains authoritative. */
+  mathML?: string
+  /** Native math uses a taller line box than its plain-text fallback. */
+  mathAscentPx?: number
+  mathDescentPx?: number
   /** px coordinate relative to the text box top-left (baseline left endpoint) */
   x: number
   /** Baseline y (px relative to the text box top-left) */
@@ -215,6 +220,8 @@ export interface GlyphRun {
   rtl?: boolean
   /** Source model run index (into Paragraph.runs); the editor uses it to merge fragments and trace back original formatting */
   srcRunIdx?: number
+  /** Run indexes restart in each paragraph; together these identify one native equation. */
+  srcParagraphIdx?: number
   /** Run hyperlink ("slide:N" or url, from TextRun.hyperlink); editor round-trips it, follow actions re-resolve live */
   link?: string
   /** The run font's real ascent (px); used by the renderer for baseline→top conversion (falls back to 0.8em) */
@@ -293,6 +300,14 @@ export interface ArrowEndRender {
 
 export interface ShapeRenderNode extends RenderNodeBase {
   type: 'shape' | 'text'
+  /** Native OOXML math detected in the text body; unsupported OMML remains read-only. */
+  hasEquation?: boolean
+  /** Structured screen preview derived from the authoritative OMML. */
+  equationMathML?: string
+  /** Safe to cover the linear fallback on the editor canvas without hiding other text runs. */
+  equationStandalone?: boolean
+  /** Strictly reversible linear source, when the OMML uses supported structures. */
+  equationLatex?: string
   /** Placeholder type (title/ctrTitle/subTitle/body/…); empty placeholders draw hint text on the canvas */
   placeholder?: string
   /** Insert > Text Box rather than Insert > Shape: the edit overlay must not center a fresh body */
@@ -349,6 +364,10 @@ export interface PictureRenderNode extends RenderNodeBase {
   biLevel?: number
   /** Picture shape-geometry clip (picture styles): three channels matching shape geometry; clip when any is set */
   clip?: { cornerRadiusPx?: number; polygonPoints?: number[]; pathData?: string }
+  /** Persisted Lock aspect ratio (a:picLocks noChangeAspect); undefined = not recorded */
+  lockAspect?: boolean
+  /** Marked decorative (no alt text needed) */
+  decorative?: boolean
   /** Source image crop ratios (0..1, how much each side is cropped) */
   srcRect?: { l: number; t: number; r: number; b: number }
   /** Whole-image opacity (0..1; default 1) */
@@ -463,6 +482,9 @@ export interface ChartStyleInfo {
   legendPos: 'b' | 't' | 'l' | 'r' | 'none'
   dataLabels: boolean
   gridlines: boolean
+  valAxisHidden?: boolean
+  dataTable?: boolean
+  pointValueLabels?: boolean
   title?: string
   catAxisTitle?: string
   valAxisTitle?: string
