@@ -6,9 +6,10 @@ import {
   DEFAULT_AI_PANEL_PREFS,
   Dropdown,
   aiPanelFontPx,
+  applyUiTheme,
   clampAiCustomFontSize,
 } from '@genoffice/ui'
-import type { AiFontSize, AiPanelPrefs, AiPanelSide, RibbonFold } from '@genoffice/ui'
+import type { AiFontSize, AiPanelPrefs, AiPanelSide, ContentTheme, RibbonFold } from '@genoffice/ui'
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   MAX_MAX_OUTPUT_TOKENS,
@@ -63,6 +64,7 @@ const THEME_OPTIONS = [
   { value: 'system', labelKey: 'themeSystem' },
   { value: 'light', labelKey: 'themeLight' },
   { value: 'dark', labelKey: 'themeDark' },
+  { value: 'gray', labelKey: 'themeGray' },
 ] as const satisfies readonly { value: UiTheme; labelKey: StringKey }[]
 
 const AI_FONT_SIZE_OPTIONS = [
@@ -1057,8 +1059,7 @@ export function SettingsModal({
   const applyTheme = (next: UiTheme) => {
     setTheme(next)
     void window.aiOffice.setTheme(next)
-    if (next === 'system') document.documentElement.removeAttribute('data-theme')
-    else document.documentElement.setAttribute('data-theme', next)
+    applyUiTheme(next)
   }
 
   const updateAiPrefs = (patch: Partial<AiPanelPrefs>) => {
@@ -1171,6 +1172,52 @@ export function SettingsModal({
                       { value: 'auto', label: t('ribbonFoldAuto') },
                     ]}
                     onPick={(ribbonFold) => updateAiPrefs({ ribbonFold: ribbonFold as RibbonFold })}
+                  />
+                </div>
+                <div className="set-field">
+                  <div className="set-field-text">
+                    <label className="set-field-label">{t('setContentTheme')}</label>
+                  </div>
+                  <Dropdown
+                    className="set-dd"
+                    value={aiPrefs.contentTheme}
+                    ariaLabel={t('setContentTheme')}
+                    options={[
+                      { value: 'auto', label: t('contentThemeAuto') },
+                      { value: 'light', label: t('contentThemeLight') },
+                      { value: 'dark', label: t('contentThemeDark') },
+                    ]}
+                    onPick={(v) => updateAiPrefs({ contentTheme: v as ContentTheme })}
+                  />
+                </div>
+                <div className="set-field">
+                  <div className="set-field-text">
+                    <div className="set-field-stack">
+                      <div className="set-field-label">{t('setSmoothScroll')}</div>
+                      <div className="set-field-desc">{t('setSmoothScrollDesc')}</div>
+                    </div>
+                  </div>
+                  <button
+                    className="set-switch"
+                    role="switch"
+                    aria-checked={aiPrefs.smoothScroll}
+                    aria-label={t('setSmoothScroll')}
+                    onClick={() => updateAiPrefs({ smoothScroll: !aiPrefs.smoothScroll })}
+                  />
+                </div>
+                <div className="set-field">
+                  <div className="set-field-text">
+                    <div className="set-field-stack">
+                      <div className="set-field-label">{t('setGpuAcceleration')}</div>
+                      <div className="set-field-desc">{t('setGpuAccelerationDesc')}</div>
+                    </div>
+                  </div>
+                  <button
+                    className="set-switch"
+                    role="switch"
+                    aria-checked={aiPrefs.gpuAcceleration}
+                    aria-label={t('setGpuAcceleration')}
+                    onClick={() => updateAiPrefs({ gpuAcceleration: !aiPrefs.gpuAcceleration })}
                   />
                 </div>
                 <div className="set-field">

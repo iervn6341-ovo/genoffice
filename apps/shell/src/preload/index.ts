@@ -6,7 +6,11 @@ import {
   AI_SEARCH_PROVIDERS,
   getProviderAdapter,
 } from '@genoffice/ai-provider/browser'
-import type { AiSettings, CodexModelCatalog, ListModelsResult } from '@genoffice/ai-provider/browser'
+import type {
+  AiSettings,
+  CodexModelCatalog,
+  ListModelsResult,
+} from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 import { normalizeAiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
 import type {
@@ -191,10 +195,10 @@ const homeApi: HomeApi = {
   },
   async getTheme() {
     const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.getTheme)
-    return result === 'dark' || result === 'light' ? result : 'system'
+    return result === 'dark' || result === 'light' || result === 'gray' ? result : 'system'
   },
   async setTheme(theme) {
-    if (theme !== 'light' && theme !== 'dark' && theme !== 'system')
+    if (theme !== 'light' && theme !== 'dark' && theme !== 'gray' && theme !== 'system')
       throw new Error('Invalid theme.')
     await ipcRenderer.invoke(HOME_CHANNELS.setTheme, theme)
   },
@@ -300,7 +304,8 @@ const homeApi: HomeApi = {
   },
   onThemeChanged(handler) {
     const listener = (_event: Electron.IpcRendererEvent, theme: unknown) => {
-      if (theme === 'light' || theme === 'dark' || theme === 'system') handler(theme)
+      if (theme === 'light' || theme === 'dark' || theme === 'gray' || theme === 'system')
+        handler(theme)
     }
     ipcRenderer.on('app:theme-changed', listener)
     return () => ipcRenderer.removeListener('app:theme-changed', listener)

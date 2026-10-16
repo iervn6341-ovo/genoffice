@@ -281,6 +281,15 @@ export function TabBar() {
               // full title (the close button's own tooltip still wins there)
               title={tab.title}
               style={dragStyle}
+              // middle button: no autoscroll cursor on press, close the tab on release (like a browser)
+              onMouseDown={(event) => {
+                if (event.button === 1) event.preventDefault()
+              }}
+              onAuxClick={(event) => {
+                if (event.button !== 1 || !tab.closable) return
+                event.preventDefault()
+                void window.aiOfficeTabs.close(tab.id)
+              }}
               onPointerDown={(event) => {
                 if (event.button !== 0) return
                 if ((event.target as HTMLElement).closest('.tab-close')) return

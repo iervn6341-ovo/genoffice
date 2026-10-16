@@ -8,7 +8,7 @@ import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/dropdown.css'
 import './home.css'
 import './tabbar.css'
-import { installScreenTips } from '@genoffice/ui'
+import { applyUiTheme, installScreenTips } from '@genoffice/ui'
 
 installScreenTips()
 
@@ -29,13 +29,8 @@ void Promise.all([
 ]).then(([lang, onboardingSeen, theme]) => {
   document.documentElement.lang = htmlLang(lang)
   // apply theme attribute before first paint to avoid flash
-  if (theme !== 'system') {
-    document.documentElement.setAttribute('data-theme', theme)
-  }
-  window.aiOffice.onThemeChanged((next) => {
-    if (next === 'system') document.documentElement.removeAttribute('data-theme')
-    else document.documentElement.setAttribute('data-theme', next)
-  })
+  applyUiTheme(theme)
+  window.aiOffice.onThemeChanged(applyUiTheme)
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <LocaleProvider initial={lang}>

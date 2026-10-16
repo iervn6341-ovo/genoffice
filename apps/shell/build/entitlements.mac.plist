@@ -9,5 +9,8 @@
   <!-- Slides show Camera button (live camera bubble during a presentation) -->
   <key>com.apple.security.device.camera</key>
   <true/>
+  <!-- Slides Record Narration (microphone) -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

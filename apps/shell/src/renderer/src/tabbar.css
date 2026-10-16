@@ -335,6 +335,13 @@ body.overlay-title-bar .tab-bar-drag-spacer {
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* Gray: the stepped dark gray — the strip sits darker than the lifted ribbon below it */
+[data-theme='dark'][data-theme-variant='gray'] .tab-bar {
+  --tabstrip-bg: #353535;
+  --tabstrip-text: #c4c4c4;
+  --tabstrip-text-active: #f0f0f0;
+}
+
 /* System dark: same overrides when following OS preference */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) .tab-bar {

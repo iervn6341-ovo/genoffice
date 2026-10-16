@@ -25,4 +25,12 @@ describe('tabStripOverlay', () => {
     })
     expect(TAB_STRIP_HEIGHT).toBe(40)
   })
+  it('uses the stepped gray strip for the gray theme only when dark', () => {
+    expect(tabStripOverlay(true, false, true)).toEqual({
+      color: '#353535',
+      symbolColor: '#f0f0f0',
+      height: TAB_STRIP_HEIGHT,
+    })
+    expect(tabStripOverlay(false, false, true).color).toBe('#ebebeb')
+  })
 })

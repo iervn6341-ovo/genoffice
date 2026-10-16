@@ -37,7 +37,7 @@ export type UiLanguage =
   | 'zh-TW'
 
 /** UI theme preference */
-export type UiTheme = 'light' | 'dark' | 'system'
+export type UiTheme = 'light' | 'dark' | 'gray' | 'system'
 
 /** shell-wide AutoSave default for every editor; updatedAt is 0 until first set */
 export interface AutoSaveDefault {

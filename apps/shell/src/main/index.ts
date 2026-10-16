@@ -448,8 +448,13 @@ let cachedTheme: UiTheme | null = null
 function currentTheme(): UiTheme {
   if (cachedTheme) return cachedTheme
   const saved = readAppSettings(APP_SETTINGS_PATH()).theme
-  cachedTheme = saved === 'light' || saved === 'dark' ? saved : 'system'
+  cachedTheme = saved === 'light' || saved === 'dark' || saved === 'gray' ? saved : 'system'
   return cachedTheme
+}
+
+/** Electron only knows light/dark/system: gray is a dark-family theme. */
+function nativeThemeSource(theme: UiTheme): 'light' | 'dark' | 'system' {
+  return theme === 'gray' ? 'dark' : theme
 }
 
 let cachedAutoSaveDefault: AutoSaveDefault | null = null
@@ -490,6 +495,9 @@ function currentAiPanelPrefs(): AiPanelPrefs {
     customFontSize: saved.aiPanelCustomFontSize,
     spellcheck: saved.aiPanelSpellcheck,
     ribbonFold: saved.ribbonFold,
+    smoothScroll: saved.smoothScroll,
+    gpuAcceleration: saved.gpuAcceleration,
+    contentTheme: saved.contentTheme,
   })
   return cachedAiPanelPrefs
 }
@@ -2515,7 +2523,9 @@ function refreshTitleBarOverlay(): void {
   const presenting = tabManager
     ?.list()
     .some((tab) => tab.active && tab.kind === 'slides' && tab.coversTabStrip)
-  shellWindow.setTitleBarOverlay(tabStripOverlay(nativeTheme.shouldUseDarkColors, presenting))
+  shellWindow.setTitleBarOverlay(
+    tabStripOverlay(nativeTheme.shouldUseDarkColors, presenting, currentTheme() === 'gray'),
+  )
 }
 
 function createShellWindow(): void {
@@ -2536,7 +2546,11 @@ function createShellWindow(): void {
           // stays registered for its accelerators and opens from the strip's
           // menu button (Alt still reveals the native bar where one exists)
           titleBarStyle: 'hidden' as const,
-          titleBarOverlay: tabStripOverlay(nativeTheme.shouldUseDarkColors),
+          titleBarOverlay: tabStripOverlay(
+            nativeTheme.shouldUseDarkColors,
+            false,
+            currentTheme() === 'gray',
+          ),
           autoHideMenuBar: true,
         }),
     webPreferences: {
@@ -3358,11 +3372,11 @@ function registerHomeIpc(): void {
   ipcMain.handle('app:get-theme', (): UiTheme => currentTheme())
 
   ipcMain.handle(HOME_CHANNELS.setTheme, (_event, theme: unknown) => {
-    if (theme !== 'light' && theme !== 'dark' && theme !== 'system') return
+    if (theme !== 'light' && theme !== 'dark' && theme !== 'gray' && theme !== 'system') return
     if (theme === currentTheme()) return
     cachedTheme = theme
     writeAppSetting(APP_SETTINGS_PATH(), 'theme', theme)
-    nativeTheme.themeSource = theme
+    nativeTheme.themeSource = nativeThemeSource(theme)
     refreshTitleBarOverlay()
     for (const wc of webContents.getAllWebContents()) wc.send('app:theme-changed', theme)
   })
@@ -3451,6 +3465,9 @@ function registerHomeIpc(): void {
       customFontSize: 'customFontSize' in raw ? raw.customFontSize : prev.customFontSize,
       spellcheck: 'spellcheck' in raw ? raw.spellcheck : prev.spellcheck,
       ribbonFold: 'ribbonFold' in raw ? raw.ribbonFold : prev.ribbonFold,
+      smoothScroll: 'smoothScroll' in raw ? raw.smoothScroll : prev.smoothScroll,
+      gpuAcceleration: 'gpuAcceleration' in raw ? raw.gpuAcceleration : prev.gpuAcceleration,
+      contentTheme: 'contentTheme' in raw ? raw.contentTheme : prev.contentTheme,
     })
     if (sameAiPanelPrefs(next, prev)) return prev
     cachedAiPanelPrefs = next
@@ -3460,6 +3477,9 @@ function registerHomeIpc(): void {
       aiPanelCustomFontSize: next.customFontSize,
       aiPanelSpellcheck: next.spellcheck,
       ribbonFold: next.ribbonFold,
+      smoothScroll: next.smoothScroll,
+      gpuAcceleration: next.gpuAcceleration,
+      contentTheme: next.contentTheme,
     })
     for (const wc of webContents.getAllWebContents()) wc.send('app:ai-panel-prefs-changed', next)
     return next
@@ -4693,6 +4713,12 @@ async function runHeadlessExportEntry(
   app.exit(headlessExitCode(outcome))
 }
 
+// GPU acceleration can only be switched before Electron is ready: Settings stores the choice and
+// the next launch applies it (software rendering is the fallback for GPUs/drivers that glitch)
+if (readAppSettings(APP_SETTINGS_PATH()).gpuAcceleration === false) {
+  app.disableHardwareAcceleration()
+}
+
 app.whenReady().then(async () => {
   // no activation at launch either (a Dock-less accessory app never takes the menu bar)
   if (E2E_BACKGROUND && process.platform === 'darwin') app.setActivationPolicy('accessory')
@@ -4756,7 +4782,7 @@ app.whenReady().then(async () => {
   // tab loads first (e.g. sheets booting in Chinese while docs shows English).
   currentLang()
   // native menus/dialogs/scrollbars follow the persisted theme from first paint
-  nativeTheme.themeSource = currentTheme()
+  nativeTheme.themeSource = nativeThemeSource(currentTheme())
   // stamp the star-prompt install-age clock on the first launch carrying the feature,
   // and detect upgrade launches (version changed since the previous run)
   try {

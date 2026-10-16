@@ -27,7 +27,7 @@
  */
 
 const { execFileSync } = require('node:child_process')
-const { existsSync, rmSync } = require('node:fs')
+const { existsSync, rmSync, statSync } = require('node:fs')
 const { join } = require('node:path')
 
 function normalizeHttpsBaseUrl(name, value) {
@@ -129,6 +129,45 @@ function compileVisionOcr({ universalOnly } = { universalOnly: false }) {
 
 if (process.platform === 'darwin' && !existsSync(join(__dirname, VISION_OCR_HELPER))) {
   compileVisionOcr()
+}
+
+// macOS print helper (print-pdf.swift): shows the standard print panel with its page preview, which
+// Electron's own webContents.print() panel lacks. Same on-demand swiftc build as the OCR helper;
+// a host-arch binary is the fallback when a cross-target SDK is unavailable.
+const PRINT_PDF_HELPER = '../../packages/electron-utils/native/print-pdf'
+
+function compilePrintPdf({ universalOnly } = { universalOnly: false }) {
+  const src = join(__dirname, `${PRINT_PDF_HELPER}.swift`)
+  const out = join(__dirname, PRINT_PDF_HELPER)
+  try {
+    try {
+      const slices = ['arm64', 'x86_64'].map((arch) => {
+        const slice = `${out}.${arch}`
+        execFileSync('swiftc', ['-O', src, '-target', `${arch}-apple-macos12`, '-o', slice], {
+          stdio: 'inherit',
+        })
+        return slice
+      })
+      execFileSync('lipo', ['-create', ...slices, '-output', out], { stdio: 'inherit' })
+      for (const slice of slices) rmSync(slice, { force: true })
+    } catch (err) {
+      if (universalOnly) throw err
+      execFileSync('swiftc', ['-O', src, '-o', out], { stdio: 'inherit' })
+    }
+  } catch (err) {
+    throw new Error(`print-pdf helper compile failed: ${err}`, { cause: err })
+  }
+}
+
+// rebuilt when missing or older than its source, so a packaged app never ships a stale helper
+function printPdfHelperIsStale() {
+  const bin = join(__dirname, PRINT_PDF_HELPER)
+  const src = join(__dirname, `${PRINT_PDF_HELPER}.swift`)
+  return !existsSync(bin) || statSync(bin).mtimeMs < statSync(src).mtimeMs
+}
+
+if (process.platform === 'darwin' && printPdfHelperIsStale()) {
+  compilePrintPdf()
 }
 
 // Windows local-OCR helper (Windows.Media.Ocr): compiled by the in-box .NET
@@ -290,6 +329,11 @@ const config = {
       from: '../../packages/pdf2docx/ocr-helper/win-ocr.exe',
       to: 'ocr/win-ocr.exe',
     },
+    // macOS print panel helper (exists only on a mac build; electron-builder skips an absent source)
+    {
+      from: '../../packages/electron-utils/native/print-pdf',
+      to: 'print/print-pdf',
+    },
     // genoffice command line: runs on the app binary with ELECTRON_RUN_AS_NODE (as
     // the CLI requires the RunAsNode fuse to remain enabled.
     // Layout (Resources/cli next to wasm/, native/, ocr/) is what
@@ -442,6 +486,9 @@ const config = {
     extendInfo: {
       NSCameraUsageDescription:
         'GenOffice shows your camera on the slides when you turn on Camera during a slide show.',
+      // Slides → Record Narration captures the microphone
+      NSMicrophoneUsageDescription:
+        'GenOffice records your voice as slide narration when you use Record Narration.',
     },
     notarize: true,
     extraResources: [
