@@ -13,6 +13,10 @@ export function setNoteNumFmts(props: { footnote?: NoteProps; endnote?: NoteProp
   numFmt.endnote = props.endnote?.numFmt ?? DEFAULT_FMT.endnote
 }
 
+export function currentNoteNumFmt(kind: NoteKind): string {
+  return numFmt[kind]
+}
+
 const ROMAN: Array<[number, string]> = [
   [1000, 'm'],
   [900, 'cm'],

@@ -123,9 +123,8 @@ export function protectedNoteMarkBlock(
   kind: NoteKind,
   id: string,
 ): number | null {
-  const re = new RegExp(
-    `<w:${kind}Reference\\b[^>]*\\bw:id="${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`,
-  )
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`<w:${kind}Reference\\b[^>]*\\bw:id=(?:"${escapedId}"|'${escapedId}')`)
   let found: number | null = null
   doc.forEach((block, _offset, index) => {
     if (found === null && block.type.name === 'docProtected' && re.test(xmlOf(block))) found = index

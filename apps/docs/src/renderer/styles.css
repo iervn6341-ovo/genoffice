@@ -242,6 +242,27 @@
   --docs-shadow-toast: 0 4px 16px rgb(0 0 0 / 45%);
 }
 
+/* Gray variant: the chrome tokens are lifted (tokens.css), so the Docs-scoped chrome
+   surfaces that the dark block hard-codes follow them instead of staying near-black */
+[data-theme='dark'][data-theme-variant='gray'] {
+  --word-heading: #a6cffa;
+  --docs-chip-bg: #484c52;
+  --docs-statusbar-bg: #4a4a4a;
+  --docs-statusbar-border: #5c5c5c;
+  --docs-ruler-bg: #444;
+  --docs-ruler-tick: #8c8c8c;
+  --docs-ruler-border: #5c5c5c;
+  --docs-ruler-ink: #c4c4c4;
+  --docs-ruler-btn-bg: #555;
+  --docs-ruler-btn-hover: #626262;
+  --docs-ruler-btn-border: #707070;
+  --docs-ruler-btn-ink: #e4e4e4;
+  --docs-ruler-tab-guide: #9a9a9a;
+  --docs-tstyle-border: #707070;
+  --docs-tstyle-row: #4a4a4a;
+  --docs-pv-canvas: #2f2f2f;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
     --word-blue: #4a9eff;
@@ -1535,6 +1556,24 @@ html.genoffice-popover-open .ribbon-tabs {
   background: var(--active-bg);
 }
 
+.symbol-more {
+  grid-column: 1 / -1;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 7px;
+  cursor: pointer;
+}
+
+.symbol-more:hover {
+  background: var(--hover);
+}
+
+.docs-symbol-modal {
+  width: min(720px, 92vw);
+}
+
 /* ---- Shape picker dropdown ---- */
 
 .shape-palette {
@@ -1741,7 +1780,7 @@ html.genoffice-popover-open .ribbon-tabs {
 }
 
 .equation-modal {
-  min-width: 460px;
+  width: min(750px, 92vw);
 }
 
 .equation-preview {
@@ -1770,14 +1809,25 @@ html.genoffice-popover-open .ribbon-tabs {
   font-family: system-ui, sans-serif;
 }
 
-.equation-inline-toggle {
-  display: flex;
+.modal.equation-modal .equation-inline-toggle {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin: 10px 0 12px;
   font-size: 12px;
   color: var(--text-dim);
   user-select: none;
+}
+
+.modal.equation-modal .equation-inline-toggle input[type='checkbox'] {
+  display: inline-block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  appearance: auto;
+  accent-color: var(--word-blue);
 }
 
 /* ---- Layout: preset menus + paragraph spinners ---- */
@@ -2147,6 +2197,10 @@ th.cell-rev-del {
 .style-card-label {
   font-size: 10.5px;
   color: var(--text-dim);
+}
+
+.style-card.active .style-card-label {
+  color: var(--text);
 }
 
 .style-card-preview {
@@ -2746,6 +2800,12 @@ th.cell-rev-del {
   outline: none;
   min-height: 1.3em;
   white-space: pre-wrap;
+}
+
+.hf-edit-error {
+  margin-top: 5px;
+  color: var(--danger);
+  font-size: 11px;
 }
 
 .page-hf-header {
@@ -3403,8 +3463,10 @@ th.cell-rev-del {
   margin-bottom: 6px;
 }
 
-.hf-menu input {
+.hf-menu textarea {
   width: 100%;
+  min-height: 72px;
+  resize: vertical;
   box-sizing: border-box;
   padding: 5px 8px;
   border: 1px solid var(--border);
@@ -3412,6 +3474,23 @@ th.cell-rev-del {
   font-size: 12.5px;
   background: var(--surface);
   color: var(--text);
+}
+
+.hf-menu-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.hf-menu-fields button,
+.hf-menu-fields select {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  padding: 3px 6px;
 }
 
 .hf-menu-actions {
@@ -8591,6 +8670,117 @@ body.docs-crop-active
   margin-top: 18px;
 }
 
+.note-settings-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.note-settings-kinds {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.note-settings-kinds button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.note-settings-kinds button[aria-selected='true'] {
+  border-bottom-color: var(--word-blue);
+  color: var(--text);
+}
+
+.note-settings-kinds button:focus-visible {
+  outline: 2px solid var(--word-blue);
+  outline-offset: -2px;
+}
+
+.note-settings-scope {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.note-settings-preview-limit {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 8px 0;
+}
+
+.toc-options-modal {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.toc-options-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 0.7fr 1fr;
+  gap: 12px;
+}
+
+.toc-options-checks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 18px;
+}
+
+.modal .toc-option-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin-bottom: 6px;
+}
+
+.modal .toc-option-check input {
+  display: inline-block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--word-blue);
+}
+
+.toc-style-levels {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  margin: 12px 0 0;
+  padding: 12px;
+}
+
+.toc-style-levels legend {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.toc-style-list {
+  max-height: 160px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.modal .toc-style-list label {
+  display: grid;
+  grid-template-columns: 1fr 82px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.modal .toc-style-list select {
+  height: 28px;
+  margin: 0;
+}
+
 .modal.gs-form {
   padding: 24px;
   box-shadow: var(--docs-shadow-modal-gs);
@@ -9967,6 +10157,29 @@ ruby.doc-ruby rt {
   background: none;
 }
 
+/* section-end endnote area rows (in-flow editor widgets; exact height set inline so
+   the page slicer and the DOM agree) */
+.page-section-endnote-row {
+  box-sizing: border-box;
+  overflow: hidden;
+  color: var(--docs-paper-ink-dim);
+}
+
+.page-section-endnote-sep {
+  width: min(2in, 100%);
+  height: 11px;
+  border-bottom: 1px solid var(--docs-paper-ink-faint);
+  margin-bottom: 4px;
+}
+
+.page-section-endnote-row .page-note {
+  padding: 0;
+}
+
+.pv-page .page-section-endnote-btn {
+  display: none;
+}
+
 .page-note {
   display: flex;
   align-items: baseline;
@@ -9997,11 +10210,6 @@ ruby.doc-ruby rt {
   font-size: 11px;
   color: var(--docs-paper-ink-faint);
   cursor: pointer;
-  visibility: hidden;
-}
-
-.page-note:hover .page-note-btn {
-  visibility: visible;
 }
 
 .page-note-btn:hover {
@@ -10125,6 +10333,55 @@ ruby.doc-ruby rt {
   align-items: flex-end;
 }
 
+.font-advanced-dialog {
+  width: min(690px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.font-dialog-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.font-dialog-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.font-dialog-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.font-advanced-dialog .font-dialog-row {
+  margin-bottom: 10px;
+}
+
+.font-advanced-dialog .font-dialog-row > label:not(.font-check) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.font-advanced-dialog input[type='number'] {
+  width: 100%;
+  min-width: 0;
+}
+
+.font-dialog-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin: 8px 0;
+}
+
 .font-dialog-row > label {
   flex: 1;
   min-width: 0;
@@ -10173,6 +10430,49 @@ ruby.doc-ruby rt {
   margin-top: 0 !important;
 }
 
+.para-advanced-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  overflow-y: auto;
+}
+
+.para-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 16px 0;
+}
+
+.para-options .font-check {
+  white-space: normal;
+  padding-bottom: 0;
+}
+
+.para-tab-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.para-tab-list {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.para-tab-list > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--border);
+}
+
+.para-tab-list > div:last-child {
+  border-bottom: 0;
+}
+
 .para-unit {
   color: var(--text-dim);
   font-size: 12px;
@@ -10193,6 +10493,39 @@ ruby.doc-ruby rt {
 
 .prompt-textarea:focus {
   border-color: var(--word-blue);
+}
+
+.prompt-secondary {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.prompt-secondary input {
+  width: 100%;
+}
+
+.prompt-secondary small {
+  color: var(--text-dim);
+}
+
+.note-mark-presets {
+  display: flex;
+  gap: 6px;
+}
+
+.note-mark-presets button {
+  min-width: 32px;
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.note-mark-presets button:hover {
+  background: var(--hover);
 }
 
 /* ---- Draw (ink annotations) ---- */
@@ -10294,9 +10627,25 @@ ruby.doc-ruby rt {
 }
 
 .pgnum-row select,
-.pgnum-row input {
+.pgnum-row input:not([type='checkbox']):not([type='radio']) {
   width: 180px;
   padding: 4px 6px;
+}
+
+.pgnum-row .pgnum-check,
+.pgnum-row input[type='radio'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.pgnum-row.pgnum-choice {
+  justify-content: flex-start;
+}
+
+.pgnum-row.pgnum-choice input[type='number'] {
+  margin-left: auto;
 }
 
 .pgnum-hint {
@@ -10860,6 +11209,114 @@ tr > .page-gap-cut {
 
 .table-properties-segment input:focus-visible + span {
   box-shadow: 0 0 0 3px var(--docs-focus-ring);
+}
+
+/* Table Properties tabs (Table / Row / Cell / Alt Text): the dialog stays one fixed width */
+.table-properties-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 12px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--hover);
+}
+
+.table-properties-tabs button {
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.table-properties-tabs button.active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.table-properties-tabs button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--docs-focus-ring);
+}
+
+.table-properties-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+/* Table Tools menu and its dialogs (sort / formula / convert) */
+.table-tools-menu hr {
+  margin: 4px 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.table-tools-dialog {
+  max-width: 420px;
+}
+
+.table-sort-key {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.table-sort-key:disabled {
+  opacity: 0.55;
+}
+
+.table-tools-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: center;
+}
+
+.table-tools-radios label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.table-sort-key .table-tools-radios {
+  grid-column: 1 / -1;
+}
+
+.table-tools-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-tools-other {
+  width: 4em;
+  margin-inline-start: 4px;
+}
+
+.table-tools-inline-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 8px;
+}
+
+.table-style-custom {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
 }
 
 .table-properties-grid {
@@ -11911,4 +12368,227 @@ tr > .page-gap-cut {
 /* the entries without a glyph line up with the text of the ones that have one */
 .borders-menu button:not(:has(svg)) {
   padding-left: 40px;
+}
+
+/* Advanced Symbol dialog: Symbols / Special Characters tabs, character info and AutoCorrect entries */
+.docs-symbol-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 10px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--hover);
+}
+
+.docs-symbol-tabs button {
+  flex: 1;
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.docs-symbol-tabs button.active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.docs-special-chars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.docs-special-chars > button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+}
+
+.docs-special-chars > button.active {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+
+.docs-special-glyph {
+  font-size: 18px;
+  text-align: center;
+}
+
+.docs-special-name {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docs-special-code {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.docs-special-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.docs-symbol-info {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.docs-autocorrect {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.docs-autocorrect legend {
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.docs-autocorrect-row,
+.docs-autocorrect-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.docs-autocorrect-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.docs-autocorrect-with {
+  min-width: 1.5em;
+  text-align: center;
+  font-size: 16px;
+}
+
+.docs-autocorrect-entry code {
+  flex: 1;
+}
+
+/* Equation contextual tab: two-row symbol grid and two-row structure buttons so the tab stays compact */
+.equation-ribbon-symbols {
+  display: grid;
+  grid-template-rows: repeat(2, 26px);
+  grid-auto-flow: column;
+  grid-auto-columns: 26px;
+  gap: 2px;
+}
+
+.equation-ribbon-symbols button {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.equation-ribbon-symbols button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.equation-ribbon-symbols button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.equation-ribbon-structures {
+  display: grid;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-flow: column;
+  gap: 2px 4px;
+}
+
+.equation-ribbon-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  width: 380px;
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+}
+
+/* M3: an equation block left in content-editing mode must still print/export its 2D MathML
+   (vector glyphs and rules), never the editable token strip */
+@media print {
+  .doc-content-editing .doc-formula.doc-formula-has-math {
+    display: none;
+  }
+
+  .doc-content-editing .doc-formula-math {
+    display: inline-block;
+  }
+}
+
+/* ---- Text boundaries: L-shaped corner marks just outside each page's text area (screen only) ---- */
+
+.text-boundary-overlays {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.text-boundary-mark {
+  --tb-len: 14px;
+  position: absolute;
+  width: var(--tb-len);
+  height: var(--tb-len);
+  box-sizing: border-box;
+  border: 0 solid var(--docs-paper-ink-faint);
+}
+
+/* the mark's inner corner touches the text-area corner: ┘ at the top-left, └ top-right, ┐ bottom-left, ┌ bottom-right */
+.text-boundary-tl {
+  transform: translate(-100%, -100%);
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+}
+
+.text-boundary-tr {
+  transform: translate(0, -100%);
+  border-left-width: 1px;
+  border-bottom-width: 1px;
+}
+
+.text-boundary-bl {
+  transform: translate(-100%, 0);
+  border-right-width: 1px;
+  border-top-width: 1px;
+}
+
+.text-boundary-br {
+  transform: translate(0, 0);
+  border-left-width: 1px;
+  border-top-width: 1px;
+}
+
+@media print {
+  .text-boundary-overlays {
+    display: none;
+  }
 }

@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { Editor } from '@tiptap/core'
-import { latexToOmml, ommlToMathML } from '@genoffice/docx-engine'
-import { t, useI18n, type StringKey } from '../i18n/locale'
+import { NodeSelection } from '@tiptap/pm/state'
+import { ommlToLatex } from '@genoffice/docx-engine'
+import { MathWorkbench, mathPreview, type MathWorkbenchLabels } from '@genoffice/ui'
+import { useI18n, type StringKey } from '../i18n/locale'
 import { equationBlockJson, inlineEquationNodeJson } from '../editor/equation'
 import { useModalKeys } from './modal-keys'
 
@@ -61,16 +63,59 @@ export interface MathEditTarget {
   kind: 'inline' | 'block'
 }
 
-/** MathML preview (returns null with an error message when the LaTeX is invalid) */
-function previewOf(latex: string): { mathml: string } | { error: string } | null {
-  if (!latex.trim()) return null
-  try {
-    const omml = latexToOmml(latex)
-    const mathml = ommlToMathML(`<m:oMath>${omml}</m:oMath>`)
-    return mathml ? { mathml } : { error: t('appPreviewUnavailable') }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) }
+export function currentEquationSource(editor: Editor, target: MathEditTarget): string | null {
+  const node = editor.state.doc.nodeAt(target.pos)
+  if (target.kind === 'inline' && node?.type.name === 'docInlineMath') {
+    return ommlToLatex(String(node.attrs.omml ?? ''))
   }
+  if (target.kind === 'block' && node?.type.name === 'docProtected') {
+    const formula = node.attrs.formulaDisplay as { omml?: string } | null
+    return formula?.omml ? ommlToLatex(formula.omml) : null
+  }
+  return null
+}
+
+/** Locate the equation selected in the document before ribbon focus moves away. */
+export function selectedEquationTarget(editor: Editor): MathEditTarget | null {
+  const selection = editor.state.selection
+  const candidates: Array<{ pos: number; kind: MathEditTarget['kind'] }> = []
+  if (selection instanceof NodeSelection && selection.node.type.name === 'docProtected') {
+    candidates.push({ pos: selection.from, kind: 'block' })
+  }
+  if (selection.$from.nodeAfter?.type.name === 'docInlineMath') {
+    candidates.push({ pos: selection.from, kind: 'inline' })
+  }
+  if (selection.$from.nodeBefore?.type.name === 'docInlineMath') {
+    candidates.push({ pos: selection.from - selection.$from.nodeBefore.nodeSize, kind: 'inline' })
+  }
+  for (const candidate of candidates) {
+    const target = { ...candidate, latex: '' }
+    const latex = currentEquationSource(editor, target)
+    if (latex !== null) return { ...target, latex }
+  }
+  return null
+}
+
+/** Replace a reversible equation; leave unsupported original OMML intact. */
+export function updateEquationFromLatex(
+  editor: Editor,
+  target: MathEditTarget,
+  latex: string,
+): boolean {
+  if (currentEquationSource(editor, target) === null) return false
+  const node = editor.state.doc.nodeAt(target.pos)
+  if (target.kind === 'inline' && node?.type.name === 'docInlineMath') {
+    const next = inlineEquationNodeJson(latex)
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(target.pos, undefined, next.attrs))
+    return true
+  }
+  if (target.kind === 'block' && node?.type.name === 'docProtected') {
+    // A full re-edit generates new OMML and a fresh block anchor.
+    const next = editor.schema.nodeFromJSON(equationBlockJson(latex))
+    editor.view.dispatch(editor.state.tr.replaceWith(target.pos, target.pos + node.nodeSize, next))
+    return true
+  }
+  return false
 }
 
 /** Insert Equation dialog: LaTeX input + live MathML preview, shared by the ribbon and the native menu */
@@ -86,26 +131,49 @@ export function EquationModal({
 }) {
   const { t } = useI18n()
   const modalKeys = useModalKeys(onClose)
-  const [latex, setLatex] = useState(editTarget?.latex ?? '')
+  const [latex, setLatex] = useState(() =>
+    editTarget ? (currentEquationSource(editor, editTarget) ?? '') : '',
+  )
   const [inline, setInline] = useState(editTarget?.kind === 'inline')
-  const preview = useMemo(() => previewOf(latex), [latex])
-  const canInsert = preview !== null && 'mathml' in preview
+  const preview = useMemo(() => mathPreview(latex), [latex])
+  const canInsert =
+    preview !== null &&
+    'mathml' in preview &&
+    (!editTarget || currentEquationSource(editor, editTarget) !== null)
+  const labels: MathWorkbenchLabels = {
+    input: t('appMathSource'),
+    structures: t('appMathStructures'),
+    professional: t('appMathProfessional'),
+    linear: t('appMathLinear'),
+    preview: t('appMathPreview'),
+    empty: t('appLatexPreviewHint'),
+    symbols: t('appSymbolMath'),
+    inputFormats: { latex: 'LaTeX', unicodeMath: 'UnicodeMath' },
+    symbolSearch: t('appSymbolSearch'),
+    symbolSubsetNames: {
+      math: t('appSymbolMath'),
+      greek: t('appSymbolGreek'),
+      arrows: t('appSymbolArrows'),
+    },
+    categoryNames: {
+      fraction: t('appMathFraction'),
+      script: t('appMathScript'),
+      radical: t('appMathRadical'),
+      integral: t('appMathIntegral'),
+      largeOperator: t('appMathLargeOperator'),
+      delimiter: t('appMathDelimiter'),
+      function: t('appMathFunction'),
+      accent: t('appMathAccent'),
+      limitLog: t('appMathLimitLog'),
+      operator: t('appMathOperator'),
+      matrix: t('appMathMatrix'),
+    },
+  }
 
   const insert = () => {
     if (!canInsert || !editor.isEditable) return
     if (editTarget) {
-      const node = editor.state.doc.nodeAt(editTarget.pos)
-      if (editTarget.kind === 'inline' && node?.type.name === 'docInlineMath') {
-        const next = inlineEquationNodeJson(latex)
-        editor.view.dispatch(editor.state.tr.setNodeMarkup(editTarget.pos, undefined, next.attrs))
-      } else if (editTarget.kind === 'block' && node?.type.name === 'docProtected') {
-        // rebuilt from LaTeX: the block loses its original anchor and saves as
-        // freshly generated OMML (that is the point of a full re-edit)
-        const next = editor.schema.nodeFromJSON(equationBlockJson(latex))
-        editor.view.dispatch(
-          editor.state.tr.replaceWith(editTarget.pos, editTarget.pos + node.nodeSize, next),
-        )
-      }
+      if (!updateEquationFromLatex(editor, editTarget, latex)) return
     } else if (inline) {
       insertInlineEquationFromLatex(editor, latex)
     } else {
@@ -121,29 +189,14 @@ export function EquationModal({
       onKeyDown={modalKeys.onKeyDown}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="modal equation-modal">
+      <div
+        className="modal equation-modal"
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') insert()
+        }}
+      >
         <h2>{t('appInsertEquation')}</h2>
-        <label>
-          LaTeX
-          <input
-            value={latex}
-            onChange={(e) => setLatex(e.target.value)}
-            placeholder={t('appLatexPlaceholder')}
-            onKeyDown={(e) => e.key === 'Enter' && insert()}
-            autoFocus
-          />
-        </label>
-        <div className="equation-preview">
-          {preview === null && (
-            <span className="equation-preview-hint">{t('appLatexPreviewHint')}</span>
-          )}
-          {preview !== null && 'error' in preview && (
-            <span className="equation-preview-error">{preview.error}</span>
-          )}
-          {preview !== null && 'mathml' in preview && (
-            <span dangerouslySetInnerHTML={{ __html: preview.mathml }} />
-          )}
-        </div>
+        <MathWorkbench latex={latex} onLatexChange={setLatex} labels={labels} autoFocus />
         {!editTarget && (
           <label className="equation-inline-toggle">
             <input type="checkbox" checked={inline} onChange={(e) => setInline(e.target.checked)} />
@@ -177,7 +230,7 @@ export function EquationGallery({
   return (
     <div data-rb-panel="" className="equation-gallery">
       {BUILTIN_EQUATIONS.map((eq) => {
-        const preview = previewOf(eq.latex)
+        const preview = mathPreview(eq.latex)
         return (
           <button
             key={eq.nameKey}

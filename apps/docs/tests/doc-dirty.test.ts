@@ -18,6 +18,8 @@ function cleanState(): DocDirtyState {
     footerDirty: false,
     hfVariantsDirty: [],
     sectionHfEdits: {},
+    sectionHfLinkEdits: {},
+    sectionHfRefEdits: {},
     pgNumEdit: null,
     pgNumDirtySections: [],
     numberingDirty: false,
@@ -78,8 +80,10 @@ describe('isDocDirty', () => {
     ['hfVariantsDirty', { hfVariantsDirty: ['headerFirst'] }],
     ['pgNumDirtySections', { pgNumDirtySections: [0] }],
     ['sectionHfEdits', { sectionHfEdits: { '3:header': {} } }],
+    ['sectionHfLinkEdits', { sectionHfLinkEdits: { '3:header:default': true } }],
     ['styleUpserts', { styleUpserts: { Heading1: {} } }],
     ['pgNumEdit', { pgNumEdit: { fmt: 'decimal' } }],
+    ['sectionHfRefEdits', { sectionHfRefEdits: { '7:header:first': 'rId60' } }],
     ['trailingStartType', { trailingStartType: 'nextPage' }],
   ] as const)('is true when only %s changed', (_name, patch) => {
     expect(isDocDirty({ ...cleanState(), ...patch })).toBe(true)
@@ -92,6 +96,8 @@ describe('resetCrossDocEditState', () => {
       setSectionsDirty: vi.fn(),
       setTrailingStartType: vi.fn(),
       setSectionHfEdits: vi.fn(),
+      setSectionHfLinkEdits: vi.fn(),
+      setSectionHfRefEdits: vi.fn(),
       setPgNumEdit: vi.fn(),
       setPgNumDirtySections: vi.fn(),
       setPendingNumbering: vi.fn(),
@@ -105,6 +111,8 @@ describe('resetCrossDocEditState', () => {
     expect(sink.setSectionsDirty).toHaveBeenCalledWith([])
     expect(sink.setTrailingStartType).toHaveBeenCalledWith(null)
     expect(sink.setSectionHfEdits).toHaveBeenCalledWith({})
+    expect(sink.setSectionHfLinkEdits).toHaveBeenCalledWith({})
+    expect(sink.setSectionHfRefEdits).toHaveBeenCalledWith({})
     expect(sink.setPgNumEdit).toHaveBeenCalledWith(null)
     expect(sink.setPgNumDirtySections).toHaveBeenCalledWith([])
     expect(sink.setPendingNumbering).toHaveBeenCalledWith({ newDefs: [], restartNums: [] })

@@ -608,6 +608,9 @@ export function insertBlankPageAt(editor: Editor): void {
 }
 
 export interface InsertTabProps extends TabProps {
+  fileName: string
+  author?: string
+  hfSectionIndex?: number
   header: HeaderFooter | null
   onHeader: (next: HeaderFooter) => void
   footer: HeaderFooter | null
@@ -1110,6 +1113,8 @@ interface ViewTabProps {
   onReadMode: (v: boolean) => void
   showGrid: boolean
   onShowGrid: (v: boolean) => void
+  showTextBoundaries: boolean
+  onShowTextBoundaries: (v: boolean) => void
   splitView: boolean
   onSplitView: (v: boolean) => void
   onPagePreview: () => void
@@ -1135,6 +1140,8 @@ export function ViewTab({
   onReadMode,
   showGrid,
   onShowGrid,
+  showTextBoundaries,
+  onShowTextBoundaries,
   splitView,
   onSplitView,
   onPagePreview,
@@ -1352,6 +1359,17 @@ export function ViewTab({
             <IconGridlines size={BIG} />
           </span>
           <span>{t('ribbonGridlines')}</span>
+        </button>
+        <button
+          className={`rb-big ${showTextBoundaries ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={t('ribbonTextBoundariesTip')}
+          onClick={() => onShowTextBoundaries(!showTextBoundaries)}
+        >
+          <span className="rb-big-icon">
+            <IconGridlines size={BIG} />
+          </span>
+          <span>{t('ribbonTextBoundaries')}</span>
         </button>
         <button
           className={`rb-big ${showNav ? 'active' : ''}`}

@@ -92,6 +92,8 @@ export function ribbonProps(editor: Editor, formatState: RibbonFormatState) {
     onReadMode: noop,
     showGrid: false,
     onShowGrid: noop,
+    showTextBoundaries: false,
+    onShowTextBoundaries: noop,
     splitView: false,
     onSplitView: noop,
     onPagePreview: noop,

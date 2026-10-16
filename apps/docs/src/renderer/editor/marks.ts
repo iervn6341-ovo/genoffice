@@ -7,6 +7,11 @@ import { cssCsFontFamily, cssLatinOnlyFontFamily, cssRunFontFamily } from '../li
 import { isEastAsianFontName } from '../font-list'
 import { t } from '../i18n/locale'
 import { dkBackground } from './dark-page'
+import {
+  enabledStylisticSets,
+  word2010PropertyPresent,
+  word2010PropertyValue,
+} from './font-advanced'
 import { toggleEffectiveFlag } from './effective-format'
 import { runBorderDecls } from './run-border'
 import { fillInk } from './shading-ink'
@@ -73,6 +78,12 @@ export const ItalicMark = Mark.create({
 
 export const UnderlineMark = Mark.create({
   name: 'underline',
+  addAttributes() {
+    return {
+      style: { default: null as string | null },
+      color: { default: null as string | null },
+    }
+  },
   parseHTML() {
     return [
       { tag: 'u' },
@@ -82,8 +93,22 @@ export const UnderlineMark = Mark.create({
       },
     ]
   },
-  renderHTML() {
-    return ['u', 0]
+  renderHTML({ mark }) {
+    const variants: Record<string, string> = {
+      double: 'double',
+      dotted: 'dotted',
+      dash: 'dashed',
+      dashLong: 'dashed',
+      wave: 'wavy',
+      wavyDouble: 'wavy',
+    }
+    const variant = variants[String(mark.attrs.style ?? '')]
+    const color = String(mark.attrs.color ?? '')
+    const styles = [
+      variant ? `text-decoration-style:${variant}` : '',
+      /^[0-9a-fA-F]{6}$/.test(color) ? `text-decoration-color:#${color}` : '',
+    ].filter(Boolean)
+    return ['u', styles.length ? { style: styles.join(';') } : {}, 0]
   },
   addKeyboardShortcuts() {
     return { 'Mod-u': () => this.editor.commands.toggleMark('underline') }
@@ -481,9 +506,13 @@ const CLIPBOARD_TEXT_STYLE_TYPES: Record<string, 'string' | 'number' | 'boolean'
   fontAscii: 'string',
   csFont: 'string',
   charSpacingTwips: 'number',
+  charScalePct: 'number',
   charScaleEm: 'number',
   charScaleX: 'string',
+  kernHalfPoints: 'number',
   kern: 'boolean',
+  underlineStyle: 'string',
+  underlineColor: 'string',
   highlight: 'string',
   shading: 'string',
   textOutline: 'string',
@@ -581,12 +610,17 @@ export const TextStyleMark = Mark.create({
       // complex-script slot (w:cs); convert sets it only when the run text needs it
       csFont: { default: null as string | null },
       charSpacingTwips: { default: null as number | null },
+      charScalePct: { default: null as number | null, rendered: false },
       // letter spacing (em, negative = condensed) converted from w:w scaling; precomputed by convert per run text
       charScaleEm: { default: null as number | null },
       // w:w on a whitespace-free run as JSON {s,gapEm}: real glyph compression (text-effects.ts)
       charScaleX: { default: null as string | null },
+      kernHalfPoints: { default: null as number | null, rendered: false },
       // w:kern resolved against the run size (Word kerns only when asked); null = document default
       kern: { default: null as boolean | null },
+      underlineStyle: { default: null as string | null, rendered: false },
+      underlineColor: { default: null as string | null, rendered: false },
+      rawRPrW14Prefixes: { default: null as string[] | null, rendered: false },
       highlight: { default: null as string | null },
       // run shading fill, hex without '#' (w:shd w:fill)
       shading: { default: null as string | null },
@@ -675,6 +709,40 @@ export const TextStyleMark = Mark.create({
     else if (scaleEm) styles.push(`letter-spacing:${scaleEm}em`)
     else if (mark.attrs.charSpacingTwips === 0) styles.push('letter-spacing:0')
     if (mark.attrs.kern != null) styles.push(`font-kerning:${mark.attrs.kern ? 'normal' : 'none'}`)
+    const rawRPr = String(mark.attrs.rawRPr ?? '')
+    const w14Prefixes = (mark.attrs.rawRPrW14Prefixes as string[] | null) ?? undefined
+    const typographyValue = (localName: string) =>
+      word2010PropertyValue(rawRPr, localName, w14Prefixes)
+    const ligatures = typographyValue('ligatures')
+    const ligatureCss: Record<string, string> = {
+      none: 'none',
+      standard: 'common-ligatures',
+      standardContextual: 'common-ligatures contextual',
+      historicalDiscretionary: 'historical-ligatures discretionary-ligatures',
+      all: 'common-ligatures historical-ligatures discretionary-ligatures contextual',
+    }
+    if (ligatures && ligatureCss[ligatures])
+      styles.push(`font-variant-ligatures:${ligatureCss[ligatures]}`)
+    const numberSpacing = typographyValue('numSpacing')
+    const numberForm = typographyValue('numForm')
+    const numeric = [
+      numberSpacing === 'tabular'
+        ? 'tabular-nums'
+        : numberSpacing === 'proportional'
+          ? 'proportional-nums'
+          : '',
+      numberForm === 'lining' ? 'lining-nums' : numberForm === 'oldStyle' ? 'oldstyle-nums' : '',
+    ].filter(Boolean)
+    if (numeric.length) styles.push(`font-variant-numeric:${numeric.join(' ')}`)
+    const features: string[] = []
+    if (
+      word2010PropertyPresent(rawRPr, 'cntxtAlts', w14Prefixes) &&
+      !/^(?:0|false|off)$/.test(typographyValue('cntxtAlts') ?? '')
+    )
+      features.push('"calt" 1')
+    for (const id of enabledStylisticSets(rawRPr, w14Prefixes) ?? [])
+      features.push(`"ss${String(id).padStart(2, '0')}" 1`)
+    if (features.length) styles.push(`font-feature-settings:${features.join(',')}`)
     const shading = (mark.attrs.shadingDisplay ?? mark.attrs.shading) as string | null
     // shading first: when both are set the later highlight declaration wins (Word behavior)
     if (shading) styles.push(`background-color:#${shading}`)

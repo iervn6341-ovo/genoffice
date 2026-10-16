@@ -6,6 +6,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 // node_modules is a symlink into the main checkout, so bare specifiers would
 // silently bundle the other checkout's (possibly stale) code.
 const localAlias = {
+  '@genoffice/office-math': resolve(__dirname, '../../packages/office-math/src/index.ts'),
   '@genoffice/docx-engine/lazy-media': resolve(
     __dirname,
     '../../packages/docx-engine/src/lazy-media.ts',
@@ -26,7 +27,12 @@ export default defineConfig({
   main: {
     plugins: [
       externalizeDepsPlugin({
-        exclude: ['@genoffice/docx-engine', '@genoffice/electron-utils', '@genoffice/font-metrics'],
+        exclude: [
+          '@genoffice/office-math',
+          '@genoffice/docx-engine',
+          '@genoffice/electron-utils',
+          '@genoffice/font-metrics',
+        ],
       }),
     ],
     resolve: { alias: localAlias },

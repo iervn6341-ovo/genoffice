@@ -118,10 +118,92 @@ describe('layout on the undo stack (C7)', () => {
     expect(nonFinal.sectionsDirty).toEqual([0])
   })
 
+  it('marks a restored rich header dirty after save while keeping its field fragment', () => {
+    const field = {
+      xml: '<w:fldSimple w:instr=" DATE "><w:r><w:t>Oct 13</w:t></w:r></w:fldSimple>',
+      instruction: ' DATE ',
+      token: '⟦DATE·1⟧',
+      displayText: 'Oct 13',
+      resultRuns: [{ text: 'Oct 13' }],
+    }
+    const original = {
+      text: 'Before Oct 13',
+      paras: [{ runs: [{ text: 'Before ' }, { text: 'Oct 13', hfField: field }] }],
+    }
+    const edited = {
+      text: 'After Oct 13',
+      paras: [{ runs: [{ text: 'After ' }, { text: 'Oct 13', hfField: field }] }],
+    }
+    const design = {
+      pageColor: null,
+      pageColorDirty: false,
+      watermark: null,
+      watermarkDirty: false,
+      watermarkStyle: null,
+      watermarkPicture: null,
+      themeFonts: null,
+      themeFontsDirty: false,
+      themeColors: null,
+      themeColorsDirty: false,
+      header: original,
+      headerDirty: false,
+      footer: null,
+      footerDirty: false,
+      hfVariants: {},
+      hfVariantsDirty: [],
+    }
+    const restored = { ...BASE, design }
+    const saved = { ...BASE, design: { ...design, header: edited, headerDirty: false } }
+    const result = withRestoreDirty(restored, saved)
+    expect(result.design?.header).toEqual(original)
+    expect(result.design?.headerDirty).toBe(true)
+    expect((result.design?.header as typeof original).paras[0]?.runs[1]?.hfField?.xml).toBe(
+      field.xml,
+    )
+  })
+
   it('a text edit does not trigger a layout restore', async () => {
     const t = await setup()
     t.commit({ titlePg: true, titlePgDirty: true })
     t.editor.commands.insertContentAt(1, 'x')
     expect(t.restores).toHaveLength(0)
+  })
+
+  it('undoes and redoes a section header link together with its pending part edit', async () => {
+    const t = await setup()
+    const edited = { '7:header:first': { text: 'Independent first page' } }
+    t.commit({ sectionHfEdits: edited })
+    t.commit({ sectionHfEdits: {}, sectionHfLinkEdits: { '7:header:first': true } })
+    expect(t.live.sectionHfLinkEdits).toEqual({ '7:header:first': true })
+    undo(t.editor.state, t.editor.view.dispatch)
+    expect(t.live.sectionHfEdits).toEqual(edited)
+    expect(t.live.sectionHfLinkEdits ?? {}).toEqual({})
+    redo(t.editor.state, t.editor.view.dispatch)
+    expect(t.live.sectionHfEdits).toEqual({})
+    expect(t.live.sectionHfLinkEdits).toEqual({ '7:header:first': true })
+  })
+
+  it('reconciles an inherited header across save and can restore a removed local ref', () => {
+    const key = '7:header:default'
+    const inherited: LayoutSnapshot = { ...BASE, sectionHfLocalRefs: {} }
+    const savedLocal: LayoutSnapshot = { ...BASE, sectionHfLocalRefs: { [key]: 'rId61' } }
+    const undoAfterSave = withRestoreDirty(inherited, savedLocal)
+    expect(undoAfterSave.sectionHfLinkEdits).toEqual({ [key]: true })
+    expect(undoAfterSave.sectionHfRefEdits).toEqual({})
+    const redoAfterLinkSave = withRestoreDirty(savedLocal, inherited)
+    expect(redoAfterLinkSave.sectionHfRefEdits).toEqual({ [key]: 'rId61' })
+    expect(redoAfterLinkSave.sectionHfLinkEdits).toEqual({})
+  })
+
+  it('preserves history when only the unsaved layout attribute differs from rebuilt DOCX', async () => {
+    const t = await setup()
+    t.commit({ sectionHfEdits: { '7:header:default': { text: 'Edited' } } })
+    const json = t.editor.state.doc.toJSON()
+    const rebuilt = { ...json, attrs: undefined }
+    expect(t.editor.state.doc.eq(t.editor.schema.nodeFromJSON(rebuilt))).toBe(false)
+    const comparable = { ...rebuilt, attrs: { layout: t.editor.state.doc.attrs.layout } }
+    expect(t.editor.state.doc.eq(t.editor.schema.nodeFromJSON(comparable))).toBe(true)
+    undo(t.editor.state, t.editor.view.dispatch)
+    expect(t.live.sectionHfEdits ?? {}).toEqual({})
   })
 })

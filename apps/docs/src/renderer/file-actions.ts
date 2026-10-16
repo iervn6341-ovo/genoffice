@@ -5,7 +5,12 @@
  * fresh per call (wrapped in useCallback with the original dependency lists)
  * so state never goes stale.
  */
-import type { DocFlags } from './editor/layout-history'
+import { LAYOUT_ATTR, type DocFlags } from './editor/layout-history'
+import {
+  rebaseTocAnchors,
+  sameBodyAfterManagedRPrRebase,
+  sameBodyAfterTocRebase,
+} from './editor/save-rebase'
 import type { Editor } from '@tiptap/core'
 import { history } from '@tiptap/pm/history'
 import {
@@ -55,6 +60,11 @@ import {
 } from './doc-state'
 import { docStyleCss } from './doc-style-css'
 import { setNoteNumFmts } from './note-format'
+import {
+  noteSettingsFromParsed,
+  noteSettingsSaveEdits,
+  type NoteSettingsState,
+} from './editor/note-settings'
 import type { CompareEntry } from './editor/compare'
 import { blocksToPmDoc, pmDocOptions, pmDocToSavePlan, type PmNode } from './editor/convert'
 import { insertedBreakTypes } from './ai/pending-sections'
@@ -78,12 +88,14 @@ import { isBlankDocument, parseHtmlFragment, replaceBlockRange } from './ai/prot
 import { carryDocSeen } from './ai/tools'
 import { isDocDirty, resetCrossDocEditState } from './doc-dirty'
 import { applySectPrRewrites, type SectPrRewrite } from './sectpr-rewrite'
+import { effectiveHfRefs } from './pagination-hf'
 import { createSaveSerializer } from './save-until-persisted'
 import { checkMissingFonts, collectDocFonts } from './font-check'
 import { setDocFontTable } from './line-metrics'
 import { adoptEmbeddedFonts } from './embedded-fonts'
 import { defaultEastAsiaFontFor, defaultTabStopFor } from './font-list'
 import { clearPrintZoom, setPrintZoom } from './print-zoom'
+import { currentPrintEntry } from './print-entry'
 import { showToast } from './components/toast-bus'
 import { buildStandaloneHtml } from './html-export'
 
@@ -145,6 +157,10 @@ export interface FileActionContext {
   setHfVariantsDirty: (value: HfVariantKey[]) => void
   sectionHfEdits: Record<string, HeaderFooter>
   setSectionHfEdits: (value: Record<string, HeaderFooter>) => void
+  sectionHfLinkEdits: Record<string, true>
+  setSectionHfLinkEdits: (value: Record<string, true>) => void
+  sectionHfRefEdits: Record<string, string>
+  setSectionHfRefEdits: (value: Record<string, string>) => void
   titlePg: boolean
   titlePgDirty: boolean
   evenOddHf: boolean
@@ -158,9 +174,21 @@ export interface FileActionContext {
   setDocFlags: (value: DocFlags) => void
   setDocFlagsDirty: (dirty: boolean) => void
   setHfView: (view: HfView) => void
-  pgNumEdit: { fmt?: string; start?: number } | null
+  pgNumEdit: {
+    fmt?: string
+    start?: number
+    chapStyle?: number | null
+    chapSep?: string | null
+  } | null
   pgNumDirtySections: number[]
-  setPgNumEdit: (value: { fmt?: string; start?: number } | null) => void
+  setPgNumEdit: (
+    value: {
+      fmt?: string
+      start?: number
+      chapStyle?: number | null
+      chapSep?: string | null
+    } | null,
+  ) => void
   setPgNumDirtySections: (value: number[]) => void
   pendingNumbering: PendingNumbering
   numberingDirty: boolean
@@ -191,6 +219,8 @@ export interface FileActionContext {
   footnotes: NoteInfo[]
   endnotes: NoteInfo[]
   notesDirty: boolean
+  noteSettings: NoteSettingsState | null
+  setNoteSettings: (value: NoteSettingsState) => void
   setFootnotes: (value: NoteInfo[]) => void
   setEndnotes: (value: NoteInfo[]) => void
   setNotesDirty: (dirty: boolean) => void
@@ -416,6 +446,8 @@ export async function loadFile(
     ctx.setDocFlags({
       autoHyphenation: parsed.autoHyphenation ?? false,
       mirrorMargins: parsed.mirrorMargins ?? false,
+      characterSpacingControl: parsed.characterSpacingControl ?? null,
+      defaultTabStopTwips: parsed.defaultTabStopTwips ?? null,
       paragraphSpacing: null,
     })
     ctx.setDocFlagsDirty(false)
@@ -433,6 +465,7 @@ export async function loadFile(
     ctx.setFootnotes(parsed.footnotes)
     ctx.setEndnotes(parsed.endnotes)
     ctx.setNotesDirty(false)
+    ctx.setNoteSettings(noteSettingsFromParsed(parsed))
     ctx.setSources(parsed.sources)
     ctx.setSourcesDirty(false)
     ctx.setZoteroDocumentData(parsed.zoteroDocumentData)
@@ -531,6 +564,7 @@ export async function newFile(ctx: FileActionContext): Promise<boolean | undefin
     ctx.setFootnotes(parsed.footnotes)
     ctx.setEndnotes(parsed.endnotes)
     ctx.setNotesDirty(false)
+    ctx.setNoteSettings(noteSettingsFromParsed(parsed))
     ctx.setSources([])
     ctx.setSourcesDirty(false)
     ctx.setZoteroDocumentData(parsed.zoteroDocumentData)
@@ -668,9 +702,15 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
       let sectPr = applySectionSettings(sec.sectPrXml, sec.settings)
       sectPr = applySectionStartType(sectPr, breakTypes.bySection.get(si) ?? sec.startType)
       sectPr = applyTitlePg(sectPr, sec.titlePg)
-      // touch w:pgNumType only when the page-number format was edited (avoids dropping unmodeled attrs like chapStyle)
+      // Touch only edited section numbering; the patch preserves unmodeled attributes.
       if (ctx.pgNumDirtySections.includes(si)) {
-        sectPr = applyPageNumType(sectPr, sec.pageNumberFmt, sec.pageNumberStart)
+        sectPr = applyPageNumType(
+          sectPr,
+          sec.pageNumberFmt,
+          sec.pageNumberStart,
+          sec.pageNumberChapterStyle ?? null,
+          sec.pageNumberChapterSeparator ?? null,
+        )
       }
       rewrites.set(sec.lastBlockIndex, {
         from: sec.sectPrXml,
@@ -681,15 +721,51 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
     saveBlocks = applySectPrRewrites(saveBlocks, plan.saveBlockIndexByDocx, rewrites)
   }
   // header/footer edits for non-final sections: the engine writes parts/references per section
+  const hfRefs = effectiveHfRefs(ctx.sections)
   const sectionHf = Object.entries(ctx.sectionHfEdits).map(([key, hf]) => {
-    const [lastBlockIndex, kind] = key.split(':')
-    return { lastBlockIndex: Number(lastBlockIndex), kind: kind as 'header' | 'footer', hf }
+    const [lastBlockIndex, kind, view] = key.split(':')
+    const sectionIndex = ctx.sections.findIndex(
+      (sec) => sec.lastBlockIndex === Number(lastBlockIndex),
+    )
+    const hfKind = kind as 'header' | 'footer'
+    return {
+      lastBlockIndex: Number(lastBlockIndex),
+      kind: hfKind,
+      hf,
+      variant: (view ?? 'default') as 'default' | 'first' | 'even',
+      sourceRId:
+        ctx.sectionHfRefEdits[key] ??
+        hfRefs[sectionIndex]?.[hfKind][(view ?? 'default') as 'default' | 'first' | 'even'],
+    }
   })
+  const sectionHfLinks = Object.keys(ctx.sectionHfLinkEdits).map((key) => {
+    const [lastBlockIndex, kind, view] = key.split(':')
+    return {
+      lastBlockIndex: Number(lastBlockIndex),
+      kind: kind as 'header' | 'footer',
+      variant: (view ?? 'default') as 'default' | 'first' | 'even',
+    }
+  })
+  const sectionHfRefs = Object.entries(ctx.sectionHfRefEdits).map(([key, rId]) => {
+    const [lastBlockIndex, kind, view] = key.split(':')
+    return {
+      lastBlockIndex: Number(lastBlockIndex),
+      kind: kind as 'header' | 'footer',
+      variant: (view ?? 'default') as 'default' | 'first' | 'even',
+      rId,
+    }
+  })
+  const noteSettingsEdits = ctx.noteSettings
+    ? noteSettingsSaveEdits(ctx.noteSettings, noteSettingsFromParsed(doc.parsed))
+    : {}
   const bytes = await saveDocx(doc.parsed, saveBlocks, {
+    ...noteSettingsEdits,
     section: ctx.sectionDirty && ctx.section ? ctx.section : undefined,
     sectionStartType: breakTypes.trailing ?? ctx.trailingStartType ?? undefined,
     pgNumType: ctx.pgNumEdit ?? undefined,
     sectionHf: sectionHf.length > 0 ? sectionHf : undefined,
+    sectionHfLinks: sectionHfLinks.length > 0 ? sectionHfLinks : undefined,
+    sectionHfRefs: sectionHfRefs.length > 0 ? sectionHfRefs : undefined,
     numbering: ctx.numberingDirty ? ctx.pendingNumbering : undefined,
     styleUpserts:
       Object.keys(ctx.styleUpserts).length > 0 ? Object.values(ctx.styleUpserts) : undefined,
@@ -714,8 +790,25 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
         : undefined,
     titlePg: ctx.titlePgDirty ? ctx.titlePg : undefined,
     evenAndOddHeaders: ctx.evenOddHfDirty ? ctx.evenOddHf : undefined,
-    autoHyphenation: ctx.docFlagsDirty ? ctx.docFlags.autoHyphenation : undefined,
-    mirrorMargins: ctx.docFlagsDirty ? ctx.docFlags.mirrorMargins : undefined,
+    autoHyphenation:
+      ctx.docFlagsDirty && ctx.docFlags.autoHyphenation !== (doc.parsed.autoHyphenation ?? false)
+        ? ctx.docFlags.autoHyphenation
+        : undefined,
+    mirrorMargins:
+      ctx.docFlagsDirty && ctx.docFlags.mirrorMargins !== (doc.parsed.mirrorMargins ?? false)
+        ? ctx.docFlags.mirrorMargins
+        : undefined,
+    characterSpacingControl:
+      ctx.docFlagsDirty &&
+      (ctx.docFlags.characterSpacingControl ?? null) !==
+        (doc.parsed.characterSpacingControl ?? null)
+        ? (ctx.docFlags.characterSpacingControl ?? null)
+        : undefined,
+    defaultTabStopTwips:
+      ctx.docFlagsDirty &&
+      (ctx.docFlags.defaultTabStopTwips ?? null) !== (doc.parsed.defaultTabStopTwips ?? null)
+        ? (ctx.docFlags.defaultTabStopTwips ?? null)
+        : undefined,
     partXml: Object.keys(partXml).length > 0 ? partXml : undefined,
     partBinary: Object.keys(partBinary).length > 0 ? partBinary : undefined,
     comments: ctx.commentsDirty ? ctx.comments : undefined,
@@ -1018,13 +1111,37 @@ async function saveOnce(
     applyDocLayoutSettings(editor, reparsed)
     const rebasedPm = blocksToPmDoc(reparsed.blocks, readSections(reparsed), pmDocOptions(reparsed))
     let unchanged = false
+    let shouldRebaseTocAnchors = false
+    let savedBodyForRebase: ReturnType<typeof editor.schema.nodeFromJSON> | null = null
     try {
-      unchanged = editor.state.doc.eq(editor.schema.nodeFromJSON(rebasedPm))
+      // The layout snapshot is editor history only and never appears in DOCX.
+      // Compare the rebuilt body with that same live attribute so a header-only
+      // save does not replace the editor document and erase Undo history.
+      const comparable = {
+        ...rebasedPm,
+        attrs: { ...rebasedPm.attrs, [LAYOUT_ATTR]: editor.state.doc.attrs[LAYOUT_ATTR] },
+      }
+      const savedBody = editor.schema.nodeFromJSON(comparable)
+      savedBodyForRebase = savedBody
+      unchanged =
+        editor.state.doc.eq(savedBody) || sameBodyAfterManagedRPrRebase(editor.state.doc, savedBody)
+      if (!unchanged) {
+        shouldRebaseTocAnchors = sameBodyAfterTocRebase(
+          editor.state.doc,
+          savedBody,
+          reparsed.blocks,
+        )
+        unchanged = shouldRebaseTocAnchors
+      }
     } catch {
       /* unrepresentable → rewrite */
     }
     // Equal doc: skip the rewrite so undo history, caret and scroll survive.
-    if (!unchanged) {
+    if (shouldRebaseTocAnchors && savedBodyForRebase) {
+      // Keep generated TOC XML in the live document for cross-save Undo/Redo,
+      // while shifting all source anchors to the newly parsed block indexes.
+      rebaseTocAnchors(editor, savedBodyForRebase)
+    } else if (!unchanged) {
       editor.commands.setContent(rebasedPm as never)
       resetEditorHistory(editor)
       const chain = editor
@@ -1079,6 +1196,8 @@ async function saveOnce(
     ctx.setDocFlags({
       autoHyphenation: reparsed.autoHyphenation ?? false,
       mirrorMargins: reparsed.mirrorMargins ?? false,
+      characterSpacingControl: reparsed.characterSpacingControl ?? null,
+      defaultTabStopTwips: reparsed.defaultTabStopTwips ?? null,
       paragraphSpacing: null,
     })
     ctx.setDocFlagsDirty(false)
@@ -1093,6 +1212,7 @@ async function saveOnce(
     ctx.setFootnotes(reparsed.footnotes)
     ctx.setEndnotes(reparsed.endnotes)
     ctx.setNotesDirty(false)
+    ctx.setNoteSettings(noteSettingsFromParsed(reparsed))
     ctx.setSources(reparsed.sources)
     ctx.setSourcesDirty(false)
     ctx.setZoteroDocumentData(reparsed.zoteroDocumentData)
@@ -1132,6 +1252,11 @@ async function saveOnce(
  */
 export function printDoc(ctx: FileActionContext): void {
   if (!ctx.doc) return
+  // macOS: no in-app dialog, the system print panel (with its preview) takes over
+  if (currentPrintEntry() === 'native-panel') {
+    void printViaNativePanel(ctx)
+    return
+  }
   // the print sheet prints the live preview pages: needs the whole document mounted
   if (isPhasedContentPending()) {
     void waitForFullContent().then(() => printDoc(ctx))
@@ -1233,6 +1358,10 @@ function deferExportToPreview(
 // through), so the defer paths return without await: the finally runs at
 // return time and the flag clears while the export is parked.
 let printJobActive = false
+/** native print: the PDF leaves the page color out (Word's default for printing) */
+let exportNoPageColor = false
+
+const pvRootEl = (): HTMLElement | null => document.querySelector('.pagination-preview')
 
 /** Resolves true only when a PDF was written to disk. */
 export async function exportPdf(ctx: FileActionContext, outPath?: string): Promise<boolean> {
@@ -1252,6 +1381,7 @@ export async function exportPdf(ctx: FileActionContext, outPath?: string): Promi
     const pvPages = [...document.querySelectorAll('.pv-page')] as HTMLElement[]
     if (pvPages.length > 0) {
       const scale = setPrintZoom()
+      if (exportNoPageColor) pvRootEl()?.classList.add('pv-no-pagecolor')
       const pxToTwips = (px: number) => Math.round((px / 96) * 1440)
       let groups: PrintGroup[] = []
       pvPages.forEach((page, i) => {
@@ -1317,9 +1447,66 @@ export async function exportPdf(ctx: FileActionContext, outPath?: string): Promi
     return deferExportToPreview(ctx, outPath, true)
   } finally {
     clearPrintZoom()
+    pvRootEl()?.classList.remove('pv-no-pagecolor')
     printJobActive = false
   }
 }
+
+/** Status filter for a PDF export staged to a temp file: its two success lines are
+    hidden (the caller's own stage replaces them); progress, busy, cancel and failure stay. */
+function quietPdfStage(ctx: FileActionContext, pdfPath: string): FileActionContext {
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pdfDone = [
+    new RegExp(`^${esc(t('appExportedPdf', { path: pdfPath }))}$`),
+    new RegExp(
+      `^${esc(t('appExportedPdfMixed', { path: pdfPath, n: '@N@' })).replace('@N@', '\\d+')}$`,
+    ),
+  ]
+  return {
+    ...ctx,
+    setStatus: (s) => {
+      if (!pdfDone.some((re) => re.test(s))) ctx.setStatus(s)
+    },
+  }
+}
+
+/** Print on macOS: the document goes through the same preview-based PDF export as Export as PDF
+    (page sizes, margins, scale, mixed paper, header/footer, floats, watermark, page borders; the
+    preview sits outside .page-dark and print media drops the editor overlays, so the PDF holds the
+    authored colors), into a temp file that the system print panel then shows with its preview.
+    Page color stays off like the in-app dialog's default ("Print background colors" unchecked). */
+async function printViaNativePanel(ctx: FileActionContext): Promise<void> {
+  if (!ctx.doc || nativePrintBusy) return
+  nativePrintBusy = true
+  let target: { pdfPath: string } | null = null
+  try {
+    target = await window.desktop.beginNativePrint()
+    if (!target) {
+      ctx.setStatus(t('appPrintFailed', { error: 'native print is unavailable' }))
+      return
+    }
+    exportNoPageColor = true
+    let exported: boolean
+    try {
+      exported = await exportPdf(quietPdfStage(ctx, target.pdfPath), target.pdfPath)
+    } finally {
+      exportNoPageColor = false
+    }
+    if (!exported) {
+      void window.desktop.takeExportPdf(target.pdfPath)
+      return
+    }
+    ctx.setStatus('')
+    const r = await window.desktop.presentNativePrint(target.pdfPath)
+    if (r.error) ctx.setStatus(t('appPrintFailed', { error: r.error }))
+  } catch (err) {
+    ctx.setStatus(t('appPrintFailed', { error: String(err) }))
+    if (target) void window.desktop.takeExportPdf(target.pdfPath)
+  } finally {
+    nativePrintBusy = false
+  }
+}
+let nativePrintBusy = false
 
 /** PNG resolution of "Export as Images" (2x the 96 dpi screen page) */
 const IMAGE_EXPORT_DPI = 192
@@ -1337,22 +1524,8 @@ export async function exportImages(ctx: FileActionContext): Promise<boolean> {
     ctx.setStatus(t('appExportImagesFailed', { error }))
     return false
   }
-  // The PDF stage keeps its own status lines (progress, busy, cancel, failure
-  // already say what happened); only its two success lines are hidden, the
-  // image stage replaces them
-  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const pdfDone = [
-    new RegExp(`^${esc(t('appExportedPdf', { path: target.pdfPath }))}$`),
-    new RegExp(
-      `^${esc(t('appExportedPdfMixed', { path: target.pdfPath, n: '@N@' })).replace('@N@', '\\d+')}$`,
-    ),
-  ]
-  const staged: FileActionContext = {
-    ...ctx,
-    setStatus: (s) => {
-      if (!pdfDone.some((re) => re.test(s))) ctx.setStatus(s)
-    },
-  }
+  // The PDF stage keeps its own status lines; only its success lines are hidden
+  const staged = quietPdfStage(ctx, target.pdfPath)
   if (!(await exportPdf(staged, target.pdfPath))) {
     void window.desktop.takeExportPdf(target.pdfPath)
     return false

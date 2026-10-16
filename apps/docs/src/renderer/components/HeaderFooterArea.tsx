@@ -14,6 +14,7 @@ import {
   hfCellSegStyle,
   hfCellTabLines,
   hfDeclaredStrutPt,
+  hfDisplayedRuns,
   hfLeadIndentCss,
   hfRowStyle,
   hfSegLeftCss,
@@ -32,7 +33,13 @@ import {
   hfParaIndentStyle,
   hfStackedSpacingPx,
 } from '../editor/hf-dom'
-import { applyHfText, hfEditText, hfParasOf, PAGE_TOKEN } from '../editor/hf-text'
+import {
+  applyHfText,
+  hfEditText,
+  hfParasOf,
+  HfProtectedFieldEditError,
+  PAGE_TOKEN,
+} from '../editor/hf-text'
 import { dkStyleProps } from '../editor/dark-page'
 import { INLINE_RULE_CLASS, inlineRuleStyle } from '../editor/inline-rule'
 import { textColorValue } from '../editor/text-color'
@@ -121,6 +128,8 @@ export function HeaderFooterArea({
   onCommit,
   pageNo,
   pageTotal,
+  fileName,
+  author,
   style,
   boxGeom,
 }: {
@@ -134,6 +143,8 @@ export function HeaderFooterArea({
   pageNo?: number | string
   /** Total page count shown for TOTAL_PAGES_MARK (NUMPAGES field), defaults to 1 */
   pageTotal?: number
+  fileName?: string
+  author?: string
   /** geometry override: on differing-width sections the strip is pinned to its own section's box */
   style?: React.CSSProperties
   /** page geometry: floating textboxes render at their anchor position (absent: stacked) */
@@ -141,6 +152,7 @@ export function HeaderFooterArea({
 }) {
   const { t } = useI18n()
   const [editing, setEditing] = useState(false)
+  const [error, setError] = useState('')
   const editRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef(false)
   const initialTextRef = useRef('')
@@ -168,14 +180,25 @@ export function HeaderFooterArea({
 
   const commit = () => {
     const el = editRef.current
-    setEditing(false)
     if (!el) return
     if (cancelRef.current) {
       cancelRef.current = false
+      setError('')
+      setEditing(false)
       return
     }
-    if (el.innerText === initialTextRef.current) return
-    onCommit(applyHfText(value, el.innerText))
+    if (el.innerText === initialTextRef.current) {
+      setEditing(false)
+      return
+    }
+    try {
+      onCommit(applyHfText(value, el.innerText))
+      setError('')
+      setEditing(false)
+    } catch (cause) {
+      if (!(cause instanceof HfProtectedFieldEditError)) throw cause
+      setError(t('appHfFieldProtectedError'))
+    }
   }
 
   const display = (text: string) => {
@@ -244,24 +267,38 @@ export function HeaderFooterArea({
         </div>
       )}
       {editing ? (
-        <div
-          ref={editRef}
-          className="page-hf-edit-surface"
-          contentEditable
-          spellCheck={spellcheckEnabled()}
-          suppressContentEditableWarning
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              e.preventDefault()
-              e.stopPropagation()
-              cancelRef.current = true
-              ;(e.target as HTMLElement).blur()
-            }
-          }}
-        />
+        <>
+          <div
+            ref={editRef}
+            className="page-hf-edit-surface"
+            contentEditable
+            spellCheck={spellcheckEnabled()}
+            suppressContentEditableWarning
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                cancelRef.current = true
+                ;(e.target as HTMLElement).blur()
+              }
+            }}
+          />
+          {error && (
+            <div className="hf-edit-error" role="alert">
+              {error}
+            </div>
+          )}
+        </>
       ) : (
-        <HfContent kind={kind} paras={paras} display={display} boxGeom={boxGeom} />
+        <HfContent
+          kind={kind}
+          paras={paras}
+          display={display}
+          boxGeom={boxGeom}
+          fileName={fileName}
+          author={author}
+        />
       )}
     </div>
   )
@@ -272,12 +309,43 @@ function HfContent({
   paras,
   display,
   boxGeom,
+  fileName,
+  author,
 }: {
   kind: 'header' | 'footer'
   paras: HfParagraph[]
   display: (text: string) => string
   boxGeom?: HfStripGeom
+  fileName?: string
+  author?: string
 }) {
+  const fieldContext = { fileName, author }
+  const renderRun = (run: Run, key: React.Key) =>
+    run.image && !run.image.rule ? (
+      <img
+        key={key}
+        className="page-hf-cell-img"
+        src={run.image.dataUrl}
+        alt=""
+        draggable={false}
+        style={{ width: run.image.widthPx, height: run.image.heightPx }}
+      />
+    ) : run.hfField &&
+      run.text !== PAGE_MARK &&
+      run.text !== TOTAL_PAGES_MARK &&
+      hfDisplayedRuns(run, new Date(), fieldContext).length > 0 ? (
+      <React.Fragment key={key}>
+        {hfDisplayedRuns(run, new Date(), fieldContext).map((part, index) => (
+          <span key={index} style={runStyle(part)}>
+            {display(part.text)}
+          </span>
+        ))}
+      </React.Fragment>
+    ) : (
+      <span key={key} style={runStyle(run)}>
+        {display(run.text)}
+      </span>
+    )
   const spacing = hfStackedSpacingPx(paras)
   const margins = (i: number): React.CSSProperties => ({
     ...(spacing[i].top ? { marginTop: `${spacing[i].top}px` } : {}),
@@ -317,7 +385,16 @@ function HfContent({
                     }}
                   />
                 )}
-                {display(run.text)}
+                {run.hfField &&
+                hfDisplayedRuns(run, new Date(), fieldContext).length > 0 &&
+                run.text !== PAGE_MARK &&
+                run.text !== TOTAL_PAGES_MARK
+                  ? hfDisplayedRuns(run, new Date(), fieldContext).map((part, index) => (
+                      <span key={index} style={runStyle(part)}>
+                        {display(part.text)}
+                      </span>
+                    ))
+                  : display(run.text)}
               </span>
             ))
           return (
@@ -395,11 +472,7 @@ function HfContent({
               }}
             >
               {para.runs.length === 0 ? ' ' : null}
-              {para.runs.map((run, j) => (
-                <span key={j} style={runStyle(run)}>
-                  {display(run.text)}
-                </span>
-              ))}
+              {para.runs.map((run, j) => renderRun(run, j))}
             </div>
           )
         }
@@ -415,22 +488,14 @@ function HfContent({
         const lineContent = (tabbed: HfTabLayout) => (
           <>
             {hfTabLeadNeedsStrut(tabbed) ? '\u200b' : null}
-            {tabbed.lead.map((run, j) => (
-              <span key={j} style={runStyle(run)}>
-                {display(run.text)}
-              </span>
-            ))}
+            {tabbed.lead.map((run, j) => renderRun(run, j))}
             {tabbed.segments.map((seg, k) => (
               <span
                 key={`t${k}`}
                 className={`page-hf-tabseg page-hf-tabseg-${seg.anchor}`}
                 style={{ left: hfSegLeftCss(seg, tabbed) }}
               >
-                {seg.runs.map((run, j) => (
-                  <span key={j} style={runStyle(run)}>
-                    {display(run.text)}
-                  </span>
-                ))}
+                {seg.runs.map((run, j) => renderRun(run, j))}
               </span>
             ))}
           </>

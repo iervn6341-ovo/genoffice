@@ -178,12 +178,50 @@ describe('FontDialog', () => {
     select(editor, 1, 10)
     const { container, unmount } = render(createElement(FontDialog, { editor, onClose: noop }))
     const dds = container.querySelectorAll<HTMLButtonElement>('.gs-dd-btn')
-    // Font style → bold
-    pickDropdown(container, dds[1]!, 'bold')
+    // Font style → bold; untouched size must not be normalized.
+    pickDropdown(container, dds[2]!, 'bold')
     const ok = [...container.querySelectorAll('button')].find((b) => b.textContent === 'OK')!
     act(() => ok.click())
     expect(editor.isActive('bold')).toBe(true)
-    expect(editor.getAttributes('docTextStyle').sizeHalfPoints).toBe(22)
+    expect(editor.getAttributes('docTextStyle').sizeHalfPoints).toBeNull()
+    unmount()
+    editor.destroy()
+  })
+
+  it('shows mixed size without normalizing it when OK is pressed untouched', () => {
+    const editor = createEditor()
+    editor.commands.setContent({
+      type: 'doc',
+      content: [
+        {
+          type: 'docParagraph',
+          attrs: { docxIndex: 0 },
+          content: [
+            {
+              type: 'text',
+              text: 'one',
+              marks: [{ type: 'docTextStyle', attrs: { sizeHalfPoints: 20 } }],
+            },
+            {
+              type: 'text',
+              text: 'two',
+              marks: [{ type: 'docTextStyle', attrs: { sizeHalfPoints: 28 } }],
+            },
+          ],
+        },
+      ],
+    } as never)
+    select(editor, 1, 7)
+    const before = editor.state.doc.toJSON()
+    const { container, unmount } = render(createElement(FontDialog, { editor, onClose: noop }))
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Size"]')?.textContent,
+    ).toContain('Mixed')
+    const ok = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'OK',
+    )!
+    act(() => ok.click())
+    expect(editor.state.doc.toJSON()).toEqual(before)
     unmount()
     editor.destroy()
   })

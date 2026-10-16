@@ -1,7 +1,12 @@
 // Header/footer variant resolution and page-number sequences / formats.
-import type { HeaderFooter, HfPartInfo, SectionInfo } from '@genoffice/docx-engine'
+import {
+  formatNumber,
+  type HeaderFooter,
+  type HfPartInfo,
+  type SectionInfo,
+} from '@genoffice/docx-engine'
 
-import type { PageSlice } from './pagination-types'
+import type { BlockBox, PageSlice } from './pagination-types'
 
 export type HfVariant = 'default' | 'first' | 'even'
 
@@ -98,87 +103,45 @@ export function pageNumbers(slices: PageSlice[], sections: SectionInfo[]): numbe
   return nums
 }
 
-const ROMAN: Array<[number, string]> = [
-  [1000, 'M'],
-  [900, 'CM'],
-  [500, 'D'],
-  [400, 'CD'],
-  [100, 'C'],
-  [90, 'XC'],
-  [50, 'L'],
-  [40, 'XL'],
-  [10, 'X'],
-  [9, 'IX'],
-  [5, 'V'],
-  [4, 'IV'],
-  [1, 'I'],
-]
-
-function toRoman(n: number): string {
-  let out = ''
-  let rest = Math.max(1, Math.floor(n))
-  for (const [v, s] of ROMAN) {
-    while (rest >= v) {
-      out += s
-      rest -= v
-    }
-  }
-  return out
-}
-
-/** 1→A ... 26→Z, 27→AA (Word letter numbering) */
-function toLetters(n: number): string {
-  let out = ''
-  let rest = Math.max(1, Math.floor(n))
-  while (rest > 0) {
-    rest -= 1
-    out = String.fromCharCode(65 + (rest % 26)) + out
-    rest = Math.floor(rest / 26)
-  }
-  return out
-}
-
-function toGreek(n: number, base: number): string {
-  if (n < 1) return String(n)
-  // 24-letter alphabet (no final sigma); 25 -> αα, skip the ς slot from the 18th letter on
-  const idx = ((n - 1) % 24) + 1
-  const repeat = Math.floor((n - 1) / 24) + 1
-  return String.fromCharCode(base + idx - 1 + (idx >= 18 ? 1 : 0)).repeat(repeat)
-}
-
-const CN_DIGITS = '〇一二三四五六七八九'
-
-function toChinese(n: number): string {
-  if (n < 10) return CN_DIGITS[n]
-  if (n < 20) return `十${n % 10 ? CN_DIGITS[n % 10] : ''}`
-  if (n < 100) return `${CN_DIGITS[Math.floor(n / 10)]}十${n % 10 ? CN_DIGITS[n % 10] : ''}`
-  return String(n)
-    .split('')
-    .map((d) => CN_DIGITS[Number(d)])
-    .join('')
-}
-
 /** Display the page number in the section's number format (w:pgNumType w:fmt) */
-export function formatPageNumber(n: number, fmt?: string): string {
-  switch (fmt) {
-    case 'numberInDash':
-      return `- ${n} -`
-    case 'lowerLetter':
-      return toLetters(n).toLowerCase()
-    case 'upperLetter':
-      return toLetters(n)
-    case 'lowerRoman':
-      return toRoman(n).toLowerCase()
-    case 'upperRoman':
-      return toRoman(n)
-    case 'lowerGreek':
-      return toGreek(n, 0x3b1)
-    case 'upperGreek':
-      return toGreek(n, 0x391)
-    case 'chineseCounting':
-    case 'chineseCountingThousand':
-      return toChinese(n)
-    default:
-      return String(n)
+export function formatPageNumber(
+  n: number,
+  fmt?: string,
+  chapter?: string | null,
+  chapterSep?: string,
+): string {
+  const page = formatNumber(n, fmt ?? 'decimal')
+  if (!chapter) return page
+  const separator: Record<string, string> = {
+    hyphen: '-',
+    period: '.',
+    colon: ':',
+    emDash: '—',
+    enDash: '–',
   }
+  return `${chapter}${separator[chapterSep ?? 'hyphen'] ?? '-'}${page}`
+}
+
+/** The latest numbered Heading at each physical page, for native chapter PAGE display. */
+export function chapterNumbersForPages(
+  slices: PageSlice[],
+  blocks: BlockBox[],
+  sections: SectionInfo[],
+  headingStyleIds: Map<number, string>,
+): Array<string | null> {
+  const styles = new Map([...headingStyleIds].map(([level, id]) => [id, level]))
+  const latest = new Map<number, string>()
+  const out: Array<string | null> = []
+  let blockIndex = 0
+  for (const slice of slices) {
+    while (blockIndex < blocks.length && blocks[blockIndex].top < slice.end) {
+      const el = blocks[blockIndex++].el
+      const level = el ? styles.get(el.getAttribute('data-style') ?? '') : undefined
+      const marker = el?.getAttribute('data-marker')?.replace(/[.\s、．]+$/, '')
+      if (level !== undefined && marker) latest.set(level, marker)
+    }
+    const level = sections[slice.section]?.pageNumberChapterStyle
+    out.push(level === undefined ? null : (latest.get(level) ?? null))
+  }
+  return out
 }

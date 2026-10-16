@@ -45,6 +45,26 @@ export function measureBlocks(
       carryApplied += rect.height / zoomFactor
       continue
     }
+    // section-end endnote row (editor widget, real flow height): a one-line virtual block
+    if (el.classList.contains('page-section-endnote-row')) {
+      if (rect.height <= 0) continue
+      const rowTop = (rect.top - origin - gapAccum) / zoomFactor
+      const rowH = rect.height / zoomFactor
+      blocks.push({
+        top: rowTop,
+        height: rowH,
+        lineBoxes: [{ offsetInBlock: 0, height: rowH }],
+        widowControl: false,
+        isEndnotes: true,
+        endnoteArea: {
+          key: el.dataset.areaKey ?? '',
+          row: parseInt(el.dataset.row ?? '0', 10) || 0,
+        },
+      })
+      carryApplied = 0
+      totalHeight = Math.max(totalHeight, rowTop + rowH)
+      continue
+    }
     // floating-anchor boxes: absolute children of a zero-height wrapper; record
     // shift-neutral virtual positions so pages can be extended to contain them
     let wrapFloatBottom: number | undefined

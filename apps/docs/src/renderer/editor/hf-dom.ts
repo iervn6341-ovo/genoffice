@@ -21,6 +21,7 @@ import {
 import { borderCssStyle, borderDrawnPx, isDrawnBorder } from './border-metrics'
 import { setDkBackground, setDkBorder, setDkColor } from './dark-page'
 import { INLINE_RULE_CLASS, inlineRuleDecls } from './inline-rule'
+import { formatHfDate, HF_DATE_FORMATS, type HfDateFormat } from './hf-text'
 
 /**
  * Plain-DOM header/footer rendering for the canvas page gaps (M4 always-on
@@ -222,6 +223,52 @@ function applyRunStyle(span: HTMLElement, run: Run): void {
   else if (run.caps === 'none') {
     span.style.textTransform = 'none'
     span.style.fontVariantCaps = 'normal'
+  }
+}
+
+/** Only newly authored dirty simple DATE fields refresh their visible cached result. */
+export function hfDisplayedRuns(
+  run: Run,
+  now = new Date(),
+  context: { fileName?: string; author?: string } = {},
+): Run[] {
+  const field = run.hfField
+  if (!field || run.text === PAGE_MARK || run.text === TOTAL_PAGES_MARK) return [run]
+  const authoredSimple =
+    /^<w:fldSimple\b/.test(field.xml) && /\bw:dirty="(?:true|1)"/.test(field.xml)
+  const replaceCached = (text: string): Run[] => [
+    { ...(field.resultRuns[0] ?? { text: '' }), text },
+  ]
+  if (
+    authoredSimple &&
+    /^\s*FILENAME\s*$/i.test(field.instruction) &&
+    context.fileName !== undefined
+  )
+    return replaceCached(context.fileName)
+  if (authoredSimple && /^\s*AUTHOR\s*$/i.test(field.instruction) && context.author !== undefined)
+    return replaceCached(context.author)
+  const format = /^\s*DATE\s+\\@\s+"([^"]+)"\s*$/i.exec(field.instruction)?.[1]
+  if (format && HF_DATE_FORMATS.includes(format as HfDateFormat) && authoredSimple) {
+    return replaceCached(formatHfDate(now, format as HfDateFormat))
+  }
+  return field.resultRuns.length > 0 ? field.resultRuns : [run]
+}
+
+function appendDisplayedRun(
+  host: HTMLElement,
+  run: Run,
+  display: (text: string) => string,
+  context?: { fileName?: string; author?: string },
+): void {
+  if (run.image && !run.image.rule) {
+    host.append(hfImgNode(run.image))
+    return
+  }
+  for (const part of hfDisplayedRuns(run, new Date(), context)) {
+    const span = document.createElement('span')
+    span.textContent = display(part.text)
+    applyRunStyle(span, part)
+    host.append(span)
   }
 }
 
@@ -708,8 +755,23 @@ export function hfReservedHeightPx(
   contentWidthPx: number,
   images?: HfImage[] | null,
   geom?: { marginTopPx: number; headerDistPx: number },
+  context: { fileName?: string; author?: string } = {},
 ): number {
-  const est = estimateHfHeight(value, contentWidthPx, images, geom)
+  const measuredValue = value?.paras
+    ? {
+        ...value,
+        paras: value.paras.map((para) => ({
+          ...para,
+          runs: para.runs.map((run) => {
+            const shown = hfDisplayedRuns(run, new Date(), context)
+            return shown.length === 1 && shown[0] !== run
+              ? { ...run, text: shown[0].text, hfField: undefined }
+              : run
+          }),
+        })),
+      }
+    : value
+  const est = estimateHfHeight(measuredValue, contentWidthPx, images, geom)
   const inline = (images ?? []).filter((img) => !img.floating)
   if (!hfHasVisibleContent(value, inline) || contentWidthPx <= 0) return est
   if (typeof document === 'undefined' || !document.body) return est
@@ -717,7 +779,7 @@ export function hfReservedHeightPx(
   const noDataUrl = (k: string, v: unknown) => (k === 'dataUrl' ? String(v).length : v)
   const key =
     `${kind}|${Math.round(contentWidthPx)}|${mountedDocCssSig()}|${hfProbeFontEpoch}|` +
-    `${JSON.stringify(value, noDataUrl)}|` +
+    `${JSON.stringify(value, noDataUrl)}|${context.fileName ?? ''}|${context.author ?? ''}|${new Date().toDateString()}|` +
     inline.map((im) => `${im.widthPx ?? ''}x${im.heightPx ?? ''}:${im.dataUrl.length}`).join(',')
   let dom = hfHeightCache.get(key)
   if (dom === undefined) {
@@ -729,6 +791,8 @@ export function hfReservedHeightPx(
       images: inline,
       pageNo: 88,
       pageTotal: 88,
+      fileName: context.fileName,
+      author: context.author,
     })
     el.style.position = 'static'
     el.style.left = 'auto'
@@ -1079,6 +1143,9 @@ export function hfTextBoxClass(box: HfTextBox): string {
 
 export function makeGapHfEl(opts: {
   kind: 'header' | 'footer'
+  sectionIndex?: number
+  fileName?: string
+  author?: string
   value: HeaderFooter
   images?: HfImage[]
   /** page number shown for the PAGE marker (may be a section-formatted string) */
@@ -1098,6 +1165,8 @@ export function makeGapHfEl(opts: {
   }
   const wrap = document.createElement('div')
   wrap.className = `page-hf page-hf-${kind} page-gap-hf`
+  wrap.dataset.testid = `hf-page-gap-${kind}`
+  if (opts.sectionIndex !== undefined) wrap.dataset.hfSection = String(opts.sectionIndex + 1)
   wrap.contentEditable = 'false'
   // Word sizes strip lines by their runs — the strip base is only the fallback
   // for runs without w:sz. When every text run declares a size, the strip font
@@ -1198,10 +1267,7 @@ export function makeGapHfEl(opts: {
               host.append(im)
               if (!run.text) continue
             }
-            const span = document.createElement('span')
-            span.textContent = display(run.text)
-            applyRunStyle(span, run)
-            host.append(span)
+            appendDisplayedRun(host, run, display, opts)
           }
         }
         // one block line per cell paragraph (Word stacks them; a lone empty
@@ -1297,20 +1363,14 @@ export function makeGapHfEl(opts: {
         if (leadIndent) line.style.textIndent = leadIndent
         if (hfTabLeadNeedsStrut(tabbed)) line.append('\u200b')
         for (const run of tabbed.lead) {
-          const span = document.createElement('span')
-          span.textContent = display(run.text)
-          applyRunStyle(span, run)
-          line.append(span)
+          appendDisplayedRun(line, run, display, opts)
         }
         for (const seg of tabbed.segments) {
           const segEl = document.createElement('span')
           segEl.className = `page-hf-tabseg page-hf-tabseg-${seg.anchor}`
           segEl.style.left = hfSegLeftCss(seg, tabbed)
           for (const run of seg.runs) {
-            const span = document.createElement('span')
-            span.textContent = display(run.text)
-            applyRunStyle(span, run)
-            segEl.append(span)
+            appendDisplayedRun(segEl, run, display, opts)
           }
           line.append(segEl)
         }
@@ -1324,10 +1384,7 @@ export function makeGapHfEl(opts: {
       if (para.emptyRunSizeHalfPoints) p.style.fontSize = `${para.emptyRunSizeHalfPoints / 2}pt`
     }
     for (const run of para.runs) {
-      const span = document.createElement('span')
-      span.textContent = display(run.text)
-      applyRunStyle(span, run)
-      p.append(span)
+      appendDisplayedRun(p, run, display, opts)
     }
     host.append(p)
   }

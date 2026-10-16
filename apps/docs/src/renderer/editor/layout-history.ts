@@ -1,7 +1,8 @@
 import type { Editor } from '@tiptap/core'
 import { closeHistory } from '@tiptap/pm/history'
 import type { Transaction } from '@tiptap/pm/state'
-import type { SectionInfo, SectionSettings } from '@genoffice/docx-engine'
+import type { HeaderFooter, NoteInfo, SectionInfo, SectionSettings } from '@genoffice/docx-engine'
+import type { NoteSettingsState } from './note-settings'
 
 /**
  * Page layout (margins, orientation, size, different-first-page, odd/even
@@ -20,6 +21,8 @@ export interface SectionLayout {
   readonly titlePg?: boolean | undefined
   readonly pageNumberFmt?: string | undefined
   readonly pageNumberStart?: number | undefined
+  readonly pageNumberChapterStyle?: number | undefined
+  readonly pageNumberChapterSeparator?: string | undefined
 }
 
 /**
@@ -32,6 +35,11 @@ export interface DocFlags {
   readonly autoHyphenation: boolean
   /** settings.xml w:mirrorMargins */
   readonly mirrorMargins: boolean
+  /** settings.xml w:characterSpacingControl; null keeps Word's implicit default */
+  readonly characterSpacingControl?:
+    'doNotCompress' | 'compressPunctuation' | 'compressPunctuationAndJapaneseKana' | null
+  /** settings.xml w:defaultTabStop; null keeps Word's implicit 720 twips */
+  readonly defaultTabStopTwips?: number | null
   /** Design → Paragraph Spacing preset id (rewrites the Normal style's spacing); null = the file's own */
   readonly paragraphSpacing: string | null
 }
@@ -53,6 +61,8 @@ export interface DesignSnapshot {
   readonly headerDirty: boolean
   readonly footer: unknown
   readonly footerDirty: boolean
+  readonly hfVariants?: unknown
+  readonly hfVariantsDirty?: readonly string[]
 }
 
 export interface LayoutSnapshot {
@@ -64,13 +74,28 @@ export interface LayoutSnapshot {
   readonly titlePgDirty: boolean
   readonly evenOddHf: boolean
   readonly evenOddHfDirty: boolean
-  readonly pgNumEdit: { readonly fmt?: string; readonly start?: number } | null
+  readonly pgNumEdit: {
+    readonly fmt?: string
+    readonly start?: number
+    readonly chapStyle?: number | null
+    readonly chapSep?: string | null
+  } | null
   readonly pgNumDirtySections: readonly number[]
+  readonly sectionHfEdits?: Readonly<Record<string, HeaderFooter>> | undefined
+  readonly sectionHfLinkEdits?: Readonly<Record<string, true>> | undefined
+  readonly sectionHfRefEdits?: Readonly<Record<string, string>> | undefined
+  /** Local references at the snapshot's save baseline, before pending edits. */
+  readonly sectionHfLocalRefs?: Readonly<Record<string, string>> | undefined
+  readonly notes?: {
+    readonly footnotes: readonly NoteInfo[]
+    readonly endnotes: readonly NoteInfo[]
+  }
+  readonly noteSettings?: NoteSettingsState | null
   readonly design?: DesignSnapshot | undefined
 }
 
 export const LAYOUT_ATTR = 'layout'
-const RECORD_META = 'layoutHistoryRecord'
+export const RECORD_META = 'layoutHistoryRecord'
 
 export function sectionLayouts(sections: readonly SectionInfo[]): SectionLayout[] {
   return sections.map((s) => ({
@@ -78,6 +103,8 @@ export function sectionLayouts(sections: readonly SectionInfo[]): SectionLayout[
     titlePg: s.titlePg,
     pageNumberFmt: s.pageNumberFmt,
     pageNumberStart: s.pageNumberStart,
+    pageNumberChapterStyle: s.pageNumberChapterStyle,
+    pageNumberChapterSeparator: s.pageNumberChapterSeparator,
   }))
 }
 
@@ -95,8 +122,37 @@ export function applySectionLayouts(
       titlePg: l.titlePg ?? s.titlePg,
       pageNumberFmt: l.pageNumberFmt,
       pageNumberStart: l.pageNumberStart,
+      pageNumberChapterStyle: l.pageNumberChapterStyle,
+      pageNumberChapterSeparator: l.pageNumberChapterSeparator,
     }
   })
+}
+
+/** A saved document is the current persistence baseline, even for old undo snapshots. */
+export function pageNumberEditsAgainstBaseline(
+  restored: readonly SectionInfo[],
+  baseline: readonly SectionInfo[],
+): { final: LayoutSnapshot['pgNumEdit']; sections: number[] } {
+  const changed = (a: SectionInfo, b: SectionInfo) =>
+    a.pageNumberFmt !== b.pageNumberFmt ||
+    a.pageNumberStart !== b.pageNumberStart ||
+    a.pageNumberChapterStyle !== b.pageNumberChapterStyle ||
+    a.pageNumberChapterSeparator !== b.pageNumberChapterSeparator
+  let final: LayoutSnapshot['pgNumEdit'] = null
+  const sections: number[] = []
+  restored.forEach((s, i) => {
+    const original = baseline[i]
+    if (!original || !changed(s, original)) return
+    if (i === restored.length - 1)
+      final = {
+        fmt: s.pageNumberFmt,
+        start: s.pageNumberStart,
+        chapStyle: s.pageNumberChapterStyle ?? null,
+        chapSep: s.pageNumberChapterSeparator ?? null,
+      }
+    else sections.push(i)
+  })
+  return { final, sections }
 }
 
 /**
@@ -108,6 +164,7 @@ export function recordLayoutChange(
   editor: Editor,
   before: LayoutSnapshot,
   after: LayoutSnapshot,
+  mutate?: (tr: Transaction) => Transaction,
 ): void {
   if (editor.isDestroyed) return
   const { state } = editor
@@ -120,9 +177,10 @@ export function recordLayoutChange(
         .setMeta(RECORD_META, true),
     )
   }
-  editor.view.dispatch(
-    closeHistory(editor.state.tr).setDocAttribute(LAYOUT_ATTR, after).setMeta(RECORD_META, true),
-  )
+  const tr = closeHistory(editor.state.tr)
+    .setDocAttribute(LAYOUT_ATTR, after)
+    .setMeta(RECORD_META, true)
+  editor.view.dispatch(mutate ? mutate(tr) : tr)
 }
 
 /**
@@ -150,8 +208,22 @@ export function withRestoreDirty(restored: LayoutSnapshot, live: LayoutSnapshot)
     same(s, live.sections[i]) ? [] : [i],
   )
   const last = Math.max(restored.sections.length - 1, 0)
+  const hfEdits = { ...restored.sectionHfEdits }
+  const hfLinks = { ...restored.sectionHfLinkEdits }
+  const hfRefs = { ...restored.sectionHfRefEdits }
+  const desired = restored.sectionHfLocalRefs ?? {}
+  const current = live.sectionHfLocalRefs ?? {}
+  for (const key of new Set([...Object.keys(desired), ...Object.keys(current)])) {
+    if (key in hfEdits || key in hfLinks || key in hfRefs) continue
+    if (desired[key] === current[key]) continue
+    if (desired[key]) hfRefs[key] = desired[key]
+    else hfLinks[key] = true
+  }
   return {
     ...restored,
+    sectionHfEdits: hfEdits,
+    sectionHfLinkEdits: hfLinks,
+    sectionHfRefEdits: hfRefs,
     sectionDirty:
       restored.sectionDirty || live.sectionDirty || !same(restored.section, live.section),
     sectionsDirty: union(
@@ -196,6 +268,19 @@ export function withRestoreDirty(restored: LayoutSnapshot, live: LayoutSnapshot)
               restored.design.footerDirty ||
               live.design.footerDirty ||
               !same(restored.design.footer, live.design.footer),
+            hfVariantsDirty: [
+              ...new Set([
+                ...(restored.design.hfVariantsDirty ?? []),
+                ...(live.design.hfVariantsDirty ?? []),
+                ...(['headerFirst', 'footerFirst', 'headerEven', 'footerEven'] as const).filter(
+                  (key) =>
+                    !same(
+                      (restored.design!.hfVariants as Record<string, unknown> | undefined)?.[key],
+                      (live.design!.hfVariants as Record<string, unknown> | undefined)?.[key],
+                    ),
+                ),
+              ]),
+            ],
           },
         }
       : {}),

@@ -134,6 +134,8 @@ function ribbonProps(editor: Editor) {
     onReadMode: noop,
     showGrid: false,
     onShowGrid: noop,
+    showTextBoundaries: false,
+    onShowTextBoundaries: noop,
     splitView: false,
     onSplitView: noop,
     onPagePreview: noop,

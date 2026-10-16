@@ -147,6 +147,8 @@ const api: DesktopApi = {
   saveMergedPdf: (defaultName: string, base64Parts: string[], outPath?: string) =>
     ipcRenderer.invoke('docs:save-merged-pdf', defaultName, base64Parts, outPath),
   pickExportImagesTarget: () => ipcRenderer.invoke('docs:pick-export-images-target'),
+  beginNativePrint: () => ipcRenderer.invoke('docs:begin-native-print'),
+  presentNativePrint: (pdfPath: string) => ipcRenderer.invoke('docs:present-native-print', pdfPath),
   takeExportPdf: (pdfPath: string) => ipcRenderer.invoke('docs:take-export-pdf', pdfPath),
   writeExportImage: (dir: string, fileName: string, pngBase64: string) =>
     ipcRenderer.invoke('docs:write-export-image', dir, fileName, pngBase64),

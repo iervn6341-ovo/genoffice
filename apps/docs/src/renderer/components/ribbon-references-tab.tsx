@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Editor } from '@tiptap/core'
+import { closeHistory } from '@tiptap/pm/history'
 import type { ZoteroCommand } from '../../shared/ipc'
 import {
   bibliographyLine,
@@ -7,13 +8,27 @@ import {
   generateCaptionXml,
   generateIndexFieldXml,
   generateTocFieldXml,
+  DEFAULT_TOC_OPTIONS,
+  tocOptionsFromField,
+  tocInstruction,
   type Block,
   type SourceInfo,
+  type StyleInfo,
   type TocEntry,
+  type TocFormat,
+  type TocLeader,
+  type TocOptions,
 } from '@genoffice/docx-engine'
 import { Dropdown, RibbonFoldGroup } from '@genoffice/ui'
 import { PromptModal } from './PromptModal'
-import { collectHeadings } from '../editor/headings'
+import {
+  anchorTocReplacement,
+  collectTocSources,
+  findTocField,
+  preserveTocHistorySource,
+  tocNodeXml,
+  updateTocPageCaches,
+} from '../editor/toc-actions'
 import { t, useI18n, type StringKey } from '../i18n/locale'
 import {
   IconBook,
@@ -30,26 +45,29 @@ import {
 /** icon size for the big icon-over-label ribbon buttons (slides ribbon parity) */
 import { BIG, TabProps, toggleDropdown } from './ribbon-tabs'
 
-function collectTocEntries(editor: Editor): TocEntry[] {
-  return collectHeadings(editor.state.doc).map(({ level, text }) => ({ level, text }))
-}
-
-/** Heading entries + real page numbers (headingPages and collectTocEntries share document order) */
+/** TOC sources + real page numbers in the same document order. */
 function collectTocEntriesWithPages(
   editor: Editor,
-  headingPages?: () => number[] | null,
+  blocks: Block[],
+  styles: ReadonlyMap<string, StyleInfo> | undefined,
+  options: TocOptions,
+  headingPages?: (positions?: number[]) => string[] | null,
 ): TocEntry[] {
-  const entries = collectTocEntries(editor)
-  const pages = headingPages?.()
+  const entries = collectTocSources(editor, blocks, styles, options)
+  const pages = headingPages?.(entries.map((entry) => entry.pos))
   if (pages && pages.length === entries.length) {
-    return entries.map((e, i) => ({ ...e, pageNo: pages[i] }))
+    return entries.map(({ level, text }, i) => ({ level, text, pageNo: pages[i] }))
   }
-  return entries
+  return entries.map(({ level, text }) => ({ level, text }))
 }
 
 /** PM nodes for a freshly generated TOC field (one docProtected per line) */
-function tocFieldNodes(entries: TocEntry[]): Array<Record<string, unknown>> {
-  return generateTocFieldXml(entries).map((xml, i) => ({
+function tocFieldNodes(
+  entries: TocEntry[],
+  options?: TocOptions,
+  instruction?: string,
+): Array<Record<string, unknown>> {
+  return generateTocFieldXml(entries, options, instruction).map((xml, i) => ({
     type: 'docProtected',
     attrs: {
       docxIndex: null,
@@ -59,8 +77,14 @@ function tocFieldNodes(entries: TocEntry[]): Array<Record<string, unknown>> {
       fieldDisplay: {
         kind: 'tocLine',
         left: entries[i].text,
-        right: entries[i].pageNo !== undefined ? String(entries[i].pageNo) : '',
+        right:
+          options?.showPageNumbers === false
+            ? ''
+            : entries[i].pageNo !== undefined
+              ? String(entries[i].pageNo)
+              : '',
         level: entries[i].level,
+        leader: options?.leader ?? 'dot',
       },
     },
   }))
@@ -68,13 +92,219 @@ function tocFieldNodes(entries: TocEntry[]): Array<Record<string, unknown>> {
 
 const PAGE_BREAK_PARAGRAPH_XML = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
 
-/** OOXML of a top-level PM node: editor-generated fragment or original slice */
-function xmlOfNode(node: { attrs: Record<string, unknown> }, blocks: Block[]): string {
-  if (node.attrs.genXml) return String(node.attrs.genXml)
-  const idx = node.attrs.docxIndex
-  if (idx === null || idx === undefined) return ''
-  return blocks.find((b) => b.docxIndex === idx)?.originalXml ?? ''
+const TOC_FORMATS: TocFormat[] = [
+  'template',
+  'classic',
+  'distinctive',
+  'fancy',
+  'modern',
+  'formal',
+  'simple',
+]
+const TOC_LEADERS: TocLeader[] = ['none', 'dot', 'hyphen', 'underscore', 'heavy', 'middleDot']
+
+function TocOptionsModal({
+  initial,
+  styles,
+  onApply,
+  onClose,
+}: {
+  initial: TocOptions
+  styles?: ReadonlyMap<string, StyleInfo>
+  onApply: (options: TocOptions) => void
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  const [options, setOptions] = useState<TocOptions>(() => ({
+    ...initial,
+    styleLevels: { ...initial.styleLevels },
+  }))
+  const [styleSearch, setStyleSearch] = useState('')
+  const update = (patch: Partial<TocOptions>) =>
+    setOptions((previous) => ({ ...previous, ...patch }))
+  const styleChoices = [...(styles?.values() ?? [])]
+    .filter((style) => style.type === 'paragraph' && !/^TOC[1-9]$/.test(style.styleId))
+    .filter((style) => style.name.toLocaleLowerCase().includes(styleSearch.toLocaleLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div
+        className="modal toc-options-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('ribbonTocCustom')}
+      >
+        <h2>{t('ribbonTocCustom')}</h2>
+        <div className="toc-options-grid">
+          <label>
+            {t('ribbonTocFormat')}
+            <select
+              value={options.format}
+              onChange={(event) => update({ format: event.target.value as TocFormat })}
+            >
+              {TOC_FORMATS.map((format) => (
+                <option key={format} value={format}>
+                  {t(`ribbonTocFormat_${format}` as StringKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t('ribbonTocLevels')}
+            <input
+              type="number"
+              min="1"
+              max="9"
+              value={options.levels}
+              onChange={(event) =>
+                update({ levels: Math.min(9, Math.max(1, Number(event.target.value) || 1)) })
+              }
+            />
+          </label>
+          <label>
+            {t('ribbonTocLeader')}
+            <select
+              value={options.leader}
+              disabled={!options.showPageNumbers || !options.rightAlignPageNumbers}
+              onChange={(event) => update({ leader: event.target.value as TocLeader })}
+            >
+              {TOC_LEADERS.map((leader) => (
+                <option key={leader} value={leader}>
+                  {t(`ribbonTocLeader_${leader}` as StringKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="toc-options-checks">
+          {(
+            [
+              ['showPageNumbers', 'ribbonTocShowPages'],
+              ['rightAlignPageNumbers', 'ribbonTocRightAlign'],
+              ['useHyperlinks', 'ribbonTocHyperlinks'],
+              ['useHeadingStyles', 'ribbonTocHeadingStyles'],
+              ['useOutlineLevels', 'ribbonTocOutlineLevels'],
+              ['useTcFields', 'ribbonTocTcFields'],
+            ] as const
+          ).map(([name, label]) => (
+            <label key={name} className="toc-option-check">
+              <input
+                type="checkbox"
+                checked={options[name]}
+                disabled={name === 'rightAlignPageNumbers' && !options.showPageNumbers}
+                onChange={(event) => update({ [name]: event.target.checked })}
+              />
+              <span>{t(label)}</span>
+            </label>
+          ))}
+        </div>
+        <fieldset className="toc-style-levels">
+          <legend>{t('ribbonTocStyles')}</legend>
+          <input
+            value={styleSearch}
+            onChange={(event) => setStyleSearch(event.target.value)}
+            aria-label={t('ribbonTocSearchStyles')}
+            placeholder={t('ribbonTocSearchStyles')}
+          />
+          <div className="toc-style-list">
+            {styleChoices.map((style) => (
+              <label key={style.styleId}>
+                <span>{style.name}</span>
+                <select
+                  aria-label={`${style.name} ${t('ribbonTocLevel')}`}
+                  disabled={/[",]/.test(style.name)}
+                  title={/[",]/.test(style.name) ? t('ribbonTocUnsupported') : undefined}
+                  value={options.styleLevels[style.name] ?? 0}
+                  onChange={(event) => {
+                    const styleLevels = { ...options.styleLevels }
+                    const level = Number(event.target.value)
+                    if (level === 0) delete styleLevels[style.name]
+                    else styleLevels[style.name] = level
+                    update({ styleLevels })
+                  }}
+                >
+                  <option value="0">—</option>
+                  {Array.from({ length: 9 }, (_, index) => (
+                    <option key={index + 1} value={index + 1}>
+                      {index + 1}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div className="modal-actions">
+          <button className="btn-ghost" onClick={onClose}>
+            {t('ribbonCancel')}
+          </button>
+          <button className="btn-primary" onClick={() => onApply(options)}>
+            {t('ribbonInsert')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
+
+function TocUpdateModal({
+  onApply,
+  onClose,
+}: {
+  onApply: (mode: 'pages' | 'full') => void
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  const [mode, setMode] = useState<'pages' | 'full'>('pages')
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div
+        className="modal toc-update-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('ribbonTocUpdate')}
+      >
+        <h2>{t('ribbonTocUpdate')}</h2>
+        <label className="toc-option-check">
+          <input
+            type="radio"
+            name="toc-update-mode"
+            checked={mode === 'pages'}
+            onChange={() => setMode('pages')}
+          />
+          <span>{t('ribbonTocUpdatePages')}</span>
+        </label>
+        <label className="toc-option-check">
+          <input
+            type="radio"
+            name="toc-update-mode"
+            checked={mode === 'full'}
+            onChange={() => setMode('full')}
+          />
+          <span>{t('ribbonTocUpdateAll')}</span>
+        </label>
+        <div className="modal-actions">
+          <button className="btn-ghost" onClick={onClose}>
+            {t('ribbonCancel')}
+          </button>
+          <button className="btn-primary" onClick={() => onApply(mode)}>
+            {t('ribbonTocUpdate')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** OOXML of a top-level PM node: editor-generated fragment or original slice */
+const xmlOfNode = tocNodeXml
 
 /**
  * Find the TOC field region (field begin ... matching end, tracked by fldChar
@@ -84,42 +314,43 @@ function xmlOfNode(node: { attrs: Record<string, unknown> }, blocks: Block[]): s
 function updateTocField(
   editor: Editor,
   blocks: Block[],
-  headingPages?: () => number[] | null,
+  styles: ReadonlyMap<string, StyleInfo> | undefined,
+  headingPages: ((positions?: number[]) => string[] | null) | undefined,
+  mode: 'pages' | 'full',
 ): void {
-  const entries = collectTocEntriesWithPages(editor, headingPages)
+  const region = findTocField(editor, blocks)
+  if (!region) {
+    window.alert(t('ribbonTocNotFound'))
+    return
+  }
+  const options = tocOptionsFromField(region.instruction, region.nodes[0]?.xml ?? '')
+  if (!options) {
+    window.alert(t('ribbonTocUnsupported'))
+    return
+  }
+  const entries = collectTocEntriesWithPages(editor, blocks, styles, options, headingPages)
   if (entries.length === 0) {
     window.alert(t('ribbonTocNoHeadings'))
     return
   }
-
-  const doc = editor.state.doc
-  let from = -1
-  let to = -1
-  let keepPageBreak = false
-  let depth = 0
-  let found = false
-  doc.forEach((node, offset) => {
-    if (found) return
-    const xml = xmlOfNode(node as never, blocks)
-    if (from === -1) {
-      if (/<w:instrText[^>]*>\s*TOC[\s\\]/.test(xml)) {
-        from = offset
-        depth = 0
-      } else {
-        return
-      }
+  if (mode === 'pages') {
+    const lines = region.nodes.filter(({ node }) => node.attrs.fieldDisplay?.kind === 'tocLine')
+    const pages = entries.map((entry) => String(entry.pageNo ?? ''))
+    if (
+      lines.length !== pages.length ||
+      pages.some((page) => !page) ||
+      !updateTocPageCaches(editor, region, pages, blocks)
+    ) {
+      window.alert(t('ribbonTocPageUpdateUnavailable'))
     }
-    depth += (xml.match(/w:fldCharType="begin"/g) ?? []).length
-    depth -= (xml.match(/w:fldCharType="end"/g) ?? []).length
-    if (depth <= 0) {
-      to = offset + node.nodeSize
-      keepPageBreak = /<w:br\s[^>]*w:type="page"/.test(xml)
-      found = true
-    }
-  })
-
-  const nodes = tocFieldNodes(entries)
-  if (keepPageBreak) {
+    return
+  }
+  const nodes = tocFieldNodes(entries, options, region.instruction)
+  if (!anchorTocReplacement(nodes, region, blocks)) {
+    window.alert(t('ribbonTocUnsupported'))
+    return
+  }
+  if (region.keepPageBreak) {
     nodes.push({
       type: 'docProtected',
       attrs: {
@@ -132,16 +363,15 @@ function updateTocField(
     })
   }
 
-  if (from === -1 || !found) {
-    window.alert(t('ribbonTocNotFound'))
-    return
-  }
+  preserveTocHistorySource(editor, region, blocks)
+  editor.view.dispatch(closeHistory(editor.state.tr))
   editor
     .chain()
     .focus()
-    .deleteRange({ from, to })
-    .insertContentAt(from, nodes as never)
+    .deleteRange({ from: region.from, to: region.to })
+    .insertContentAt(region.from, nodes as never)
     .run()
+  editor.view.dispatch(closeHistory(editor.state.tr))
 }
 
 const CAPTION_LABEL_KEYS = [
@@ -338,22 +568,28 @@ function SourceModal({
 
 interface ReferencesTabProps extends TabProps {
   blocks: Block[]
+  styles?: ReadonlyMap<string, StyleInfo>
   onInsertNote: (kind: 'footnote' | 'endnote') => void
+  onNavigateNextNote: (kind: 'footnote' | 'endnote') => void
+  onNoteSettings: () => void
   sources: SourceInfo[]
   /** footnotes/endnotes hold Zotero citation fields the bridge cannot see yet */
   zoteroNoteFields?: boolean
   onAddSource: (source: SourceInfo) => void
   /** TOC page-number backfill: docHeadings in document order → real page numbers */
-  headingPages?: () => number[] | null
+  headingPages?: (positions?: number[]) => string[] | null
 }
 
 export function ReferencesTab({
   editor,
   hasDoc,
   blocks,
+  styles,
   dropdown,
   setDropdown,
   onInsertNote,
+  onNavigateNextNote,
+  onNoteSettings,
   sources,
   zoteroNoteFields,
   onAddSource,
@@ -361,6 +597,8 @@ export function ReferencesTab({
 }: ReferencesTabProps) {
   const { t } = useI18n()
   const [captionOpen, setCaptionOpen] = useState(false)
+  const [tocOptionsOpen, setTocOptionsOpen] = useState(false)
+  const [tocUpdateOpen, setTocUpdateOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const [zoteroBusy, setZoteroBusy] = useState<ZoteroCommand | null>(null)
 
@@ -395,16 +633,72 @@ export function ReferencesTab({
   }
 
   const insertToc = () => {
-    const entries = collectTocEntriesWithPages(editor, headingPages)
+    const entries = collectTocEntriesWithPages(
+      editor,
+      blocks,
+      styles,
+      DEFAULT_TOC_OPTIONS,
+      headingPages,
+    )
     if (entries.length === 0) {
       window.alert(t('ribbonTocNoHeadings'))
       return
     }
+    editor.view.dispatch(closeHistory(editor.state.tr))
     editor
       .chain()
       .focus()
-      .insertContent(tocFieldNodes(entries) as never)
+      .insertContent(tocFieldNodes(entries, DEFAULT_TOC_OPTIONS) as never)
       .run()
+    editor.view.dispatch(closeHistory(editor.state.tr))
+  }
+
+  const applyCustomToc = (options: TocOptions) => {
+    const entries = collectTocEntriesWithPages(editor, blocks, styles, options, headingPages)
+    if (entries.length === 0) {
+      window.alert(t('ribbonTocNoHeadings'))
+      return
+    }
+    const region = findTocField(editor, blocks)
+    const nodes = tocFieldNodes(entries, options, tocInstruction(options))
+    if (region) {
+      if (!tocOptionsFromField(region.instruction, region.nodes[0]?.xml ?? '')) {
+        window.alert(t('ribbonTocUnsupported'))
+        return
+      }
+      if (!anchorTocReplacement(nodes, region, blocks)) {
+        window.alert(t('ribbonTocUnsupported'))
+        return
+      }
+      if (region.keepPageBreak)
+        nodes.push({
+          type: 'docProtected',
+          attrs: {
+            docxIndex: null,
+            blockType: 'passthrough',
+            label: t('ribbonPageBreak'),
+            genXml: PAGE_BREAK_PARAGRAPH_XML,
+            fieldDisplay: { kind: 'pageBreak' },
+          },
+        })
+      editor.view.dispatch(closeHistory(editor.state.tr))
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from: region.from, to: region.to })
+        .insertContentAt(region.from, nodes as never)
+        .run()
+      editor.view.dispatch(closeHistory(editor.state.tr))
+    } else {
+      editor.view.dispatch(closeHistory(editor.state.tr))
+      editor
+        .chain()
+        .focus()
+        .insertContent(nodes as never)
+        .run()
+      editor.view.dispatch(closeHistory(editor.state.tr))
+    }
+    setTocOptionsOpen(false)
   }
 
   const insertCitation = (source: SourceInfo) => {
@@ -580,8 +874,26 @@ export function ReferencesTab({
         <button
           className="rb-big"
           disabled={!hasDoc}
+          data-tip={t('ribbonTocCustom')}
+          onClick={() => {
+            const region = findTocField(editor, blocks)
+            if (region && !tocOptionsFromField(region.instruction, region.nodes[0]?.xml ?? '')) {
+              window.alert(t('ribbonTocUnsupported'))
+              return
+            }
+            setTocOptionsOpen(true)
+          }}
+        >
+          <span className="rb-big-icon">
+            <IconToc size={BIG} />
+          </span>
+          <span>{t('ribbonTocCustom')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
           data-tip={t('ribbonTocUpdateTip')}
-          onClick={() => updateTocField(editor, blocks, headingPages)}
+          onClick={() => setTocUpdateOpen(true)}
         >
           <span className="rb-big-icon">
             <IconRefresh size={BIG} />
@@ -589,6 +901,30 @@ export function ReferencesTab({
           <span>{t('ribbonTocUpdate')}</span>
         </button>
       </RibbonFoldGroup>
+
+      {tocOptionsOpen && (
+        <TocOptionsModal
+          initial={(() => {
+            const region = findTocField(editor, blocks)
+            return region
+              ? (tocOptionsFromField(region.instruction, region.nodes[0]?.xml ?? '') ??
+                  DEFAULT_TOC_OPTIONS)
+              : DEFAULT_TOC_OPTIONS
+          })()}
+          styles={styles}
+          onApply={applyCustomToc}
+          onClose={() => setTocOptionsOpen(false)}
+        />
+      )}
+      {tocUpdateOpen && (
+        <TocUpdateModal
+          onApply={(mode) => {
+            updateTocField(editor, blocks, styles, headingPages, mode)
+            setTocUpdateOpen(false)
+          }}
+          onClose={() => setTocUpdateOpen(false)}
+        />
+      )}
 
       <div className="ribbon-sep" />
 
@@ -620,6 +956,19 @@ export function ReferencesTab({
             <IconEndnote size={BIG} />
           </span>
           <span>{t('ribbonEndnote')}</span>
+        </button>
+        <button className="rb-big" disabled={!hasDoc} onClick={onNoteSettings}>
+          <span>{t('ribbonNoteSettings')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          onClick={() => onNavigateNextNote('footnote')}
+        >
+          <span>{t('ribbonNextFootnote')}</span>
+        </button>
+        <button className="rb-big" disabled={!hasDoc} onClick={() => onNavigateNextNote('endnote')}>
+          <span>{t('ribbonNextEndnote')}</span>
         </button>
       </RibbonFoldGroup>
 

@@ -48,6 +48,7 @@ import {
   installNavigationGuard,
   isHeadlessMode,
   printHtmlToPdf,
+  printPdfWithSystemPanel,
   safeExternalUrl,
   saveAsSuggestion,
   saveImageFromUrl,
@@ -3962,6 +3963,39 @@ export function registerDocsIpc(): void {
     imageExportDirs.set(wcId, (imageExportDirs.get(wcId) ?? new Set()).add(dir))
     return { dir, pdfPath }
   })
+
+  // macOS: the print entry renders the document to a temp PDF (the regular export path) and hands it
+  // to the standard system print panel with its page preview (print-pdf helper, PDFKit).
+  ipcMain.handle('docs:begin-native-print', (event) => {
+    if (process.platform !== 'darwin') return null
+    const wcId = event.sender.id
+    const pdfPath = join(tmpdir(), `genoffice-docs-print-${randomUUID()}.pdf`)
+    allowPdfWrite(wcId, pdfPath)
+    imageExportTemps.set(wcId, (imageExportTemps.get(wcId) ?? new Set()).add(pdfPath))
+    return { pdfPath }
+  })
+
+  ipcMain.handle(
+    'docs:present-native-print',
+    async (event, pdfPath: string): Promise<{ ok: boolean; error?: string }> => {
+      const temps = imageExportTemps.get(event.sender.id)
+      if (process.platform !== 'darwin' || typeof pdfPath !== 'string' || !temps?.has(pdfPath)) {
+        return { ok: false, error: 'not a native-print temp file' }
+      }
+      try {
+        const outcome = await printPdfWithSystemPanel(pdfPath, basename(pdfPath), {
+          resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+          devDir: join(app.getAppPath(), '../../packages/electron-utils/native'),
+        })
+        if (outcome.status === 'printed') return { ok: true }
+        // canceled in the panel: no error to show
+        return outcome.status === 'canceled' ? { ok: false } : { ok: false, error: outcome.message }
+      } finally {
+        temps.delete(pdfPath)
+        await rm(pdfPath, { force: true })
+      }
+    },
+  )
 
   ipcMain.handle('docs:take-export-pdf', async (event, pdfPath: string) => {
     const temps = imageExportTemps.get(event.sender.id)

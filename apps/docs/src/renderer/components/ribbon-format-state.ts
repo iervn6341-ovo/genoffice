@@ -1,3 +1,4 @@
+import { selectedEquation } from '../editor/equation-tools'
 import type { Editor } from '@tiptap/core'
 import type { Node as PmNode } from '@tiptap/pm/model'
 import { NodeSelection } from '@tiptap/pm/state'
@@ -26,6 +27,8 @@ export interface RibbonFormatState {
   canMergeCells: boolean
   canSplitCell: boolean
   imageSelected: boolean
+  /** a display or inline equation node is selected (Equation contextual tab) */
+  equationSelected: boolean
   imageDataUrl: string | null
   imageWrap: string | null
   imageAlign: string | null
@@ -92,6 +95,7 @@ export const EMPTY_FORMAT_STATE: RibbonFormatState = {
   canMergeCells: false,
   canSplitCell: false,
   imageSelected: false,
+  equationSelected: false,
   imageDataUrl: null,
   imageWrap: null,
   imageAlign: null,
@@ -265,6 +269,7 @@ export function computeFormatState(
     canMergeCells: inTable && !!mergeCells(editor.state),
     canSplitCell: inTable && !!splitCell(editor.state),
     imageSelected,
+    equationSelected: selectedEquation(editor) !== null,
     imageDataUrl: imageSelected ? str(protAttrs.imageDataUrl) : null,
     imageWrap: str(protAttrs.imageWrap),
     imageAlign: str(protAttrs.imageAlign),

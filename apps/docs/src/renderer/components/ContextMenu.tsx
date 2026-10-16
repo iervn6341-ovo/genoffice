@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { applyFlag, isFlagActive, styleContextOf } from '../editor/effective-format'
 import type { Editor } from '@tiptap/core'
 import type { Command } from '@tiptap/pm/state'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
@@ -18,14 +17,16 @@ import {
   splitCell,
 } from '@tiptap/pm/tables'
 import { platformShortcuts } from '@genoffice/i18n'
-import { Dropdown, isSymbolFontFamily, type DropdownOption } from '@genoffice/ui'
+import { Dropdown } from '@genoffice/ui'
+import type { TabStop } from '@genoffice/docx-engine'
 import { getLang, useI18n, type StringKey } from '../i18n/locale'
-import { fontFamiliesFor, isEastAsianFontName } from '../font-list'
-import { useSystemFontFamilies } from '../system-fonts'
-import { cssFontFamily } from '../line-metrics'
-import { setParaAttrs, activeParaAttrs } from './ribbon-tabs'
+import { activeParaAttrs } from './ribbon-tabs'
 import { wordRangeAtCaret } from '../editor/comments'
-import { setSelectionAlign } from '../editor/direction'
+import {
+  applyParagraphChanges,
+  commonParagraphValue,
+  selectedParagraphs,
+} from '../editor/paragraph-advanced'
 import { IconSparkle } from './icons'
 import { useModalKeys } from './modal-keys'
 
@@ -39,6 +40,7 @@ export interface ContextMenuState {
   y: number
   /** src of the picture under the pointer, when the click landed on one */
   imageSrc?: string | null
+  noteRef?: { kind: 'footnote' | 'endnote'; id: string }
 }
 
 interface EditorContextMenuProps {
@@ -57,6 +59,7 @@ interface EditorContextMenuProps {
   onContinueNumbering?: () => void
   /** F9 update fields (shown when the cursor is on an inline field) */
   onUpdateFields?: () => void
+  onConvertNote?: (kind: 'footnote' | 'endnote', id: string) => void
 }
 
 /** target languages mirrored from the Review → Translate dropdown; the localized label also goes into the LLM prompt */
@@ -86,6 +89,7 @@ export function EditorContextMenu({
   onRestartNumbering,
   onContinueNumbering,
   onUpdateFields,
+  onConvertNote,
 }: EditorContextMenuProps) {
   const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
@@ -427,6 +431,18 @@ export function EditorContextMenu({
           {item(t('appUpdateField'), { key: 'F9', onClick: run(() => onUpdateFields()) })}
         </>
       )}
+      {menu.noteRef && onConvertNote && (
+        <>
+          <div className="ctx-sep" />
+          {item(
+            t(menu.noteRef.kind === 'footnote' ? 'appConvertToEndnote' : 'appConvertToFootnote'),
+            {
+              disabled: !canEdit,
+              onClick: run(() => onConvertNote(menu.noteRef!.kind, menu.noteRef!.id)),
+            },
+          )}
+        </>
+      )}
       {editor.isActive('docListItem') && !!editor.getAttributes('docListItem').numId && (
         <>
           <div className="ctx-sep" />
@@ -533,218 +549,7 @@ export const WRAP_OPTIONS: Array<{ labelKey: StringKey; value: string | null }> 
 
 /* ================= Font dialog ================= */
 
-const FONT_SIZES = [9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 28, 36, 48, 72]
-
-const FONT_STYLES: Array<{ key: string; nameKey: StringKey }> = [
-  { key: 'regular', nameKey: 'appFontRegular' },
-  { key: 'italic', nameKey: 'appFontItalic' },
-  { key: 'bold', nameKey: 'appFontBold' },
-  { key: 'boldItalic', nameKey: 'appFontBoldItalic' },
-]
-
-export function FontDialog({ editor, onClose }: { editor: Editor; onClose: () => void }) {
-  const { t, lang } = useI18n()
-  const modalKeys = useModalKeys(onClose)
-  const fontFamilies = fontFamiliesFor(lang)
-  const { families: systemFontFamilies, load: loadSystemFonts } = useSystemFontFamilies()
-  // the dialog opens from a click, so activation is still live here
-  useEffect(() => loadSystemFonts(), [loadSystemFonts])
-  const textAttrs = editor.getAttributes('docTextStyle')
-  const styleCtx = styleContextOf(editor)
-  const boldNow = isFlagActive(editor.state, 'bold', styleCtx)
-  const italicNow = isFlagActive(editor.state, 'italic', styleCtx)
-  const initialStyle = boldNow
-    ? italicNow
-      ? 'boldItalic'
-      : 'bold'
-    : italicNow
-      ? 'italic'
-      : 'regular'
-
-  const [font, setFont] = useState(
-    (textAttrs.font as string | null) ?? (textAttrs.fontAscii as string | null) ?? '',
-  )
-  const [size, setSize] = useState(
-    textAttrs.sizeHalfPoints ? Number(textAttrs.sizeHalfPoints) / 2 : 11,
-  )
-  const [style, setStyle] = useState<string>(initialStyle)
-  const [color, setColor] = useState(`#${(textAttrs.color as string | null) ?? '000000'}`)
-  // the input has no "unset" state: an untouched swatch keeps the run's colour as it was
-  const [colorTouched, setColorTouched] = useState(false)
-  const [underline, setUnderline] = useState(editor.isActive('underline'))
-  const [strike, setStrike] = useState(editor.isActive('strike'))
-  const [vertAlign, setVertAlign] = useState<string>((textAttrs.vertAlign as string | null) ?? '')
-
-  const apply = () => {
-    if (!editor.isEditable) {
-      onClose()
-      return
-    }
-    let chain = editor
-      .chain()
-      .focus()
-      .setMark('docTextStyle', {
-        color: colorTouched
-          ? color.replace('#', '').toUpperCase()
-          : ((textAttrs.color as string | null) ?? null),
-        sizeHalfPoints: Math.round(size * 2),
-        // picks target only their script's rFonts slot; the other slot survives
-        ...(!font
-          ? { font: null, fontAscii: null }
-          : isEastAsianFontName(font)
-            ? { font }
-            : { fontAscii: font }),
-        highlight: textAttrs.highlight ?? null,
-        vertAlign: vertAlign || null,
-      })
-    const wantBold = style === 'bold' || style === 'boldItalic'
-    const wantItalic = style === 'italic' || style === 'boldItalic'
-    // effective values: un-bolding Heading 1 text writes the explicit off-switch
-    chain = chain.command(({ tr }) => {
-      applyFlag(tr, 'bold', wantBold, styleCtx)
-      applyFlag(tr, 'italic', wantItalic, styleCtx)
-      return true
-    })
-    chain = underline ? chain.setMark('underline') : chain.unsetMark('underline')
-    chain = strike ? chain.setMark('strike') : chain.unsetMark('strike')
-    chain.run()
-    onClose()
-  }
-
-  return (
-    <div
-      className="modal-backdrop"
-      ref={modalKeys.ref}
-      onKeyDown={modalKeys.onKeyDown}
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="modal">
-        <h2>{t('appFontDialogTitle')}</h2>
-        <div className="font-dialog-row">
-          <label>
-            {t('appFontFamilyLabel')}
-            <Dropdown
-              value={font}
-              ariaLabel={t('appFontFamilyLabel')}
-              options={[
-                { value: '', label: t('appDefaultBodyFont') } as DropdownOption,
-                ...fontFamilies.map((f): DropdownOption => ({
-                  value: f,
-                  label: f,
-                  render: <span style={{ fontFamily: cssFontFamily(f) }}>{f}</span>,
-                })),
-                ...systemFontFamilies.map((f): DropdownOption => ({
-                  value: f,
-                  label: f,
-                  render: (
-                    // symbol fonts would render their own name as pictographs
-                    <span
-                      style={{
-                        fontFamily: isSymbolFontFamily(f) ? undefined : cssFontFamily(f),
-                      }}
-                    >
-                      {f}
-                    </span>
-                  ),
-                })),
-                ...(font && !fontFamilies.includes(font) && !systemFontFamilies.includes(font)
-                  ? [{ value: font, label: font } as DropdownOption]
-                  : []),
-              ]}
-              onPick={setFont}
-            />
-          </label>
-          <label>
-            {t('appFontStyleLabel')}
-            <Dropdown
-              value={style}
-              ariaLabel={t('appFontStyleLabel')}
-              options={FONT_STYLES.map((s) => ({ value: s.key, label: t(s.nameKey) }))}
-              onPick={setStyle}
-            />
-          </label>
-          <label>
-            {t('appFontSizeLabel')}
-            <Dropdown
-              value={String(size)}
-              ariaLabel={t('appFontSizeLabel')}
-              options={[
-                ...(!FONT_SIZES.includes(size) ? [String(size)] : []),
-                ...FONT_SIZES.map(String),
-              ].map((s) => ({ value: s, label: s }))}
-              onPick={(v) => setSize(Number(v))}
-            />
-          </label>
-        </div>
-        <div className="font-dialog-row">
-          <label>
-            {t('appFontColor')}
-            <input
-              type="color"
-              className="font-color-input"
-              value={color}
-              onChange={(e) => {
-                setColor(e.target.value)
-                setColorTouched(true)
-              }}
-            />
-          </label>
-          <label className="font-check">
-            <input
-              type="checkbox"
-              checked={underline}
-              onChange={(e) => setUnderline(e.target.checked)}
-            />
-            {t('appUnderline')}
-          </label>
-          <label className="font-check">
-            <input type="checkbox" checked={strike} onChange={(e) => setStrike(e.target.checked)} />
-            {t('appStrikethrough')}
-          </label>
-          <label className="font-check">
-            <input
-              type="checkbox"
-              checked={vertAlign === 'superscript'}
-              onChange={(e) => setVertAlign(e.target.checked ? 'superscript' : '')}
-            />
-            {t('appSuperscript')}
-          </label>
-          <label className="font-check">
-            <input
-              type="checkbox"
-              checked={vertAlign === 'subscript'}
-              onChange={(e) => setVertAlign(e.target.checked ? 'subscript' : '')}
-            />
-            {t('appSubscript')}
-          </label>
-        </div>
-        <div
-          className="font-preview"
-          style={{
-            fontFamily: font ? cssFontFamily(font) : undefined,
-            fontSize: `${Math.min(size, 28)}pt`,
-            fontWeight: style === 'bold' || style === 'boldItalic' ? 600 : 400,
-            fontStyle: style === 'italic' || style === 'boldItalic' ? 'italic' : 'normal',
-            color,
-            textDecoration:
-              [underline ? 'underline' : '', strike ? 'line-through' : ''].join(' ').trim() ||
-              undefined,
-          }}
-        >
-          {t('appFontPreviewSample')}
-        </div>
-        <div className="modal-actions">
-          <button className="btn-ghost" onClick={onClose}>
-            {t('appCancel')}
-          </button>
-          <button className="btn-primary" onClick={apply}>
-            {t('appOk')}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+export { FontDialog } from './FontAdvancedDialog'
 
 /* ================= Paragraph dialog ================= */
 
@@ -755,7 +560,8 @@ type SpecialIndent = 'none' | 'first' | 'hanging'
 const round2 = (v: number) => Math.round(v * 100) / 100
 
 /** UI languages whose Word measures paragraph indents in characters (字元) */
-const isCjkLang = (lang: string) => lang === 'zh' || lang === 'zh-TW' || lang === 'ja' || lang === 'ko'
+const isCjkLang = (lang: string) =>
+  lang === 'zh' || lang === 'zh-TW' || lang === 'ja' || lang === 'ko'
 
 /** rendered font size (pt) at the caret — the width of one indent character */
 function paraFontPt(editor: Editor): number {
@@ -789,10 +595,103 @@ const LINE_SPACINGS: Array<{ value: number; nameKey: StringKey }> = [
   { value: 3, nameKey: 'appLineTriple' },
 ]
 
-export function ParagraphDialog({ editor, onClose }: { editor: Editor; onClose: () => void }) {
+type Compression = 'doNotCompress' | 'compressPunctuation' | 'compressPunctuationAndJapaneseKana'
+
+export interface ParagraphDialogChange {
+  from: number
+  to: number
+  attrs: Record<string, unknown>
+  visualAlign?: AlignValue
+  compression?: Compression
+  defaultTabStopTwips?: number
+}
+
+export function ParagraphDialog({
+  editor,
+  onClose,
+  compression,
+  onCompressionChange,
+  defaultTabStopTwips,
+  onDefaultTabStopChange,
+  onApplyAdvanced,
+}: {
+  editor: Editor
+  onClose: () => void
+  compression?: Compression | null
+  onCompressionChange?: (value: Compression) => void
+  defaultTabStopTwips?: number | null
+  onDefaultTabStopChange?: (twips: number) => void
+  onApplyAdvanced?: (change: ParagraphDialogChange) => void
+}) {
   const { t } = useI18n()
   const modalKeys = useModalKeys(onClose)
-  const attrs = activeParaAttrs(editor)
+  const [selection] = useState(() => ({
+    from: editor.state.selection.from,
+    to: editor.state.selection.to,
+  }))
+  const [samples] = useState(() => selectedParagraphs(editor, selection.from, selection.to))
+  const attrs = samples[0]?.node.attrs ?? activeParaAttrs(editor)
+  const [pane, setPane] = useState<'spacing' | 'breaks' | 'asian' | 'tabs'>('spacing')
+  const [flags, setFlags] = useState<Record<string, boolean>>({})
+  const [alignTouched, setAlignTouched] = useState(false)
+  const flagValue = (key: string, fallback: boolean) => {
+    const sample = commonParagraphValue(samples, (s) => s.node.attrs[key] as boolean | null)
+    return {
+      value: flags[key] ?? sample.value ?? fallback,
+      mixed: key in flags ? false : sample.mixed,
+    }
+  }
+  const setFlag = (key: string, value: boolean) => setFlags((old) => ({ ...old, [key]: value }))
+  const check = (key: string, label: string, fallback = false) => {
+    const state = flagValue(key, fallback)
+    return (
+      <label className="font-check" key={key}>
+        <input
+          type="checkbox"
+          checked={state.value}
+          ref={(el) => {
+            if (el) el.indeterminate = state.mixed
+          }}
+          onChange={(event) => setFlag(key, event.target.checked)}
+        />
+        {label}
+      </label>
+    )
+  }
+  const [tabStops, setTabStops] = useState<TabStop[]>(() => {
+    try {
+      const parsed = JSON.parse(String(attrs.tabStops ?? '[]')) as TabStop[]
+      return Array.isArray(parsed) ? parsed.filter((stop) => !stop.inherited && !stop.rel) : []
+    } catch {
+      return []
+    }
+  })
+  const [tabsTouched, setTabsTouched] = useState(false)
+  const [tabPosPt, setTabPosPt] = useState(36)
+  const [tabAlign, setTabAlign] = useState<TabStop['val']>('left')
+  const [tabLeader, setTabLeader] = useState<NonNullable<TabStop['leader']>>('none')
+  const [textAlignment, setTextAlignment] = useState(String(attrs.textAlignment ?? 'auto'))
+  const [compressionValue, setCompressionValue] = useState<Compression>(
+    compression ?? 'doNotCompress',
+  )
+  const [compressionTouched, setCompressionTouched] = useState(false)
+  const [defaultTabPt, setDefaultTabPt] = useState((defaultTabStopTwips ?? 720) / 20)
+  const [defaultTabTouched, setDefaultTabTouched] = useState(false)
+  const addTabStop = () => {
+    const pos = Math.round(tabPosPt * 20)
+    if (!Number.isFinite(pos) || pos < 0 || pos > 31680) return
+    setTabStops((old) =>
+      [
+        ...old.filter((stop) => stop.pos !== pos),
+        {
+          pos,
+          val: tabAlign,
+          ...(tabLeader === 'none' ? {} : { leader: tabLeader }),
+        },
+      ].sort((a, b) => a.pos - b.pos),
+    )
+    setTabsTouched(true)
+  }
   // unset align means "start": visually left in LTR, right in RTL (same as the ribbon)
   const [align, setAlign] = useState<AlignValue>(
     (attrs.align as AlignValue | null) ?? (attrs.bidi === true ? 'right' : 'left'),
@@ -873,14 +772,48 @@ export function ParagraphDialog({ editor, onClose }: { editor: Editor; onClose: 
             lineRule: null,
             lineRawTwips: null,
           }
-    // align goes through setSelectionAlign so each paragraph resolves the
-    // visual value against its own direction (null = start side)
-    setSelectionAlign(editor, align)
-    setParaAttrs(editor, {
-      ...spacing,
+    const changes: Record<string, unknown> = {
+      ...(lineRule !== initRule ||
+      lineSpacing !== Math.round(initMultiple * 100) / 100 ||
+      linePt !== (rawTwips ? Math.round(rawTwips / 2) / 10 : 12)
+        ? spacing
+        : {}),
       ...indent,
       ...spacingAttrs,
-    })
+      ...flags,
+      ...('pageBreakBefore' in flags ? { pageBreakBeforeDirect: true } : {}),
+      ...(textAlignment !== String(attrs.textAlignment ?? 'auto') ? { textAlignment } : {}),
+      ...(tabsTouched ? { tabStops: JSON.stringify(tabStops) } : {}),
+    }
+    const compressionEdit =
+      compressionTouched && compressionValue !== compression ? compressionValue : undefined
+    const defaultTabEdit =
+      defaultTabTouched &&
+      defaultTabPt > 0 &&
+      defaultTabPt <= 1584 &&
+      Math.round(defaultTabPt * 20) !== defaultTabStopTwips
+        ? Math.round(defaultTabPt * 20)
+        : undefined
+    if (onApplyAdvanced) {
+      onApplyAdvanced({
+        from: selection.from,
+        to: selection.to,
+        attrs: changes,
+        ...(alignTouched ? { visualAlign: align } : {}),
+        ...(compressionEdit ? { compression: compressionEdit } : {}),
+        ...(defaultTabEdit ? { defaultTabStopTwips: defaultTabEdit } : {}),
+      })
+    } else {
+      applyParagraphChanges(
+        editor,
+        selection.from,
+        selection.to,
+        changes,
+        alignTouched ? align : undefined,
+      )
+      if (compressionEdit) onCompressionChange?.(compressionEdit)
+      if (defaultTabEdit !== undefined) onDefaultTabStopChange?.(defaultTabEdit)
+    }
     onClose()
   }
 
@@ -915,102 +848,308 @@ export function ParagraphDialog({ editor, onClose }: { editor: Editor; onClose: 
       onKeyDown={modalKeys.onKeyDown}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="modal">
+      <div className="modal para-advanced-dialog" data-testid="paragraph-dialog">
         <h2>{t('appParagraph')}</h2>
-        <div className="font-dialog-row">
-          <label>
-            {t('appAlignment')}
-            <Dropdown
-              value={align}
-              ariaLabel={t('appAlignment')}
-              options={ALIGN_OPTIONS.map((o) => ({ value: o.key, label: t(o.nameKey) }))}
-              onPick={setAlign}
-            />
-          </label>
-          <label>
-            {t('appLineSpacingLabel')}
-            <Dropdown
-              value={lineRule || String(lineSpacing)}
-              ariaLabel={t('appLineSpacingLabel')}
-              options={[
-                ...(!lineRule && !LINE_SPACINGS.some((s) => s.value === lineSpacing)
-                  ? [
-                      {
-                        value: String(lineSpacing),
-                        label: t('appLineMultiple', { n: lineSpacing }),
-                      },
-                    ]
-                  : []),
-                ...LINE_SPACINGS.map((s) => ({ value: String(s.value), label: t(s.nameKey) })),
-                { value: 'atLeast', label: t('appLineAtLeast') },
-                { value: 'exact', label: t('appLineExactly') },
-              ]}
-              onPick={(v) => {
-                if (v === 'exact' || v === 'atLeast') {
-                  setLineRule(v)
-                } else {
-                  setLineRule('')
-                  setLineSpacing(Number(v))
-                }
-              }}
-            />
-          </label>
-          {lineRule === 'exact' || lineRule === 'atLeast' ? (
-            <label>
-              {t('appLineValue')}
-              <span className="para-num">
-                <input
-                  type="number"
-                  min={1}
-                  max={1584}
-                  step={0.5}
-                  value={linePt}
-                  onChange={(e) => setLinePt(Math.max(0, Number(e.target.value) || 0))}
+        <div className="font-dialog-tabs" role="tablist">
+          {(
+            [
+              ['spacing', 'appParaTabSpacing'],
+              ['breaks', 'appParaTabBreaks'],
+              ['asian', 'appParaTabAsian'],
+              ['tabs', 'appParaTabs'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              data-testid={`paragraph-pane-${id}`}
+              aria-selected={pane === id}
+              onClick={() => setPane(id)}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
+        {pane === 'spacing' && (
+          <>
+            <div className="font-dialog-row">
+              <label>
+                {t('appAlignment')}
+                <Dropdown
+                  value={align}
+                  ariaLabel={t('appAlignment')}
+                  options={ALIGN_OPTIONS.map((o) => ({ value: o.key, label: t(o.nameKey) }))}
+                  onPick={(value) => {
+                    setAlign(value)
+                    setAlignTouched(true)
+                  }}
                 />
-                <span className="para-unit">pt</span>
-              </span>
-            </label>
-          ) : (
-            <label>
-              {t('appLineValue')}
-              <span className="para-num">
-                <input
-                  type="number"
-                  min={0.06}
-                  max={132}
-                  step={0.05}
-                  value={lineSpacing}
-                  onChange={(e) => setLineSpacing(Math.max(0.06, Number(e.target.value) || 1))}
+              </label>
+              <label>
+                {t('appLineSpacingLabel')}
+                <Dropdown
+                  value={lineRule || String(lineSpacing)}
+                  ariaLabel={t('appLineSpacingLabel')}
+                  options={[
+                    ...(!lineRule && !LINE_SPACINGS.some((s) => s.value === lineSpacing)
+                      ? [
+                          {
+                            value: String(lineSpacing),
+                            label: t('appLineMultiple', { n: lineSpacing }),
+                          },
+                        ]
+                      : []),
+                    ...LINE_SPACINGS.map((s) => ({ value: String(s.value), label: t(s.nameKey) })),
+                    { value: 'atLeast', label: t('appLineAtLeast') },
+                    { value: 'exact', label: t('appLineExactly') },
+                  ]}
+                  onPick={(v) => {
+                    if (v === 'exact' || v === 'atLeast') {
+                      setLineRule(v)
+                    } else {
+                      setLineRule('')
+                      setLineSpacing(Number(v))
+                    }
+                  }}
                 />
-                <span className="para-unit">×</span>
-              </span>
-            </label>
-          )}
-        </div>
-        <div className="font-dialog-row">
-          {numInput(t('appIndentLeft'), indentLeft, setIndentLeft, 'indent')}
-          {numInput(t('appIndentRight'), indentRight, setIndentRight, 'indent')}
-        </div>
-        <div className="font-dialog-row">
-          <label>
-            {t('appIndentSpecial')}
-            <Dropdown
-              value={special}
-              ariaLabel={t('appIndentSpecial')}
-              options={[
-                { value: 'none', label: t('appIndentSpecialNone') },
-                { value: 'first', label: t('appIndentSpecialFirst') },
-                { value: 'hanging', label: t('appIndentSpecialHanging') },
-              ]}
-              onPick={(v) => pickSpecial(v as SpecialIndent)}
-            />
-          </label>
-          {special !== 'none' && numInput(t('appIndentBy'), specialBy, setSpecialBy, 'indent')}
-        </div>
-        <div className="font-dialog-row">
-          {numInput(t('appSpaceBefore'), spaceBefore, setSpaceBefore)}
-          {numInput(t('appSpaceAfter'), spaceAfter, setSpaceAfter)}
-        </div>
+              </label>
+              {lineRule === 'exact' || lineRule === 'atLeast' ? (
+                <label>
+                  {t('appLineValue')}
+                  <span className="para-num">
+                    <input
+                      type="number"
+                      min={1}
+                      max={1584}
+                      step={0.5}
+                      value={linePt}
+                      onChange={(e) => setLinePt(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                    <span className="para-unit">pt</span>
+                  </span>
+                </label>
+              ) : (
+                <label>
+                  {t('appLineValue')}
+                  <span className="para-num">
+                    <input
+                      type="number"
+                      min={0.06}
+                      max={132}
+                      step={0.05}
+                      value={lineSpacing}
+                      onChange={(e) => setLineSpacing(Math.max(0.06, Number(e.target.value) || 1))}
+                    />
+                    <span className="para-unit">×</span>
+                  </span>
+                </label>
+              )}
+            </div>
+            <div className="font-dialog-row">
+              {numInput(t('appIndentLeft'), indentLeft, setIndentLeft, 'indent')}
+              {numInput(t('appIndentRight'), indentRight, setIndentRight, 'indent')}
+            </div>
+            <div className="font-dialog-row">
+              <label>
+                {t('appIndentSpecial')}
+                <Dropdown
+                  value={special}
+                  ariaLabel={t('appIndentSpecial')}
+                  options={[
+                    { value: 'none', label: t('appIndentSpecialNone') },
+                    { value: 'first', label: t('appIndentSpecialFirst') },
+                    { value: 'hanging', label: t('appIndentSpecialHanging') },
+                  ]}
+                  onPick={(v) => pickSpecial(v as SpecialIndent)}
+                />
+              </label>
+              {special !== 'none' && numInput(t('appIndentBy'), specialBy, setSpecialBy, 'indent')}
+            </div>
+            <div className="font-dialog-row">
+              {numInput(t('appSpaceBefore'), spaceBefore, setSpaceBefore)}
+              {numInput(t('appSpaceAfter'), spaceAfter, setSpaceAfter)}
+            </div>
+          </>
+        )}
+        {pane === 'breaks' && (
+          <div className="font-dialog-checks para-options">
+            {check('widowControl', t('appParaWidow'), true)}
+            {check('keepNext', t('appParaKeepNext'))}
+            {check('keepLines', t('appParaKeepLines'))}
+            {check('pageBreakBefore', t('appParaPageBreakBefore'))}
+            {check('suppressLineNumbers', t('appParaSuppressLineNumbers'))}
+            {check('suppressAutoHyphens', t('appParaDoNotHyphenate'))}
+          </div>
+        )}
+        {pane === 'asian' && (
+          <>
+            <div className="font-dialog-checks para-options">
+              {check('kinsoku', t('appParaKinsoku'), true)}
+              {check('wordWrap', t('appParaLatinBreak'))}
+              {check('overflowPunct', t('appParaHangPunct'), true)}
+              {check('topLinePunct', t('appParaCompressLineStart'))}
+              {check('autoSpaceDE', t('appParaAsianLatinSpace'), true)}
+              {check('autoSpaceDN', t('appParaAsianDigitSpace'), true)}
+            </div>
+            <div className="font-dialog-row">
+              <label>
+                {t('appParaTextAlign')}
+                <Dropdown
+                  value={textAlignment}
+                  ariaLabel={t('appParaTextAlign')}
+                  options={(
+                    [
+                      ['auto', 'appParaTextAuto'],
+                      ['baseline', 'appParaTextBaseline'],
+                      ['center', 'appAlignCenter'],
+                      ['top', 'appParaTextTop'],
+                      ['bottom', 'appParaTextBottom'],
+                    ] as const
+                  ).map(([value, label]) => ({ value, label: t(label) }))}
+                  onPick={(value) => setTextAlignment(value)}
+                />
+              </label>
+              {(onCompressionChange || onApplyAdvanced) && (
+                <label>
+                  {t('appParaCompression')}
+                  <Dropdown
+                    value={compressionValue}
+                    ariaLabel={t('appParaCompression')}
+                    options={(
+                      [
+                        ['doNotCompress', 'appParaCompressNone'],
+                        ['compressPunctuation', 'appParaCompressPunctuation'],
+                        ['compressPunctuationAndJapaneseKana', 'appParaCompressKana'],
+                      ] as const
+                    ).map(([value, label]) => ({ value, label: t(label) }))}
+                    onPick={(value) => {
+                      setCompressionValue(value)
+                      setCompressionTouched(true)
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+          </>
+        )}
+        {pane === 'tabs' && (
+          <>
+            <div className="font-dialog-row">
+              {(onDefaultTabStopChange || onApplyAdvanced) && (
+                <label>
+                  {t('appParaDefaultTab')}
+                  <span className="para-num">
+                    <input
+                      type="number"
+                      min="0.5"
+                      max="1584"
+                      step="0.5"
+                      value={defaultTabPt}
+                      onChange={(event) => {
+                        setDefaultTabPt(Number(event.target.value))
+                        setDefaultTabTouched(true)
+                      }}
+                    />
+                    <span className="para-unit">pt</span>
+                  </span>
+                </label>
+              )}
+              <label>
+                {t('appParaTabPosition')}
+                <span className="para-num">
+                  <input
+                    type="number"
+                    min="0"
+                    max="1584"
+                    step="0.5"
+                    value={tabPosPt}
+                    onChange={(event) => setTabPosPt(Number(event.target.value))}
+                  />
+                  <span className="para-unit">pt</span>
+                </span>
+              </label>
+              <label>
+                {t('appParaTabAlignment')}
+                <Dropdown
+                  value={tabAlign}
+                  ariaLabel={t('appParaTabAlignment')}
+                  options={(
+                    [
+                      ['left', 'appTabLeft'],
+                      ['center', 'appTabCenter'],
+                      ['right', 'appTabRight'],
+                      ['decimal', 'appTabDecimal'],
+                      ['bar', 'appTabBar'],
+                    ] as const
+                  ).map(([value, label]) => ({ value, label: t(label) }))}
+                  onPick={(value) => setTabAlign(value as TabStop['val'])}
+                />
+              </label>
+              <label>
+                {t('appParaTabLeader')}
+                <Dropdown
+                  value={tabLeader}
+                  ariaLabel={t('appParaTabLeader')}
+                  options={(
+                    [
+                      ['none', 'appParaLeaderNone'],
+                      ['dot', 'appParaLeaderDots'],
+                      ['hyphen', 'appParaLeaderDashes'],
+                      ['underscore', 'appParaLeaderUnderline'],
+                      ['heavy', 'appParaLeaderHeavyDots'],
+                    ] as const
+                  ).map(([value, label]) => ({ value, label: t(label) }))}
+                  onPick={(value) => setTabLeader(value as NonNullable<TabStop['leader']>)}
+                />
+              </label>
+            </div>
+            <div className="para-tab-actions">
+              <button type="button" onClick={addTabStop}>
+                {t('appParaTabAdd')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTabStops([])
+                  setTabsTouched(true)
+                }}
+              >
+                {t('appParaTabClearAll')}
+              </button>
+            </div>
+            <div className="para-tab-list" role="list">
+              {tabStops.map((stop) => (
+                <div key={stop.pos} role="listitem">
+                  <span>
+                    {round2(stop.pos / 20)} pt ·{' '}
+                    {t(
+                      (
+                        {
+                          left: 'appTabLeft',
+                          center: 'appTabCenter',
+                          right: 'appTabRight',
+                          decimal: 'appTabDecimal',
+                          bar: 'appTabBar',
+                          clear: 'appTabClear',
+                        } as const
+                      )[stop.val],
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTabStops((old) => old.filter((item) => item.pos !== stop.pos))
+                      setTabsTouched(true)
+                    }}
+                  >
+                    {t('appParaTabRemove')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
         <div className="modal-actions">
           <button className="btn-ghost" onClick={onClose}>
             {t('appCancel')}

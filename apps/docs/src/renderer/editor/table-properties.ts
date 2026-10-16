@@ -3,14 +3,14 @@ import type { Command, EditorState, Transaction } from '@tiptap/pm/state'
 import { isInTable, selectedRect } from '@tiptap/pm/tables'
 import type { TableAutoFitMode, TableLook } from '@genoffice/docx-engine'
 
-interface SelectedTable {
+export interface SelectedTable {
   node: PmNode
   pos: number
   tableStart: number
   rect: ReturnType<typeof selectedRect>
 }
 
-function selectedTable(state: EditorState): SelectedTable | null {
+export function selectedTable(state: EditorState): SelectedTable | null {
   if (!isInTable(state)) return null
   try {
     const rect = selectedRect(state)

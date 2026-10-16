@@ -44,6 +44,13 @@ describe('canvas content-area top', () => {
     expect(canvasContentTopPx(sections, body, headerPx)).toBe(headerDist + headerPx)
   })
 
+  it('reserves the taller first-page variant before placing the first body block', () => {
+    const first = [{ ...sec(120), titlePg: true }, ...sections.slice(1)]
+    const headerDist = twipsToPx(720)
+    expect(canvasContentTopPx(first, body, 20, 154)).toBe(headerDist + 154)
+    expect(canvasContentTopPx(first, body, 154, 20)).toBe(headerDist + 20)
+  })
+
   it('measured against that origin, the first block starts at virtual 0 like the clone', () => {
     const padTop = canvasContentTopPx(sections, body, 0)
     const pm = document.createElement('div')

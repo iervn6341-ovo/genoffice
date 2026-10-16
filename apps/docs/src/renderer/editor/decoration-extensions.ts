@@ -198,6 +198,8 @@ const DEFAULT_TAB_TWIPS = 720
 export interface TabStopStorage {
   /** settings.xml w:defaultTabStop (twips); 0 = zero-width default tabs (Word barely advances) */
   defaultTabStopTwips: number | null
+  /** Explicit settings refresh for a metadata-only transaction. */
+  measureVersion?: number
 }
 
 declare module '@tiptap/core' {
@@ -422,6 +424,7 @@ const MEASURE_RETRY_MAX = 10
 const MEASURE_SIGS_MAX = 8
 
 class TabLayoutView {
+  private lastMeasureVersion: number
   private lastSig = ''
   private seenSigs = new Set<string>()
   private frozen = false
@@ -443,6 +446,7 @@ class TabLayoutView {
     private view: EditorView,
     private storage: TabStopStorage,
   ) {
+    this.lastMeasureVersion = storage.measureVersion ?? 0
     this.measure()
     document.fonts?.addEventListener('loadingdone', this.onFontsLoaded)
     document.addEventListener(PHASED_CONTENT_SETTLED_EVENT, this.onPhasedSettled)
@@ -466,7 +470,11 @@ class TabLayoutView {
   }
 
   update(view: EditorView, prevState: EditorState) {
-    if (view.state.doc !== prevState.doc) {
+    const measureVersion = this.storage.measureVersion ?? 0
+    if (measureVersion !== this.lastMeasureVersion) {
+      this.lastMeasureVersion = measureVersion
+      this.invalidate()
+    } else if (view.state.doc !== prevState.doc) {
       this.invalidate()
     } else if (
       // selection-only transactions change neither the doc nor tab layout; the

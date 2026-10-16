@@ -311,7 +311,13 @@ function lineSampleSig(el: HTMLElement, textH: number): string {
     const per = Math.round((parseFloat(sp.style.wordSpacing) || 0) * -100)
     js = (js * 33 + per + (sp.textContent?.length ?? 0)) | 0
   }
-  return `${lineSampleFontEpoch}:${Math.round(textH * 4)}:${Math.round(w * 4)}:${nodes}:${h}:${js}`
+  // row flags published as data attributes (repeat header / cannot split) change the cut
+  // model without touching text or structure
+  let flags = ''
+  if (el.querySelector('tr'))
+    for (const tr of el.querySelectorAll('tr'))
+      flags += `${tr.getAttribute('data-repeat-header') ?? ''}${tr.hasAttribute('data-cant-split') ? 'c' : '-'}`
+  return `${lineSampleFontEpoch}:${Math.round(textH * 4)}:${Math.round(w * 4)}:${nodes}:${h}:${js}:${flags}`
 }
 
 export function fillLineBoxes(
@@ -422,7 +428,7 @@ export function fillLineBoxes(
             // it must beat the source XML so turning repetition off takes effect
             // before the document is saved and reopened.
             if (r.isHeader === undefined && flags[i]?.isHeader) r.isHeader = true
-            if (flags[i]?.cantSplit) r.cantSplit = true
+            if (r.cantSplit === undefined && flags[i]?.cantSplit) r.cantSplit = true
             if (flags[i]?.keepNext) r.keepNext = true
             if (flags[i]?.minHPx) r.minHPx = flags[i].minHPx
           })
@@ -597,6 +603,7 @@ function domTableRows(el: HTMLElement, blockHeight: number, zoomFactor: number):
       ...(trs[i].hasAttribute('data-repeat-header')
         ? { isHeader: trs[i].getAttribute('data-repeat-header') === '1' }
         : {}),
+      ...(trs[i].hasAttribute('data-cant-split') ? { cantSplit: true } : {}),
       ...(cuts.length > 0 ? { cutYs: cuts } : {}),
       ...(cells ? { cells } : {}),
       ...(splitExtra > 0 ? { splitExtra } : {}),

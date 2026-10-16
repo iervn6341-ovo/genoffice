@@ -61,8 +61,9 @@ export function canvasContentTopPx(
   sections: SectionInfo[],
   section: SectionSettings,
   headerPx: number,
+  firstHeaderPx?: number,
 ): number {
-  return effectiveTopPx(sections[0]?.settings ?? section, headerPx)
+  return effectiveTopPx(sections[0]?.settings ?? section, firstHeaderPx ?? headerPx)
 }
 
 /** Body bottom margin = max(marginBottom, footerDist + footer height) */

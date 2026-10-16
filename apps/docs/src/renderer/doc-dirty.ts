@@ -16,6 +16,8 @@ export interface DocDirtyState {
   footerDirty: boolean
   hfVariantsDirty: readonly unknown[]
   sectionHfEdits: Record<string, unknown>
+  sectionHfLinkEdits: Record<string, unknown>
+  sectionHfRefEdits: Record<string, unknown>
   pgNumEdit: unknown
   pgNumDirtySections: readonly number[]
   numberingDirty: boolean
@@ -46,6 +48,8 @@ export function isDocDirty(s: DocDirtyState): boolean {
     s.footerDirty ||
     s.hfVariantsDirty.length > 0 ||
     Object.keys(s.sectionHfEdits).length > 0 ||
+    Object.keys(s.sectionHfLinkEdits).length > 0 ||
+    Object.keys(s.sectionHfRefEdits).length > 0 ||
     s.pgNumEdit !== null ||
     s.pgNumDirtySections.length > 0 ||
     s.numberingDirty ||
@@ -72,7 +76,16 @@ export interface CrossDocEditStateSink {
   setSectionsDirty: (value: number[]) => void
   setTrailingStartType: (value: SectionInfo['startType'] | null) => void
   setSectionHfEdits: (value: Record<string, HeaderFooter>) => void
-  setPgNumEdit: (value: { fmt?: string; start?: number } | null) => void
+  setSectionHfLinkEdits: (value: Record<string, true>) => void
+  setSectionHfRefEdits: (value: Record<string, string>) => void
+  setPgNumEdit: (
+    value: {
+      fmt?: string
+      start?: number
+      chapStyle?: number | null
+      chapSep?: string | null
+    } | null,
+  ) => void
   setPgNumDirtySections: (value: number[]) => void
   setPendingNumbering: (value: PendingNumbering) => void
   setStyleUpserts: (value: Record<string, StyleUpsert>) => void
@@ -89,6 +102,8 @@ export function resetCrossDocEditState(sink: CrossDocEditStateSink): void {
   sink.setSectionsDirty([])
   sink.setTrailingStartType(null)
   sink.setSectionHfEdits({})
+  sink.setSectionHfLinkEdits({})
+  sink.setSectionHfRefEdits({})
   sink.setPgNumEdit(null)
   sink.setPgNumDirtySections([])
   sink.setPendingNumbering({ newDefs: [], restartNums: [] })

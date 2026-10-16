@@ -58,7 +58,7 @@ import {
   WORD_AUTO_SPACING_PT,
 } from '../line-metrics'
 import { textAlignDecl } from './text-effects'
-import { noteMarkText } from '../note-format'
+import { currentNoteNumFmt, formatNoteNumber } from '../note-format'
 import { t } from '../i18n/locale'
 import {
   ommlToMathML,
@@ -122,6 +122,8 @@ import {
   PaginationGapsExtension,
   RowFillsExtension,
 } from './pagination-gaps'
+import { SectionEndnoteAreasExtension } from './section-endnotes'
+import { AutoCorrectExtension } from './autocorrect'
 import {
   CaretMarksMemory,
   FORMAT_MARKS,
@@ -248,6 +250,13 @@ const anchorAttrs = {
   // character before the paragraph content, so a newline must not clone the
   // break onto the new paragraph
   pageBreakBefore: { default: false, keepOnSplit: false },
+  /** Explicit false must cancel an inherited style page break. */
+  pageBreakBeforeDirect: { default: false, keepOnSplit: false },
+  keepNext: { default: null as boolean | null },
+  keepLines: { default: null as boolean | null },
+  widowControl: { default: null as boolean | null },
+  suppressLineNumbers: { default: null as boolean | null },
+  suppressAutoHyphens: { default: null as boolean | null },
   /** RTL paragraph (w:bidi); align is already the visual value */
   bidi: { default: false },
   /** render-only RTL inferred from run w:rtl / RTL script when w:bidi is absent
@@ -259,6 +268,11 @@ const anchorAttrs = {
   wordWrap: { default: null as boolean | null },
   /** w:overflowPunct; false = a line-end CJK stop never hangs into the margin */
   overflowPunct: { default: null as boolean | null },
+  kinsoku: { default: null as boolean | null },
+  topLinePunct: { default: null as boolean | null },
+  autoSpaceDE: { default: null as boolean | null },
+  autoSpaceDN: { default: null as boolean | null },
+  textAlignment: { default: null as string | null },
   /** paragraph-style chain w:lang w:eastAsia; runs without their own value inherit it */
   eaLang: { default: null as string | null },
   shadingFill: { default: null as string | null },
@@ -524,11 +538,22 @@ const CLIPBOARD_PARA_ATTR_TYPES: Record<string, 'string' | 'number' | 'boolean'>
   spaceAfterAuto: 'boolean',
   contextualSpacing: 'boolean',
   pageBreakBefore: 'boolean',
+  pageBreakBeforeDirect: 'boolean',
+  keepNext: 'boolean',
+  keepLines: 'boolean',
+  widowControl: 'boolean',
+  suppressLineNumbers: 'boolean',
+  suppressAutoHyphens: 'boolean',
   bidi: 'boolean',
   bidiInferred: 'boolean',
   autoSpace: 'boolean',
   wordWrap: 'boolean',
   overflowPunct: 'boolean',
+  kinsoku: 'boolean',
+  topLinePunct: 'boolean',
+  autoSpaceDE: 'boolean',
+  autoSpaceDN: 'boolean',
+  textAlignment: 'string',
   eaLang: 'string',
   shadingFill: 'string',
   shadingDisplay: 'string',
@@ -861,6 +886,10 @@ export const DocNoteRef = Node.create({
       kind: { default: 'footnote' as 'footnote' | 'endnote' },
       id: { default: '' },
       num: { default: 1 },
+      fmt: { default: null as string | null },
+      customMark: { default: null as string | null },
+      customMarkSymbol: { default: null as { font: string; char: string } | null },
+      rawRPr: { default: null as string | null },
     }
   },
   parseHTML() {
@@ -876,7 +905,11 @@ export const DocNoteRef = Node.create({
         title: node.attrs.kind === 'footnote' ? t('editorFootnote') : t('editorEndnote'),
       },
       // bare superscript number, matching Word; hover/selection accents live in CSS
-      noteMarkText(node.attrs.kind as 'footnote' | 'endnote', Number(node.attrs.num) || 1),
+      node.attrs.customMark ??
+        formatNoteNumber(
+          node.attrs.fmt ?? currentNoteNumFmt(node.attrs.kind as 'footnote' | 'endnote'),
+          Number(node.attrs.num) || 1,
+        ),
     ]
   },
 })
@@ -2556,6 +2589,8 @@ const tableCellAttrs = {
   cellRevision: { default: null as Record<string, string> | null },
   cellMar: { default: null as Record<string, number> | null },
   textDirection: { default: null as string | null },
+  /** the text direction was edited and must be written to w:textDirection */
+  textDirectionEdited: { default: false },
   /** inner clip-box height (twips) when the row is hRule="exact" (computed in convert.ts) */
   clipHeightTwips: { default: null as number | null },
   /** display placeholder for the row's w:gridBefore/w:gridAfter columns (borderless, not saved as w:tc) */
@@ -2858,6 +2893,12 @@ export const DocTable = Node.create({
       sdtShell: { default: null as string | null },
       /** RTL table (tblPr w:bidiVisual): columns right to left */
       bidiVisual: { default: false },
+      /** alternative text (tblPr w:tblCaption / w:tblDescription) */
+      altTitle: { default: null as string | null },
+      altDescription: { default: null as string | null },
+      altEdited: { default: false },
+      /** the cell spacing (cellSpacingTwips) was edited and must be written */
+      cellSpacingEdited: { default: false },
       originalStructure: { default: null as string | null },
       originalFormatting: { default: null as string | null },
       blockRevision: { default: null as Record<string, string> | null },
@@ -3112,6 +3153,9 @@ export const DocTableRow = Node.create({
       heightRule: { default: null as 'atLeast' | 'exact' | null },
       repeatHeader: { default: false },
       repeatHeaderEdited: { default: false },
+      /** trPr w:cantSplit: the row may not break across pages */
+      cantSplit: { default: false },
+      cantSplitEdited: { default: false },
       rawTrPr: { default: null as string | null },
       /** trPr w:ins/w:del row-level revision ({kind, author, ...} | null) */
       rowRevision: { default: null as Record<string, string> | null },
@@ -3135,6 +3179,7 @@ export const DocTableRow = Node.create({
       if (node.attrs.heightRule === 'exact') classes.push('row-h-exact')
     }
     attrs['data-repeat-header'] = node.attrs.repeatHeader ? '1' : '0'
+    if (node.attrs.cantSplit) attrs['data-cant-split'] = '1'
     if (rev?.kind) {
       classes.push(`row-rev-${rev.kind}`)
       if (rev.author) attrs.title = rev.author
@@ -6202,6 +6247,8 @@ export const editorExtensions = [
   ListNumberingExtension,
   AnchorLineExtension,
   PaginationGapsExtension,
+  SectionEndnoteAreasExtension,
+  AutoCorrectExtension,
   RowFillsExtension,
   FloatVShiftsExtension,
   InactiveSelectionExtension,

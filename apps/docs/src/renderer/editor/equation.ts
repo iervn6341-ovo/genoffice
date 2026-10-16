@@ -1,4 +1,10 @@
-import { latexToOmml, mathParagraphXml, mathTokensOf, ommlToMathML } from '@genoffice/docx-engine'
+import {
+  latexToOmml,
+  mathParagraphXml,
+  mathTokensOf,
+  ommlToLatex,
+  ommlToMathML,
+} from '@genoffice/docx-engine'
 import { t } from '../i18n/locale'
 import type { PmNode } from './convert'
 
@@ -17,34 +23,44 @@ export function inlineMathML(omml: string): string {
  * Flows with paragraph text; saves as a Run.math (<m:oMath> emitted verbatim).
  */
 export function inlineEquationNodeJson(latex: string): PmNode {
-  const inner = latexToOmml(latex)
+  return inlineEquationNodeFromInner(latexToOmml(latex), latex.trim())
+}
+
+/** Inline equation node from the children of <m:oMath>; `latex` is the editable source ('' when none). */
+export function inlineEquationNodeFromInner(inner: string, latex: string): PmNode {
   const omml = `<m:oMath>${inner}</m:oMath>`
   return {
     type: 'docInlineMath',
     attrs: {
       omml,
       mathml: inlineMathML(omml),
-      latex: latex.trim(),
+      // recovered LaTeX makes parsed formulas re-editable; null = atom only
+      latex: latex || (ommlToLatex(omml) ?? ''),
       text: mathTokensOf(omml).join(''),
     },
   }
 }
 
 export function equationBlockJson(latex: string): PmNode {
-  const omml = latexToOmml(latex)
+  return equationBlockFromInner(latexToOmml(latex), latex.trim())
+}
+
+/** Display equation block from the children of <m:oMath>. */
+export function equationBlockFromInner(inner: string, latex: string): PmNode {
+  const omml = inner
   return {
     type: 'docProtected',
     attrs: {
       docxIndex: null,
       blockType: 'passthrough',
       label: t('editorEquation'),
-      previewText: latex.trim(),
+      previewText: latex,
       genXml: mathParagraphXml(omml),
       formulaDisplay: {
         tokens: mathTokensOf(omml),
         mathml: ommlToMathML(`<m:oMath>${omml}</m:oMath>`),
         omml: `<m:oMath>${omml}</m:oMath>`,
-        latex: latex.trim(),
+        latex,
       },
     },
   }

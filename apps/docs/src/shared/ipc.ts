@@ -157,7 +157,7 @@ export type MenuCommand =
   | 'ai-proofread'
   | 'shortcuts'
 
-export type UiTheme = 'light' | 'dark' | 'system'
+export type UiTheme = 'light' | 'dark' | 'gray' | 'system'
 
 /** shell-wide AutoSave default; updatedAt is 0 until the user has ever set it */
 export interface AutoSaveDefault {
@@ -417,6 +417,11 @@ export interface DesktopApi {
   /** Export as images: the folder picker plus a pre-authorized temp PDF path the
    *  regular PDF export writes to silently (no reveal, no open) */
   pickExportImagesTarget(): Promise<{ dir: string; pdfPath: string } | null>
+  /** macOS: a pre-authorized temp PDF path for the native print panel (null elsewhere) */
+  beginNativePrint(): Promise<{ pdfPath: string } | null>
+  /** macOS: show the system print panel (with preview) for that PDF, then delete it;
+   *  ok=false without error = canceled */
+  presentNativePrint(pdfPath: string): Promise<{ ok: boolean; error?: string }>
   /** Read back and delete the temp PDF written for an image export */
   takeExportPdf(pdfPath: string): Promise<{ ok: boolean; base64?: string; error?: string }>
   /** Write one page PNG into the folder chosen by pickExportImagesTarget */

@@ -17,6 +17,7 @@ import {
   effectiveHfRefs,
   effectiveTopPx,
   formatPageNumber,
+  chapterNumbersForPages,
   liveSections,
   measureBlocks,
   noteAreaPlacement,
@@ -60,7 +61,7 @@ import {
 import { pageBorderArtStripStyle, pageBorderStyleOf } from '../editor/pagination-gaps'
 import { textColorValue } from '../editor/text-color'
 import { textOutlineCssValue } from '../editor/text-outline'
-import { noteMarkText } from '../note-format'
+import { formatNoteNumber, noteMarkText } from '../note-format'
 import { useI18n } from '../i18n/locale'
 import {
   hfFloatPagePos,
@@ -788,6 +789,9 @@ function FloatHfImg({
 }
 
 export function PaginationPreview({
+  fileName,
+  author,
+  headingStyleIds,
   section,
   canvasTop,
   sections,
@@ -812,6 +816,9 @@ export function PaginationPreview({
   onClose,
   suppressEscape,
 }: {
+  fileName?: string
+  author?: string
+  headingStyleIds: Map<number, string>
   /** Canvas geometry (final section): clone width, single-section fallbacks */
   section: SectionSettings
   /** canvas content-area top (px): the first section's effective top margin, the paper's padding-top */
@@ -841,7 +848,11 @@ export function PaginationPreview({
   /** Endnote entries (placed together at the document end, take part in slicing, may continue across pages) */
   endnoteItems?: PageNoteItem[]
   /** Multi-section: unsaved per-section header/footer edit overrides (default variant) */
-  sectionHfOverride?: (sectionIndex: number, kind: 'header' | 'footer') => HeaderFooter | null
+  sectionHfOverride?: (
+    sectionIndex: number,
+    kind: 'header' | 'footer',
+    variant?: 'default' | 'first' | 'even',
+  ) => HeaderFooter | null
   /**
    * Clears the canvas page-gap decorations before the snapshot measure. In-table
    * gap/repeated-header widgets are extra <tr>s that consume rowspan slots, so a
@@ -862,7 +873,15 @@ export function PaginationPreview({
   suppressEscape?: boolean
 }) {
   const { t } = useI18n()
+  const hfReservedHeightPxForPreview = (
+    kind: 'header' | 'footer',
+    value: HeaderFooter | null,
+    contentWidthPx: number,
+    images?: HfImage[] | null,
+    geom?: { marginTopPx: number; headerDistPx: number },
+  ) => hfReservedHeightPx(kind, value, contentWidthPx, images, geom, { fileName, author })
   const [slices, setSlices] = useState<PageSlice[]>([])
+  const [chapters, setChapters] = useState<Array<string | null>>([])
   const [splitCss, setSplitCss] = useState('')
   const [vertCss, setVertCss] = useState('')
   const [leakCss, setLeakCss] = useState('')
@@ -985,24 +1004,24 @@ export function PaginationPreview({
             return rId ? hfParts[rId]?.images : undefined
           }
           return {
-            headerPx: hfReservedHeightPx(
+            headerPx: hfReservedHeightPxForPreview(
               'header',
               pick('header'),
               w,
               imagesOf('header'),
               hfHeaderGeom(set),
             ),
-            footerPx: hfReservedHeightPx('footer', pick('footer'), w, imagesOf('footer')),
+            footerPx: hfReservedHeightPxForPreview('footer', pick('footer'), w, imagesOf('footer')),
             ...(s.titlePg
               ? {
-                  firstHeaderPx: hfReservedHeightPx(
+                  firstHeaderPx: hfReservedHeightPxForPreview(
                     'header',
                     firstPart('header'),
                     w,
                     firstImagesOf('header'),
                     hfHeaderGeom(set),
                   ),
-                  firstFooterPx: hfReservedHeightPx(
+                  firstFooterPx: hfReservedHeightPxForPreview(
                     'footer',
                     firstPart('footer'),
                     w,
@@ -1031,7 +1050,7 @@ export function PaginationPreview({
           twipsToPx(section.pageHeight) -
           effectiveTopPx(
             section,
-            hfReservedHeightPx(
+            hfReservedHeightPxForPreview(
               'header',
               hf.header,
               canvasContentW,
@@ -1041,7 +1060,7 @@ export function PaginationPreview({
           ) -
           effectiveBottomPx(
             section,
-            hfReservedHeightPx('footer', hf.footer, canvasContentW, hf.images?.footer),
+            hfReservedHeightPxForPreview('footer', hf.footer, canvasContentW, hf.images?.footer),
           )
         // titlePg: the first page renders the first-page header/footer variant
         // (hfFor), so it gets its own capacity
@@ -1049,7 +1068,7 @@ export function PaginationPreview({
           ? twipsToPx(section.pageHeight) -
             effectiveTopPx(
               section,
-              hfReservedHeightPx(
+              hfReservedHeightPxForPreview(
                 'header',
                 hf.headerFirst,
                 canvasContentW,
@@ -1059,7 +1078,12 @@ export function PaginationPreview({
             ) -
             effectiveBottomPx(
               section,
-              hfReservedHeightPx('footer', hf.footerFirst, canvasContentW, hf.images?.footerFirst),
+              hfReservedHeightPxForPreview(
+                'footer',
+                hf.footerFirst,
+                canvasContentW,
+                hf.images?.footerFirst,
+              ),
             )
           : undefined
         computed = sliceWithLineSplit(
@@ -1208,6 +1232,7 @@ export function PaginationPreview({
       )
       setLeakCss(leadLeakCss(blocks, computed))
       setSlices(computed)
+      setChapters(chapterNumbersForPages(computed, blocks, live, headingStyleIds))
       setPageNotes(pageFootnotesOf ? pageFootnotesOf(blocks, computed) : [])
       setTextEnds(footnotesBeneathText ? pageTextEnds(blocks, computed) : [])
       // comment anchors, measured in the same neutralized geometry as the blocks;
@@ -1367,8 +1392,8 @@ export function PaginationPreview({
     const refs = effRefs[Math.min(slice.section, effRefs.length - 1)]
     const variant = hfVariantOf(sec.titlePg, firsts[i], hf.evenOddHf, pageNo)
     // unsaved per-section header/footer edits take priority over document parts (default variant)
-    const ovHeader = variant === 'default' ? sectionHfOverride?.(slice.section, 'header') : null
-    const ovFooter = variant === 'default' ? sectionHfOverride?.(slice.section, 'footer') : null
+    const ovHeader = sectionHfOverride?.(slice.section, 'header', variant)
+    const ovFooter = sectionHfOverride?.(slice.section, 'footer', variant)
     const headerRId = refs.header[variant]
     const footerRId = refs.footer[variant]
     return {
@@ -1410,7 +1435,7 @@ export function PaginationPreview({
           // effective margins after this page's variant header/footer push-down (an over-tall header pushes the body down)
           const mTop = effectiveTopPx(
             s,
-            hfReservedHeightPx(
+            hfReservedHeightPxForPreview(
               'header',
               parts.header,
               secContentW,
@@ -1418,7 +1443,7 @@ export function PaginationPreview({
               hfHeaderGeom(s),
             ),
           )
-          const footerReservedPx = hfReservedHeightPx(
+          const footerReservedPx = hfReservedHeightPxForPreview(
             'footer',
             parts.footer,
             secContentW,
@@ -1464,6 +1489,8 @@ export function PaginationPreview({
           const pageNoText = formatPageNumber(
             nums[i],
             secs[Math.min(slice.section, secs.length - 1)]?.pageNumberFmt,
+            chapters[i],
+            secs[Math.min(slice.section, secs.length - 1)]?.pageNumberChapterSeparator,
           )
           // page border (w:pgBorders): drawn per sheet; w:display counts pages within the section
           const pageBorder = pageBorderStyleOf(s)
@@ -1589,6 +1616,8 @@ export function PaginationPreview({
                 {(parts.header || parts.headerImages?.some((img) => !img.floating)) && (
                   <HeaderFooterArea
                     kind="header"
+                    fileName={fileName}
+                    author={author}
                     value={parts.header ?? { text: '' }}
                     images={parts.headerImages?.filter((img) => !img.floating)}
                     readOnly
@@ -1817,7 +1846,14 @@ export function PaginationPreview({
                           ...(n.fontFamily ? { fontFamily: n.fontFamily } : {}),
                         }}
                       >
-                        {!n.noRefMark && <sup>{noteMarkText('footnote', n.no)}</sup>}
+                        {!n.noRefMark && (
+                          <sup>
+                            {n.customMark ??
+                              (n.fmt
+                                ? formatNoteNumber(n.fmt, n.no)
+                                : noteMarkText('footnote', n.no))}
+                          </sup>
+                        )}
                         {n.richParas
                           ? n.richParas.map((para, pi) => (
                               <span key={pi}>
@@ -1889,7 +1925,14 @@ export function PaginationPreview({
                           }}
                         >
                           {withSeparator && <div className="pv-endnote-separator" />}
-                          {!n.noRefMark && <sup>{noteMarkText('endnote', n.no)}</sup>}
+                          {!n.noRefMark && (
+                            <sup>
+                              {n.customMark ??
+                                (n.fmt
+                                  ? formatNoteNumber(n.fmt, n.no)
+                                  : noteMarkText('endnote', n.no))}
+                            </sup>
+                          )}
                           {n.richParas
                             ? n.richParas.map((para, pi) => (
                                 <span key={pi}>
@@ -1936,6 +1979,8 @@ export function PaginationPreview({
                 {(parts.footer || parts.footerImages?.some((img) => !img.floating)) && (
                   <HeaderFooterArea
                     kind="footer"
+                    fileName={fileName}
+                    author={author}
                     value={parts.footer ?? { text: '' }}
                     images={parts.footerImages?.filter((img) => !img.floating)}
                     readOnly

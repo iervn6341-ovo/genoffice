@@ -67,7 +67,30 @@ import {
 import { formatNumber } from '../editor/numbering'
 import type { InkTool } from '../editor/ink'
 import type { RibbonFormatState } from './ribbon-format-state'
-import { setSelectedColumnWidth } from '../editor/table-sizing'
+import { distributeSelectedColumns, setSelectedColumnWidth } from '../editor/table-sizing'
+import {
+  distributeSelectedRows,
+  rowsMayBreak,
+  selectInTable,
+  setCellTextDirection,
+  setRowsMayBreak,
+  setTableAltText,
+  setTableCellSpacing,
+  type TableSelectionTarget,
+} from '../editor/table-tools'
+import { updateTableFormulas } from '../editor/table-formula'
+import { EQUATION_STRUCTURES, SYMBOL_SUBSETS, ommlToUnicodeMath } from '@genoffice/office-math'
+import { mathPreview } from '@genoffice/ui'
+import {
+  appendToEquation,
+  convertEquationToLinear,
+  convertEquationToProfessional,
+  equationSource,
+  isLinearEquation,
+  selectedEquation,
+} from '../editor/equation-tools'
+import { EquationModal, selectedEquationTarget, type MathEditTarget } from './EquationModal'
+import { TableFormulaDialog, TableSortDialog, TableToText } from './TableToolsDialogs'
 import {
   applyTablePreset,
   repeatHeaderState,
@@ -176,6 +199,9 @@ import {
   IconTableProperties,
 } from './icons'
 interface RibbonProps {
+  fileName?: string
+  author?: string
+  hfSectionIndex?: number
   /** App keyboard shortcuts reuse ribbon closures through here (font-size stepping keeps its coalescing) */
   actionsRef?: React.MutableRefObject<{
     stepFontSize?: (dir: 1 | -1) => void
@@ -236,12 +262,14 @@ interface RibbonProps {
   onInkClearAll: () => void
   /** References → footnotes / endnotes / citations */
   onInsertNote: (kind: 'footnote' | 'endnote') => void
+  onNavigateNextNote?: (kind: 'footnote' | 'endnote') => void
+  onNoteSettings?: () => void
   sources: SourceInfo[]
   /** footnotes/endnotes hold Zotero citation fields the bridge cannot see yet */
   zoteroNoteFields?: boolean
   onAddSource: (source: SourceInfo) => void
   /** TOC page-number backfill: docHeadings in document order → real page numbers (null when not computable) */
-  headingPages?: () => number[] | null
+  headingPages?: (positions?: number[]) => string[] | null
   zoom: number
   onZoom: (zoom: number) => void
   /** compute zoom from the current window size (Word: page width / whole page) */
@@ -311,6 +339,8 @@ interface RibbonProps {
   onReadMode: (v: boolean) => void
   showGrid: boolean
   onShowGrid: (v: boolean) => void
+  showTextBoundaries: boolean
+  onShowTextBoundaries: (v: boolean) => void
   splitView: boolean
   onSplitView: (v: boolean) => void
   onPagePreview: () => void
@@ -371,11 +401,29 @@ const TABS = (
 const TABLE_TABS = ['tableDesign', 'tableLayout'] as const
 const IMAGE_TABS = ['pictureFormat'] as const
 const SHAPE_TABS = ['shapeFormat'] as const
+const EQUATION_TABS = ['equationTools'] as const
+
+const EQUATION_CATEGORY_LABELS: Record<string, StringKey> = {
+  fraction: 'appMathFraction',
+  script: 'appMathScript',
+  radical: 'appMathRadical',
+  integral: 'appMathIntegral',
+  largeOperator: 'appMathLargeOperator',
+  delimiter: 'appMathDelimiter',
+  function: 'appMathFunction',
+  accent: 'appMathAccent',
+  limitLog: 'appMathLimitLog',
+  operator: 'appMathOperator',
+  matrix: 'appMathMatrix',
+}
+const EQUATION_RIBBON_SYMBOLS =
+  SYMBOL_SUBSETS.find((item) => item.id === 'math')?.symbols.slice(0, 24) ?? []
 type RibbonTab =
   | (typeof TABS)[number]
   | (typeof TABLE_TABS)[number]
   | (typeof IMAGE_TABS)[number]
   | (typeof SHAPE_TABS)[number]
+  | (typeof EQUATION_TABS)[number]
 
 const TABLE_PRESETS = [
   {
@@ -442,6 +490,7 @@ const TAB_LABEL_KEYS: Record<string, StringKey> = {
   tableLayout: 'ribbonTabTableLayout',
   pictureFormat: 'ribbonTabPictureFormat',
   shapeFormat: 'ribbonTabShapeFormat',
+  equationTools: 'ribbonEquation',
 }
 
 /** CSS px per cm at 96dpi (size inputs display in centimeters) */
@@ -648,6 +697,9 @@ function findNumIdOfKind(blocks: Block[], kind: 'bullet' | 'ordered'): string | 
 
 function RibbonInner({
   actionsRef,
+  fileName,
+  author,
+  hfSectionIndex,
   quickActions,
   trailingActions,
   editor,
@@ -688,6 +740,8 @@ function RibbonInner({
   inkCount,
   onInkClearAll,
   onInsertNote,
+  onNavigateNextNote = () => undefined,
+  onNoteSettings = () => undefined,
   sources,
   zoteroNoteFields,
   onAddSource,
@@ -747,6 +801,8 @@ function RibbonInner({
   onReadMode,
   showGrid,
   onShowGrid,
+  showTextBoundaries,
+  onShowTextBoundaries,
   splitView,
   onSplitView,
   onPagePreview,
@@ -776,6 +832,7 @@ function RibbonInner({
   const [pictureDialog, setPictureDialog] = useState<'cutout' | 'crop' | null>(null)
   const [listDialog, setListDialog] = useState(false)
   const [tablePropertiesOpen, setTablePropertiesOpen] = useState(false)
+  const [tableDialog, setTableDialog] = useState<'sort' | 'formula' | 'toText' | null>(null)
 
   useEffect(() => {
     if (tabRequest && (TABS as readonly string[]).includes(tabRequest.tab)) {
@@ -858,6 +915,22 @@ function RibbonInner({
   const inShape = fs.textboxSelected
   const shapeIsLine = !!fs.shapePrst?.startsWith('line')
   const wasInShape = useRef(false)
+
+  // ---- Equation (contextual tab while an equation node is selected) ----
+  const inEquation = !sub && fs.equationSelected
+  const wasInEquation = useRef(false)
+  const [equationEditTarget, setEquationEditTarget] = useState<MathEditTarget | null>(null)
+  useEffect(() => {
+    if (inEquation && !wasInEquation.current) {
+      wasInEquation.current = true
+      setDropdown(null)
+      setTab('equationTools')
+    } else if (!inEquation && wasInEquation.current) {
+      wasInEquation.current = false
+      setDropdown(null)
+      setTab((current) => (current === 'equationTools' ? lastRegularTab.current : current))
+    }
+  }, [inEquation])
 
   useEffect(() => {
     if (inShape && !wasInShape.current) {
@@ -1106,6 +1179,9 @@ function RibbonInner({
   // ---- Table borders / vertical alignment / row height & column width ----
   const [borderColor, setBorderColor] = useState('000000')
   const [borderSz, setBorderSz] = useState(4) // 1/8 pt:4 = 0.5pt
+  const [borderStyle, setBorderStyle] = useState('single')
+  const [customShade, setCustomShade] = useState<string | null>(null)
+  const [customShadeDirty, setCustomShadeDirty] = useState(false)
   const sectionContentWidthPx = section
     ? Math.max(1, (section.pageWidth - section.marginLeft - section.marginRight) / 15)
     : 624
@@ -1135,7 +1211,7 @@ function RibbonInner({
     editor.view.focus()
     const { state, view } = editor
     const rect = selectedRect(state)
-    const solid: BorderSide = { style: 'single', szEighths: borderSz, color: borderColor }
+    const solid: BorderSide = { style: borderStyle, szEighths: borderSz, color: borderColor }
     const none: BorderSide = { style: 'none' }
     if (mode === 'insideH' || mode === 'insideV') {
       const tablePos = rect.tableStart - 1
@@ -1311,6 +1387,18 @@ function RibbonInner({
         tblFloatEdited: true,
       }),
     )
+    // Row / cell-spacing / alt-text tabs only write when they differ from what was loaded, so an
+    // untouched value never marks the table as edited
+    if (value.allowRowBreak !== (rowsMayBreak(editor.state) ?? true))
+      runTableCommand(setRowsMayBreak(value.allowRowBreak))
+    const spacingTwips = Math.max(0, Math.round(value.spacingCm * TWIPS_PER_CM))
+    if (spacingTwips !== (Number(tableAttrs.cellSpacingTwips) || 0))
+      runTableCommand(setTableCellSpacing(spacingTwips || null))
+    if (
+      value.altTitle.trim() !== String(tableAttrs.altTitle ?? '') ||
+      value.altDescription.trim() !== String(tableAttrs.altDescription ?? '')
+    )
+      runTableCommand(setTableAltText(value.altTitle, value.altDescription))
     setTablePropertiesOpen(false)
   }
 
@@ -2046,12 +2134,142 @@ function RibbonInner({
               {t(TAB_LABEL_KEYS[shapeTab])}
             </button>
           ))}
+        {inEquation &&
+          EQUATION_TABS.map((equationTab) => (
+            <button
+              key={equationTab}
+              className={`ribbon-tab ${tab === equationTab ? 'active' : ''}`}
+              onClick={() => {
+                collapse.onTabPress(tab === equationTab)
+                setTab(equationTab)
+                setDropdown(null)
+              }}
+            >
+              {t(TAB_LABEL_KEYS[equationTab])}
+            </button>
+          ))}
         <span className="ribbon-tabs-spacer" />
         {trailingActions}
       </div>
 
       <div className="ribbon-body" data-ribbon-body="" ref={ribbonBodyRef}>
-        {tab === 'shapeFormat' && inShape ? (
+        {tab === 'equationTools' && inEquation ? (
+          (() => {
+            const equation = selectedEquation(editor)
+            const editable = canEdit && equation !== null && equationSource(equation) !== null
+            const linear = equation ? isLinearEquation(equation) : false
+            const canLinear =
+              canEdit && equation !== null && !linear && ommlToUnicodeMath(equation.omml) !== null
+            return (
+              <div className="table-ribbon-body equation-ribbon-body">
+                <div className="table-tool-group">
+                  <div className="table-tool-row">
+                    <button
+                      className="table-tool-button"
+                      disabled={!canEdit}
+                      onClick={() => {
+                        const target = selectedEquationTarget(editor)
+                        if (target) setEquationEditTarget(target)
+                      }}
+                    >
+                      {t('ribbonEquation')}
+                    </button>
+                  </div>
+                  <div className="ribbon-group-label">{t('ribbonGroupEquationTools')}</div>
+                </div>
+                <div className="ribbon-sep" />
+                <div className="table-tool-group">
+                  <div className="table-tool-stack">
+                    <button
+                      className={linear ? 'table-tool-button' : 'table-tool-button active'}
+                      aria-pressed={!linear}
+                      disabled={!canEdit || !equation || !linear}
+                      onClick={() => equation && convertEquationToProfessional(editor, equation)}
+                    >
+                      {t('appMathProfessional')}
+                    </button>
+                    <button
+                      className={linear ? 'table-tool-button active' : 'table-tool-button'}
+                      aria-pressed={linear}
+                      disabled={!canLinear}
+                      onClick={() => equation && convertEquationToLinear(editor, equation)}
+                    >
+                      {t('appMathLinear')}
+                    </button>
+                  </div>
+                  <div className="ribbon-group-label">{t('ribbonGroupEquationConvert')}</div>
+                </div>
+                <div className="ribbon-sep" />
+                <div className="table-tool-group">
+                  <div className="equation-ribbon-symbols">
+                    {EQUATION_RIBBON_SYMBOLS.map((char) => (
+                      <button
+                        key={char}
+                        disabled={!editable}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => equation && appendToEquation(editor, equation, char)}
+                      >
+                        {char}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="ribbon-group-label">{t('appSymbolMath')}</div>
+                </div>
+                <div className="ribbon-sep" />
+                <div className="table-tool-group">
+                  <div className="equation-ribbon-structures">
+                    {EQUATION_STRUCTURES.map((category) => (
+                      <div className="rb-split-wrap" key={category.id}>
+                        <button
+                          className={`table-tool-button${dropdown === `eq:${category.id}` ? ' active' : ''}`}
+                          disabled={!editable}
+                          aria-expanded={dropdown === `eq:${category.id}`}
+                          onClick={() =>
+                            setDropdown((current) =>
+                              current === `eq:${category.id}` ? null : `eq:${category.id}`,
+                            )
+                          }
+                        >
+                          {t(EQUATION_CATEGORY_LABELS[category.id] ?? 'appMathFraction')}
+                          <IconCaret size={10} />
+                        </button>
+                        {dropdown === `eq:${category.id}` && equation && (
+                          <div
+                            data-rb-panel=""
+                            className="layout-menu go-math-templates equation-ribbon-gallery"
+                          >
+                            {category.templates.map((template) => {
+                              const sample = template.latex.replace('{{selection}}', 'x')
+                              const preview = mathPreview(sample)
+                              if (!preview || 'error' in preview) return null
+                              return (
+                                <button
+                                  key={template.id}
+                                  type="button"
+                                  className="go-math-template"
+                                  title={sample}
+                                  aria-label={sample}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    setDropdown(null)
+                                    appendToEquation(editor, equation, template.latex)
+                                  }}
+                                >
+                                  <span dangerouslySetInnerHTML={{ __html: preview.mathml }} />
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="ribbon-group-label">{t('appMathStructures')}</div>
+                </div>
+              </div>
+            )
+          })()
+        ) : tab === 'shapeFormat' && inShape ? (
           <div className="table-ribbon-body">
             <div className="ribbon-group">
               <div className="ribbon-group-items">
@@ -2500,6 +2718,21 @@ function RibbonInner({
                     onClick={() => runTableCommand(setCellAttr('fill', hex))}
                   />
                 ))}
+                <input
+                  type="color"
+                  className="table-style-custom"
+                  data-tip={t('ribbonShadingCustom')}
+                  aria-label={t('ribbonShadingCustom')}
+                  value={`#${customShade ?? 'FFFF00'}`}
+                  onChange={(e) => setCustomShade(e.target.value.slice(1).toUpperCase())}
+                  onBlur={() => {
+                    if (customShade && customShadeDirty) {
+                      runTableCommand(setCellAttr('fill', customShade))
+                      setCustomShadeDirty(false)
+                    }
+                  }}
+                  onInput={() => setCustomShadeDirty(true)}
+                />
                 <button
                   className="table-style-clear"
                   onClick={() => runTableCommand(setCellAttr('fill', null))}
@@ -2597,6 +2830,21 @@ function RibbonInner({
                     label: t('ribbonPtValue', { n: sz / 8 }),
                   }))}
                   onPick={(v) => setBorderSz(Number(v))}
+                />
+                <Dropdown
+                  tip={t('ribbonBorderLineStyle')}
+                  value={borderStyle}
+                  options={(
+                    [
+                      ['single', 'ribbonLineSingle'],
+                      ['dotted', 'ribbonLineDotted'],
+                      ['dashed', 'ribbonLineDashed'],
+                      ['dotDash', 'ribbonLineDotDash'],
+                      ['dotDotDash', 'ribbonLineDotDotDash'],
+                      ['double', 'ribbonLineDouble'],
+                    ] as Array<[string, StringKey]>
+                  ).map(([value, label]) => ({ value, label: t(label) }))}
+                  onPick={setBorderStyle}
                 />
               </div>
               <div className="ribbon-group-label">{t('ribbonGroupBorders')}</div>
@@ -2855,6 +3103,111 @@ function RibbonInner({
                 </button>
               </div>
               <div className="ribbon-group-label">{t('ribbonTableData')}</div>
+            </div>
+            <div className="ribbon-sep" />
+            <div className="table-tool-group table-tool-autofit">
+              <div className="table-tool-row">
+                <div className="rb-split-wrap table-autofit-wrap">
+                  <button
+                    className={`table-command-button${dropdown === 'tableTools' ? ' active' : ''}`}
+                    data-tip={t('ribbonTableTools')}
+                    aria-expanded={dropdown === 'tableTools'}
+                    onClick={() =>
+                      setDropdown((current) => (current === 'tableTools' ? null : 'tableTools'))
+                    }
+                  >
+                    <IconTableProperties size={18} />
+                    <span className="table-command-copy">
+                      <span>{t('ribbonTableTools')}</span>
+                    </span>
+                    <IconCaret size={12} />
+                  </button>
+                  {dropdown === 'tableTools' && (
+                    <div
+                      data-rb-panel=""
+                      className="layout-menu table-autofit-menu table-tools-menu"
+                    >
+                      {(
+                        [
+                          ['sort', 'ribbonTableSort'],
+                          ['formula', 'ribbonTableFormula'],
+                          ['toText', 'ribbonTableConvertToText'],
+                        ] as Array<['sort' | 'formula' | 'toText', StringKey]>
+                      ).map(([dialog, label]) => (
+                        <button
+                          key={dialog}
+                          onClick={() => {
+                            setDropdown(null)
+                            setTableDialog(dialog)
+                          }}
+                        >
+                          <span>{t(label)}</span>
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => {
+                          setDropdown(null)
+                          runTableCommand(updateTableFormulas())
+                        }}
+                      >
+                        <span>{t('ribbonTableUpdateFormulas')}</span>
+                      </button>
+                      <hr />
+                      <button
+                        onClick={() => {
+                          setDropdown(null)
+                          if (editor.view) {
+                            const zoomEl = document.querySelector('.doc-zoom') as HTMLElement | null
+                            const zoom = zoomEl
+                              ? parseFloat(getComputedStyle(zoomEl).zoom || '1') || 1
+                              : 1
+                            editor.view.focus()
+                            distributeSelectedRows(editor.view, zoom)
+                          }
+                        }}
+                      >
+                        <span>{t('ribbonDistributeRows')}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDropdown(null)
+                          runTableCommand(distributeSelectedColumns(sectionContentWidthPx))
+                        }}
+                      >
+                        <span>{t('ribbonDistributeColumns')}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDropdown(null)
+                          runTableCommand(setCellTextDirection())
+                        }}
+                      >
+                        <span>{t('ribbonTextDirection')}</span>
+                      </button>
+                      <hr />
+                      {(
+                        [
+                          ['cell', 'ribbonSelectCell'],
+                          ['row', 'ribbonSelectRow'],
+                          ['column', 'ribbonSelectColumn'],
+                          ['table', 'ribbonSelectTable'],
+                        ] as Array<[TableSelectionTarget, StringKey]>
+                      ).map(([target, label]) => (
+                        <button
+                          key={target}
+                          onClick={() => {
+                            setDropdown(null)
+                            runTableCommand(selectInTable(target))
+                          }}
+                        >
+                          <span>{t(label)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="ribbon-group-label">{t('ribbonTableTools')}</div>
             </div>
           </div>
         ) : tab === 'home' ? (
@@ -3985,6 +4338,9 @@ function RibbonInner({
         ) : tab === 'insert' ? (
           <InsertTab
             editor={editor}
+            fileName={fileName ?? ''}
+            author={author}
+            hfSectionIndex={hfSectionIndex}
             hasDoc={canEdit}
             dropdown={dropdown}
             setDropdown={setDropdown}
@@ -4042,10 +4398,13 @@ function RibbonInner({
             dropdown={dropdown}
             setDropdown={setDropdown}
             onInsertNote={onInsertNote}
+            onNavigateNextNote={onNavigateNextNote}
+            onNoteSettings={onNoteSettings}
             sources={sources}
             zoteroNoteFields={zoteroNoteFields}
             onAddSource={onAddSource}
             headingPages={headingPages}
+            styles={styles}
           />
         ) : tab === 'review' ? (
           <ReviewTab
@@ -4097,6 +4456,8 @@ function RibbonInner({
             onReadMode={onReadMode}
             showGrid={showGrid}
             onShowGrid={onShowGrid}
+            showTextBoundaries={showTextBoundaries}
+            onShowTextBoundaries={onShowTextBoundaries}
             splitView={splitView}
             onSplitView={onSplitView}
             onPagePreview={onPagePreview}
@@ -4137,9 +4498,25 @@ function RibbonInner({
           onClose={() => setListDialog(false)}
         />
       )}
+      {equationEditTarget && (
+        <EquationModal
+          editor={editor}
+          editTarget={equationEditTarget}
+          onClose={() => setEquationEditTarget(null)}
+        />
+      )}
+      {tableDialog === 'sort' && (
+        <TableSortDialog editor={editor} onClose={() => setTableDialog(null)} />
+      )}
+      {tableDialog === 'formula' && (
+        <TableFormulaDialog editor={editor} onClose={() => setTableDialog(null)} />
+      )}
+      {tableDialog === 'toText' && (
+        <TableToText editor={editor} onClose={() => setTableDialog(null)} />
+      )}
       {tablePropertiesOpen && (
         <TablePropertiesDialog
-          initial={tablePropertiesFromAttrs(tableAttrs)}
+          initial={tablePropertiesFromAttrs(tableAttrs, rowsMayBreak(editor.state) ?? true)}
           onApply={applyTableProperties}
           onClose={() => setTablePropertiesOpen(false)}
         />
@@ -4201,9 +4578,16 @@ interface TablePropertiesValue {
   marginRightCm: number
   marginBottomCm: number
   marginLeftCm: number
+  allowRowBreak: boolean
+  spacingCm: number
+  altTitle: string
+  altDescription: string
 }
 
-function tablePropertiesFromAttrs(attrs: Record<string, unknown>): TablePropertiesValue {
+function tablePropertiesFromAttrs(
+  attrs: Record<string, unknown>,
+  allowRowBreak = true,
+): TablePropertiesValue {
   const cm = (value: unknown, fallback = 0) =>
     +((Number.isFinite(Number(value)) ? Number(value) : fallback) / TWIPS_PER_CM).toFixed(2)
   const margins = (attrs.cellMar as Record<string, number> | null) ?? {}
@@ -4226,6 +4610,10 @@ function tablePropertiesFromAttrs(attrs: Record<string, unknown>): TableProperti
     marginRightCm: cm(margins.right, 108),
     marginBottomCm: cm(margins.bottom),
     marginLeftCm: cm(margins.left, 108),
+    allowRowBreak,
+    spacingCm: cm(attrs.cellSpacingTwips),
+    altTitle: String(attrs.altTitle ?? ''),
+    altDescription: String(attrs.altDescription ?? ''),
   }
 }
 
@@ -4240,6 +4628,7 @@ function TablePropertiesDialog({
 }) {
   const { t } = useI18n()
   const [value, setValue] = useState(initial)
+  const [tab, setTab] = useState<'table' | 'row' | 'cell' | 'alt'>('table')
   const update = (patch: Partial<TablePropertiesValue>) =>
     setValue((current) => ({ ...current, ...patch }))
   const numberInput = (
@@ -4285,113 +4674,205 @@ function TablePropertiesDialog({
           </div>
         </div>
 
-        <section className="table-properties-card">
-          <h3>{t('ribbonAutoFit')}</h3>
-          <div className="table-properties-segments">
-            {TABLE_AUTO_FIT_OPTIONS.map(([mode, label]) => (
-              <label key={mode} className="table-properties-segment">
-                <input
-                  type="radio"
-                  name="table-autofit"
-                  checked={value.autoFit === mode}
-                  onChange={() => update({ autoFit: mode })}
-                />
-                <span>{t(label)}</span>
-              </label>
-            ))}
-          </div>
-        </section>
+        <div className="table-properties-tabs" role="tablist">
+          {(
+            [
+              ['table', 'tablePropTabTable'],
+              ['row', 'tablePropTabRow'],
+              ['cell', 'tablePropTabCell'],
+              ['alt', 'tablePropTabAlt'],
+            ] as Array<[typeof tab, StringKey]>
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              className={tab === id ? 'active' : ''}
+              onClick={() => setTab(id)}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
 
-        <section className="table-properties-card">
-          <h3>{t('ribbonWrapText')}</h3>
-          <div className="table-properties-segments">
-            {(
-              [
-                ['none', 'appWrapInline'],
-                ['left', 'appWrapSquareLeft'],
-                ['right', 'appWrapSquareRight'],
-              ] as Array<[TableWrapMode, StringKey]>
-            ).map(([mode, label]) => (
-              <label key={mode} className="table-properties-segment">
-                <input
-                  type="radio"
-                  name="table-wrap"
-                  checked={value.wrap === mode}
-                  onChange={() => update({ wrap: mode })}
-                />
-                <span>{t(label)}</span>
-              </label>
-            ))}
-          </div>
-          {value.wrap !== 'none' && (
-            <div className="table-properties-grid">
-              <label>
-                {t('ribbonHorizontalPosition')}
-                <span>
-                  {numberInput('positionXCm')}
-                  {t('ribbonCm')}
-                </span>
-              </label>
-              <label>
-                {t('ribbonVerticalPosition')}
-                <span>
-                  {numberInput('positionYCm')}
-                  {t('ribbonCm')}
-                </span>
-              </label>
-              <label>
-                {t('ribbonDistanceFromText')}
-                <span>
-                  {numberInput('distanceCm')}
-                  {t('ribbonCm')}
-                </span>
-              </label>
+        <div hidden={tab !== 'table'}>
+          <section className="table-properties-card">
+            <h3>{t('ribbonAutoFit')}</h3>
+            <div className="table-properties-segments">
+              {TABLE_AUTO_FIT_OPTIONS.map(([mode, label]) => (
+                <label key={mode} className="table-properties-segment">
+                  <input
+                    type="radio"
+                    name="table-autofit"
+                    checked={value.autoFit === mode}
+                    onChange={() => update({ autoFit: mode })}
+                  />
+                  <span>{t(label)}</span>
+                </label>
+              ))}
             </div>
-          )}
-        </section>
+          </section>
 
-        <section className="table-properties-card table-properties-margins">
-          <h3>{t('ribbonCellMargins')}</h3>
-          <div className="table-properties-margin-layout">
-            <div className="table-properties-grid">
-              <label>
-                {t('ribbonMarginTop')}
-                <span>
-                  {numberInput('marginTopCm')}
-                  {t('ribbonCm')}
-                </span>
-              </label>
-              <label>
-                {t('ribbonMarginBottom')}
-                <span>
-                  {numberInput('marginBottomCm')}
-                  {t('ribbonCm')}
-                </span>
-              </label>
-              <label>
-                {t('ribbonMarginLeft')}
-                <span>
-                  {numberInput('marginLeftCm')}
-                  {t('ribbonCm')}
-                </span>
-              </label>
-              <label>
-                {t('ribbonMarginRight')}
-                <span>
-                  {numberInput('marginRightCm')}
-                  {t('ribbonCm')}
-                </span>
-              </label>
+          <section className="table-properties-card">
+            <h3>{t('ribbonWrapText')}</h3>
+            <div className="table-properties-segments">
+              {(
+                [
+                  ['none', 'appWrapInline'],
+                  ['left', 'appWrapSquareLeft'],
+                  ['right', 'appWrapSquareRight'],
+                ] as Array<[TableWrapMode, StringKey]>
+              ).map(([mode, label]) => (
+                <label key={mode} className="table-properties-segment">
+                  <input
+                    type="radio"
+                    name="table-wrap"
+                    checked={value.wrap === mode}
+                    onChange={() => update({ wrap: mode })}
+                  />
+                  <span>{t(label)}</span>
+                </label>
+              ))}
             </div>
-            <div className="table-margin-preview" aria-hidden="true">
-              <span className="table-margin-value top">{value.marginTopCm}</span>
-              <span className="table-margin-value right">{value.marginRightCm}</span>
-              <span className="table-margin-value bottom">{value.marginBottomCm}</span>
-              <span className="table-margin-value left">{value.marginLeftCm}</span>
-              <span className="table-margin-preview-cell" />
+            {value.wrap !== 'none' && (
+              <div className="table-properties-grid">
+                <label>
+                  {t('ribbonHorizontalPosition')}
+                  <span>
+                    {numberInput('positionXCm')}
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+                <label>
+                  {t('ribbonVerticalPosition')}
+                  <span>
+                    {numberInput('positionYCm')}
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+                <label>
+                  {t('ribbonDistanceFromText')}
+                  <span>
+                    {numberInput('distanceCm')}
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div hidden={tab !== 'row'}>
+          <section className="table-properties-card">
+            <h3>{t('tablePropTabRow')}</h3>
+            <p className="modal-desc">{t('tableRowScope')}</p>
+            <label className="table-properties-segment">
+              <input
+                type="checkbox"
+                checked={value.allowRowBreak}
+                onChange={(event) => update({ allowRowBreak: event.target.checked })}
+              />
+              <span>{t('tableAllowRowBreak')}</span>
+            </label>
+          </section>
+        </div>
+
+        <div hidden={tab !== 'cell'}>
+          <section className="table-properties-card table-properties-margins">
+            <h3>{t('ribbonCellMargins')}</h3>
+            <div className="table-properties-margin-layout">
+              <div className="table-properties-grid">
+                <label>
+                  {t('ribbonMarginTop')}
+                  <span>
+                    {numberInput('marginTopCm')}
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+                <label>
+                  {t('ribbonMarginBottom')}
+                  <span>
+                    {numberInput('marginBottomCm')}
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+                <label>
+                  {t('ribbonMarginLeft')}
+                  <span>
+                    {numberInput('marginLeftCm')}
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+                <label>
+                  {t('ribbonMarginRight')}
+                  <span>
+                    {numberInput('marginRightCm')}
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+              </div>
+              <div className="table-margin-preview" aria-hidden="true">
+                <span className="table-margin-value top">{value.marginTopCm}</span>
+                <span className="table-margin-value right">{value.marginRightCm}</span>
+                <span className="table-margin-value bottom">{value.marginBottomCm}</span>
+                <span className="table-margin-value left">{value.marginLeftCm}</span>
+                <span className="table-margin-preview-cell" />
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+          <section className="table-properties-card">
+            <label className="table-properties-segment">
+              <input
+                type="checkbox"
+                checked={value.spacingCm > 0}
+                onChange={(event) => update({ spacingCm: event.target.checked ? 0.05 : 0 })}
+              />
+              <span>{t('tableAllowSpacing')}</span>
+            </label>
+            {value.spacingCm > 0 && (
+              <div className="table-properties-grid">
+                <label>
+                  {t('tableSpacingValue')}
+                  <span>
+                    <input
+                      type="number"
+                      min={0.01}
+                      max={5}
+                      step={0.01}
+                      value={value.spacingCm}
+                      onChange={(event) =>
+                        update({ spacingCm: Math.max(0.01, Number(event.target.value) || 0.01) })
+                      }
+                    />
+                    {t('ribbonCm')}
+                  </span>
+                </label>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div hidden={tab !== 'alt'}>
+          <section className="table-properties-card">
+            <p className="modal-desc">{t('tableAltHint')}</p>
+            <label>
+              {t('tableAltTitle')}
+              <input
+                value={value.altTitle}
+                onChange={(event) => update({ altTitle: event.target.value })}
+              />
+            </label>
+            <label>
+              {t('tableAltDescription')}
+              <textarea
+                rows={4}
+                value={value.altDescription}
+                onChange={(event) => update({ altDescription: event.target.value })}
+              />
+            </label>
+          </section>
+        </div>
 
         <div className="modal-actions">
           <button onClick={onClose}>{t('ribbonCancel')}</button>

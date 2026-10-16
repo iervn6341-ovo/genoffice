@@ -440,7 +440,12 @@ export type PageGapSpec = {
        *  paragraph of a split floating table skips the table's in-table gaps */
       carryPx?: number
     }
-  | { pos: number; kind?: Exclude<GapKind, 'block'> }
+  | {
+      pos: number
+      kind?: GapKind
+      /** widget order among same-position widgets (default -1, before the block) */
+      side?: number
+    }
 )
 
 /** Rebuild all page gaps (an empty list clears them); each gap carries its own margins (sections differ) */
@@ -545,7 +550,7 @@ export function setPageGaps(
           return el
         },
         {
-          side: -1,
+          side: 'side' in gap && gap.side !== undefined ? gap.side : -1,
           // keyed by page ordinal, NOT pos: edits above a gap shift its mapped
           // position without changing the page, so an ordinal key lets sameGaps
           // skip the dispatch entirely and lets PM reuse the widget DOM when a
@@ -937,6 +942,16 @@ export interface PageFrame {
   /** horizontal extent on the page wrap (differing-width documents center narrower pages) */
   left: number
   width: number
+  /** text-area insets of this page, when the caller supplied the first page's margins */
+  margins?: PageMargins
+}
+
+/** Page margins in canvas px */
+export interface PageMargins {
+  top: number
+  bottom: number
+  left: number
+  right: number
 }
 
 /**
@@ -949,6 +964,7 @@ export function pageFramesFromGaps(
   wrap: HTMLElement,
   zoomFactor: number,
   first?: { left: number; width: number },
+  firstMargins?: PageMargins,
 ): PageFrame[] {
   const wr = wrap.getBoundingClientRect()
   const paper = wrap.querySelector<HTMLElement>('.doc-page')
@@ -967,11 +983,15 @@ export function pageFramesFromGaps(
       const mt = parseFloat(cs.getPropertyValue('--gap-mt')) || 0
       const x = parseFloat(g.style.getPropertyValue('--gap-page-x'))
       const w = parseFloat(g.style.getPropertyValue('--gap-page-w'))
+      const ml = parseFloat(g.style.getPropertyValue('--gap-ml'))
+      const mr = parseFloat(g.style.getPropertyValue('--gap-mr'))
       return {
         top: (r.top - wr.top) / zoomFactor,
         height: r.height / zoomFactor,
         mb,
         mt,
+        ml: Number.isFinite(ml) ? ml : null,
+        mr: Number.isFinite(mr) ? mr : null,
         page: Number.isFinite(x) && Number.isFinite(w) ? { left: x, width: w } : null,
       }
     })
@@ -979,12 +999,49 @@ export function pageFramesFromGaps(
   const frames: PageFrame[] = []
   let geom = first
   let top = 0
+  // each page's insets: its top comes from the gap before it, its bottom from the gap after it
+  let marginTop = firstMargins?.top ?? 0
+  let marginLeft = firstMargins?.left ?? 0
+  let marginRight = firstMargins?.right ?? 0
   for (const g of gaps) {
-    frames.push({ top, bottom: g.top + g.mb, left: paperX + geom.left, width: geom.width })
+    frames.push({
+      top,
+      bottom: g.top + g.mb,
+      left: paperX + geom.left,
+      width: geom.width,
+      ...(firstMargins
+        ? {
+            margins: {
+              top: marginTop,
+              bottom: g.mb,
+              left: marginLeft,
+              right: marginRight,
+            },
+          }
+        : {}),
+    })
     geom = g.page ?? geom
     top = g.top + g.height - g.mt
+    marginTop = g.mt
+    marginLeft = g.ml ?? marginLeft
+    marginRight = g.mr ?? marginRight
   }
-  frames.push({ top, bottom: wr.height / zoomFactor, left: paperX + geom.left, width: geom.width })
+  frames.push({
+    top,
+    bottom: wr.height / zoomFactor,
+    left: paperX + geom.left,
+    width: geom.width,
+    ...(firstMargins
+      ? {
+          margins: {
+            top: marginTop,
+            bottom: firstMargins.bottom,
+            left: marginLeft,
+            right: marginRight,
+          },
+        }
+      : {}),
+  })
   return frames
 }
 
@@ -1044,6 +1101,67 @@ export function syncPageBorders(
       }
     }
     layer.appendChild(el)
+  }
+}
+
+export type BoundaryCorner = 'tl' | 'tr' | 'bl' | 'br'
+
+export interface BoundaryMark {
+  corner: BoundaryCorner
+  /** the corner of the text area the mark points at, in canvas px on the page wrap */
+  x: number
+  y: number
+}
+
+/** The four corners of a page's text area (page frame minus its margins); none for a frame without margins. */
+export function textBoundaryMarks(frame: PageFrame): BoundaryMark[] {
+  const m = frame.margins
+  if (!m) return []
+  const x1 = frame.left + m.left
+  const x2 = frame.left + frame.width - m.right
+  const y1 = frame.top + m.top
+  const y2 = frame.bottom - m.bottom
+  if (x2 - x1 <= 0 || y2 - y1 <= 0) return []
+  return [
+    { corner: 'tl', x: x1, y: y1 },
+    { corner: 'tr', x: x2, y: y1 },
+    { corner: 'bl', x: x1, y: y2 },
+    { corner: 'br', x: x2, y: y2 },
+  ]
+}
+
+/**
+ * Text boundaries (Word's "Show text boundaries"): an L-shaped mark just outside each corner of
+ * every page's text area. A screen-only overlay on the page wrap, like the page borders: it never
+ * enters the document, the clipboard, print or export. `margins` null removes the layer.
+ */
+export function syncTextBoundaries(
+  wrap: HTMLElement,
+  zoomFactor: number,
+  first: { left: number; width: number } | undefined,
+  margins: PageMargins | null,
+): void {
+  let layer = wrap.querySelector(':scope > .text-boundary-overlays') as HTMLElement | null
+  if (!margins) {
+    layer?.remove()
+    return
+  }
+  if (!layer) {
+    layer = document.createElement('div')
+    layer.className = 'text-boundary-overlays'
+    layer.setAttribute('aria-hidden', 'true')
+    wrap.appendChild(layer)
+  }
+  layer.textContent = ''
+  for (const frame of pageFramesFromGaps(wrap, zoomFactor, first, margins)) {
+    if (frame.bottom - frame.top <= 10) continue
+    for (const mark of textBoundaryMarks(frame)) {
+      const el = document.createElement('div')
+      el.className = `text-boundary-mark text-boundary-${mark.corner}`
+      el.style.left = `${mark.x}px`
+      el.style.top = `${mark.y}px`
+      layer.appendChild(el)
+    }
   }
 }
 

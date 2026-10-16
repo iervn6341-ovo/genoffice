@@ -32,6 +32,7 @@ import {
   type ImageWrap,
   type NewChart,
   type NewImage,
+  type NoteProps,
   type ParaFormat,
   type Run,
   type SaveBlock,
@@ -44,6 +45,7 @@ import {
   type TextboxParaPatch,
   type TextboxParasPatchSet,
 } from '@genoffice/docx-engine'
+import { currentNoteNumFmt } from '../note-format'
 import { t } from '../i18n/locale'
 import { symbolFontCovers } from '../font-check'
 import {
@@ -84,10 +86,18 @@ export interface PmDocOptions {
    *  the table border sits one left cell margin further out (Word 2013+ measures
    *  to the border) */
   legacyTableIndent?: boolean
+  noteSettings?: { footnote?: NoteProps; endnote?: NoteProps }
 }
 
-export function pmDocOptions(parsed: { compatibilityMode?: number }): PmDocOptions {
-  return { legacyTableIndent: (parsed.compatibilityMode ?? 0) < 15 }
+export function pmDocOptions(parsed: {
+  compatibilityMode?: number
+  footnoteSettings?: NoteProps
+  endnoteSettings?: NoteProps
+}): PmDocOptions {
+  return {
+    legacyTableIndent: (parsed.compatibilityMode ?? 0) < 15,
+    noteSettings: { footnote: parsed.footnoteSettings, endnote: parsed.endnoteSettings },
+  }
 }
 
 export function blocksToPmDoc(
@@ -98,14 +108,28 @@ export function blocksToPmDoc(
   const content: PmNode[] = []
   for (const block of blocks) {
     if (block.hidden) continue
-    content.push(
-      blockToPmNode(
-        block,
-        sectionRowCapTwips(sections, block.docxIndex),
-        sectionWidthBudget(sections, block.docxIndex),
-        options,
-      ),
+    const node = blockToPmNode(
+      block,
+      sectionRowCapTwips(sections, block.docxIndex),
+      sectionWidthBudget(sections, block.docxIndex),
+      options,
     )
+    if (sections && options.noteSettings) {
+      const section = sections.find((item) => (block.docxIndex ?? 0) <= item.lastBlockIndex)
+      const formatOf = {
+        footnote: section?.settings.footnotePr?.numFmt ?? options.noteSettings.footnote?.numFmt,
+        endnote: section?.settings.endnotePr?.numFmt ?? options.noteSettings.endnote?.numFmt,
+      }
+      const setFormat = (child: PmNode): void => {
+        if (child.type === 'docNoteRef' && child.attrs) {
+          const kind = child.attrs.kind as 'footnote' | 'endnote'
+          child.attrs.fmt = formatOf[kind] ?? (kind === 'footnote' ? 'decimal' : 'lowerRoman')
+        }
+        child.content?.forEach(setFormat)
+      }
+      setFormat(node)
+    }
+    content.push(node)
   }
   if (content.length === 0) {
     content.push({
@@ -142,6 +166,12 @@ function formatAttrs(format: ParaFormat | undefined, runs?: Run[]): Record<strin
     spaceAfterAuto: format?.spaceAfterAuto ?? null,
     contextualSpacing: format?.contextualSpacing ?? null,
     pageBreakBefore: format?.pageBreakBefore ?? false,
+    pageBreakBeforeDirect: format?.pageBreakBefore !== undefined,
+    keepNext: format?.keepNext ?? null,
+    keepLines: format?.keepLines ?? null,
+    widowControl: format?.widowControl ?? null,
+    suppressLineNumbers: format?.suppressLineNumbers ?? null,
+    suppressAutoHyphens: format?.suppressAutoHyphens ?? null,
     shadingFill: format?.shadingFill ?? null,
     shadingDisplay: format?.shadingDisplay ?? null,
     shadingClear: format?.shadingClear ?? null,
@@ -158,6 +188,11 @@ function formatAttrs(format: ParaFormat | undefined, runs?: Run[]): Record<strin
     autoSpace: format?.autoSpace ?? null,
     wordWrap: format?.wordWrap ?? null,
     overflowPunct: format?.overflowPunct ?? null,
+    kinsoku: format?.kinsoku ?? null,
+    topLinePunct: format?.topLinePunct ?? null,
+    autoSpaceDE: format?.autoSpaceDE ?? null,
+    autoSpaceDN: format?.autoSpaceDN ?? null,
+    textAlignment: format?.textAlignment ?? null,
     eaLang: format?.eastAsiaLang ?? null,
     snapToGrid: format?.snapToGrid ?? null,
     emptyRunSize: format?.emptyRunSizeHalfPoints ?? null,
@@ -902,6 +937,10 @@ export function tableModelToPmNode(
       tblLook: model.tableLook ?? null,
       tblLookEdited: false,
       bidiVisual: model.bidiVisual ?? false,
+      altTitle: model.altTitle ?? null,
+      altDescription: model.altDescription ?? null,
+      altEdited: false,
+      cellSpacingEdited: false,
       originalStructure: null,
       originalFormatting: null,
     },
@@ -912,6 +951,8 @@ export function tableModelToPmNode(
         heightRule: model.rowHeightRules?.[rowIndex] ?? null,
         repeatHeader: model.repeatHeaderRows?.[rowIndex] ?? false,
         repeatHeaderEdited: false,
+        cantSplit: model.cantSplitRows?.[rowIndex] ?? false,
+        cantSplitEdited: false,
         rawTrPr: model.rawTrPrs?.[rowIndex] ?? null,
         rowRevision: model.rowRevisions?.[rowIndex] ?? null,
       },
@@ -1032,10 +1073,17 @@ export function tableStructureSignature(table: PmNode): string {
     tblFloatEdited: table.attrs?.tblFloatEdited ?? false,
     tblLook: table.attrs?.tblLook ?? null,
     tblLookEdited: table.attrs?.tblLookEdited ?? false,
+    altTitle: table.attrs?.altTitle ?? null,
+    altDescription: table.attrs?.altDescription ?? null,
+    altEdited: table.attrs?.altEdited ?? false,
+    cellSpacing: table.attrs?.cellSpacingTwips ?? null,
+    cellSpacingEdited: table.attrs?.cellSpacingEdited ?? false,
     rows: (table.content ?? []).map((row) => [
       row.attrs?.heightTwips ?? null,
       row.attrs?.repeatHeader ?? false,
       row.attrs?.repeatHeaderEdited ?? false,
+      row.attrs?.cantSplit ?? false,
+      row.attrs?.cantSplitEdited ?? false,
       // accepting/rejecting revisions strips records from trPr/tcPr: include them in the signature to trigger regeneration (works for empty rows too)
       row.attrs?.rawTrPr ?? null,
       row.attrs?.rowRevision ?? null,
@@ -1049,6 +1097,8 @@ export function tableStructureSignature(table: PmNode): string {
         cell.attrs?.bold ?? false,
         cell.attrs?.align ?? null,
         cell.attrs?.vAlign ?? null,
+        cell.attrs?.textDirection ?? null,
+        cell.attrs?.textDirectionEdited ?? false,
         cell.attrs?.borders ?? null,
         cell.attrs?.rawTcPr ?? null,
         cell.attrs?.cellRevision ?? null,
@@ -1118,6 +1168,7 @@ export function pmTableToModel(table: PmNode): TableModel {
   const repeatHeaderRows: Array<boolean | null> = []
   const rawTrPrs: Array<string | null> = []
   const rowRevisions: TableModel['rowRevisions'] = []
+  const cantSplitRows: Array<boolean | null> = []
   for (const rowNode of table.content ?? []) {
     rowHeightsTwips.push((rowNode.attrs?.heightTwips as number | null) ?? null)
     rowHeightRules.push(
@@ -1126,6 +1177,11 @@ export function pmTableToModel(table: PmNode): TableModel {
     repeatHeaderRows.push(
       rowNode.attrs?.repeatHeaderEdited || table.attrs?.docxIndex == null
         ? !!rowNode.attrs?.repeatHeader
+        : null,
+    )
+    cantSplitRows.push(
+      rowNode.attrs?.cantSplitEdited || table.attrs?.docxIndex == null
+        ? !!rowNode.attrs?.cantSplit
         : null,
     )
     rawTrPrs.push((rowNode.attrs?.rawTrPr as string | null) ?? null)
@@ -1162,6 +1218,12 @@ export function pmTableToModel(table: PmNode): TableModel {
         borders: (cellNode.attrs?.borders as TableCell['borders'] | null) ?? undefined,
         rawTcPr: (cellNode.attrs?.rawTcPr as string | null) ?? undefined,
         gridGap: cellNode.attrs?.gridGap ? true : undefined,
+        ...(cellNode.attrs?.textDirectionEdited
+          ? {
+              textDirectionWrite: ((cellNode.attrs?.textDirection as 'tbRl' | 'btLr' | null) ??
+                'lrTb') as NonNullable<TableCell['textDirectionWrite']>,
+            }
+          : {}),
       }
       const cellParas = (cellNode.content ?? []).filter(
         (n) => n.type === 'docParagraph' || n.type === 'docListItem',
@@ -1289,6 +1351,16 @@ export function pmTableToModel(table: PmNode): TableModel {
     ...(table.attrs?.tblFill ? { fill: String(table.attrs.tblFill) } : {}),
     ...(rowHeightsTwips.some((h) => h !== null) ? { rowHeightsTwips, rowHeightRules } : {}),
     ...(repeatHeaderRows.some((value) => value !== null) ? { repeatHeaderRows } : {}),
+    ...(cantSplitRows.some((value) => value !== null) ? { cantSplitRows } : {}),
+    ...(table.attrs?.altEdited
+      ? {
+          altTitle: String(table.attrs.altTitle ?? ''),
+          altDescription: String(table.attrs.altDescription ?? ''),
+        }
+      : {}),
+    ...(table.attrs?.cellSpacingEdited
+      ? { cellSpacingWriteTwips: Number(table.attrs.cellSpacingTwips) || null }
+      : {}),
     ...(rawTrPrs.some((r) => r !== null) ? { rawTrPrs } : {}),
     ...(rowRevisions.some((revision) => revision !== null) ? { rowRevisions } : {}),
     // null (cleared) → '' removes explicitly; undefined leaves it alone
@@ -1341,6 +1413,10 @@ export function runsToInline(runs: Run[]): PmNode[] {
           kind: run.noteRef.kind,
           id: run.noteRef.id,
           num: parseInt(run.text, 10) || 1,
+          fmt: currentNoteNumFmt(run.noteRef.kind),
+          customMark: run.noteRef.customMark ?? null,
+          customMarkSymbol: run.noteRef.customMarkSymbol ?? null,
+          rawRPr: run.rawRPr ?? null,
         },
       })
       continue
@@ -1415,7 +1491,11 @@ function runMarks(run: Run): PmMark[] {
   const marks: PmMark[] = []
   if (run.bold) marks.push({ type: 'bold' })
   if (run.italic) marks.push({ type: 'italic' })
-  if (run.underline) marks.push({ type: 'underline' })
+  if (run.underline)
+    marks.push({
+      type: 'underline',
+      attrs: { style: run.underlineStyle ?? null, color: run.underlineColor ?? null },
+    })
   if (run.strike) marks.push({ type: 'strike' })
   if (run.link)
     marks.push({
@@ -1485,6 +1565,8 @@ function runMarks(run: Run): PmMark[] {
     run.charSpacingTwips !== undefined ||
     run.charScalePct ||
     run.kernHalfPoints !== undefined ||
+    run.underlineStyle ||
+    run.underlineColor ||
     run.highlight ||
     run.shading ||
     run.shadingDisplay ||
@@ -1532,9 +1614,14 @@ function runMarks(run: Run): PmMark[] {
         // cs chain only kicks in for complex-script text (Word's w:cs semantics)
         csFont: run.csFont && textHasComplexScript(run.text) ? run.csFont : null,
         charSpacingTwips: run.charSpacingTwips ?? null,
+        charScalePct: run.charScalePct ?? null,
         charScaleEm: run.charScalePct && !scaleX ? charScaleEm(run.text, run.charScalePct) : null,
         charScaleX: scaleX,
+        kernHalfPoints: run.kernHalfPoints ?? null,
         kern: wordKerns(run.kernHalfPoints, run.sizeHalfPoints) ?? null,
+        underlineStyle: run.underlineStyle ?? null,
+        underlineColor: run.underlineColor ?? null,
+        rawRPrW14Prefixes: run.rawRPrW14Prefixes ?? null,
         highlight: run.highlight ?? null,
         shading: run.shading ?? null,
         shadingDisplay: run.shadingDisplay ?? null,
@@ -1930,7 +2017,22 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
           original.type === 'image'
             ? (node.attrs?.imageReplace as { base64: string; mime: string } | null)
             : null
-        if ((imagePatch || imageReplace) && original.originalXml) {
+        const tocXmlOverride =
+          (node.attrs?.fieldDisplay as FieldDisplay | null)?.kind === 'tocLine' &&
+          typeof node.attrs?.genXml === 'string' &&
+          node.attrs.genXml !== original.originalXml
+            ? (node.attrs.genXml as string)
+            : null
+        if (tocXmlOverride) {
+          changedCount++
+          pushBlock({
+            kind: 'xml',
+            xml:
+              fieldText?.left !== undefined
+                ? patchFieldParagraphXml(tocXmlOverride, { left: fieldText.left })
+                : tocXmlOverride,
+          })
+        } else if ((imagePatch || imageReplace) && original.originalXml) {
           changedCount++
           let xml = imagePatch
             ? patchImageParagraphXml(original.originalXml, imagePatch)
@@ -2176,13 +2278,36 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
       usedIndexes.add(idx!)
       mapAnchor(idx!)
       pushBlock({ kind: 'original', docxIndex: idx! })
+    } else if (
+      original &&
+      !usedIndexes.has(idx!) &&
+      original.originalXml &&
+      !original.sdtShell &&
+      !generated.sdtShell &&
+      (original.rawPPr
+        ? original.originalXml.includes(original.rawPPr)
+        : /^<w:p(?:\s[^>]*)?>/.test(original.originalXml)) &&
+      sameExceptParagraphFormat(original, generated)
+    ) {
+      // A paragraph-property edit does not change its inline content. Patch
+      // only w:pPr so the exact original field, drawing, math and run XML stays.
+      usedIndexes.add(idx!)
+      mapAnchor(idx!)
+      changedCount++
+      applyRawPPr(generated, original)
+      const pPr = generated.rawPPr ?? mergePPrFormat('', generated.format, original.format)
+      const xml = original.rawPPr
+        ? original.originalXml.replace(original.rawPPr, pPr)
+        : original.originalXml.replace(/^(<w:p(?:\s[^>]*)?>)/, `$1${pPr}`)
+      pushBlock({ kind: 'xml', xml, docxIndex: idx! })
     } else {
       changedCount++
       // an in-place edit consumes its original anchor: it is replaced, not
       // deleted — and may reuse the anchor's original pPr bytes. A split twin
       // (anchor already consumed) gets no rawPPr, so revision records and
       // section props are never duplicated.
-      if (original && !usedIndexes.has(idx!)) {
+      const anchoredOriginal = original && !usedIndexes.has(idx!)
+      if (anchoredOriginal) {
         usedIndexes.add(idx!)
         mapAnchor(idx!)
         applyRawPPr(generated, original)
@@ -2198,7 +2323,11 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
         // emitted exactly once, by the anchor.
         if (generated.sdtShell?.group !== undefined) delete generated.sdtShell
       }
-      pushBlock({ kind: 'generated', block: generated })
+      pushBlock({
+        kind: 'generated',
+        block: generated,
+        ...(anchoredOriginal ? { docxIndex: idx! } : {}),
+      })
     }
   }
 
@@ -2754,12 +2883,30 @@ function nodeFormat(node: PmNode): ParaFormat | undefined {
   if (node.attrs?.contextualSpacing != null)
     format.contextualSpacing = node.attrs.contextualSpacing as boolean
   if (node.attrs?.pageBreakBefore) format.pageBreakBefore = true
+  else if (node.attrs?.pageBreakBeforeDirect) format.pageBreakBefore = false
+  for (const key of [
+    'keepNext',
+    'keepLines',
+    'widowControl',
+    'suppressLineNumbers',
+    'suppressAutoHyphens',
+    'kinsoku',
+    'topLinePunct',
+    'autoSpaceDE',
+    'autoSpaceDN',
+  ] as const)
+    if (node.attrs?.[key] != null) format[key] = node.attrs[key] as boolean
   if (node.attrs?.bidi) format.bidi = true
   if (node.attrs?.autoSpace != null) format.autoSpace = node.attrs.autoSpace as boolean
   if (node.attrs?.wordWrap != null) format.wordWrap = node.attrs.wordWrap as boolean
   if (node.attrs?.overflowPunct != null) {
     format.overflowPunct = node.attrs.overflowPunct as boolean
   }
+  if (
+    node.attrs?.textAlignment &&
+    ['auto', 'baseline', 'center', 'top', 'bottom'].includes(String(node.attrs.textAlignment))
+  )
+    format.textAlignment = node.attrs.textAlignment as ParaFormat['textAlignment']
   if (node.attrs?.eaLang) format.eastAsiaLang = String(node.attrs.eaLang)
   if (node.attrs?.shadingFill) format.shadingFill = String(node.attrs.shadingFill)
   if (node.attrs?.borders) format.borders = String(node.attrs.borders)
@@ -2776,7 +2923,7 @@ function nodeFormat(node: PmNode): ParaFormat | undefined {
   if (node.attrs?.tabStops) {
     try {
       const parsed = JSON.parse(String(node.attrs.tabStops))
-      if (Array.isArray(parsed) && parsed.length > 0) format.tabStops = parsed
+      if (Array.isArray(parsed)) format.tabStops = parsed
     } catch {
       /* ignore malformed */
     }
@@ -2925,9 +3072,16 @@ export function inlineToRuns(content: PmNode[]): Run[] {
     if (node.type === 'docNoteRef') {
       runs.push({
         text: String(node.attrs?.num ?? 1),
+        ...(typeof node.attrs?.rawRPr === 'string' ? { rawRPr: node.attrs.rawRPr } : {}),
         noteRef: {
           kind: (node.attrs?.kind as 'footnote' | 'endnote') ?? 'footnote',
           id: String(node.attrs?.id ?? ''),
+          ...(typeof node.attrs?.customMark === 'string' && node.attrs.customMark
+            ? { customMark: node.attrs.customMark }
+            : {}),
+          ...(node.attrs?.customMarkSymbol
+            ? { customMarkSymbol: node.attrs.customMarkSymbol as { font: string; char: string } }
+            : {}),
         },
       })
       continue
@@ -3057,6 +3211,14 @@ function runFromMarks(text: string, marks: PmMark[]): Run {
       if (mark.attrs?.csFont) run.csFont = String(mark.attrs.csFont)
       if (mark.attrs?.charSpacingTwips != null)
         run.charSpacingTwips = Number(mark.attrs.charSpacingTwips)
+      if (mark.attrs?.charScalePct != null) run.charScalePct = Number(mark.attrs.charScalePct)
+      if (mark.attrs?.kernHalfPoints != null) run.kernHalfPoints = Number(mark.attrs.kernHalfPoints)
+      if (mark.attrs?.underlineStyle) run.underlineStyle = String(mark.attrs.underlineStyle)
+      if (mark.attrs?.underlineColor) run.underlineColor = String(mark.attrs.underlineColor)
+      if (Array.isArray(mark.attrs?.rawRPrW14Prefixes))
+        run.rawRPrW14Prefixes = mark.attrs.rawRPrW14Prefixes.filter(
+          (prefix: unknown): prefix is string => typeof prefix === 'string',
+        )
       if (mark.attrs?.highlight) run.highlight = String(mark.attrs.highlight)
       if (mark.attrs?.shading) run.shading = String(mark.attrs.shading)
       if (mark.attrs?.textOutline) {
@@ -3070,7 +3232,7 @@ function runFromMarks(text: string, marks: PmMark[]): Run {
         const glow = parseGlowAttr(String(mark.attrs.glow))
         if (glow) run.glow = glow
       }
-      if (mark.attrs?.positionHalfPoints)
+      if (mark.attrs?.positionHalfPoints != null)
         run.positionHalfPoints = Number(mark.attrs.positionHalfPoints)
       if (mark.attrs?.bdr) {
         const bdr = parseRunBorderAttr(String(mark.attrs.bdr))
@@ -3081,7 +3243,7 @@ function runFromMarks(text: string, marks: PmMark[]): Run {
       }
       if (mark.attrs?.em) run.em = mark.attrs.em as NonNullable<Run['em']>
       if (mark.attrs?.cs) run.cs = true
-      if (mark.attrs?.vanish) run.vanish = true
+      if (mark.attrs?.vanish != null) run.vanish = Boolean(mark.attrs.vanish)
       if (mark.attrs?.eaLang) run.eastAsiaLang = String(mark.attrs.eaLang)
       if (mark.attrs?.rtl != null) run.rtl = Boolean(mark.attrs.rtl)
       if (mark.attrs?.styleId) run.styleId = String(mark.attrs.styleId)
@@ -3157,7 +3319,14 @@ function runStyleKey(run: Run): string {
     run.link?.rId ?? null,
     run.commentIds?.join(' ') ?? null,
     revisionKey(run),
-    run.noteRef ? [run.noteRef.kind, run.noteRef.id] : null,
+    run.noteRef
+      ? [
+          run.noteRef.kind,
+          run.noteRef.id,
+          run.noteRef.customMark ?? null,
+          run.noteRef.customMarkSymbol ?? null,
+        ]
+      : null,
     run.xeTerm ?? null,
     run.refField ?? null,
     run.instrField ?? null,
@@ -3191,7 +3360,9 @@ function normalizedRuns(runs: Run[]): unknown[] {
     r.text === '' && r.image
       ? ['image', r.rawRPr ?? null, r.image.xml, r.link?.href ?? null, revisionKey(r)]
       : [
-          r.text,
+          // The reference number is a live preview derived from section note
+          // settings. Only its native kind/id identify document content.
+          r.noteRef ? null : r.text,
           r.rawRPr ?? null,
           r.styleId ?? null,
           r.bold ?? null,
@@ -3207,7 +3378,14 @@ function normalizedRuns(runs: Run[]): unknown[] {
           r.link?.href ?? null,
           r.commentIds?.join(' ') ?? null,
           revisionKey(r),
-          r.noteRef ? [r.noteRef.kind, r.noteRef.id] : null,
+          r.noteRef
+            ? [
+                r.noteRef.kind,
+                r.noteRef.id,
+                r.noteRef.customMark ?? null,
+                r.noteRef.customMarkSymbol ?? null,
+              ]
+            : null,
           r.xeTerm ?? null,
           r.refField ?? null,
           r.instrField ?? null,
@@ -3247,6 +3425,11 @@ function normalizedFormat(format: ParaFormat | undefined): unknown {
     format.spaceBefore ?? null,
     format.spaceAfter ?? null,
     format.pageBreakBefore ?? false,
+    format.keepNext ?? null,
+    format.keepLines ?? null,
+    format.widowControl ?? null,
+    format.suppressLineNumbers ?? null,
+    format.suppressAutoHyphens ?? null,
     format.shadingFill ?? null,
     format.borders ?? null,
     format.borderLines ? JSON.stringify(format.borderLines) : null,
@@ -3255,6 +3438,11 @@ function normalizedFormat(format: ParaFormat | undefined): unknown {
     format.autoSpace ?? null,
     format.wordWrap ?? null,
     format.overflowPunct ?? null,
+    format.kinsoku ?? null,
+    format.topLinePunct ?? null,
+    format.autoSpaceDE ?? null,
+    format.autoSpaceDN ?? null,
+    format.textAlignment ?? null,
     format.emptyRunSizeHalfPoints ?? null,
   ]
 }
@@ -3293,4 +3481,13 @@ export function signatureOfGenerated(block: GeneratedBlock): string {
     pPrChange: block.pPrChange ?? null,
     blockRevision: block.blockRevision ?? null,
   })
+}
+
+/** Same direct paragraph content and structure, with only pPr formatting edited. */
+function sameExceptParagraphFormat(original: Block, generated: GeneratedBlock): boolean {
+  const old = JSON.parse(signatureOfBlock(original)) as Record<string, unknown>
+  const next = JSON.parse(signatureOfGenerated(generated)) as Record<string, unknown>
+  old.format = null
+  next.format = null
+  return JSON.stringify(old) === JSON.stringify(next)
 }

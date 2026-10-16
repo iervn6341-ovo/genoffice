@@ -120,6 +120,8 @@ export interface CjkPunctShrinkStorage {
   legacyLayout: boolean
   /** docDefaults w:lang w:eastAsia: the fallback of the run / paragraph-style chain */
   docEastAsiaLang: string | null
+  /** Explicit settings refresh; a metadata-only transaction keeps the same document. */
+  measureVersion?: number
 }
 
 /** dispatched on document after the doc-scoped <style> commits (App) */
@@ -350,6 +352,7 @@ function charAdvancePx(font: string, ch: string): number {
 }
 
 class CjkPunctShrinkView {
+  private lastMeasureVersion: number
   private lastSig = ''
   private results = new SettledParagraphCache<MeasuredShrink[]>(shiftShrinks, (r) => r.length === 0)
   private seenSigs = new Set<string>()
@@ -378,6 +381,7 @@ class CjkPunctShrinkView {
     private view: EditorView,
     private storage: CjkPunctShrinkStorage,
   ) {
+    this.lastMeasureVersion = storage.measureVersion ?? 0
     this.measure()
     document.fonts?.addEventListener('loadingdone', this.onFontsLoaded)
     document.addEventListener(DOC_CSS_COMMITTED_EVENT, this.onDocCss)
@@ -407,7 +411,11 @@ class CjkPunctShrinkView {
   }
 
   update(view: EditorView, prevState: EditorState) {
-    if (view.state.doc !== prevState.doc) {
+    const measureVersion = this.storage.measureVersion ?? 0
+    if (measureVersion !== this.lastMeasureVersion) {
+      this.lastMeasureVersion = measureVersion
+      this.invalidate()
+    } else if (view.state.doc !== prevState.doc) {
       // untouched paragraphs keep their settled results (keyed on node identity)
       this.restartConvergence()
     } else if (

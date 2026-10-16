@@ -183,3 +183,29 @@ export function constrainTableWidthAtCell(cellPos: number, maxWidthPx: number): 
   return (state, dispatch) =>
     resizeColumns(state, dispatch, null, maxWidthPx, targetFromCellPos(state, cellPos))
 }
+
+/**
+ * Word "Distribute Columns": selected columns (the whole grid when fewer than two are
+ * selected) take their average width. The grid is re-fitted into the content box.
+ */
+export function distributeSelectedColumns(maxWidthPx: number): Command {
+  return (state, dispatch) => {
+    const target = targetFromSelection(state)
+    if (!target) return false
+    const current = tableGridWidths(state, target, maxWidthPx)
+    if (!current) return false
+    let { left, right } = target
+    if (right - left < 2) {
+      left = 0
+      right = current.length
+    }
+    if (right - left < 2) return false
+    const slice = current.slice(left, right)
+    const average = slice.reduce((sum, width) => sum + width, 0) / slice.length
+    const requested = new Map<number, number>()
+    for (let col = left; col < right; col++) requested.set(col, average)
+    const widths = fitColumnWidths(current, requested, maxWidthPx)
+    dispatch?.(writeGridWidths(state, state.tr, target, widths))
+    return true
+  }
+}

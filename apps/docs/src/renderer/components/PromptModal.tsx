@@ -12,6 +12,7 @@ export function PromptModal({
   initial = '',
   multiline = false,
   allowEmpty = false,
+  secondary,
   onSubmit,
   onClose,
 }: {
@@ -21,11 +22,13 @@ export function PromptModal({
   multiline?: boolean
   /** submit button stays enabled for empty input (e.g. clearing a value) */
   allowEmpty?: boolean
-  onSubmit: (value: string) => void
+  secondary?: { label: string; initial?: string; hint?: string }
+  onSubmit: (value: string, secondary?: string) => void
   onClose: () => void
 }) {
   const { t } = useI18n()
   const [value, setValue] = useState(initial)
+  const [secondaryValue, setSecondaryValue] = useState(secondary?.initial ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const modalKeys = useModalKeys(onClose)
@@ -37,10 +40,16 @@ export function PromptModal({
   }, [multiline])
 
   const submit = () => {
-    if (!allowEmpty && !value.trim()) return
-    onSubmit(value.trim())
+    if ((!allowEmpty && !value.trim()) || !validSecondary) return
+    onSubmit(value.trim(), secondary ? secondaryValue.trim() : undefined)
     onClose()
   }
+  const validSecondary =
+    Array.from(secondaryValue).length <= 8 &&
+    Array.from(secondaryValue).every((char) => {
+      const cp = char.codePointAt(0) ?? 0
+      return cp >= 0x20 && cp !== 0x7f && !(cp >= 0xd800 && cp <= 0xdfff)
+    })
 
   return (
     <div
@@ -76,11 +85,39 @@ export function PromptModal({
             />
           )}
         </label>
+        {secondary && (
+          <label className="prompt-secondary">
+            {secondary.label}
+            <input
+              aria-label={secondary.label}
+              value={secondaryValue}
+              maxLength={16}
+              onChange={(event) => setSecondaryValue(event.target.value)}
+            />
+            {secondary.hint && <small>{secondary.hint}</small>}
+            <span className="note-mark-presets">
+              {(['♠', '♥'] as const).map((symbol) => (
+                <button
+                  key={symbol}
+                  type="button"
+                  aria-label={symbol}
+                  onClick={() => setSecondaryValue(symbol)}
+                >
+                  {symbol}
+                </button>
+              ))}
+            </span>
+          </label>
+        )}
         <div className="modal-actions">
           <button className="btn-ghost" onClick={onClose}>
             {t('appCancel')}
           </button>
-          <button className="btn-primary" disabled={!allowEmpty && !value.trim()} onClick={submit}>
+          <button
+            className="btn-primary"
+            disabled={(!allowEmpty && !value.trim()) || !validSecondary}
+            onClick={submit}
+          >
             {t('appOk')}
           </button>
         </div>

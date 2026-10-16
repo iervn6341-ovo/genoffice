@@ -458,6 +458,15 @@ describe('paragraph border color/width round trip', () => {
     }
     const plan = pmDocToSavePlan(doc, [block])
     const saved = plan.saveBlocks[0]
+    // an alignment-only edit is a sparse pPr patch of the original paragraph (xml); a regenerated
+    // block would carry the same border data in its format
+    if (saved.kind === 'xml') {
+      expect(saved.xml).toContain('<w:jc w:val="center"/>')
+      expect(saved.xml).toContain(
+        '<w:bottom w:val="single" w:sz="18" w:space="1" w:color="4472C4"/>',
+      )
+      return
+    }
     if (saved.kind !== 'generated') throw new Error(`expected generated, got ${saved.kind}`)
     expect(saved.block.format?.borderLines).toEqual({
       b: { color: '4472C4', szPt: 2.25, spacePt: 1 },
@@ -494,6 +503,11 @@ describe('empty paragraph line size attr', () => {
     }
     const plan = pmDocToSavePlan(doc, [block])
     const saved = plan.saveBlocks[0]
+    if (saved.kind === 'xml') {
+      expect(saved.xml).toContain('<w:jc w:val="center"/>')
+      expect(saved.xml).toContain('<w:sz w:val="2"/>')
+      return
+    }
     if (saved.kind !== 'generated') throw new Error(`expected generated, got ${saved.kind}`)
     expect(saved.block.format?.emptyRunSizeHalfPoints).toBe(2)
   })

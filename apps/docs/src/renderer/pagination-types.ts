@@ -133,6 +133,9 @@ export interface BlockBox {
   /** virtual endnotes-area block (appended by appendEndnotesBlock; no DOM/docxIndex) */
   isEndnotes?: boolean
 
+  /** in-flow row of a section-end endnote area (real widget DOM, no `el`): which area/row, for page-gap anchoring */
+  endnoteArea?: { key: string; row: number }
+
   /** virtual trailing block reserving pages for overflowing floating boxes (appendFloatSpillBlock) */
   isFloatSpill?: boolean
 
@@ -492,6 +495,10 @@ export interface FloatBox {
 /** Page-bottom footnote entry (number/text/estimated height): shared by canvas page gaps and the pagination preview */
 export interface PageNoteItem {
   no: number
+  /** The numbering format of the section containing this reference. */
+  fmt?: string
+  /** Explicit mark in place of Word's automatically numbered reference. */
+  customMark?: string
   id: string
   text: string
   /** note body has no self-reference mark run: Word draws the entry without a numeral */

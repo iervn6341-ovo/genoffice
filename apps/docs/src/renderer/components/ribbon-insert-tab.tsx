@@ -1,14 +1,39 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { getMarkRange } from '@tiptap/core'
 import type { Editor } from '@tiptap/core'
 import { ShapePreview, WORDART_PRESETS, wordArtStrokePx } from '@genoffice/ui'
-import type { ChartDisplay, HeaderFooter, NewChart } from '@genoffice/docx-engine'
+import {
+  PAGE_MARK,
+  type ChartDisplay,
+  type HeaderFooter,
+  type NewChart,
+} from '@genoffice/docx-engine'
 import { hfHasPageField, hfWithoutPageMarks } from '../editor/hf-dom'
-import { EquationGallery, EquationModal } from './EquationModal'
+import {
+  applyHfText,
+  appendHfLayout,
+  formatHfDate,
+  hfEditText,
+  HF_DATE_FORMATS,
+  HfProtectedFieldEditError,
+  insertHfNativeField,
+  insertHfPictureAtSelection,
+  type HfNativeFieldKind,
+  type HfLayoutKind,
+  type HfDateFormat,
+} from '../editor/hf-text'
+import {
+  EquationGallery,
+  EquationModal,
+  selectedEquationTarget,
+  type MathEditTarget,
+} from './EquationModal'
+import { SymbolDialog } from './SymbolDialog'
 import { COVER_PRESETS, insertCoverPage, type CoverPreset } from '../editor/cover-pages'
 import { startShapeDrawMode } from '../editor/shape-draw'
 import { useI18n, type StringKey } from '../i18n/locale'
+import { TextToTableDialog } from './TableToolsDialogs'
 import { RibbonFoldGroup } from '@genoffice/ui'
 import { useModalKeys } from './modal-keys'
 import {
@@ -42,6 +67,7 @@ import {
   DOC_SHAPE_GROUPS,
   insertBlankPageAt,
   insertImageViaDialog,
+  imageSizeOf,
   insertPageBreakAt,
   insertShapeAt,
   insertTableAt,
@@ -107,43 +133,202 @@ const SYMBOLS = [
   '⑩',
 ]
 
-/** small dropdown editor for header/footer text */
+/** Edit the text paragraphs without replacing imported runs, fields, tables, or images. */
 function HfEditor({
   label,
+  kind,
+  targetSection,
   current,
+  fileName,
+  author,
   onApply,
   onClose,
 }: {
   label: string
-  current: string
-  onApply: (text: string) => void
+  kind: 'header' | 'footer'
+  targetSection?: number
+  current: HeaderFooter | null
+  fileName: string
+  author?: string
+  onApply: (next: HeaderFooter) => void
   onClose: () => void
 }) {
   const { t } = useI18n()
-  const [text, setText] = useState(current)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [draft, setDraft] = useState<HeaderFooter | null>(current)
+  const [text, setText] = useState(() => hfEditText(current ?? { text: '' }))
+  const [error, setError] = useState('')
+  const [structuredDirty, setStructuredDirty] = useState(false)
+  const [dateFormat, setDateFormat] = useState<HfDateFormat>('yyyy-MM-dd')
+  const insertPlain = (value: string) => {
+    const el = textareaRef.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? start
+    const next = text.slice(0, start) + value + text.slice(end)
+    setText(next)
+    setError('')
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(start + value.length, start + value.length)
+    })
+  }
+  const insertNative = (kind: HfNativeFieldKind) => {
+    const el = textareaRef.current
+    try {
+      const next = insertHfNativeField(
+        draft,
+        text,
+        el?.selectionStart ?? text.length,
+        el?.selectionEnd ?? text.length,
+        kind,
+        fileName,
+        new Date(),
+        dateFormat,
+        author,
+      )
+      setDraft(next.value)
+      setText(next.text)
+      setStructuredDirty(true)
+      setError('')
+      requestAnimationFrame(() => {
+        el?.focus()
+        el?.setSelectionRange(next.caret, next.caret)
+      })
+    } catch (cause) {
+      if (!(cause instanceof HfProtectedFieldEditError)) throw cause
+      setError(t('appHfFieldProtectedError'))
+    }
+  }
+  const insertPicture = async () => {
+    const el = textareaRef.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? start
+    const picked = await window.desktop.pickImage()
+    if (!picked) return
+    const natural = await imageSizeOf(`data:${picked.mime};base64,${picked.base64}`)
+    const scale = Math.min(1, 240 / natural.width)
+    try {
+      const next = insertHfPictureAtSelection(draft, text, start, end, {
+        base64: picked.base64,
+        mime: picked.mime,
+        widthPx: Math.max(1, Math.round(natural.width * scale)),
+        heightPx: Math.max(1, Math.round(natural.height * scale)),
+      })
+      setDraft(next.value)
+      setText(next.text)
+      setStructuredDirty(true)
+      setError('')
+      requestAnimationFrame(() => {
+        el?.focus()
+        el?.setSelectionRange(next.caret, next.caret)
+      })
+    } catch (cause) {
+      if (!(cause instanceof HfProtectedFieldEditError)) throw cause
+      setError(t('appHfFieldProtectedError'))
+    }
+  }
+  const insertLayout = (kind: HfLayoutKind) => {
+    try {
+      const next = appendHfLayout(draft, text, kind, fileName, new Date(), dateFormat)
+      setDraft(next.value)
+      setText(next.text)
+      setStructuredDirty(true)
+      setError('')
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus()
+        textareaRef.current?.setSelectionRange(next.caret, next.caret)
+      })
+    } catch (cause) {
+      if (!(cause instanceof HfProtectedFieldEditError)) throw cause
+      setError(t('appHfFieldProtectedError'))
+    }
+  }
+  const apply = () => {
+    if (structuredDirty || text !== hfEditText(current ?? { text: '' })) {
+      try {
+        onApply(applyHfText(draft, text))
+      } catch (cause) {
+        if (!(cause instanceof HfProtectedFieldEditError)) throw cause
+        setError(t('appHfFieldProtectedError'))
+        return
+      }
+    }
+    onClose()
+  }
   return (
-    <div data-rb-panel="" className="hf-menu">
+    <div
+      data-rb-panel=""
+      data-testid={`hf-editor-${kind}`}
+      data-hf-target-section={targetSection === undefined ? undefined : targetSection + 1}
+      className="hf-menu"
+    >
       <div className="hf-menu-title">{label}</div>
-      <input
+      <textarea
+        data-testid="hf-editor-textarea"
+        ref={textareaRef}
         autoFocus
         value={text}
         placeholder={t('ribbonHfPlaceholder', { label })}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value)
+          setError('')
+        }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            onApply(text.trim())
-            onClose()
-          }
+          if (e.key === 'Escape') onClose()
         }}
       />
-      <div className="hf-menu-actions">
-        <button
-          className="btn-primary"
-          onClick={() => {
-            onApply(text.trim())
-            onClose()
-          }}
+      {error && (
+        <div className="hf-edit-error" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="hf-menu-fields">
+        <button type="button" onClick={() => void insertPicture()}>
+          {t('ribbonPicture')}
+        </button>
+        <button type="button" onClick={() => insertNative('PAGE')}>
+          {t('ribbonHfFieldPage')}
+        </button>
+        <button type="button" onClick={() => insertNative('NUMPAGES')}>
+          {t('ribbonHfFieldPages')}
+        </button>
+        <select
+          aria-label={t('ribbonFieldDate')}
+          value={dateFormat}
+          onChange={(event) => setDateFormat(event.target.value as HfDateFormat)}
         >
+          {HF_DATE_FORMATS.map((format) => (
+            <option key={format} value={format}>
+              {format}
+            </option>
+          ))}
+        </select>
+        <button type="button" onClick={() => insertNative('DATE')}>
+          {t('ribbonFieldDate')}
+        </button>
+        <button type="button" onClick={() => insertPlain(formatHfDate(new Date(), dateFormat))}>
+          {t('ribbonHfDateFixed')}
+        </button>
+        <button type="button" onClick={() => insertNative('FILENAME')}>
+          {t('ribbonFieldFileName')}
+        </button>
+        <button type="button" onClick={() => insertNative('AUTHOR')}>
+          {t('ribbonSourceAuthor')}
+        </button>
+      </div>
+      <div className="hf-menu-fields">
+        <button type="button" onClick={() => insertLayout('blank')}>
+          {t('ribbonHfLayoutBlank')}
+        </button>
+        <button type="button" onClick={() => insertLayout('threeColumn')}>
+          {t('ribbonHfLayoutThree')}
+        </button>
+        <button type="button" onClick={() => insertLayout('datePage')}>
+          {t('ribbonHfLayoutDatePage')}
+        </button>
+      </div>
+      <div className="hf-menu-actions">
+        <button className="btn-primary" onClick={apply}>
           {t('ribbonOk')}
         </button>
         <button onClick={onClose}>{t('ribbonCancel')}</button>
@@ -736,6 +921,9 @@ export function InsertTab({
   hasDoc,
   dropdown,
   setDropdown,
+  fileName,
+  author,
+  hfSectionIndex,
   header,
   onHeader,
   footer,
@@ -754,8 +942,11 @@ export function InsertTab({
   const { t } = useI18n()
   const [grid, setGrid] = useState<{ r: number; c: number }>({ r: 0, c: 0 })
   const [tableDialogOpen, setTableDialogOpen] = useState(false)
+  const [textToTableOpen, setTextToTableOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
   const [equationOpen, setEquationOpen] = useState(false)
+  const [equationEditTarget, setEquationEditTarget] = useState<MathEditTarget | null>(null)
+  const [symbolOpen, setSymbolOpen] = useState(false)
   const [bookmarkOpen, setBookmarkOpen] = useState(false)
   const [crossRefOpen, setCrossRefOpen] = useState(false)
   const [chartOpen, setChartOpen] = useState(false)
@@ -884,6 +1075,15 @@ export function InsertTab({
                 }}
               >
                 {t('ribbonTableInsertDialog')}
+              </button>
+              <button
+                className="table-picker-custom"
+                onClick={() => {
+                  setDropdown(() => null)
+                  setTextToTableOpen(true)
+                }}
+              >
+                {t('ribbonConvertTextToTable')}
               </button>
             </div>
           )}
@@ -1204,8 +1404,12 @@ export function InsertTab({
           {dropdown === 'header' && (
             <HfEditor
               label={t('ribbonHeader')}
-              current={header?.text ?? ''}
-              onApply={(text) => onHeader({ text })}
+              kind="header"
+              targetSection={hfSectionIndex}
+              current={header}
+              fileName={fileName}
+              author={author}
+              onApply={onHeader}
               onClose={() => setDropdown(() => null)}
             />
           )}
@@ -1226,8 +1430,12 @@ export function InsertTab({
           {dropdown === 'footer' && (
             <HfEditor
               label={t('ribbonFooter')}
-              current={footer?.text ?? ''}
-              onApply={(text) => onFooter({ text, pageNumber: footer?.pageNumber ?? false })}
+              kind="footer"
+              targetSection={hfSectionIndex}
+              current={footer}
+              fileName={fileName}
+              author={author}
+              onApply={onFooter}
               onClose={() => setDropdown(() => null)}
             />
           )}
@@ -1260,13 +1468,23 @@ export function InsertTab({
                 <button
                   key={label}
                   onClick={() => {
-                    // Word gallery semantics: replace the area's content with a single page-number paragraph
-                    const hf: HeaderFooter = {
-                      text: '#',
+                    const current = kind === 'header' ? header : footer
+                    const base = current ?? { text: '' }
+                    const paras = base.paras ?? [
+                      { align: 'center' as const, runs: base.text ? [{ text: base.text }] : [] },
+                    ]
+                    const existing = paras.findIndex((p) =>
+                      p.runs.some((run) => run.text.includes(PAGE_MARK)),
+                    )
+                    const nextParas =
+                      existing >= 0
+                        ? paras.map((p, i) => (i === existing ? { ...p, align } : p))
+                        : [...paras, { align, runs: [{ text: PAGE_MARK }] }]
+                    ;(kind === 'header' ? onHeader : onFooter)({
+                      ...base,
                       pageNumber: true,
-                      paras: [{ align, runs: [{ text: '#' }] }],
-                    }
-                    ;(kind === 'header' ? onHeader : onFooter)(hf)
+                      paras: nextParas,
+                    })
                     setDropdown(() => null)
                   }}
                 >
@@ -1326,6 +1544,38 @@ export function InsertTab({
           <button
             className="rb-big"
             disabled={!hasDoc}
+            data-tip={t('ribbonEquationTip')}
+            onClick={() => {
+              const target = selectedEquationTarget(editor)
+              if (target) {
+                setDropdown(() => null)
+                setEquationEditTarget(target)
+              } else {
+                toggleDropdown(setDropdown, 'equation')
+              }
+            }}
+          >
+            <span className="rb-big-icon">
+              <IconEquation size={BIG} />
+              <IconCaret />
+            </span>
+            <span>{t('ribbonEquation')}</span>
+          </button>
+          {dropdown === 'equation' && (
+            <EquationGallery
+              editor={editor}
+              onPick={() => setDropdown(() => null)}
+              onCustom={() => {
+                setDropdown(() => null)
+                setEquationOpen(true)
+              }}
+            />
+          )}
+        </div>
+        <div className="rb-split-wrap">
+          <button
+            className="rb-big"
+            disabled={!hasDoc}
             data-tip={t('ribbonSymbolTip')}
             onClick={() => toggleDropdown(setDropdown, 'symbol')}
           >
@@ -1349,31 +1599,17 @@ export function InsertTab({
                   {s}
                 </button>
               ))}
+              <button
+                type="button"
+                className="symbol-more"
+                onClick={() => {
+                  setDropdown(() => null)
+                  setSymbolOpen(true)
+                }}
+              >
+                {t('appAdvancedSymbol')}
+              </button>
             </div>
-          )}
-        </div>
-        <div className="rb-split-wrap">
-          <button
-            className="rb-big"
-            disabled={!hasDoc}
-            data-tip={t('ribbonEquationTip')}
-            onClick={() => toggleDropdown(setDropdown, 'equation')}
-          >
-            <span className="rb-big-icon">
-              <IconEquation size={BIG} />
-              <IconCaret />
-            </span>
-            <span>{t('ribbonEquation')}</span>
-          </button>
-          {dropdown === 'equation' && (
-            <EquationGallery
-              editor={editor}
-              onPick={() => setDropdown(() => null)}
-              onCustom={() => {
-                setDropdown(() => null)
-                setEquationOpen(true)
-              }}
-            />
           )}
         </div>
       </RibbonFoldGroup>
@@ -1381,8 +1617,19 @@ export function InsertTab({
       {tableDialogOpen && (
         <TableInsertModal editor={editor} onClose={() => setTableDialogOpen(false)} />
       )}
+      {textToTableOpen && (
+        <TextToTableDialog editor={editor} onClose={() => setTextToTableOpen(false)} />
+      )}
       {linkOpen && <LinkInsertModal editor={editor} onClose={() => setLinkOpen(false)} />}
       {equationOpen && <EquationModal editor={editor} onClose={() => setEquationOpen(false)} />}
+      {equationEditTarget && (
+        <EquationModal
+          editor={editor}
+          editTarget={equationEditTarget}
+          onClose={() => setEquationEditTarget(null)}
+        />
+      )}
+      {symbolOpen && <SymbolDialog editor={editor} onClose={() => setSymbolOpen(false)} />}
       {bookmarkOpen && <BookmarkModal editor={editor} onClose={() => setBookmarkOpen(false)} />}
       {crossRefOpen && <CrossRefModal editor={editor} onClose={() => setCrossRefOpen(false)} />}
       {chartOpen && <ChartInsertModal editor={editor} onClose={() => setChartOpen(false)} />}

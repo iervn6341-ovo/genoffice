@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SectionSettings } from '@genoffice/docx-engine'
 import { useI18n } from '../i18n/locale'
-import { parsePrintRange } from '../print-range'
+import { parsePrintRangeSections } from '../print-range'
 import {
   DEFAULT_PRINTER_SETTINGS,
   PrintCheck,
@@ -69,6 +69,8 @@ export function PrintDialog({
   setStatus,
   section,
   onPageSetup,
+  printMarkup,
+  onPrintMarkup,
 }: {
   onClose: () => void
   setStatus: (s: string) => void
@@ -76,6 +78,9 @@ export function PrintDialog({
   section: SectionSettings | null
   /** Applies a page setup change to every section, like Word's print pane */
   onPageSetup: (change: (s: SectionSettings) => SectionSettings) => void
+  /** Word's "Print Markup": revisions and comments print as displayed (off = final text only) */
+  printMarkup: boolean
+  onPrintMarkup: (on: boolean) => void
 }) {
   const { t, lang } = useI18n()
   const L = printOfficeLabels(lang)
@@ -132,7 +137,10 @@ export function PrintDialog({
         ? Array.from({ length: pageCount }, (_x, i) => i)
         : rangeMode === 'current'
           ? [pageNow]
-          : parsePrintRange(customRange, pageCount)
+          : parsePrintRangeSections(
+              customRange,
+              pvPages().map((el) => ({ section: Number(el.dataset.pvSection ?? 0) || 0 })),
+            )
     if (base === null) return null
     const kept = base.filter((i) => keepParity(i, parity))
     return reverse ? kept.reverse() : kept
@@ -366,6 +374,7 @@ export function PrintDialog({
                     type="text"
                     className={`print-range-input ${rangeInvalid ? 'invalid' : ''}`}
                     placeholder={t('appPrintRangeHint')}
+                    title={t('appPrintRangeSyntax')}
                     value={customRange}
                     onChange={(e) => setCustomRange(e.target.value)}
                   />
@@ -492,6 +501,11 @@ export function PrintDialog({
             <PrintSection title={L.secOptions} defaultOpen={false}>
               <PrintCheck label={L.reverseOrder} checked={reverse} onChange={setReverse} />
               <PrintCheck label={L.optBackground} checked={pageColor} onChange={setPageColor} />
+              <PrintCheck
+                label={t('appPrintMarkup')}
+                checked={printMarkup}
+                onChange={onPrintMarkup}
+              />
             </PrintSection>
             <div className="print-page-count">
               {ready && printOrder && total > 0 ? t('appPrintPageCount', { n: sheetCount }) : ''}
