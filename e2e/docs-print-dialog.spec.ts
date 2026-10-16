@@ -15,6 +15,8 @@ test('docs: print sheet groups, page setup and pages per sheet', async () => {
       await p.keyboard.type(`Page ${n}`)
       if (n < 4) await p.keyboard.press('ControlOrMeta+Enter')
     }
+    // macOS prints through the system panel; this spec drives the in-app dialog (Windows/Linux entry)
+    await p.evaluate(() => localStorage.setItem('genoffice:docs-force-in-app-print', '1'))
     await launched.app.evaluate(({ Menu, BrowserWindow }) => {
       const walk = (m: Electron.Menu | null | undefined): Electron.MenuItem | undefined => {
         for (const it of m?.items ?? []) {

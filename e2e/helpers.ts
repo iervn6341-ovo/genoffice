@@ -8,7 +8,7 @@
  */
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { appendFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -109,6 +109,26 @@ export async function launchShell(options: LaunchOptions): Promise<LaunchedApp> 
             size: { width: 1280, height: 800 },
           },
   })
+  const concurrencyLog = process.env.GENOFFICE_E2E_CONCURRENCY_LOG
+  if (concurrencyLog) {
+    const pid = app.process()?.pid
+    appendFileSync(
+      concurrencyLog,
+      JSON.stringify({ event: 'electron-open', pid, userDataDir, at: new Date().toISOString() }) +
+        '\n',
+    )
+    app.on('close', () => {
+      appendFileSync(
+        concurrencyLog,
+        JSON.stringify({
+          event: 'electron-close',
+          pid,
+          userDataDir,
+          at: new Date().toISOString(),
+        }) + '\n',
+      )
+    })
+  }
   const page = await app.firstWindow()
   await waitForDocumentReady(app, page)
   // keep test windows small (the default fills most of a laptop screen) and pinned to the
