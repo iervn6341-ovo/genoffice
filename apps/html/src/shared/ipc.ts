@@ -1,5 +1,6 @@
 import type { AiPanelPrefs } from '@genoffice/ui'
 import type { HeadlessExportTarget } from '@genoffice/electron-utils/headless-export'
+import type { HtmlPrintOptions } from '@genoffice/electron-utils/print-job'
 import type { Lang } from '@genoffice/i18n'
 import type { AiSettings, AiStreamChunk, AiStreamRequest } from '@genoffice/ai-provider'
 
@@ -31,6 +32,7 @@ export const HTML_CHANNELS = {
   consumeHeadlessExport: 'html:consume-headless-export',
   headlessExportDone: 'html:headless-export-done',
   printRequest: 'html:print-request',
+  printDocument: 'html:print-document',
   aiGenerateImage: 'html:ai-generate-image',
   filesPick: 'html:files-pick',
   filesAdd: 'html:files-add',
@@ -47,7 +49,7 @@ export const HTML_CHANNELS = {
   aiPanelPrefsChanged: 'app:ai-panel-prefs-changed',
 } as const
 
-export type UiTheme = 'light' | 'dark' | 'system'
+export type UiTheme = 'light' | 'dark' | 'gray' | 'system'
 
 /** shell-wide AutoSave default; updatedAt is 0 until the user has ever set it */
 export interface AutoSaveDefault {
@@ -162,6 +164,18 @@ export interface ExportPdfRequest {
   outPath?: string
 }
 
+/** Print the document: macOS shows the system print panel, elsewhere the print sheet's options apply */
+export interface PrintDocumentRequest {
+  /** the document text */
+  html: string
+  title: string
+  /** non-macOS only: the print sheet's choices; missing fields take their defaults */
+  options?: Partial<HtmlPrintOptions>
+}
+
+export type PrintDocumentResult =
+  { ok: true } | { ok: true; canceled: true } | { ok: false; error: string }
+
 /** Single-file HTML export: local image references inlined as data URLs; opens without the assets/ folder */
 export interface ExportHtmlRequest {
   /** the document text */
@@ -256,6 +270,7 @@ export interface HtmlApi {
   onPrintRequest(handler: () => void): () => void
   exportDocx(request: ExportDocxRequest): Promise<ExportResult>
   exportPdf(request: ExportPdfRequest): Promise<ExportResult>
+  printDocument(request: PrintDocumentRequest): Promise<PrintDocumentResult>
   exportHtml(request: ExportHtmlRequest): Promise<ExportResult>
   getLanguage(): Promise<Lang>
   onLanguageChanged(handler: (lang: Lang) => void): () => void

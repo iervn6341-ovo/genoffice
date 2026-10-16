@@ -5,6 +5,7 @@ import type { AiSettings, AiStreamChunk, AiStreamRequest } from '@genoffice/ai-p
 export const PDF_CHANNELS = {
   consumePending: 'pdf:consume-pending',
   readFile: 'pdf:read-file',
+  printNative: 'pdf:print-native',
   save: 'pdf:save',
   requestRedactionCopy: 'pdf:request-redaction-copy',
   autoRename: 'pdf:auto-rename',
@@ -99,7 +100,7 @@ export interface CreateDocumentResult {
   error?: string
 }
 
-export type UiTheme = 'light' | 'dark' | 'system'
+export type UiTheme = 'light' | 'dark' | 'gray' | 'system'
 
 export type MarkupType = 'highlight' | 'underline' | 'strikeout'
 
@@ -698,12 +699,17 @@ export interface ImageSearchResponse {
   error?: string
 }
 
+export type PrintNativeResult =
+  { ok: true } | { ok: true; canceled: true } | { ok: false; error: string }
+
 /** API exposed by preload to the renderer (window.pdfApi) */
 export interface PdfApi {
   /** Take the pdf path pending for this view (queued at tab creation); null if none */
   consumePending(): Promise<string | null>
   /** Read pdf bytes. Only paths granted to this view are allowed */
   readFile(path: string): Promise<ArrayBuffer>
+  /** macOS: show the system print panel (with preview) for the saved file itself, so the PDF prints as vector pages. Path grants same as readFile */
+  printNative(path: string): Promise<PrintNativeResult>
   /** Write markups/form values/page ops back to the original file (pdf-lib, content streams untouched); path grants same as readFile. With targetPath set (Save As), the original is only read and the result goes to targetPath */
   save(request: SavePdfRequest): Promise<SavePdfResult>
   /** Opens a Save As dialog and grants a single target for the confirmed redaction copy. */

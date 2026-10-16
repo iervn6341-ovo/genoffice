@@ -1,3 +1,5 @@
+import { printJobStringsFor } from '@genoffice/electron-utils/print-job-strings'
+
 const fillFormStrings = {
   ribbonTabFillForm: 'Fill Form',
   formPreviousField: 'Previous field',
@@ -162,6 +164,7 @@ const fillFormStringsFor = (lang: string) => ({
 
 export const strings = {
   zh: {
+    ...printJobStringsFor('zh'),
     ...fillFormStringsFor('zh'),
     ribbonTabHome: '开始',
     ribbonTabAnnotate: '注释',
@@ -489,6 +492,7 @@ export const strings = {
     propModified: '修改时间',
   },
   en: {
+    ...printJobStringsFor('en'),
     ...fillFormStringsFor('en'),
     ribbonTabHome: 'Home',
     ribbonTabAnnotate: 'Annotate',
@@ -824,6 +828,7 @@ export const strings = {
     propModified: 'Modified',
   },
   ja: {
+    ...printJobStringsFor('ja'),
     ...fillFormStringsFor('ja'),
     ribbonTabHome: 'ホーム',
     ribbonTabAnnotate: '注釈',
@@ -1149,6 +1154,7 @@ export const strings = {
     propModified: '更新日時',
   },
   ko: {
+    ...printJobStringsFor('ko'),
     ...fillFormStringsFor('ko'),
     ribbonTabHome: '홈',
     ribbonTabAnnotate: '주석',
@@ -1473,6 +1479,7 @@ export const strings = {
     propModified: '수정한 날짜',
   },
   fr: {
+    ...printJobStringsFor('fr'),
     ...fillFormStringsFor('fr'),
     ribbonTabHome: 'Accueil',
     ribbonTabAnnotate: 'Annoter',
@@ -1804,6 +1811,7 @@ export const strings = {
     propModified: 'Modifié le',
   },
   de: {
+    ...printJobStringsFor('de'),
     ...fillFormStringsFor('de'),
     ribbonTabHome: 'Start',
     ribbonTabAnnotate: 'Anmerken',
@@ -2133,6 +2141,7 @@ export const strings = {
     propModified: 'Geändert',
   },
   es: {
+    ...printJobStringsFor('es'),
     ...fillFormStringsFor('es'),
     ribbonTabHome: 'Inicio',
     ribbonTabAnnotate: 'Anotar',
@@ -2463,6 +2472,7 @@ export const strings = {
     propModified: 'Modificado',
   },
   th: {
+    ...printJobStringsFor('th'),
     ...fillFormStringsFor('th'),
     ribbonTabHome: 'หน้าแรก',
     ribbonTabAnnotate: 'คำอธิบายประกอบ',
@@ -2787,6 +2797,7 @@ export const strings = {
     propModified: 'แก้ไขเมื่อ',
   },
   id: {
+    ...printJobStringsFor('id'),
     ...fillFormStringsFor('id'),
     ribbonTabHome: 'Beranda',
     ribbonTabAnnotate: 'Anotasi',
@@ -3114,6 +3125,7 @@ export const strings = {
     propModified: 'Diubah',
   },
   ru: {
+    ...printJobStringsFor('ru'),
     ...fillFormStringsFor('ru'),
     ribbonTabHome: 'Главная',
     ribbonTabAnnotate: 'Аннотирование',
@@ -3442,6 +3454,7 @@ export const strings = {
     propModified: 'Изменён',
   },
   ar: {
+    ...printJobStringsFor('ar'),
     ...fillFormStringsFor('ar'),
     ribbonTabHome: 'الشريط الرئيسي',
     ribbonTabAnnotate: 'تعليق توضيحي',
@@ -3765,6 +3778,7 @@ export const strings = {
     propModified: 'تاريخ التعديل',
   },
   pt: {
+    ...printJobStringsFor('pt'),
     ...fillFormStringsFor('pt'),
     ribbonTabHome: 'Página Inicial',
     ribbonTabAnnotate: 'Anotar',
@@ -4093,6 +4107,7 @@ export const strings = {
     propModified: 'Modificado',
   },
   it: {
+    ...printJobStringsFor('it'),
     ...fillFormStringsFor('it'),
     ribbonTabHome: 'Home',
     ribbonTabAnnotate: 'Annota',
@@ -4424,6 +4439,7 @@ export const strings = {
     propModified: 'Modificato',
   },
   pl: {
+    ...printJobStringsFor('pl'),
     ...fillFormStringsFor('pl'),
     ribbonTabHome: 'Narzędzia główne',
     ribbonTabAnnotate: 'Adnotacje',
@@ -4752,6 +4768,7 @@ export const strings = {
     propModified: 'Zmodyfikowano',
   },
   cs: {
+    ...printJobStringsFor('cs'),
     ...fillFormStringsFor('cs'),
     ribbonTabHome: 'Domů',
     ribbonTabAnnotate: 'Anotace',
@@ -5078,6 +5095,7 @@ export const strings = {
     propModified: 'Změněno',
   },
   nl: {
+    ...printJobStringsFor('nl'),
     ...fillFormStringsFor('nl'),
     ribbonTabHome: 'Start',
     ribbonTabAnnotate: 'Annoteren',
@@ -5406,6 +5424,7 @@ export const strings = {
     propModified: 'Gewijzigd',
   },
   ms: {
+    ...printJobStringsFor('ms'),
     ...fillFormStringsFor('ms'),
     ribbonTabHome: 'Laman Utama',
     ribbonTabAnnotate: 'Anotasi',
@@ -5733,6 +5752,7 @@ export const strings = {
     propModified: 'Diubah suai',
   },
   he: {
+    ...printJobStringsFor('he'),
     ...fillFormStringsFor('he'),
     ribbonTabHome: 'בית',
     ribbonTabAnnotate: 'הערות',
@@ -6053,6 +6073,7 @@ export const strings = {
     propModified: 'עודכן',
   },
   hi: {
+    ...printJobStringsFor('hi'),
     ...fillFormStringsFor('hi'),
     ribbonTabHome: 'होम',
     ribbonTabAnnotate: 'एनोटेट',
@@ -6378,6 +6399,7 @@ export const strings = {
     propModified: 'संशोधन समय',
   },
   'zh-TW': {
+    ...printJobStringsFor('zh-TW'),
     ...fillFormStringsFor('zh-TW'),
     ribbonTabHome: '常用',
     ribbonTabAnnotate: '註解',

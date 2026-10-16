@@ -3246,6 +3246,24 @@ button {
   .pdf-print-root img + img {
     break-before: page;
   }
+
+  /* 'shrink' / 'actual' / custom scale: one clipping, centering box per sheet */
+  .pdf-print-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: calc(100vh - 1px);
+    overflow: hidden;
+  }
+
+  .pdf-print-page + .pdf-print-page {
+    break-before: page;
+  }
+
+  .pdf-print-root .pdf-print-page img {
+    flex: none;
+    object-fit: contain;
+  }
 }
 
 /* ── AI sidebar (aligned with docs/sheets panel language) ── */
@@ -4223,4 +4241,34 @@ button {
   flex-direction: column;
   flex: 1;
   min-width: 0;
+}
+
+/* print dialog: option groups */
+.pdf-print-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.pdf-print-group legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pdf-print-select {
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
 }

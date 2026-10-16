@@ -1,4 +1,5 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist'
+import { pageFit, type PdfPrintOptions } from './print-plan'
 
 /** Baseline raster density (previous behavior — quality never drops below this). */
 const BASE_DPI = 150
@@ -34,11 +35,18 @@ export function printScaleForAreas(areas: number[]): number {
  * system print dialog; clean up after it closes (including cancel).
  * Caller flushes unsaved changes and re-getDocument first — rotations/deleted pages are
  * already in the file.
- * @param pages 1-based file pages to render; defaults to the whole document.
+ * @param pages 1-based file pages to render, in the order given when `ordered` is set (reverse
+ * printing); defaults to the whole document in page order.
+ * @param options the dialog's page scaling and annotation choices (defaults: fit, annotations on).
  * The 200 DPI pixel budget is computed over the selected pages only, so a
  * small range out of a huge document still prints at full target quality.
  */
-export async function printPdf(doc: PDFDocumentProxy, pages?: number[]): Promise<void> {
+export async function printPdf(
+  doc: PDFDocumentProxy,
+  pages?: number[],
+  options?: Partial<PdfPrintOptions>,
+  ordered = false,
+): Promise<void> {
   const root = document.createElement('div')
   root.className = 'pdf-print-root'
   const canvas = document.createElement('canvas')
@@ -48,18 +56,20 @@ export async function printPdf(doc: PDFDocumentProxy, pages?: number[]): Promise
     pages && pages.length > 0
       ? [...new Set(pages)]
           .filter((n) => Number.isInteger(n) && n >= 1 && n <= doc.numPages)
-          .sort((a, b) => a - b)
+          .sort((a, b) => (ordered ? 0 : a - b))
       : Array.from({ length: doc.numPages }, (_x, i) => i + 1)
   // First pass: measure each page at unit scale to budget the shared scale.
   // Stream one page at a time so no PDFPageProxy outlives its render — the
   // previous two-pass held all pages alive plus 2× viewports.
   const areas: number[] = []
+  const widths: number[] = []
   for (const n of targets) {
     const page = await doc.getPage(n)
     try {
       const unit = page.getViewport({ scale: 1 })
       const area = unit.width * unit.height
       areas.push(Number.isFinite(area) && area > 0 ? area : 0)
+      widths.push(unit.width)
     } finally {
       try {
         page.cleanup()
@@ -73,7 +83,7 @@ export async function printPdf(doc: PDFDocumentProxy, pages?: number[]): Promise
   // pixel budget so a single huge drawing (e.g. 200in² at 150 DPI → >1Bpx)
   // cannot OOM the renderer even at the floor scale.
   const MAX_PAGE_PIXELS = MAX_PRINT_PIXELS
-  for (const n of targets) {
+  for (const [index, n] of targets.entries()) {
     const page = await doc.getPage(n)
     try {
       let viewport = page.getViewport({ scale })
@@ -96,10 +106,28 @@ export async function printPdf(doc: PDFDocumentProxy, pages?: number[]): Promise
       }
       canvas.width = w
       canvas.height = h
-      await page.render({ canvas, viewport }).promise
+      // pdf.js AnnotationMode: 0 draws none; omitting it keeps the default (annotations drawn)
+      await page.render({
+        canvas,
+        viewport,
+        ...(options?.annotations === false ? { annotationMode: 0 } : {}),
+      }).promise
       const img = document.createElement('img')
       img.src = canvas.toDataURL('image/jpeg', 0.92)
-      root.appendChild(img)
+      const fit = pageFit(
+        options?.scaleMode ?? 'fit',
+        options?.customScale ?? 100,
+        widths[index] ?? 0,
+      )
+      Object.assign(img.style, fit.style)
+      if (fit.clip) {
+        const box = document.createElement('div')
+        box.className = 'pdf-print-page'
+        box.appendChild(img)
+        root.appendChild(box)
+      } else {
+        root.appendChild(img)
+      }
     } finally {
       try {
         page.cleanup()

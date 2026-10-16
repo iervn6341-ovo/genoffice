@@ -90,6 +90,47 @@ describe('printPdf', () => {
     expect(window.print).toHaveBeenCalledTimes(1)
   })
 
+  it('prints the pages in the given order when ordered (reverse printing)', async () => {
+    const { doc, getPage } = fakeDoc(5)
+    await printPdf(doc, [5, 3, 1], undefined, true)
+    // measure pass then render pass, both in the requested order
+    expect(getPage.mock.calls.map((c) => (c as unknown as [number])[0])).toEqual([5, 3, 1, 5, 3, 1])
+  })
+
+  it('sizes page images by the chosen scale mode and wraps them in a clipping box', async () => {
+    const { doc } = fakeDoc(2)
+    let html = ''
+    ;(window.print as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      html = document.querySelector('.pdf-print-root')!.innerHTML
+      window.dispatchEvent(new Event('afterprint'))
+    })
+    await printPdf(doc, undefined, { scaleMode: 'custom', customScale: 50 })
+    expect(html.match(/pdf-print-page/g)).toHaveLength(2)
+    expect(html).toContain('width: 306pt')
+  })
+
+  it('keeps plain images (no wrapper) for fit-to-paper', async () => {
+    const { doc } = fakeDoc(1)
+    let html = ''
+    ;(window.print as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      html = document.querySelector('.pdf-print-root')!.innerHTML
+      window.dispatchEvent(new Event('afterprint'))
+    })
+    await printPdf(doc, undefined, { scaleMode: 'fit' })
+    expect(html).not.toContain('pdf-print-page')
+  })
+
+  it('turns annotations off only when asked to', async () => {
+    const off = fakeDoc(1)
+    await printPdf(off.doc, undefined, { annotations: false })
+    expect(off.render).toHaveBeenCalledWith(expect.objectContaining({ annotationMode: 0 }))
+    const on = fakeDoc(1)
+    await printPdf(on.doc, undefined, { annotations: true })
+    expect(on.render).toHaveBeenCalledWith(
+      expect.not.objectContaining({ annotationMode: expect.anything() }),
+    )
+  })
+
   it('waits for afterprint before resolving', async () => {
     const { doc } = fakeDoc(1)
     let fireAfterPrint: () => void = () => {}

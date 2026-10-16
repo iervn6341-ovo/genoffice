@@ -14,7 +14,8 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import { FindPanel, type FindFocusRequest, type FindPanelStrings } from '@genoffice/ui'
 import type { Editor } from '@tiptap/core'
 import { TextSelection } from '@tiptap/pm/state'
-import { useI18n } from './i18n/locale'
+import { t as translateNow, useI18n } from './i18n/locale'
+import { printEntryFor, type HtmlPrintOptions } from '@genoffice/electron-utils/print-job'
 import {
   buildFrontmatterRaw,
   frontmatterInner,
@@ -33,6 +34,8 @@ import { Ribbon } from './components/Ribbon'
 import { OutlinePane } from './components/OutlinePane'
 import { SlashMenu, type SlashMenuHandle } from './components/SlashMenu'
 import { ToastHost } from './components/toast'
+import { showToast } from './components/toast-bus'
+import { PrintSheet } from './components/PrintSheet'
 import { TableMenu } from './components/TableMenu'
 import { FrontmatterPanel } from './components/FrontmatterPanel'
 import { AiAskPopover } from './components/AiAskPopover'
@@ -467,57 +470,51 @@ export default function App() {
   }, [runExport])
 
   /**
-   * Print through the same self-contained HTML the PDF export uses, loaded into a
-   * hidden same-session iframe (md-asset:// images keep resolving) — printing the
-   * live page would drag the ribbon/panels along, and Electron has no built-in
-   * preview to crop them out.
+   * Print through the same self-contained HTML the PDF export uses (printing the live page would
+   * drag the ribbon/panels along). macOS goes straight to the system print panel with its
+   * preview; Windows/Linux open the print sheet first. The main process renders the pages.
    */
   const printingRef = useRef(false)
-  const printDoc = useCallback(async () => {
+  const [printSheet, setPrintSheet] = useState(false)
+  const runPrint = useCallback(async (options?: HtmlPrintOptions) => {
     const current = editorRef.current
     if (!current || statusRef.current !== 'ready' || printingRef.current) return
     printingRef.current = true
-    const title =
-      (filePathRef.current
-        ? filePathRef.current.replace(/^.*[/\\]/, '').replace(/\.(md|markdown)$/i, '')
-        : deriveAutoFileName(current)) || 'Untitled'
-    const frame = document.createElement('iframe')
-    frame.style.position = 'fixed'
-    frame.style.right = '100%'
-    frame.style.bottom = '100%'
-    frame.style.width = '0'
-    frame.style.height = '0'
-    frame.style.border = '0'
     try {
-      await new Promise<void>((resolve) => {
-        frame.onload = () => resolve()
-        frame.srcdoc = buildPrintHtml(current.view.dom, title)
-        document.body.appendChild(frame)
+      const title =
+        (filePathRef.current
+          ? filePathRef.current.replace(/^.*[/\\]/, '').replace(/\.(md|markdown)$/i, '')
+          : deriveAutoFileName(current)) || 'Untitled'
+      const result = await window.markdownApi.printDocument({
+        html: buildPrintHtml(current.view.dom, title),
+        title,
+        ...(options ? { options } : {}),
       })
-      const fdoc = frame.contentDocument
-      const fwin = frame.contentWindow
-      if (!fdoc || !fwin) return
-      // the export path passes printToPDF margins instead; the dialog needs @page
-      const pageStyle = fdoc.createElement('style')
-      pageStyle.textContent = '@page { margin: 0.6in; }'
-      fdoc.head.appendChild(pageStyle)
-      await Promise.all([...fdoc.images].map((img) => img.decode().catch(() => {})))
-      // resolve on afterprint so the frame survives until the dialog closes (cancel included)
-      await new Promise<void>((resolve) => {
-        fwin.addEventListener('afterprint', () => resolve())
-        fwin.print()
-      })
+      if (!result.ok) {
+        console.error('[markdown] print failed:', result.error)
+        showToast(translateNow('printSheetFailed', { error: result.error }), 'error')
+      }
     } catch (err) {
       console.error('[markdown] print failed:', err)
+      showToast(
+        translateNow('printSheetFailed', {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+        'error',
+      )
     } finally {
-      frame.remove()
       printingRef.current = false
     }
   }, [])
+  const printDoc = useCallback(() => {
+    if (!editorRef.current || statusRef.current !== 'ready' || printingRef.current) return
+    if (printEntryFor(navigator.platform) === 'native-panel') void runPrint()
+    else setPrintSheet(true)
+  }, [runPrint])
 
   useEffect(() => {
     const offExport = window.markdownApi.onExportRequest((format) => void runExport(format))
-    const offPrint = window.markdownApi.onPrintRequest(() => void printDoc())
+    const offPrint = window.markdownApi.onPrintRequest(printDoc)
     return () => {
       offExport()
       offPrint()
@@ -901,6 +898,16 @@ export default function App() {
       </div>
       <SlashMenu ref={slashMenuRef} state={slashState} onDismiss={() => setSlashState(null)} />
       <ToastHost />
+      {printSheet && (
+        <PrintSheet
+          busy={false}
+          onCancel={() => setPrintSheet(false)}
+          onPrint={(options) => {
+            setPrintSheet(false)
+            void runPrint(options)
+          }}
+        />
+      )}
       {viewImage && (
         <ImageViewer
           src={viewImage}

@@ -12,7 +12,9 @@ import {
   pollUntilReady,
   runHeadlessRendererExport,
 } from '@genoffice/electron-utils/headless-export'
+import { printEntryFor, type HtmlPrintOptions } from '@genoffice/electron-utils/print-job'
 import { useI18n } from './i18n/locale'
+import { PrintSheet } from './components/PrintSheet'
 import { parseDocText, serializeDocText, type Envelope } from './document/envelope'
 import { SourceEditor, type CursorInfo, type SourceEditorHandle } from './source/SourceEditor'
 import { PreviewFrame, type PreviewFrameHandle } from './preview/PreviewFrame'
@@ -1172,6 +1174,46 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t is not referentially stable
   }, [])
 
+  /**
+   * Print: macOS goes straight to the system print panel with its preview; Windows/Linux open
+   * the print sheet first. The main process renders the document in a script-free window, so
+   * the editing chrome and the dark-theme preview remap never reach the page.
+   */
+  const printingRef = useRef(false)
+  const [printSheet, setPrintSheet] = useState(false)
+  const runPrint = useCallback(async (options?: HtmlPrintOptions) => {
+    if (statusRef.current !== 'ready' || printingRef.current) return
+    printingRef.current = true
+    try {
+      flushPending()
+      const html = textRef.current
+      const title =
+        pathRef.current?.replace(/^.*[/\\]/, '').replace(/\.html?$/i, '') ||
+        deriveAutoFileName(html) ||
+        ''
+      const result = await window.htmlApi.printDocument({
+        html,
+        title,
+        ...(options ? { options } : {}),
+      })
+      if (!result.ok) {
+        console.error('[html] print failed:', result.error)
+        setNotice(t('printSheetFailed', { error: result.error }))
+      }
+    } catch (err) {
+      console.error('[html] print failed:', err)
+      setNotice(t('printSheetFailed', { error: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      printingRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is not referentially stable
+  }, [])
+  const printDoc = useCallback(() => {
+    if (statusRef.current !== 'ready' || printingRef.current) return
+    if (printEntryFor(navigator.platform) === 'native-panel') void runPrint()
+    else setPrintSheet(true)
+  }, [runPrint])
+
   // Headless export mode (--headless-export): this renderer lives in a hidden
   // window whose only job is to run the File menu's PDF or Word export against
   // a path the CLI chose, then report back so the main process can quit.
@@ -1235,6 +1277,7 @@ export default function App() {
     })
     const offRenamed = window.htmlApi.onFileRenamed((next) => setPath(next))
     const offExport = window.htmlApi.onExportRequest((format) => void runExport(format))
+    const offPrint = window.htmlApi.onPrintRequest(printDoc)
     const offTheme = window.htmlApi.onThemeChanged(() => {
       // let main.tsx flip data-theme first
       window.setTimeout(
@@ -1286,10 +1329,11 @@ export default function App() {
       offClose()
       offRenamed()
       offExport()
+      offPrint()
       offTheme()
       window.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [doSave, runExport, cycleView, zoomIn, zoomOut, flushPending, openFind])
+  }, [doSave, runExport, printDoc, cycleView, zoomIn, zoomOut, flushPending, openFind])
 
   // pinch / ctrl+wheel over the stage chrome around the frame; wheel inside the frame arrives as gx:zoom
   useEffect(() => {
@@ -1659,6 +1703,16 @@ export default function App() {
           </footer>
         </div>
       </div>
+      {printSheet && (
+        <PrintSheet
+          busy={false}
+          onCancel={() => setPrintSheet(false)}
+          onPrint={(options) => {
+            setPrintSheet(false)
+            void runPrint(options)
+          }}
+        />
+      )}
       {askTarget && askMode && canvasMode !== 'present' && (
         <AiAskPopover
           key={askMode.kind === 'edit' ? askMode.qid : 'new'}

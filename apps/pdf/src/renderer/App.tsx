@@ -69,6 +69,15 @@ import { OutlinePanel } from './OutlinePanel'
 import type { OutlineNode } from './OutlinePanel'
 import { buildHeadingOutline, remapOutlinePages } from './heading-outline'
 import { printPdf } from './print'
+import {
+  DEFAULT_PDF_PRINT_OPTIONS,
+  MAX_CUSTOM_SCALE,
+  MIN_CUSTOM_SCALE,
+  clampCustomScale,
+  selectPrintPages,
+  type PdfPrintOptions,
+} from './print-plan'
+import { printEntryFor } from '@genoffice/electron-utils/print-job'
 import { PasswordDialog } from './PasswordDialog'
 import { PropertiesDialog } from './PropertiesDialog'
 import { SignatureDialog, fileToCanvas } from './SignatureDialog'
@@ -849,6 +858,8 @@ export default function App() {
   const [printMode, setPrintMode] = useState<'all' | 'current' | 'custom'>('all')
   const [printInput, setPrintInput] = useState('')
   const [printInvalid, setPrintInvalid] = useState(false)
+  const [printOpts, setPrintOpts] = useState<PdfPrintOptions>(DEFAULT_PDF_PRINT_OPTIONS)
+  const [printNoPages, setPrintNoPages] = useState(false)
   /** Page-crop dialog: rendered page bitmap + which page it shows */
   const [pageCropDlg, setPageCropDlg] = useState<{ png: string; origIdx: number } | null>(null)
   const [cropAllPages, setCropAllPages] = useState(false)
@@ -5167,6 +5178,12 @@ export default function App() {
   // currentPage only tracks scroll, so it can outlive a page deletion
   const printCurrentPage = Math.max(1, Math.min(currentPage, pageCount))
   const openPrintDlg = () => {
+    // macOS: straight to the system print panel (with preview) for the saved file itself
+    if (printEntryFor(navigator.platform) === 'native-panel') {
+      void printDoc()
+      return
+    }
+    setPrintNoPages(false)
     setPrintMode('all')
     setPrintInput(String(printCurrentPage))
     setPrintInvalid(false)
@@ -5186,10 +5203,16 @@ export default function App() {
       await flushThen(async () => {
         setPrinting(true)
         try {
+          if (printEntryFor(navigator.platform) === 'native-panel') {
+            // the saved file prints as is; the panel's own page range picks the pages
+            const result = await window.pdfApi.printNative(filePath)
+            if (!result.ok) opFailed(t('printSheetFailed', { error: result.error }))
+            return
+          }
           const data = await window.pdfApi.readFile(filePath)
           const pdoc = await getDocument({ data: new Uint8Array(data), ...DOC_OPTS }).promise
           try {
-            await printPdf(pdoc, pages)
+            await printPdf(pdoc, pages, printOpts, true)
           } finally {
             void pdoc.loadingTask.destroy()
           }
@@ -5204,21 +5227,24 @@ export default function App() {
     }
   }
 
-  /** Print dialog confirm: visible page numbers → 1-based file pages */
+  /** Print dialog confirm: visible page numbers → 1-based file pages, then parity and order */
   const confirmPrint = () => {
+    let base: number[]
     if (printMode === 'all') {
-      setPrintDlg(false)
-      void printDoc()
-      return
+      base = Array.from({ length: pageCount }, (_x, i) => i + 1)
+    } else if (printMode === 'current') {
+      base = [printCurrentPage]
+    } else {
+      const parsed = parsePageRanges(printInput, pageCount)
+      if (!parsed || parsed.length === 0) {
+        setPrintInvalid(true)
+        return
+      }
+      base = parsed
     }
-    if (printMode === 'current') {
-      setPrintDlg(false)
-      void printDoc([printCurrentPage])
-      return
-    }
-    const pages = parsePageRanges(printInput, pageCount)
-    if (!pages || pages.length === 0) {
-      setPrintInvalid(true)
+    const pages = selectPrintPages(base, printOpts)
+    if (pages.length === 0) {
+      setPrintNoPages(true)
       return
     }
     setPrintDlg(false)
@@ -8904,6 +8930,79 @@ export default function App() {
                       }}
                     />
                   )}
+                  <fieldset className="pdf-print-group">
+                    <legend>{t('printSheetParity')}</legend>
+                    <select
+                      className="pdf-print-select"
+                      value={printOpts.parity}
+                      onChange={(e) => {
+                        setPrintOpts({
+                          ...printOpts,
+                          parity: e.target.value as PdfPrintOptions['parity'],
+                        })
+                        setPrintNoPages(false)
+                      }}
+                    >
+                      <option value="all">{t('printSheetParityAll')}</option>
+                      <option value="odd">{t('printSheetParityOdd')}</option>
+                      <option value="even">{t('printSheetParityEven')}</option>
+                    </select>
+                    <label className="pdf-modal-row">
+                      <input
+                        type="checkbox"
+                        checked={printOpts.reverse}
+                        onChange={(e) => setPrintOpts({ ...printOpts, reverse: e.target.checked })}
+                      />
+                      <span>{t('printSheetReverse')}</span>
+                    </label>
+                  </fieldset>
+                  <fieldset className="pdf-print-group">
+                    <legend>{t('printSheetScalePage')}</legend>
+                    <select
+                      className="pdf-print-select"
+                      value={printOpts.scaleMode}
+                      onChange={(e) =>
+                        setPrintOpts({
+                          ...printOpts,
+                          scaleMode: e.target.value as PdfPrintOptions['scaleMode'],
+                        })
+                      }
+                    >
+                      <option value="fit">{t('printSheetScaleFit')}</option>
+                      <option value="shrink">{t('printSheetScaleShrink')}</option>
+                      <option value="actual">{t('printSheetScaleActual')}</option>
+                      <option value="custom">{t('printSheetScaleCustom')}</option>
+                    </select>
+                    {printOpts.scaleMode === 'custom' && (
+                      <label className="pdf-modal-row">
+                        <span>{t('printSheetScale')}</span>
+                        <input
+                          className="pdf-modal-input"
+                          type="number"
+                          min={MIN_CUSTOM_SCALE}
+                          max={MAX_CUSTOM_SCALE}
+                          value={printOpts.customScale}
+                          onChange={(e) =>
+                            setPrintOpts({
+                              ...printOpts,
+                              customScale: clampCustomScale(Number(e.target.value)),
+                            })
+                          }
+                        />
+                      </label>
+                    )}
+                  </fieldset>
+                  <label className="pdf-modal-row">
+                    <input
+                      type="checkbox"
+                      checked={printOpts.annotations}
+                      onChange={(e) =>
+                        setPrintOpts({ ...printOpts, annotations: e.target.checked })
+                      }
+                    />
+                    <span>{t('printSheetAnnotations')}</span>
+                  </label>
+                  {printNoPages && <div className="pdf-modal-hint">{t('printSheetNoPages')}</div>}
                   <div className="pdf-modal-actions">
                     <button className="pdf-modal-btn" onClick={() => setPrintDlg(false)}>
                       {t('cancel')}

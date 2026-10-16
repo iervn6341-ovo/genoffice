@@ -1,5 +1,8 @@
+import { printJobStringsFor } from '@genoffice/electron-utils/print-job-strings'
+
 export const strings = {
   zh: {
+    ...printJobStringsFor('zh'),
     aiToolReadFm: '读取文档属性',
     aiToolWriteDoc: '撰写文档',
     aiToolWriteDocFailed: '文档撰写失败',
@@ -199,6 +202,7 @@ export const strings = {
     zoomOut: '缩小',
   },
   en: {
+    ...printJobStringsFor('en'),
     aiToolReadFm: 'Read document properties',
     aiToolWriteDoc: 'Wrote the content',
     aiToolWriteDocFailed: 'Writing failed',
@@ -404,6 +408,7 @@ export const strings = {
     zoomOut: 'Zoom out',
   },
   ja: {
+    ...printJobStringsFor('ja'),
     aiToolReadFm: 'ドキュメントのプロパティを読み取り',
     aiToolWriteDoc: '本文を作成しました',
     aiToolWriteDocFailed: '本文の作成に失敗しました',
@@ -608,6 +613,7 @@ export const strings = {
     zoomOut: '縮小',
   },
   ko: {
+    ...printJobStringsFor('ko'),
     aiToolReadFm: '문서 속성 읽기',
     aiToolWriteDoc: '본문을 작성했습니다',
     aiToolWriteDocFailed: '본문 작성 실패',
@@ -812,6 +818,7 @@ export const strings = {
     zoomOut: '축소',
   },
   fr: {
+    ...printJobStringsFor('fr'),
     aiToolReadFm: 'Lecture des propriétés du document',
     aiToolWriteDoc: 'Contenu rédigé',
     aiToolWriteDocFailed: 'Échec de la rédaction',
@@ -1021,6 +1028,7 @@ export const strings = {
     zoomOut: 'Zoom arrière',
   },
   de: {
+    ...printJobStringsFor('de'),
     aiToolReadFm: 'Dokumenteigenschaften lesen',
     aiToolWriteDoc: 'Inhalt geschrieben',
     aiToolWriteDocFailed: 'Schreiben fehlgeschlagen',
@@ -1229,6 +1237,7 @@ export const strings = {
     zoomOut: 'Verkleinern',
   },
   es: {
+    ...printJobStringsFor('es'),
     aiToolReadFm: 'Leer propiedades del documento',
     aiToolWriteDoc: 'Contenido redactado',
     aiToolWriteDocFailed: 'Falló la redacción',
@@ -1438,6 +1447,7 @@ export const strings = {
     zoomOut: 'Alejar',
   },
   th: {
+    ...printJobStringsFor('th'),
     aiToolReadFm: 'อ่านคุณสมบัติเอกสาร',
     aiToolWriteDoc: 'เขียนเนื้อหาแล้ว',
     aiToolWriteDocFailed: 'เขียนเนื้อหาไม่สำเร็จ',
@@ -1639,6 +1649,7 @@ export const strings = {
     zoomOut: 'ย่อ',
   },
   id: {
+    ...printJobStringsFor('id'),
     aiToolReadFm: 'Baca properti dokumen',
     aiToolWriteDoc: 'Konten ditulis',
     aiToolWriteDocFailed: 'Penulisan gagal',
@@ -1843,6 +1854,7 @@ export const strings = {
     zoomOut: 'Perkecil',
   },
   ru: {
+    ...printJobStringsFor('ru'),
     aiToolReadFm: 'Чтение свойств документа',
     aiToolWriteDoc: 'Текст написан',
     aiToolWriteDocFailed: 'Не удалось написать текст',
@@ -2048,6 +2060,7 @@ export const strings = {
     zoomOut: 'Уменьшить',
   },
   ar: {
+    ...printJobStringsFor('ar'),
     aiToolReadFm: 'قراءة خصائص المستند',
     aiToolWriteDoc: 'تمت كتابة المحتوى',
     aiToolWriteDocFailed: 'فشلت الكتابة',
@@ -2249,6 +2262,7 @@ export const strings = {
     zoomOut: 'تصغير',
   },
   pt: {
+    ...printJobStringsFor('pt'),
     aiToolReadFm: 'Ler propriedades do documento',
     aiToolWriteDoc: 'Conteúdo escrito',
     aiToolWriteDocFailed: 'Falha ao escrever',
@@ -2456,6 +2470,7 @@ export const strings = {
     zoomOut: 'Reduzir',
   },
   it: {
+    ...printJobStringsFor('it'),
     aiToolReadFm: 'Lettura delle proprietà del documento',
     aiToolWriteDoc: 'Contenuto scritto',
     aiToolWriteDocFailed: 'Scrittura non riuscita',
@@ -2663,6 +2678,7 @@ export const strings = {
     zoomOut: 'Riduci',
   },
   pl: {
+    ...printJobStringsFor('pl'),
     aiToolReadFm: 'Odczyt właściwości dokumentu',
     aiToolWriteDoc: 'Napisano treść',
     aiToolWriteDocFailed: 'Pisanie nie powiodło się',
@@ -2868,6 +2884,7 @@ export const strings = {
     zoomOut: 'Pomniejsz',
   },
   cs: {
+    ...printJobStringsFor('cs'),
     aiToolReadFm: 'Číst vlastnosti dokumentu',
     aiToolWriteDoc: 'Obsah napsán',
     aiToolWriteDocFailed: 'Psaní se nezdařilo',
@@ -3072,6 +3089,7 @@ export const strings = {
     mermaidError: 'Chyba syntaxe diagramu',
   },
   nl: {
+    ...printJobStringsFor('nl'),
     aiToolReadFm: 'Documenteigenschappen lezen',
     aiToolWriteDoc: 'Inhoud geschreven',
     aiToolWriteDocFailed: 'Schrijven mislukt',
@@ -3278,6 +3296,7 @@ export const strings = {
     zoomOut: 'Uitzoomen',
   },
   ms: {
+    ...printJobStringsFor('ms'),
     aiToolReadFm: 'Baca sifat dokumen',
     aiToolWriteDoc: 'Kandungan ditulis',
     aiToolWriteDocFailed: 'Penulisan gagal',
@@ -3482,6 +3501,7 @@ export const strings = {
     zoomOut: 'Zum keluar',
   },
   he: {
+    ...printJobStringsFor('he'),
     aiToolReadFm: 'קריאת מאפייני המסמך',
     aiToolWriteDoc: 'התוכן נכתב',
     aiToolWriteDocFailed: 'הכתיבה נכשלה',
@@ -3682,6 +3702,7 @@ export const strings = {
     zoomOut: 'הקטנה',
   },
   hi: {
+    ...printJobStringsFor('hi'),
     aiToolReadFm: 'दस्तावेज़ गुण पढ़ें',
     aiToolWriteDoc: 'सामग्री लिख दी',
     aiToolWriteDocFailed: 'लिखने में विफल',
@@ -3886,6 +3907,7 @@ export const strings = {
     zoomOut: 'ज़ूम आउट',
   },
   'zh-TW': {
+    ...printJobStringsFor('zh-TW'),
     aiToolReadFm: '讀取文件屬性',
     aiToolWriteDoc: '撰寫文件',
     aiToolWriteDocFailed: '文件撰寫失敗',

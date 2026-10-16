@@ -4,7 +4,12 @@ import App from './App'
 import { PresentView } from './PresentView'
 import { LocaleProvider } from './i18n/locale'
 import type { UiTheme } from '../shared/ipc'
-import { applyAiPanelPrefs, installMacLineBoundaryKeys, installScreenTips } from '@genoffice/ui'
+import {
+  applyUiTheme,
+  applyAiPanelPrefs,
+  installMacLineBoundaryKeys,
+  installScreenTips,
+} from '@genoffice/ui'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/dropdown.css'
@@ -23,8 +28,7 @@ installScreenTips()
 installMacLineBoundaryKeys()
 
 function applyTheme(theme: UiTheme): void {
-  if (theme === 'system') document.documentElement.removeAttribute('data-theme')
-  else document.documentElement.setAttribute('data-theme', theme)
+  applyUiTheme(theme)
 }
 
 void (async () => {

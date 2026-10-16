@@ -21,6 +21,7 @@ import {
   installContextMenu,
   installNavigationGuard,
   printHtmlToPdf,
+  printPdfWithSystemPanel,
   safeExternalUrl,
   showOpenDialogWithMemory,
   installRendererProtocol,
@@ -31,6 +32,7 @@ import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { PDF_CHANNELS } from '../shared/ipc'
 import type {
+  PrintNativeResult,
   ExportImagesRequest,
   ExportImagesResult,
   PdfAutoRenameResult,
@@ -880,6 +882,20 @@ function registerPdfIpc(): void {
     }
     const buf = await readFile(path)
     return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  })
+
+  ipcMain.handle(PDF_CHANNELS.printNative, async (e, path: unknown): Promise<PrintNativeResult> => {
+    if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
+      return { ok: false, error: 'pdf: path not granted to this view' }
+    }
+    // the renderer saved first, so the file on disk holds every edit, rotation and page deletion
+    const outcome = await printPdfWithSystemPanel(path, basename(path), {
+      resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+      devDir: join(app.getAppPath(), '../../packages/electron-utils/native'),
+    })
+    if (outcome.status === 'printed') return { ok: true }
+    if (outcome.status === 'canceled') return { ok: true, canceled: true }
+    return { ok: false, error: outcome.message }
   })
 
   ipcMain.handle(

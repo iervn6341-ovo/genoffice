@@ -36,8 +36,15 @@ import {
   type HeadlessExportFormat,
   type HeadlessExportTarget,
   installRendererProtocol,
+  printPdfWithSystemPanel,
   rendererUrl,
 } from '@genoffice/electron-utils'
+import {
+  defaultPaperFor,
+  normalizeHtmlPrintOptions,
+  printLoadedDocument,
+  withPrintPageCss,
+} from '@genoffice/electron-utils/print-job'
 import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { parseFileToText } from '@genoffice/file-parse'
@@ -83,6 +90,8 @@ import type {
   ExportPdfRequest,
   ExportResult,
   ImageData,
+  PrintDocumentRequest,
+  PrintDocumentResult,
   SaveHtmlRequest,
   SaveHtmlResult,
   SaveMode,
@@ -1650,6 +1659,72 @@ function registerHtmlIpc(): void {
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       } finally {
+        await rm(workDir, { recursive: true, force: true }).catch(() => {})
+      }
+    },
+  )
+
+  ipcMain.handle(
+    HTML_CHANNELS.printDocument,
+    async (e, request: PrintDocumentRequest): Promise<PrintDocumentResult> => {
+      if (typeof request?.html !== 'string') return { ok: false, error: 'html: bad print request' }
+      const title = String(request.title || tm('untitledFile')).slice(0, 120)
+      const owner = BrowserWindow.fromWebContents(e.sender)
+      const docPath = savePathByWc.get(e.sender.id)
+      const workDir = await mkdtemp(join(tmpdir(), 'genoffice-html-print-'))
+      const htmlPath = join(workDir, 'print.html')
+      const printWin = new BrowserWindow({
+        show: false,
+        ...(owner && !owner.isDestroyed() ? { parent: owner } : {}),
+        // Chromium attaches the native Windows print dialog to the printed window; a hidden
+        // owner hides the dialog too, so Windows gets a real (taskbar-less) one
+        ...(process.platform === 'win32'
+          ? { width: 900, height: 700, autoHideMenuBar: true, closable: false, skipTaskbar: true }
+          : {}),
+        webPreferences: { sandbox: true, javascript: false },
+      })
+      try {
+        // relative assets resolve through html-asset:// against the document's folder, as in the preview
+        const document = buildPreviewDocument(
+          request.html,
+          docPath ? assetBaseHref(dirname(docPath)) : null,
+        )
+        if (process.platform === 'darwin') {
+          // the system panel prints a PDF: render the author-colored page to one first
+          await writeFile(htmlPath, document, 'utf8')
+          await printWin.loadFile(htmlPath)
+          const pdfPath = join(workDir, 'print.pdf')
+          await writeFile(
+            pdfPath,
+            await printWin.webContents.printToPDF({
+              pageSize: defaultPaperFor(app.getLocaleCountryCode()),
+              printBackground: true,
+              margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 },
+            }),
+          )
+          const outcome = await printPdfWithSystemPanel(pdfPath, title, {
+            resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+            devDir: join(app.getAppPath(), '../../packages/electron-utils/native'),
+          })
+          if (outcome.status === 'printed') return { ok: true }
+          if (outcome.status === 'canceled') return { ok: true, canceled: true }
+          return { ok: false, error: outcome.message }
+        }
+        const options = normalizeHtmlPrintOptions(request.options)
+        await writeFile(htmlPath, withPrintPageCss(document, options), 'utf8')
+        await printWin.loadFile(htmlPath)
+        if (process.platform === 'win32') {
+          printWin.show()
+          printWin.focus()
+        }
+        const outcome = await printLoadedDocument(printWin.webContents, options, title)
+        if (outcome.status === 'printed') return { ok: true }
+        if (outcome.status === 'canceled') return { ok: true, canceled: true }
+        return { ok: false, error: outcome.message }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        printWin.destroy()
         await rm(workDir, { recursive: true, force: true }).catch(() => {})
       }
     },

@@ -17,6 +17,7 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
+          '@genoffice/office-math',
           '@genoffice/i18n',
           'pdf-lib',
           '@genoffice/electron-utils',

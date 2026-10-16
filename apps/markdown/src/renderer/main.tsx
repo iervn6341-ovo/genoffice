@@ -17,14 +17,18 @@ import 'katex/dist/katex.min.css'
 import './styles.css'
 // compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
 import '@genoffice/ui/ribbon-density.css'
-import { applyAiPanelPrefs, installMacLineBoundaryKeys, installScreenTips } from '@genoffice/ui'
+import {
+  applyUiTheme,
+  applyAiPanelPrefs,
+  installMacLineBoundaryKeys,
+  installScreenTips,
+} from '@genoffice/ui'
 
 installScreenTips()
 installMacLineBoundaryKeys()
 
 function applyTheme(theme: UiTheme): void {
-  if (theme === 'system') document.documentElement.removeAttribute('data-theme')
-  else document.documentElement.setAttribute('data-theme', theme)
+  applyUiTheme(theme)
 }
 
 void (async () => {

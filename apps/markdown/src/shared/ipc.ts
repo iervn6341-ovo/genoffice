@@ -1,4 +1,5 @@
 import type { AiPanelPrefs } from '@genoffice/ui'
+import type { HtmlPrintOptions } from '@genoffice/electron-utils/print-job'
 import type { Lang } from '@genoffice/i18n'
 import type { AiSettings, AiStreamChunk, AiStreamRequest } from '@genoffice/ai-provider'
 
@@ -25,6 +26,7 @@ export const MARKDOWN_CHANNELS = {
   consumeHeadlessExport: 'markdown:consume-headless-export',
   headlessExportDone: 'markdown:headless-export-done',
   printRequest: 'markdown:print-request',
+  printDocument: 'markdown:print-document',
   aiGenerateImage: 'markdown:ai-generate-image',
   getLanguage: 'app:get-language',
   languageChanged: 'app:language-changed',
@@ -36,7 +38,7 @@ export const MARKDOWN_CHANNELS = {
   aiPanelPrefsChanged: 'app:ai-panel-prefs-changed',
 } as const
 
-export type UiTheme = 'light' | 'dark' | 'system'
+export type UiTheme = 'light' | 'dark' | 'gray' | 'system'
 
 /** shell-wide AutoSave default; updatedAt is 0 until the user has ever set it */
 export interface AutoSaveDefault {
@@ -117,6 +119,18 @@ export interface ExportPdfRequest {
   outPath?: string
 }
 
+/** Print the document: macOS shows the system print panel, elsewhere the print sheet's options apply */
+export interface PrintDocumentRequest {
+  /** self-contained print HTML (same as the PDF export) */
+  html: string
+  title: string
+  /** non-macOS only: the print sheet's choices; missing fields take their defaults */
+  options?: Partial<HtmlPrintOptions>
+}
+
+export type PrintDocumentResult =
+  { ok: true } | { ok: true; canceled: true } | { ok: false; error: string }
+
 export type ExportResult =
   { ok: true; path: string } | { ok: true; canceled: true } | { ok: false; error: string }
 
@@ -184,6 +198,7 @@ export interface MarkdownApi {
   onPrintRequest(handler: () => void): () => void
   exportDocx(request: ExportDocxRequest): Promise<ExportResult>
   exportPdf(request: ExportPdfRequest): Promise<ExportResult>
+  printDocument(request: PrintDocumentRequest): Promise<PrintDocumentResult>
   getLanguage(): Promise<Lang>
   onLanguageChanged(handler: (lang: Lang) => void): () => void
   getTheme(): Promise<UiTheme>

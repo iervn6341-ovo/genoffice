@@ -25,9 +25,16 @@ import {
   showOpenDialogWithMemory,
   showSaveDialogWithMemory,
   installRendererProtocol,
+  printPdfWithSystemPanel,
   registerRendererScheme,
   rendererUrl,
 } from '@genoffice/electron-utils'
+import {
+  defaultPaperFor,
+  normalizeHtmlPrintOptions,
+  printLoadedDocument,
+  withPrintPageCss,
+} from '@genoffice/electron-utils/print-job'
 import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { atomicWriteFile } from './atomic-write'
@@ -53,6 +60,8 @@ import type {
   ExportPdfRequest,
   ExportResult,
   ImageData,
+  PrintDocumentRequest,
+  PrintDocumentResult,
   SaveMarkdownRequest,
   SaveMarkdownResult,
   SaveMode,
@@ -987,6 +996,69 @@ function registerMarkdownIpc(): void {
       } finally {
         printWin.destroy()
         await rm(workDir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  ipcMain.handle(
+    MARKDOWN_CHANNELS.printDocument,
+    async (e, request: PrintDocumentRequest): Promise<PrintDocumentResult> => {
+      if (typeof request?.html !== 'string' || !request.html) {
+        return { ok: false, error: 'markdown: bad print request' }
+      }
+      const title = String(request.title || tm('untitledFile')).slice(0, 120)
+      const owner = BrowserWindow.fromWebContents(e.sender)
+      const workDir = await mkdtemp(join(tmpdir(), 'genoffice-md-print-'))
+      const onMac = process.platform === 'darwin'
+      const printWin = new BrowserWindow({
+        show: false,
+        ...(owner && !owner.isDestroyed() ? { parent: owner } : {}),
+        // Chromium attaches the native Windows print dialog to the printed window; a hidden
+        // owner hides the dialog too, so Windows gets a real (taskbar-less) one
+        ...(process.platform === 'win32'
+          ? { width: 900, height: 700, autoHideMenuBar: true, closable: false, skipTaskbar: true }
+          : {}),
+        webPreferences: { sandbox: true, javascript: false },
+      })
+      try {
+        const htmlPath = join(workDir, 'print.html')
+        if (onMac) {
+          // the system panel prints a PDF: render the author-colored print HTML to one first
+          await writeFile(htmlPath, request.html, 'utf8')
+          await printWin.loadFile(htmlPath)
+          const pdfPath = join(workDir, 'print.pdf')
+          await writeFile(
+            pdfPath,
+            await printWin.webContents.printToPDF({
+              pageSize: defaultPaperFor(app.getLocaleCountryCode()),
+              printBackground: true,
+              margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 },
+            }),
+          )
+          const outcome = await printPdfWithSystemPanel(pdfPath, title, {
+            resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+            devDir: join(app.getAppPath(), '../../packages/electron-utils/native'),
+          })
+          if (outcome.status === 'printed') return { ok: true }
+          if (outcome.status === 'canceled') return { ok: true, canceled: true }
+          return { ok: false, error: outcome.message }
+        }
+        const options = normalizeHtmlPrintOptions(request.options)
+        await writeFile(htmlPath, withPrintPageCss(request.html, options), 'utf8')
+        await printWin.loadFile(htmlPath)
+        if (process.platform === 'win32') {
+          printWin.show()
+          printWin.focus()
+        }
+        const outcome = await printLoadedDocument(printWin.webContents, options, title)
+        if (outcome.status === 'printed') return { ok: true }
+        if (outcome.status === 'canceled') return { ok: true, canceled: true }
+        return { ok: false, error: outcome.message }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        printWin.destroy()
+        await rm(workDir, { recursive: true, force: true }).catch(() => {})
       }
     },
   )
