@@ -42,10 +42,15 @@ function verifyInteractionModes(
   expect(wrapper.draggable).toBe(true)
   expect(editableElement.getAttribute('contenteditable')).toBe('false')
 
+  // Word: one click inside a plain text box puts the caret there (the box is selected as an
+  // object too, so the Shape Format tab stays available)
   textTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
-  expect(wrapper.draggable).toBe(true)
+  expect(wrapper.classList.contains('doc-content-editing')).toBe(true)
+  expect(wrapper.draggable).toBe(false)
+  expect(editableElement.getAttribute('contenteditable')).toBe('true')
   expect(editor.state.selection).toBeInstanceOf(NodeSelection)
 
+  // a double click on a box that is already editing keeps editing
   textTarget.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }))
   expect(wrapper.classList.contains('doc-content-editing')).toBe(true)
   expect(wrapper.draggable).toBe(false)

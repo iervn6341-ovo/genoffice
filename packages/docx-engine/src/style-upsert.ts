@@ -101,6 +101,11 @@ export interface StyleUpsert {
   quickFormat?: boolean
   rPr?: StyleRunProps
   pPr?: StyleParaProps
+  /**
+   * The complete `<w:style>` element to add when the style does not exist yet
+   * (a style copied from another document). Ignored when the style exists.
+   */
+  rawXml?: string
 }
 
 const STYLE_CHILD_ORDER = [
@@ -300,6 +305,8 @@ function patchPara(children: Children, pp: StyleParaProps): void {
 /** The w:style element after applying `up` to `existing` (null = create). */
 export function mergeStyleXml(existing: string | null, up: StyleUpsert): string {
   const creating = existing === null
+  if (creating && up.rawXml) return up.rawXml
+  if (!creating && up.rawXml && !up.pPr && !up.rPr) return existing
   const attrs: Attrs = creating
     ? new Map([
         ['w:type', up.type ?? 'paragraph'],

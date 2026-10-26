@@ -1219,7 +1219,7 @@ export function makeGapHfEl(opts: {
     const lh = hfParaLineHeightCss(para)
     if (lh) p.style.lineHeight = lh
     // Word sizes a strip line by the fonts its text uses, like a body line: a
-    // page-number-only footer line under an Arial/標楷體 Normal takes Arial's
+    // page-number-only footer line under an Arial/BiauKai Normal takes Arial's
     // height, not the East Asian face's (Word probe 2026-10-01: 1.8pt per
     // line, a body line per page on a two-paragraph footer). Table rows keep
     // the strip factor; the doc CSS re-resolves the strip line-height per para.

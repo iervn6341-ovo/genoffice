@@ -25,7 +25,11 @@ import { Fragment } from '@tiptap/pm/model'
  *  wrapper; explicit run payloads carry data-doc-style. Everything else is a
  *  foreign fragment: browsers, Word, spreadsheets. */
 export function isForeignPasteHtml(html: string): boolean {
-  return !html.includes('data-pm-slice') && !html.includes('data-doc-style')
+  return (
+    !html.includes('data-pm-slice') &&
+    !html.includes('data-doc-style') &&
+    !html.includes('data-genoffice-slice')
+  )
 }
 
 const PUSHDOWN_PROPS = ['font-family', 'font-size', 'color'] as const

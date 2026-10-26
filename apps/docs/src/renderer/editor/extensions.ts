@@ -1,3 +1,4 @@
+import { classifyEditPress } from '@genoffice/ui'
 import { closeHistory } from '@tiptap/pm/history'
 import { Editor, Extension, Node, getSplittedAttributes } from '@tiptap/core'
 import type { ChainedCommands, RawCommands } from '@tiptap/core'
@@ -16,6 +17,14 @@ import {
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { ListAutoFormat } from './list-autoformat'
 import { MarkdownShortcut } from './markdown-shortcut'
+import {
+  foreignCellAttrs,
+  foreignParaAttrs,
+  foreignRowAttrs,
+  foreignTableAttrs,
+} from './foreign-style'
+import { ClipboardTransferExtension, type ClipHost } from './clipboard-extension'
+import { buildClipPayload, encodeClipPayload } from './clipboard-transfer'
 import { WordEnterStyle, WordNavigation, WordSelectionDelete } from './word-keys'
 import { DoubleClickLineEnd } from './double-click-line-end'
 import { appendsAtEnd, touchedTopLevelBlocks } from './touched-blocks'
@@ -135,6 +144,7 @@ import {
 import { insertPageBreak } from './page-break'
 import { ColumnLayoutExtension } from './column-layout'
 import { TableHandle } from './table-handle'
+import { TableEdgeSelect } from './table-edge-select'
 import { TRACK_IGNORE, TrackChangesExtension } from './revisions'
 import { inlineToRuns, runsToInline, textboxParaSignature, type PmNode as PmJson } from './convert'
 import { inlineMathML } from './equation'
@@ -1482,7 +1492,13 @@ export const DocParagraph = Node.create({
   },
   parseHTML() {
     // getAttrs null = match with defaults (foreign HTML); data-para restores formatting
-    return [{ tag: 'p', getAttrs: (el) => clipboardParaAttrs(el as HTMLElement) }]
+    return [
+      {
+        tag: 'p',
+        getAttrs: (el) =>
+          clipboardParaAttrs(el as HTMLElement) ?? foreignParaAttrs(el as HTMLElement),
+      },
+    ]
   },
   renderHTML({ node }) {
     return ['p', blockAttrs(node), paraContentSpec(node)]
@@ -1504,7 +1520,10 @@ export const DocHeading = Node.create({
   parseHTML() {
     return [1, 2, 3, 4, 5, 6].map((level) => ({
       tag: `h${level}`,
-      getAttrs: (el) => ({ level, ...clipboardParaAttrs(el as HTMLElement) }),
+      getAttrs: (el) => ({
+        level,
+        ...(clipboardParaAttrs(el as HTMLElement) ?? foreignParaAttrs(el as HTMLElement)),
+      }),
     }))
   },
   renderHTML({ node }) {
@@ -1542,11 +1561,22 @@ export const DocListItem = Node.create({
     return [
       {
         tag: 'li',
-        getAttrs: (el) => ({
-          kind: (el as HTMLElement).closest('ol') ? 'ordered' : 'bullet',
-          ilvl: ilvlOf(el as HTMLElement),
-          ...clipboardParaAttrs(el as HTMLElement),
-        }),
+        getAttrs: (el) => {
+          const li = el as HTMLElement
+          // Word's mso-list paragraphs (foreign-style.ts convertMsoLists) name kind / level directly
+          const kind = li.getAttribute('data-list-kind')
+          const level = li.getAttribute('data-list-level')
+          return {
+            kind:
+              kind === 'ordered' || kind === 'bullet'
+                ? kind
+                : li.closest('ol')
+                  ? 'ordered'
+                  : 'bullet',
+            ilvl: level !== null ? Math.max(0, Math.min(8, Number(level) || 0)) : ilvlOf(li),
+            ...(clipboardParaAttrs(li) ?? foreignParaAttrs(li)),
+          }
+        },
       },
       // our own clipboard HTML: renderHTML emits <div class="doc-li …">, which
       // no rule matched before r117 — pasting a GenOffice list item degraded it
@@ -2905,7 +2935,10 @@ export const DocTable = Node.create({
     }
   },
   parseHTML() {
-    return [{ tag: 'table.doc-table' }, { tag: 'table' }]
+    return [
+      { tag: 'table.doc-table' },
+      { tag: 'table', getAttrs: (el) => foreignTableAttrs(el as HTMLElement) },
+    ]
   },
   renderHTML({ node }) {
     const attrs: Record<string, string> = { class: 'doc-table' }
@@ -3162,7 +3195,7 @@ export const DocTableRow = Node.create({
     }
   },
   parseHTML() {
-    return [{ tag: 'tr' }]
+    return [{ tag: 'tr', getAttrs: (el) => foreignRowAttrs(el as HTMLElement) }]
   },
   renderHTML({ node }) {
     const h = node.attrs.heightTwips as number | null
@@ -3197,7 +3230,7 @@ export const DocTableCell = Node.create({
     return tableCellAttrs
   },
   parseHTML() {
-    return [{ tag: 'td' }]
+    return [{ tag: 'td', getAttrs: (el) => foreignCellAttrs(el as HTMLElement) }]
   },
   renderHTML({ node }) {
     return tableCellSpec('td', node)
@@ -3212,7 +3245,7 @@ export const DocTableHeader = Node.create({
     return tableCellAttrs
   },
   parseHTML() {
-    return [{ tag: 'th' }]
+    return [{ tag: 'th', getAttrs: (el) => foreignCellAttrs(el as HTMLElement) }]
   },
   renderHTML({ node }) {
     return tableCellSpec('th', node)
@@ -3598,7 +3631,22 @@ export const ImageCopyExtension = Extension.create({
           return false
         }
       }
-      const write = window.desktop?.copyImageToClipboard?.(dataUrl, imageMetaJson(node.attrs))
+      // the exact node rides along so another document keeps crop / effects / alt text
+      let payload: string | undefined
+      try {
+        const host = (view as unknown as { __clipHost?: ClipHost }).__clipHost
+        if (host && !lazyPart) {
+          const encoded = encodeClipPayload(buildClipPayload(sel.content(), host.source()))
+          if (encoded) payload = encoded
+        }
+      } catch {
+        /* the plain img html still pastes */
+      }
+      const write = window.desktop?.copyImageToClipboard?.(
+        dataUrl,
+        imageMetaJson(node.attrs),
+        payload,
+      )
       // no bridge: keep the default HTML-only copy instead of an empty clipboard
       if (!write) return false
       event.preventDefault()
@@ -3831,6 +3879,9 @@ export const DocProtected = Node.create({
           pos,
           editor.view,
           textboxes ?? table ?? field ?? formula ?? chart,
+          // a plain text box takes the caret on one click (Word); drawn shapes (prst) keep
+          // press-to-move and need a double click
+          () => !!textboxes && !(getNode().attrs.textboxes as TextboxDisplay[] | null)?.[0]?.prst,
         ),
         wireFormulaLatexEdit(dom, getNode, pos),
         table?.cleanup,
@@ -3887,7 +3938,7 @@ export const DocProtected = Node.create({
     }
   },
   addProseMirrorPlugins() {
-    return [imageResizePlugin(), floatingObjectDragPlugin()]
+    return [imageResizePlugin(), floatingObjectDragPlugin(), textboxTypeThroughPlugin()]
   },
 })
 
@@ -4762,16 +4813,36 @@ const IMAGE_RESIZE_HANDLES: readonly ImageResizeHandle[] = [
 ]
 
 function imageSelectionControlsSpec(): DomSpec[] {
-  return IMAGE_RESIZE_HANDLES.map((direction): DomSpec => [
-    'span',
-    {
-      class: `img-resize-handle img-resize-handle-${direction}`,
-      'data-resize-handle': direction,
-      contenteditable: 'false',
-      draggable: 'false',
-      'aria-hidden': 'true',
-    },
-  ])
+  return [
+    [
+      'span',
+      {
+        class: 'img-rotate-handle-line',
+        contenteditable: 'false',
+        draggable: 'false',
+        'aria-hidden': 'true',
+      },
+    ],
+    [
+      'span',
+      {
+        class: 'img-rotate-handle',
+        contenteditable: 'false',
+        draggable: 'false',
+        'aria-hidden': 'true',
+      },
+    ],
+    ...IMAGE_RESIZE_HANDLES.map((direction): DomSpec => [
+      'span',
+      {
+        class: `img-resize-handle img-resize-handle-${direction}`,
+        'data-resize-handle': direction,
+        contenteditable: 'false',
+        draggable: 'false',
+        'aria-hidden': 'true',
+      },
+    ]),
+  ]
 }
 
 function imageAnchorMarkerSpec(): DomSpec {
@@ -4808,11 +4879,12 @@ const EDITABLE_PROTECTED_SELECTOR =
   '.doc-formula-math, .doc-chart-title, .doc-chart-cell'
 
 /** Object mode (single click/drag) and text mode (double click). */
-function wireProtectedInteractionMode(
+export function wireProtectedInteractionMode(
   dom: HTMLElement,
   getPos: () => number | undefined,
   view: EditorView,
   contentEditor: ProtectedContentEditor | null,
+  singleClickEdits: () => boolean = () => false,
 ): (() => void) | null {
   const handle = dom.querySelector('.doc-move-handle') as HTMLElement | null
   if (!handle && !contentEditor) return null
@@ -4845,7 +4917,18 @@ function wireProtectedInteractionMode(
     }
     const content = target.closest(EDITABLE_PROTECTED_SELECTOR)
     if (content && dom.contains(content)) {
-      if (!dom.classList.contains('doc-content-editing')) selectObject()
+      const wasEditing = dom.classList.contains('doc-content-editing')
+      if (!wasEditing) selectObject()
+      if (
+        !wasEditing &&
+        event.detail < 2 &&
+        !event.shiftKey &&
+        content.matches('.doc-textbox') &&
+        singleClickEdits()
+      ) {
+        // the contenteditable flips on before the browser places the caret for this press
+        setEditing(true)
+      }
       dom.draggable = !!handle && !dom.classList.contains('doc-content-editing')
       return
     }
@@ -4858,13 +4941,19 @@ function wireProtectedInteractionMode(
     const content = target?.closest(EDITABLE_PROTECTED_SELECTOR)
     if (!content || !dom.contains(content)) return
     setEditing(true)
+    // the caret must land in the box now: with focus left behind, the next keystroke would
+    // act on the selected object (and replace it)
+    const field = content.querySelector<HTMLElement>('[contenteditable="true"]')
+    if (field && !field.contains(document.activeElement)) field.focus()
   }
   const onDocumentMouseDown = (event: MouseEvent) => {
     const target = event.target
     if (
       target instanceof HTMLElement &&
       !dom.contains(target) &&
-      dom.classList.contains('doc-content-editing')
+      dom.classList.contains('doc-content-editing') &&
+      // a press in the ribbon / a task pane (keep-edit zone) works ON the text being edited
+      classifyEditPress(dom, target) === 'outside'
     ) {
       setEditing(false)
     }
@@ -5398,6 +5487,43 @@ function mountTextboxEditors(
   return { cleanup, sync, setEditable, commit }
 }
 
+/**
+ * A text box / shape that is selected as an object and then typed at must take the text, not be
+ * replaced by it (ProseMirror's default for a NodeSelection). Word types into the shape; here the
+ * box enters edit mode exactly as a double click would and the characters go to its sub-editor.
+ */
+export function textboxTypeThroughPlugin(): Plugin {
+  return new Plugin({
+    props: {
+      handleTextInput(view, _from, _to, text) {
+        const sel = view.state.selection
+        if (!(sel instanceof NodeSelection) || sel.node.type.name !== 'docProtected') return false
+        const boxes = sel.node.attrs.textboxes as TextboxDisplay[] | null
+        if (!Array.isArray(boxes) || boxes.length === 0 || boxes[0].readOnly) return false
+        const dom = view.nodeDOM(sel.from)
+        if (!(dom instanceof HTMLElement)) return false
+        const box = dom.querySelector<HTMLElement>('.doc-textbox')
+        if (!box?.querySelector('.doc-textbox-editor')) return false
+        if (!dom.classList.contains('doc-content-editing')) {
+          box.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+        }
+        const field = box.querySelector<HTMLElement>('[contenteditable="true"]')
+        if (!field) return false
+        field.focus()
+        // type after the existing text (Word enters the shape at the end of its text)
+        const range = document.createRange()
+        range.selectNodeContents(field)
+        range.collapse(false)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+        document.execCommand('insertText', false, text)
+        return true
+      },
+    },
+  })
+}
+
 /** drag the corner handle of a selected image to resize it */
 function imageResizePlugin(): Plugin {
   return new Plugin({
@@ -5494,6 +5620,85 @@ function imageResizePlugin(): Plugin {
                 }),
               )
             }
+            window.addEventListener('mousemove', onMove)
+            window.addEventListener('mouseup', onUp)
+            return true
+          }
+          const rotateHandle = target.closest('.img-rotate-handle') as HTMLElement | null
+          if (rotateHandle) {
+            const wrapper = rotateHandle.closest('.doc-protected') as HTMLElement | null
+            const imageBox = rotateHandle.closest('.doc-img-wrap') as HTMLElement | null
+            const img = wrapper?.querySelector('img.doc-protected-img') as HTMLImageElement | null
+            if (!wrapper || !imageBox || !img) return false
+            event.preventDefault()
+            event.stopPropagation()
+
+            let pos = -1
+            view.state.doc.descendants((node, p) => {
+              if (pos !== -1) return false
+              if (node.type.name === 'docProtected' && view.nodeDOM(p) === wrapper) pos = p
+              return pos === -1
+            })
+            if (pos === -1) return false
+
+            view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)))
+            view.focus()
+
+            const selectedNode = view.state.doc.nodeAt(pos)
+            const startRot = Number(selectedNode?.attrs.imageRotDeg ?? 0)
+            const rect = imageBox.getBoundingClientRect()
+            const centerX = rect.left + rect.width / 2
+            const centerY = rect.top + rect.height / 2
+            const startAngleRad = Math.atan2(event.clientY - centerY, event.clientX - centerX)
+
+            const priorImgStyle = img.getAttribute('style')
+
+            const onMove = (e: MouseEvent) => {
+              const curAngleRad = Math.atan2(e.clientY - centerY, e.clientX - centerX)
+              const deltaDeg = ((curAngleRad - startAngleRad) * 180) / Math.PI
+              let newRot = Math.round((startRot + deltaDeg) % 360)
+              if (newRot < 0) newRot += 360
+              if (e.shiftKey) {
+                newRot = (Math.round(newRot / 15) * 15) % 360
+              }
+              const xf = pictureTransformFns(
+                newRot,
+                selectedNode?.attrs.imageFlipH,
+                selectedNode?.attrs.imageFlipV,
+              )
+              img.style.transform = xf.join(' ')
+            }
+
+            const onUp = (e: MouseEvent) => {
+              window.removeEventListener('mousemove', onMove)
+              window.removeEventListener('mouseup', onUp)
+              if (priorImgStyle === null) img.removeAttribute('style')
+              else img.setAttribute('style', priorImgStyle)
+
+              const curAngleRad = Math.atan2(e.clientY - centerY, e.clientX - centerX)
+              const deltaDeg = ((curAngleRad - startAngleRad) * 180) / Math.PI
+              if (
+                Math.abs(deltaDeg) < 1 &&
+                Math.abs(e.clientX - event.clientX) < 2 &&
+                Math.abs(e.clientY - event.clientY) < 2
+              ) {
+                return
+              }
+              let newRot = Math.round((startRot + deltaDeg) % 360)
+              if (newRot < 0) newRot += 360
+              if (e.shiftKey) {
+                newRot = (Math.round(newRot / 15) * 15) % 360
+              }
+              const node = view.state.doc.nodeAt(pos)
+              if (!node) return
+              view.dispatch(
+                view.state.tr.setNodeMarkup(pos, undefined, {
+                  ...node.attrs,
+                  imageRotDeg: newRot === 0 ? null : newRot,
+                }),
+              )
+            }
+
             window.addEventListener('mousemove', onMove)
             window.addEventListener('mouseup', onUp)
             return true
@@ -5752,6 +5957,7 @@ function floatingObjectDragPlugin(): Plugin {
             !handle &&
             !body &&
             !target.closest('.img-resize-handle') &&
+            !target.closest('.img-rotate-handle') &&
             !document.body.classList.contains('docs-crop-active')
           ) {
             imgBody = target.closest('.doc-img-wrap') as HTMLElement | null
@@ -6242,6 +6448,7 @@ export const editorExtensions = [
   ResolvedCommentsExtension,
   NativeTableSupport,
   TableHandle,
+  TableEdgeSelect,
   TrackChangesExtension,
   LineFactorExtension,
   ListNumberingExtension,
@@ -6258,6 +6465,7 @@ export const editorExtensions = [
   TrailingTableExitExtension,
   Gapcursor,
   ImageCopyExtension,
+  ClipboardTransferExtension,
   EnterReplacesSelection,
   WordEnterStyle,
   WordSelectionDelete,

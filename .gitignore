@@ -19,6 +19,8 @@ electron-builder.env
 /docs-archive/
 .idea/
 .claude/
+.claude-flow/
+.pnpm-store/
 
 # Local build artifacts dropped in the repo root
 /*.dmg
@@ -28,6 +30,7 @@ electron-builder.env
 
 # Playwright artifacts
 /test-results/
+/e2e/test-results-*/
 
 .cursor/rules/git-remote.mdc
 __pycache__/

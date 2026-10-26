@@ -1153,6 +1153,8 @@ function unwrapBlockRevisionXml(xml: string): string {
 }
 
 /** Convert native table cells back to the physical OOXML-style TableModel grid. */
+const isNewTable = (table: PmNode): boolean => table.attrs?.docxIndex == null
+
 export function pmTableToModel(table: PmNode): TableModel {
   type ActiveSpan = {
     remaining: number
@@ -1349,6 +1351,11 @@ export function pmTableToModel(table: PmNode): TableModel {
       ? { cellSpacingTwips: Number(table.attrs.cellSpacingTwips) }
       : {}),
     ...(table.attrs?.tblFill ? { fill: String(table.attrs.tblFill) } : {}),
+    // a table the editor builds from scratch (new / pasted from another document) has no
+    // original tblPr to keep: its declared borders must be written, or it saves with the default grid
+    ...(isNewTable(table) && table.attrs?.borders
+      ? { borders: table.attrs.borders as NonNullable<TableModel['borders']> }
+      : {}),
     ...(rowHeightsTwips.some((h) => h !== null) ? { rowHeightsTwips, rowHeightRules } : {}),
     ...(repeatHeaderRows.some((value) => value !== null) ? { repeatHeaderRows } : {}),
     ...(cantSplitRows.some((value) => value !== null) ? { cantSplitRows } : {}),

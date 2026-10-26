@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { PENDING_IMG_PREFIX, lookupPendingMedia } from './pending-media'
 import {
   applyImageWrap,
   generateParagraphXml,
@@ -539,6 +540,22 @@ export async function saveDocx(
       mediaRelByContent.set(contentKey, rId)
     }
     return rId
+  }
+  /** drawings pasted from another document: land their bytes here, swap the token for the real rId */
+  const resolvePendingImages = (xml: string): string => {
+    if (!xml.includes(PENDING_IMG_PREFIX)) return xml
+    const swapped = xml.replace(
+      new RegExp(`r:embed="(${PENDING_IMG_PREFIX}[0-9a-z]+)"`, 'g'),
+      (whole, token: string) => {
+        const media = lookupPendingMedia(token)
+        return media ? `r:embed="${embedImageMedia(media)}"` : whole
+      },
+    )
+    // a pasted drawing keeps its source docPr id: renumber so ids stay unique in the package
+    return swapped.replace(
+      /(<wp:docPr\b[^>]*?\bid=")\d+(")/g,
+      (_m, a: string, b: string) => `${a}${9000 + ++docPrSeq}${b}`,
+    )
   }
   const embedImage = (image: NewImage): string => {
     const rId = embedImageMedia(image)
@@ -1245,6 +1262,7 @@ export async function saveDocx(
     } else {
       xml = embedImage(fb.image)
     }
+    xml = resolvePendingImages(xml)
     // Inject newly created per-section header/footer references into the section's sectPr
     // (the reference must be the first sectPr child)
     const refTags = fbDocxIndex !== undefined ? sectionRefTags.get(fbDocxIndex) : undefined

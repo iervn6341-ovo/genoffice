@@ -97,6 +97,16 @@ export interface CustomNumberingLevel {
   hanging?: number
   /** w:start (default 1) */
   start?: number
+  /** marker font (w:rPr/w:rFonts), e.g. Symbol / Wingdings for private-use bullet glyphs */
+  font?: string
+  /** marker colour (hex) */
+  color?: string
+  /** w:suff */
+  suff?: 'tab' | 'space' | 'nothing'
+  /** w:lvlJc (default left) */
+  lvlJc?: 'left' | 'center' | 'right'
+  /** w:isLgl */
+  isLgl?: boolean
 }
 
 const escAttr = (s: string): string =>
@@ -104,12 +114,19 @@ const escAttr = (s: string): string =>
 
 function customLevels(levels: CustomNumberingLevel[]): string {
   return levels
-    .map(
-      (l, ilvl) =>
+    .map((l, ilvl) => {
+      const rPr =
+        l.font || l.color
+          ? `<w:rPr>${l.font ? `<w:rFonts w:ascii="${escAttr(l.font)}" w:hAnsi="${escAttr(l.font)}" w:hint="default"/>` : ''}${l.color ? `<w:color w:val="${escAttr(l.color)}"/>` : ''}</w:rPr>`
+          : ''
+      return (
         `<w:lvl w:ilvl="${ilvl}"><w:start w:val="${l.start ?? 1}"/><w:numFmt w:val="${escAttr(l.numFmt)}"/>` +
-        `<w:lvlText w:val="${escAttr(l.lvlText)}"/><w:lvlJc w:val="left"/>` +
-        `<w:pPr><w:ind w:left="${Math.round(l.indentLeft)}" w:hanging="${Math.round(l.hanging ?? 360)}"/></w:pPr></w:lvl>`,
-    )
+        (l.isLgl ? '<w:isLgl/>' : '') +
+        (l.suff && l.suff !== 'tab' ? `<w:suff w:val="${l.suff}"/>` : '') +
+        `<w:lvlText w:val="${escAttr(l.lvlText)}"/><w:lvlJc w:val="${l.lvlJc ?? 'left'}"/>` +
+        `<w:pPr><w:ind w:left="${Math.round(l.indentLeft)}" w:hanging="${Math.round(l.hanging ?? 360)}"/></w:pPr>${rPr}</w:lvl>`
+      )
+    })
     .join('')
 }
 

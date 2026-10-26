@@ -164,6 +164,7 @@ import type { PageSize, FitMode } from './view-config'
 import { useVisibleSet, PdfPage, MarkupOverlay } from './PdfPage'
 import { PdfThumb, ThumbPendingOverlay } from './PdfThumb'
 import type { ThumbMenu } from './PdfThumb'
+import { clampMenuToViewport } from './menu-clamp'
 import { SignDropOverlay, signPlaceK, imagePlaceK, staticFormFillPlaceK } from './SignDropOverlay'
 import {
   EDIT_FONT_BY_ID,
@@ -5619,6 +5620,22 @@ export default function App() {
 
   /** Guard roots (popover panel + its trigger) for the dismissal hooks below */
   const thumbMenuRef = useRef<HTMLDivElement | null>(null)
+  const [thumbMenuPos, setThumbMenuPos] = useState<{ x: number; y: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = thumbMenuRef.current
+    if (!thumbMenu || !el) {
+      setThumbMenuPos(null)
+      return
+    }
+    const r = el.getBoundingClientRect()
+    setThumbMenuPos(
+      clampMenuToViewport(
+        { x: thumbMenu.x, y: thumbMenu.y },
+        { width: r.width, height: r.height },
+        { width: window.innerWidth, height: window.innerHeight },
+      ),
+    )
+  }, [thumbMenu])
   const drawColorWrapRef = useRef<HTMLDivElement | null>(null)
   const draftColorWrapRef = useRef<HTMLSpanElement | null>(null)
   const highlightWrapRef = useRef<HTMLDivElement | null>(null)
@@ -6998,11 +7015,9 @@ export default function App() {
                       onClick={() => scrollToPage(v + 1)}
                       onContextMenu={(e) => {
                         e.preventDefault()
-                        setThumbMenu({
-                          x: Math.min(e.clientX, window.innerWidth - 190),
-                          y: Math.min(e.clientY, window.innerHeight - 190),
-                          origIdx,
-                        })
+                        // raw pointer position; the layout effect below clamps it with the
+                        // menu's measured size
+                        setThumbMenu({ x: e.clientX, y: e.clientY, origIdx })
                       }}
                     >
                       <div
@@ -8564,7 +8579,10 @@ export default function App() {
               <div
                 ref={thumbMenuRef}
                 className="thumb-menu file-menu"
-                style={{ left: thumbMenu.x, top: thumbMenu.y }}
+                style={{
+                  left: thumbMenuPos?.x ?? thumbMenu.x,
+                  top: thumbMenuPos?.y ?? thumbMenu.y,
+                }}
               >
                 <button
                   onClick={() => {

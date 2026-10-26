@@ -6,6 +6,7 @@
  * has none and its pilcrow memory lives in storedMarks (caret-marks.ts), so
  * pasting after select→Delete fell back to the theme font.
  */
+import { CLIP_SLICE_ATTR } from './clipboard-transfer'
 import type { ResolvedPos } from '@tiptap/pm/model'
 import { Fragment, Slice } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
@@ -28,6 +29,8 @@ import { PARA_FORMAT_ATTRS } from './caret-marks'
  */
 export function singleCellPasteText(html: string): string | null {
   if (!/<table/i.test(html)) return null
+  // our own copies rebuild from their exact payload (a one-cell table stays a table)
+  if (html.includes(CLIP_SLICE_ATTR)) return null
   try {
     const doc = new window.DOMParser().parseFromString(html, 'text/html')
     const body = doc.body

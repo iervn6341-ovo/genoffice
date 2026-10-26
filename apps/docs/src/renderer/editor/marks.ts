@@ -1,4 +1,5 @@
 import { Extension, Mark, combineTransactionSteps, getChangedRanges } from '@tiptap/core'
+import { foreignRunColors } from './foreign-style'
 import type { Mark as PmMark } from '@tiptap/pm/model'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
@@ -556,20 +557,7 @@ function clipboardTextStyleAttrs(el: HTMLElement): Record<string, unknown> | nul
 function textStyleAttrsFromDom(el: HTMLElement): Record<string, unknown> | false {
   const attrs: Record<string, unknown> = {}
   const st = el.style
-  const hex = (css: string): string | null => {
-    if (!css) return null
-    const rgb = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(css)
-    if (rgb) {
-      return [rgb[1], rgb[2], rgb[3]]
-        .map((n) => Number(n).toString(16).padStart(2, '0'))
-        .join('')
-        .toUpperCase()
-    }
-    const m = /^#([0-9a-fA-F]{6})$/.exec(css.trim())
-    return m ? m[1].toUpperCase() : null
-  }
-  const color = hex(st.color)
-  if (color && color !== '000000') attrs.color = color
+  Object.assign(attrs, foreignRunColors(el))
   const size = st.fontSize
   if (size) {
     const v = parseFloat(size)

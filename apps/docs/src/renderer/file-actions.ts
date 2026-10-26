@@ -5,6 +5,7 @@
  * fresh per call (wrapped in useCallback with the original dependency lists)
  * so state never goes stale.
  */
+import { bumpClipDocGeneration } from './editor/clipboard-transfer'
 import { LAYOUT_ATTR, type DocFlags } from './editor/layout-history'
 import {
   rebaseTocAnchors,
@@ -899,6 +900,7 @@ let docGeneration = 0
 export function noteDocumentSwapped(): void {
   pathlessDocSavedPath = null
   docGeneration++
+  bumpClipDocGeneration()
 }
 
 export function currentDocGeneration(): number {

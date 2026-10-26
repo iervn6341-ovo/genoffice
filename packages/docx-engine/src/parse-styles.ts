@@ -70,6 +70,23 @@ function mergeNumPr(own: OwnNumPr, parent: StyleInfo['numPr']): StyleInfo['numPr
   return { numId, ilvl: own.ilvl ?? inherited?.ilvl ?? 0 }
 }
 
+/**
+ * The exact `<w:style>` element of every style in word/styles.xml, by styleId.
+ * Kept so a style can be copied verbatim into another document (clipboard
+ * paste between documents).
+ */
+export async function extractStyleXml(zip: JSZip): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  const xml = await zip.file('word/styles.xml')?.async('string')
+  if (!xml) return out
+  for (const m of xml.matchAll(
+    /<w:style\b[^>]*?\bw:styleId="([^"]+)"[^>]*?(?:\/>|>[\s\S]*?<\/w:style>)/g,
+  )) {
+    out[m[1]!.replace(/&quot;/g, '"')] = m[0]
+  }
+  return out
+}
+
 export async function parseStyles(
   zip: JSZip,
   theme?: ThemeColors | null,

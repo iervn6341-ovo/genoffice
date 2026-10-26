@@ -1,6 +1,6 @@
 /**
  * Word sizes a header/footer line by the fonts its text uses (Word probe
- * 2026-10-01): a page-number-only footer line under an Arial/標楷體 Normal
+ * 2026-10-01): a page-number-only footer line under an Arial/BiauKai Normal
  * takes Arial's height, and a Footer-styled paragraph lays out its unsized
  * runs at the style's 10pt. Each strip paragraph therefore carries its own
  * per-script --doc-line-factor and the style size.

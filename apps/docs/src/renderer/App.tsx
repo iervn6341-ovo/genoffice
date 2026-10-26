@@ -39,6 +39,8 @@ import {
   useAutoSavePref,
   useContentDarkPref,
 } from '@genoffice/ui'
+import { tableDragGuard } from './editor/table-drag'
+import { posInsideSelection } from './editor/selection-hit'
 import { wordRangeAtCaret } from './editor/comments'
 import { isSourceMarkupHtml, markdownPasteHtml } from './editor/markdown-paste'
 import { stashMarkdownPaste } from './editor/markdown-paste-hint'
@@ -48,12 +50,10 @@ import {
   insertImageFilesAtCoords,
   isImageFileDrag,
 } from './editor/image-drop'
-import {
-  caretFontSlots,
-  fillMissingRunFonts,
-  isForeignPasteHtml,
-  pushDownWebInlineStyles,
-} from './editor/paste-web-html'
+import { caretFontSlots, fillMissingRunFonts, isForeignPasteHtml } from './editor/paste-web-html'
+import { cleanPastedHtml } from './editor/paste-clean'
+import { createClipHost } from './editor/clipboard-host'
+import { payloadFragment } from './editor/clipboard-extension'
 import {
   beginForeignPaste,
   caretParaFormat,
@@ -93,6 +93,7 @@ import {
   type HeaderFooter,
   type HfImage,
   type NoteInfo,
+  type NumberingDef,
   type SectionInfo,
   type SectionSettings,
   type SourceInfo,
@@ -441,19 +442,6 @@ function posFromAnchor(view: Editor['view'], anchor: LineAnchor): number | undef
   }
 }
 
-/** Clean pasted Word/web HTML: mso conditional comments, <o:p>, and unwrapping <li><p>x</p></li>;
- *  foreign fragments also get block-level font/size/color pushed down onto
- *  spans so whole-paragraph web copies keep their formatting (r181) */
-function cleanPastedHtml(html: string): string {
-  const cleaned = unwrapSingleCellTable(
-    html
-      .replace(/<!--\[if[\s\S]*?<!\[endif\]-->/g, '')
-      .replace(/<o:p>[\s\S]*?<\/o:p>/g, '')
-      .replace(/<li([^>]*)>\s*<p[^>]*>([\s\S]*?)<\/p>\s*<\/li>/g, '<li$1>$2</li>'),
-  )
-  return isForeignPasteHtml(html) ? pushDownWebInlineStyles(cleaned) : cleaned
-}
-
 /** Insert converted Markdown HTML at the selection (the "Markdown detected" chip's Convert).
  *  Block content never lands inside a paragraph's text: onto an empty paragraph it replaces it,
  *  at a paragraph's start/end it goes before/after it, and mid-paragraph the paragraph is split
@@ -537,41 +525,6 @@ function htmlFallbackText(html: string): string {
 // the handlePaste lanes consume it. Our own clipboard HTML keeps its exact
 // run marks, plain-text pastes go through pasteTextSlice, and drops never
 // arm anything.
-
-/**
- * Word parity: pasting a copy of a SINGLE spreadsheet cell inserts its
- * content as text, not a 1x1 table (a lone cell copied from Sheets/Excel
- * pasted into Docs as a table and flipped the ribbon into table tools). Only a payload whose entire content is one table with one
- * cell unwraps; anything else — multi-cell tables, tables mixed with prose —
- * stays intact.
- */
-function unwrapSingleCellTable(html: string): string {
-  if (!/<table/i.test(html)) return html
-  try {
-    const doc = new window.DOMParser().parseFromString(html, 'text/html')
-    const body = doc.body
-    const tables = body.querySelectorAll('table')
-    if (tables.length !== 1) return html
-    const table = tables[0]!
-    // The table must be the only real content of the paste. Text equality
-    // covers prose ANYWHERE outside the table — including inside wrappers
-    // that also contain it — and Element.textContent excludes HTML comments,
-    // so Excel's StartFragment markers don't block the unwrap.
-    if ((body.textContent ?? '').trim() !== (table.textContent ?? '').trim()) return html
-    // text-less content outside the table (images, separators) also keeps it
-    if (
-      [...body.querySelectorAll('img,svg,video,hr')].some((element) => !table.contains(element))
-    ) {
-      return html
-    }
-    const cells = table.querySelectorAll('td,th')
-    if (cells.length !== 1) return html
-    if (cells[0]!.querySelector('table')) return html
-    return cells[0]!.innerHTML
-  } catch {
-    return html
-  }
-}
 
 /** All runs a footnote/endnote reference may live in: paragraph runs, plus table
  *  cell paragraphs (incl. nested tables) — refs inside cells still print their
@@ -1438,6 +1391,8 @@ export function App() {
           )
           return false
         },
+        // a cell-range selection must never be lifted by a native drag (it would tear the table)
+        dragstart: (view, event) => tableDragGuard.dragstart(view, event),
       },
       // foreign-HTML paste, by the armed mode: 'source' fills runs that still
       // have no concrete font after the parse (generic-only family chains
@@ -1479,7 +1434,9 @@ export function App() {
       },
       // image files dragged from the OS (or a browser) land as inline pictures
       // at the drop point, like Word; other drops keep the default handling
-      handleDrop: (_view, event) => {
+      handleDrop: (view, event, slice, moved) => {
+        // table safety first: no cross-cell text moves, no row/cell slices dropped into a table
+        if (tableDragGuard.drop(view, event, slice, moved)) return true
         const ed = editorRef.current
         const files = imageFilesFromDataTransfer(event.dataTransfer)
         if (!ed || files.length === 0) return false
@@ -1568,8 +1525,15 @@ export function App() {
           $from.depth === 1
         ) {
           try {
-            const dom = new window.DOMParser().parseFromString(cleanPastedHtml(html), 'text/html')
-            const parsed = PmDOMParser.fromSchema(view.state.schema).parse(dom.body)
+            // our own copies rebuild from their exact payload; foreign HTML parses by the schema rules
+            const payloadContent = payloadFragment(view, html)
+            const parsed = {
+              content:
+                payloadContent ??
+                PmDOMParser.fromSchema(view.state.schema).parse(
+                  new window.DOMParser().parseFromString(cleanPastedHtml(html), 'text/html').body,
+                ).content,
+            }
             if (parsed.content.childCount > 0) {
               // this lane re-parses and dispatches itself, bypassing
               // transformPasted — apply the armed paste mode to foreign
@@ -2594,6 +2558,36 @@ export function App() {
       store.resolve = null
     }
   }, [editor, allocateListNumId, createCustomListDef])
+  // cross-document clipboard: what this document tells a copy about itself and how a paste
+  // imports styles / numbering into it (clipboard-host.ts)
+  const clipDocRef = useRef(doc)
+  const clipNotesRef = useRef<AiNotesAccess | null>(null)
+  clipDocRef.current = doc
+  useEffect(() => {
+    if (!editor) return
+    const store = editor.storage.clipboardTransfer
+    if (!store) return
+    store.host = createClipHost({
+      parsed: () => clipDocRef.current?.parsed ?? null,
+      addStyleUpsert: (up) => setStyleUpserts((prev) => ({ ...prev, [up.styleId]: up })),
+      styleSheetChanged: () => {
+        const current = clipDocRef.current
+        if (current) setDocCss(docStyleCss(current.parsed))
+      },
+      createListDef: (levels) => createCustomListDef(levels),
+      addNote: (kind, note) => {
+        const access = clipNotesRef.current
+        if (!access) return null
+        const id = access.add(kind, note.text)
+        return id
+      },
+      normalizeNotes: (tr, kind) => reviewCtxRef.current.normalizeNoteMarkers?.(tr, kind) ?? tr,
+      numbering: () => (editor.storage.listNumbering as { defs: Map<string, NumberingDef> }).defs,
+    })
+    return () => {
+      store.host = null
+    }
+  }, [editor, createCustomListDef])
   const restartNumbering = useCallback(() => restartNumberingImpl(numberingCtxRef.current), [])
   const continueNumbering = useCallback(() => continueNumberingImpl(numberingCtxRef.current), [])
 
@@ -5975,8 +5969,8 @@ export function App() {
         if (!selectedNode) {
           const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
           if (hit) {
-            const { from, to } = editor.state.selection
-            if (hit.pos < from || hit.pos > to) {
+            // inside ANY range keeps the selection (a cell range has one range per cell)
+            if (!posInsideSelection(editor.state.selection, hit.pos)) {
               editor.commands.setTextSelection(hit.pos)
             }
           }
@@ -6150,6 +6144,7 @@ export function App() {
       },
     }
   }, [])
+  clipNotesRef.current = aiNotesAccess
 
   // AI header/footer tool: reads the live HF state and writes through the same
   // commit path as on-canvas editing (variant routing, per-section edits, dirty flags).

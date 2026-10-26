@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { Editor } from '@tiptap/core'
 import type { Command } from '@tiptap/pm/state'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
@@ -27,7 +28,10 @@ import {
   commonParagraphValue,
   selectedParagraphs,
 } from '../editor/paragraph-advanced'
+import { insertPerSelection } from '../editor/table-tools'
+import { pasteFromSystemClipboard } from '../editor/clipboard-paste'
 import { IconSparkle } from './icons'
+import { placeContextMenu, placeSubmenu } from './menu-placement'
 import { useModalKeys } from './modal-keys'
 
 /**
@@ -75,6 +79,32 @@ const TRANSLATE_TARGETS: Array<{ labelKey: StringKey }> = [
 
 const MENU_WIDTH = 240
 
+/**
+ * Flyout of a menu item. Fixed-positioned from the parent item's rect so the main menu may scroll
+ * (overflow) without clipping it, flipping left / sliding up when the window is small.
+ */
+function CtxSubmenu({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [style, setStyle] = useState<CSSProperties>({ visibility: 'hidden' })
+  useLayoutEffect(() => {
+    const el = ref.current
+    const anchor = el?.parentElement
+    if (!el || !anchor) return
+    const a = anchor.getBoundingClientRect()
+    const p = placeSubmenu(
+      { left: a.left, right: a.right, top: a.top },
+      { width: el.offsetWidth, height: el.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    )
+    setStyle({ left: p.left, top: p.top, maxHeight: p.maxHeight })
+  }, [])
+  return (
+    <div ref={ref} className="ctx-submenu" style={style}>
+      {children}
+    </div>
+  )
+}
+
 export function EditorContextMenu({
   editor,
   menu,
@@ -103,17 +133,25 @@ export function EditorContextMenu({
   // Synonyms targets a word / short phrase, not long selections
   const synonymText = selectedText.length > 0 && selectedText.length <= 20 ? selectedText : ''
 
-  // keep the menu inside the viewport (flip up / clamp left near the edges)
-  const [pos, setPos] = useState({ left: menu.x, top: menu.y })
-  useEffect(() => {
+  // keep the menu inside the viewport (flip up / clamp left near the edges; scroll when taller
+  // than the window)
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight?: number }>({
+    left: menu.x,
+    top: menu.y,
+  })
+  useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
+    // measure at natural height: drop the cap from a previous placement first
+    el.style.maxHeight = ''
     const rect = el.getBoundingClientRect()
-    let left = menu.x
-    let top = menu.y
-    if (left + rect.width > window.innerWidth - 8) left = window.innerWidth - rect.width - 8
-    if (top + rect.height > window.innerHeight - 8) top = Math.max(8, menu.y - rect.height)
-    setPos({ left, top })
+    setPos(
+      placeContextMenu(
+        { x: menu.x, y: menu.y },
+        { width: rect.width, height: rect.height },
+        { width: window.innerWidth, height: window.innerHeight },
+      ),
+    )
   }, [menu])
 
   useEffect(() => {
@@ -259,25 +297,8 @@ export function EditorContextMenu({
 
   const clipboard = async (action: 'cut' | 'copy' | 'paste' | 'pastePlain') => {
     if (action === 'paste') {
-      // rich paste: prefer HTML (parsed by editor paste rules, keeps formatting), otherwise plain text
-      try {
-        const items = await navigator.clipboard.read()
-        for (const item of items) {
-          if (item.types.includes('text/html')) {
-            const html = await (await item.getType('text/html')).text()
-            editor
-              .chain()
-              .focus()
-              .insertContent(html, { parseOptions: { preserveWhitespace: true } })
-              .run()
-            return
-          }
-        }
-      } catch {
-        /* clipboard.read unavailable (permission/format): fall back to plain text */
-      }
-      const text = await navigator.clipboard.readText()
-      if (text) insertPlainText(text)
+      // same pipeline as Ctrl+V (payload parse, paste modes, image priority)
+      await pasteFromSystemClipboard(editor)
     } else if (action === 'pastePlain') {
       const text = await navigator.clipboard.readText()
       if (text) insertPlainText(text)
@@ -319,7 +340,7 @@ export function EditorContextMenu({
     <div
       ref={ref}
       className="ctx-menu"
-      style={{ left: pos.left, top: pos.top, minWidth: MENU_WIDTH }}
+      style={{ left: pos.left, top: pos.top, maxHeight: pos.maxHeight, minWidth: MENU_WIDTH }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {menu.imageSrc && (
@@ -357,13 +378,13 @@ export function EditorContextMenu({
           <div className="ctx-item-wrap" onMouseLeave={() => setSubmenu(null)}>
             {item(t('ribbonInsert'), { submenuKey: 'tableInsert', disabled: !canEdit })}
             {submenu === 'tableInsert' && canEdit && (
-              <div className="ctx-submenu">
+              <CtxSubmenu>
                 {(
                   [
-                    ['ribbonInsertAbove', addRowBefore],
-                    ['ribbonInsertBelow', addRowAfter],
-                    ['ribbonInsertLeft', addColumnBefore],
-                    ['ribbonInsertRight', addColumnAfter],
+                    ['ribbonInsertAbove', insertPerSelection(addRowBefore, 'row')],
+                    ['ribbonInsertBelow', insertPerSelection(addRowAfter, 'row')],
+                    ['ribbonInsertLeft', insertPerSelection(addColumnBefore, 'column')],
+                    ['ribbonInsertRight', insertPerSelection(addColumnAfter, 'column')],
                   ] as Array<[StringKey, Command]>
                 ).map(([labelKey, command]) => (
                   <button
@@ -374,13 +395,13 @@ export function EditorContextMenu({
                     <span className="ctx-label">{t(labelKey)}</span>
                   </button>
                 ))}
-              </div>
+              </CtxSubmenu>
             )}
           </div>
           <div className="ctx-item-wrap" onMouseLeave={() => setSubmenu(null)}>
             {item(t('ribbonTableDeleteMenu'), { submenuKey: 'tableDelete', disabled: !canEdit })}
             {submenu === 'tableDelete' && canEdit && (
-              <div className="ctx-submenu">
+              <CtxSubmenu>
                 {(
                   [
                     ['ribbonDeleteRow', deleteRow],
@@ -396,13 +417,13 @@ export function EditorContextMenu({
                     <span className="ctx-label">{t(labelKey)}</span>
                   </button>
                 ))}
-              </div>
+              </CtxSubmenu>
             )}
           </div>
           <div className="ctx-item-wrap" onMouseLeave={() => setSubmenu(null)}>
             {item(t('ribbonSelect'), { submenuKey: 'tableSelect' })}
             {submenu === 'tableSelect' && (
-              <div className="ctx-submenu">
+              <CtxSubmenu>
                 <button className="ctx-item" onClick={run(() => selectRowOrColumn('row'))}>
                   <span className="ctx-label">{t('ribbonSelectRow')}</span>
                 </button>
@@ -412,7 +433,7 @@ export function EditorContextMenu({
                 <button className="ctx-item" onClick={run(selectWholeTable)}>
                   <span className="ctx-label">{t('ribbonSelectTable')}</span>
                 </button>
-              </div>
+              </CtxSubmenu>
             )}
           </div>
           {item(t('ribbonMergeCells'), {
@@ -465,7 +486,7 @@ export function EditorContextMenu({
       <div className="ctx-item-wrap" onMouseLeave={() => setSubmenu(null)}>
         {item(t('appTranslate'), { disabled: !hasSelection, submenuKey: 'translate', ai: true })}
         {submenu === 'translate' && hasSelection && (
-          <div className="ctx-submenu">
+          <CtxSubmenu>
             {TRANSLATE_TARGETS.map((target) => (
               <button
                 key={target.labelKey}
@@ -484,7 +505,7 @@ export function EditorContextMenu({
                 </span>
               </button>
             ))}
-          </div>
+          </CtxSubmenu>
         )}
       </div>
       {isFloating && (
@@ -493,7 +514,7 @@ export function EditorContextMenu({
           <div className="ctx-item-wrap" onMouseLeave={() => setSubmenu(null)}>
             {item(t('appWrapTextMenu'), { submenuKey: 'wrap' })}
             {submenu === 'wrap' && (
-              <div className="ctx-submenu">
+              <CtxSubmenu>
                 {WRAP_OPTIONS.map((opt) => (
                   <button
                     key={String(opt.value)}
@@ -506,13 +527,13 @@ export function EditorContextMenu({
                     </span>
                   </button>
                 ))}
-              </div>
+              </CtxSubmenu>
             )}
           </div>
           <div className="ctx-item-wrap" onMouseLeave={() => setSubmenu(null)}>
             {item(t('appArrangeMenu'), { submenuKey: 'arrange' })}
             {submenu === 'arrange' && (
-              <div className="ctx-submenu">
+              <CtxSubmenu>
                 <button className="ctx-item" onClick={run(bringToFront)}>
                   <span className="ctx-label">{t('appBringToFront')}</span>
                 </button>
@@ -525,7 +546,7 @@ export function EditorContextMenu({
                 <button className="ctx-item" onClick={run(sendToBack)}>
                   <span className="ctx-label">{t('appSendToBack')}</span>
                 </button>
-              </div>
+              </CtxSubmenu>
             )}
           </div>
         </>
@@ -559,7 +580,7 @@ type SpecialIndent = 'none' | 'first' | 'hanging'
 
 const round2 = (v: number) => Math.round(v * 100) / 100
 
-/** UI languages whose Word measures paragraph indents in characters (字元) */
+/** UI languages whose Word measures paragraph indents in characters */
 const isCjkLang = (lang: string) =>
   lang === 'zh' || lang === 'zh-TW' || lang === 'ja' || lang === 'ko'
 
@@ -709,7 +730,7 @@ export function ParagraphDialog({
   const twipsToPt = (v: unknown) => round2((Number(v) || 0) * PT_PER_TWIP)
   // Word's indent block: Left / Right plus Special (none / first line /
   // hanging) By. East Asian Word measures indents in characters (1 ch = the
-  // paragraph's font size, "2 字元" is the customary first-line indent);
+  // paragraph's font size, "2 characters" is the customary first-line indent);
   // elsewhere the default By is 0.5" (36pt). Left shows where the first
   // line starts: a hanging paragraph's w:left minus the hang (probed: Word
   // after ⌘T, w:left 480 w:hanging 480, shows Left 0, Hanging 24pt).

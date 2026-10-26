@@ -5,6 +5,7 @@ import type { ChainedCommands, Editor } from '@tiptap/core'
 import { NodeSelection, type Command } from '@tiptap/pm/state'
 import type { Mark, ResolvedPos } from '@tiptap/pm/model'
 import { createFontSizeStepper } from './font-size-step'
+import { stepFontSizeLadder } from './font-size-ladder'
 import {
   CellSelection,
   TableMap,
@@ -44,6 +45,7 @@ import {
   ColorPicker,
   Dropdown,
   RibbonCollapseButton,
+  KEEP_EDIT_ATTR,
   keepEditorFocusOnRibbonPress,
   isSymbolFontFamily,
   labelFromTip,
@@ -57,19 +59,15 @@ import { applyCase, type CaseMode } from '../editor/case-transform'
 import { setParagraphDirection, setSelectionAlign } from '../editor/direction'
 import { setInactiveSelectionShown } from '../editor/inactive-selection'
 import { stepParagraphIndent } from '../editor/indent'
-import {
-  beginForeignPaste,
-  defaultPasteMode,
-  forceNextPasteMode,
-  stashPastePayload,
-  type PasteMode,
-} from '../editor/paste-options'
+import { defaultPasteMode, type PasteMode } from '../editor/paste-options'
+import { pasteFromSystemClipboard } from '../editor/clipboard-paste'
 import { formatNumber } from '../editor/numbering'
 import type { InkTool } from '../editor/ink'
 import type { RibbonFormatState } from './ribbon-format-state'
 import { distributeSelectedColumns, setSelectedColumnWidth } from '../editor/table-sizing'
 import {
   distributeSelectedRows,
+  insertPerSelection,
   rowsMayBreak,
   selectInTable,
   setCellTextDirection,
@@ -115,7 +113,6 @@ import {
   type InkPenSettings,
   type RevisionDisplayMode,
   type ViewMode,
-  insertImageFromDataUrl,
   applyParagraphStyle,
   activeParaAttrs,
   setParaAttrs,
@@ -1655,19 +1652,8 @@ function RibbonInner({
     fontStepperRef.current?.step(ed, currentSize, step)
   }
 
-  /** A+/A- and ⇧⌘. / ⇧⌘,: walk Word's preset size list */
-  const stepFontSize = (dir: 1 | -1) =>
-    applyFontStep((base) => {
-      const idx = FONT_SIZES.findIndex((s) => s >= base)
-      if (dir === 1)
-        return FONT_SIZES[
-          Math.min(
-            idx === -1 ? FONT_SIZES.length : idx + (FONT_SIZES[idx] === base ? 1 : 0),
-            FONT_SIZES.length - 1,
-          )
-        ]
-      return FONT_SIZES[Math.max(idx === -1 ? FONT_SIZES.length - 1 : idx - 1, 0)]
-    })
+  /** A+/A- and ⇧⌘. / ⇧⌘,: walk Word's grow/shrink ladder, each run from its own size */
+  const stepFontSize = (dir: 1 | -1) => applyFontStep((base) => stepFontSizeLadder(base, dir))
 
   /** Word's ⌘] / ⌘[: exactly one point, within Word's 1–1638pt range */
   const nudgeFontSize = (dir: 1 | -1) =>
@@ -1949,63 +1935,7 @@ function RibbonInner({
   const clipboard = async (action: 'cut' | 'copy' | 'paste', mode?: PasteMode) => {
     if (action !== 'copy' && !canEdit) return
     if (action === 'paste') {
-      // Same pipeline as Ctrl+V: pasteHTML/pasteText run the editor's full
-      // paste machinery, where readText + insertContent flattened everything
-      // to plain text (r127). The synthesized event carries a real
-      // clipboardData so App's handlePaste branches (empty-paragraph
-      // wholesale replace, markdown conversion, image priority) behave
-      // exactly as on a native paste.
-      const pasteEvent = (html: string | null, text: string): ClipboardEvent => {
-        const data = new DataTransfer()
-        if (html) data.setData('text/html', html)
-        if (text) data.setData('text/plain', text)
-        return new ClipboardEvent('paste', { clipboardData: data })
-      }
-      try {
-        for (const item of await navigator.clipboard.read()) {
-          const text = item.types.includes('text/plain')
-            ? await (await item.getType('text/plain')).text()
-            : ''
-          if (item.types.includes('text/html')) {
-            const html = await (await item.getType('text/html')).text()
-            if (html) {
-              // arm the foreign-paste handshake exactly like a Ctrl+V — the
-              // synthetic pasteHTML never fires the DOM paste handler, so
-              // ribbon pastes skipped the paste mode and the r181 fill
-              // Paste ▾ → Keep Source / Merge / Text Only decides this one paste
-              if (mode) forceNextPasteMode(mode)
-              if (beginForeignPaste(html)) {
-                stashPastePayload({ html, text, mode: mode ?? defaultPasteMode() })
-              }
-              ed.view.pasteHTML(html, pasteEvent(html, text))
-              ed.commands.focus()
-              return
-            }
-          }
-          // image priority mirrors Ctrl+V: an image wins over missing or
-          // whitespace-only plain text (OS clipboards often advertise an
-          // empty text/plain beside image/png)
-          const imageType = item.types.find((type) => type.startsWith('image/'))
-          if (imageType && !text.trim()) {
-            const blob = await item.getType(imageType)
-            const reader = new FileReader()
-            reader.onload = () => {
-              if (typeof reader.result === 'string') {
-                void insertImageFromDataUrl(ed, reader.result, 'Image (pasted)')
-              }
-            }
-            reader.readAsDataURL(blob)
-            return
-          }
-        }
-      } catch {
-        /* clipboard.read unavailable/denied: plain-text fallback below */
-      }
-      const text = await navigator.clipboard.readText()
-      if (text) {
-        ed.view.pasteText(text, pasteEvent(null, text))
-        ed.commands.focus()
-      }
+      await pasteFromSystemClipboard(ed, mode)
     } else {
       document.execCommand(action)
       ed.commands.focus()
@@ -2067,6 +1997,8 @@ function RibbonInner({
     <div
       className={`ribbon ${collapse.rootClass}`}
       ref={collapse.rootRef}
+      // neutral zone: pressing a ribbon control must not end a text-box / shape text edit
+      {...{ [KEEP_EDIT_ATTR]: '' }}
       onMouseDownCapture={keepEditorFocusOnRibbonPress}
     >
       <div
@@ -2865,19 +2797,23 @@ function RibbonInner({
             <div className="ribbon-sep" />
             <div className="table-tool-group">
               <div className="table-tool-grid table-tool-grid-four">
-                <button onClick={() => runTableCommand(addRowBefore)}>
+                <button onClick={() => runTableCommand(insertPerSelection(addRowBefore, 'row'))}>
                   <IconRowInsertAbove />
                   {t('ribbonInsertAbove')}
                 </button>
-                <button onClick={() => runTableCommand(addRowAfter)}>
+                <button onClick={() => runTableCommand(insertPerSelection(addRowAfter, 'row'))}>
                   <IconRowInsertBelow />
                   {t('ribbonInsertBelow')}
                 </button>
-                <button onClick={() => runTableCommand(addColumnBefore)}>
+                <button
+                  onClick={() => runTableCommand(insertPerSelection(addColumnBefore, 'column'))}
+                >
                   <IconColInsertLeft />
                   {t('ribbonInsertLeft')}
                 </button>
-                <button onClick={() => runTableCommand(addColumnAfter)}>
+                <button
+                  onClick={() => runTableCommand(insertPerSelection(addColumnAfter, 'column'))}
+                >
                   <IconColInsertRight />
                   {t('ribbonInsertRight')}
                 </button>

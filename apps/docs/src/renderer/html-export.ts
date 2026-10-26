@@ -358,6 +358,17 @@ function serializeDocument(root: HTMLElement, opts: HtmlExportOptions): string {
   )
 }
 
+/** The children of `root` re-emitted with their resolved styles inlined (no document wrapper):
+ *  the clipboard's external HTML flavor. `root` must sit in the live document so rules apply. */
+export function serializeChildrenInline(root: HTMLElement): string {
+  const win = root.ownerDocument.defaultView
+  if (!win) return ''
+  const rootCs = win.getComputedStyle(root)
+  const body: string[] = []
+  for (const child of Array.from(root.childNodes)) serializeNode(child, rootCs, win, body)
+  return body.join('')
+}
+
 function serializeNode(
   node: Node,
   parentCs: CSSStyleDeclaration,

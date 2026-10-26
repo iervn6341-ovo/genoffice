@@ -174,8 +174,8 @@ const api: DesktopApi = {
   addAttachmentPaths: (paths: string[]) => ipcRenderer.invoke('files:add', paths),
   addPastedImage: (data: ArrayBuffer, ext: string) =>
     ipcRenderer.invoke('files:add-pasted-image', data, ext),
-  copyImageToClipboard: (dataUrl: string, metaJson?: string) =>
-    ipcRenderer.invoke('docs:copy-image-to-clipboard', dataUrl, metaJson),
+  copyImageToClipboard: (dataUrl: string, metaJson?: string, slicePayload?: string) =>
+    ipcRenderer.invoke('docs:copy-image-to-clipboard', dataUrl, metaJson, slicePayload),
   readAttachment: (path: string, offset: number, maxChars: number) =>
     ipcRenderer.invoke('files:read', path, offset, maxChars),
   readAttachmentImage: (path: string) => ipcRenderer.invoke('files:read-image', path),

@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/core'
 import { Extension } from '@tiptap/core'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import type { Node as PmNode } from '@tiptap/pm/model'
+import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import { Mapping } from '@tiptap/pm/transform'
 
 /** paragraph-like blocks that carry the bidi attribute */
@@ -67,6 +68,24 @@ function dirFlipAttrs(attrs: Record<string, unknown>, bidi: boolean): Record<str
 }
 
 /**
+ * Visit every node touched by the selection once, across all of its ranges (document order, no
+ * repeats when ranges share an ancestor).
+ */
+export function forEachSelectedNode(
+  state: EditorState,
+  visit: (node: PmNode, pos: number) => void,
+): void {
+  const seen = new Set<number>()
+  for (const range of state.selection.ranges) {
+    state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos) => {
+      if (seen.has(pos)) return
+      seen.add(pos)
+      visit(node, pos)
+    })
+  }
+}
+
+/**
  * Apply alignment to every paragraph-like block in the selection, resolving
  * the stored attr per paragraph against its own direction (a mixed LTR/RTL
  * selection must not inherit the cursor paragraph's resolution). Selected
@@ -80,9 +99,9 @@ export function setSelectionAlign(
     .chain()
     .focus()
     .command(({ state, tr, dispatch }) => {
-      const { from, to } = state.selection
       let changed = false
-      state.doc.nodesBetween(from, to, (node, pos) => {
+      // every range: a table CellSelection holds one range per cell (from/to is only the head cell)
+      forEachSelectedNode(state, (node, pos) => {
         if (DIR_BLOCKS.has(node.type.name)) {
           const value = alignAttrFor(align, effectiveBidi(node.attrs))
           tr.setNodeMarkup(pos, undefined, { ...node.attrs, align: value })
@@ -109,9 +128,8 @@ export function setParagraphDirection(editor: Editor, dir: 'ltr' | 'rtl'): boole
     .chain()
     .focus()
     .command(({ state, tr, dispatch }) => {
-      const { from, to } = state.selection
       let changed = false
-      state.doc.nodesBetween(from, to, (node, pos) => {
+      forEachSelectedNode(state, (node, pos) => {
         if (!DIR_BLOCKS.has(node.type.name)) return
         if (node.attrs.bidi === undefined || effectiveBidi(node.attrs) === bidi) return
         tr.setNodeMarkup(pos, undefined, dirFlipAttrs(node.attrs, bidi))

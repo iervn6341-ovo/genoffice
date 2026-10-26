@@ -269,6 +269,22 @@ export function insertTableAt(editor: Editor, rows: number, cols: number): void 
       .run()
 }
 
+/**
+ * Where a picture inserted at `$from` must go so it never splits a table. A table cell can only
+ * hold paragraphs / lists / nested tables, so a block picture dropped at the caret inside a cell
+ * tore the table into two with the picture between them. A picture cannot live inside a cell yet
+ * (saving a new inline picture needs media support the docx writer lacks), so it lands right after
+ * the outermost table instead. Returns null when the caret is not inside a table.
+ */
+export function pictureInsertPosOutsideTable(
+  $from: Editor['state']['selection']['$from'],
+): number | null {
+  for (let depth = 1; depth <= $from.depth; depth++) {
+    if ($from.node(depth).type.name === 'docTable') return $from.after(depth)
+  }
+  return null
+}
+
 /** Insert an inline image from a dataURL at the cursor (shared by paste/dialog; size scaled to content width) */
 export async function insertImageFromDataUrl(
   editor: Editor,
@@ -282,27 +298,27 @@ export async function insertImageFromDataUrl(
   try {
     const natural = await imageSizeOf(dataUrl)
     const scale = Math.min(1, MAX_IMAGE_WIDTH_PX / natural.width)
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: 'docProtected',
-        attrs: {
-          docxIndex: null,
-          blockType: 'image',
-          label,
-          imageDataUrl: dataUrl,
-          imageWidthPx: Math.round(natural.width * scale),
-          imageHeightPx: Math.round(natural.height * scale),
-          genImage: {
-            base64: m[2],
-            mime,
-            widthPx: Math.round(natural.width * scale),
-            heightPx: Math.round(natural.height * scale),
-          },
+    const outsideTableAt = pictureInsertPosOutsideTable(editor.state.selection.$from)
+    const imageNode = {
+      type: 'docProtected',
+      attrs: {
+        docxIndex: null,
+        blockType: 'image',
+        label,
+        imageDataUrl: dataUrl,
+        imageWidthPx: Math.round(natural.width * scale),
+        imageHeightPx: Math.round(natural.height * scale),
+        genImage: {
+          base64: m[2],
+          mime,
+          widthPx: Math.round(natural.width * scale),
+          heightPx: Math.round(natural.height * scale),
         },
-      })
-      .run()
+      },
+    }
+    const insertChain = editor.chain().focus()
+    if (outsideTableAt === null) insertChain.insertContent(imageNode).run()
+    else insertChain.insertContentAt(outsideTableAt, imageNode).run()
     // Pasting into an empty document leaves the image as the ONLY node with a
     // node-selection on it: there is no text position to type at, and the
     // next keystroke REPLACES the picture. Ensure a

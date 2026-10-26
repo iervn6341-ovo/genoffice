@@ -1,7 +1,7 @@
 import { Fragment, type Node as PmNode, type NodeType } from '@tiptap/pm/model'
 import type { Command, EditorState, Transaction } from '@tiptap/pm/state'
 import { TextSelection } from '@tiptap/pm/state'
-import { CellSelection } from '@tiptap/pm/tables'
+import { CellSelection, selectedRect } from '@tiptap/pm/tables'
 import type { EditorView } from '@tiptap/pm/view'
 import { selectedTable } from './table-properties'
 import { tableModelToPmNode, type PmNode as JsonNode } from './convert'
@@ -13,6 +13,38 @@ import { tableModelToPmNode, type PmNode as JsonNode } from './convert'
  * command edits native table attributes (with the matching `*Edited` flag) so the edit
  * survives Undo/Redo and is written to the DOCX table parts on save.
  */
+
+/**
+ * Word's Insert Above/Below/Left/Right insert as many rows (columns) as are selected — two rows
+ * selected, two rows added. prosemirror-tables' commands add exactly one, so run the command once
+ * per selected row/column, folded into ONE transaction (a single undo step). The selection keeps
+ * its place between runs, so each run inserts next to the same edge.
+ */
+export function insertPerSelection(command: Command, axis: 'row' | 'column'): Command {
+  return (state, dispatch) => {
+    let rect: ReturnType<typeof selectedRect>
+    try {
+      rect = selectedRect(state)
+    } catch {
+      return command(state, dispatch)
+    }
+    const count = Math.max(1, axis === 'row' ? rect.bottom - rect.top : rect.right - rect.left)
+    if (count === 1) return command(state, dispatch)
+    if (!dispatch) return command(state)
+    const combined = state.tr
+    let current = state
+    for (let i = 0; i < count; i++) {
+      let produced: Transaction | null = null
+      if (!command(current, (tr) => (produced = tr))) return i > 0
+      const tr = produced as Transaction | null
+      if (!tr) break
+      tr.steps.forEach((step) => combined.step(step))
+      current = current.apply(tr)
+    }
+    dispatch(combined.scrollIntoView())
+    return true
+  }
+}
 
 /* ------------------------------------------------------------ table attrs */
 

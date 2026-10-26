@@ -4708,12 +4708,19 @@ body.docs-crop-active .doc-protected[data-doc-protected='image'] .doc-img-wrap {
 
 .doc-table td,
 .doc-table th {
+  isolation: isolate;
   /* not positioned: a positioned cell's fill paints over the inner half of the collapsed borders */
   box-sizing: border-box;
   /* the w:docGrid line grid applies to the body flow only, UNLESS settings.xml
      w:compat carries w:adjustLineHeightInTable — then docStyleCss restores the
      pitch in cells and they snap like body lines (Word probe 2026-09-02) */
   --doc-grid-pitch: 0.0001px;
+}
+
+.doc-table td .doc-img-wrap,
+.doc-table th .doc-img-wrap {
+  position: relative;
+  z-index: 1;
 }
 
 /* empty paragraph in a cell: LO sizes it near the Latin single line, so it must
@@ -4813,12 +4820,20 @@ body.docs-crop-active .doc-protected[data-doc-protected='image'] .doc-img-wrap {
   position: relative;
 }
 
-.doc-table .selectedCell::after {
+.doc-table .selectedCell::after,
+.doc-table.ProseMirror-selectednode :is(td, th)::after,
+.ProseMirror-selectednode > .doc-table :is(td, th)::after {
   position: absolute;
   inset: 0;
   content: '';
   pointer-events: none;
   background: color-mix(in srgb, var(--word-blue) 18%, transparent);
+}
+
+/* whole-table selection (move handle) highlights every cell like a cell range */
+.doc-table.ProseMirror-selectednode :is(td, th),
+.ProseMirror-selectednode > .doc-table :is(td, th) {
+  position: relative;
 }
 
 .doc-page.resize-cursor {
@@ -6458,6 +6473,37 @@ body.docs-crop-active .doc-protected[data-doc-protected='image'] .doc-img-wrap {
   z-index: 6;
 }
 
+.img-rotate-handle-line {
+  display: none;
+  position: absolute;
+  top: -19px;
+  left: 50%;
+  width: 1px;
+  height: 15px;
+  background: var(--word-blue);
+  z-index: 6;
+}
+
+.img-rotate-handle {
+  display: none;
+  position: absolute;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  top: -26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--docs-paper);
+  border: 1px solid var(--word-blue);
+  border-radius: 50%;
+  cursor: grab;
+  z-index: 6;
+}
+
+.img-rotate-handle:active {
+  cursor: grabbing;
+}
+
 .img-resize-handle-nw {
   top: -5px;
   left: -5px;
@@ -6512,7 +6558,19 @@ body.docs-crop-active .doc-protected[data-doc-protected='image'] .doc-img-wrap {
 
 .ProseMirror-focused
   .doc-protected[data-doc-protected='image'].ProseMirror-selectednode
-  .img-resize-handle {
+  .img-resize-handle,
+.ProseMirror-focused
+  .doc-protected[data-doc-protected='image'].ProseMirror-selectednode
+  .img-rotate-handle-line,
+.ProseMirror-focused
+  .doc-protected[data-doc-protected='image'].ProseMirror-selectednode
+  .img-rotate-handle,
+.doc-protected[data-doc-protected='image'].ProseMirror-selectednode
+  .img-resize-handle,
+.doc-protected[data-doc-protected='image'].ProseMirror-selectednode
+  .img-rotate-handle-line,
+.doc-protected[data-doc-protected='image'].ProseMirror-selectednode
+  .img-rotate-handle {
   display: block;
 }
 
@@ -6548,6 +6606,12 @@ body.docs-crop-active
 body.docs-crop-active
   .doc-protected[data-doc-protected='image'].ProseMirror-selectednode
   .img-resize-handle,
+body.docs-crop-active
+  .doc-protected[data-doc-protected='image'].ProseMirror-selectednode
+  .img-rotate-handle-line,
+body.docs-crop-active
+  .doc-protected[data-doc-protected='image'].ProseMirror-selectednode
+  .img-rotate-handle,
 body.docs-crop-active
   .doc-protected[data-doc-protected='image'].ProseMirror-selectednode
   > .doc-image-anchor-marker,
@@ -9654,6 +9718,8 @@ body.docs-crop-active
   }
 
   .img-resize-handle,
+  .img-rotate-handle-line,
+  .img-rotate-handle,
   .doc-image-anchor-marker {
     display: none !important;
   }
@@ -10257,6 +10323,10 @@ ruby.doc-ruby rt {
   border-radius: 8px;
   box-shadow: var(--docs-shadow-ctx);
   font-size: 13px;
+  /* a window shorter than the menu scrolls it (ContextMenu sets max-height); submenus are
+     position: fixed so this never clips them */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ctx-item {
@@ -10314,10 +10384,11 @@ ruby.doc-ruby rt {
 }
 
 .ctx-submenu {
-  position: absolute;
-  top: -5px;
-  left: calc(100% - 4px);
+  /* placed from the parent item's rect by CtxSubmenu (flips left / slides up in small windows) */
+  position: fixed;
   min-width: 150px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 5px 0;
   background: var(--surface);
   border: 1px solid var(--border-strong);

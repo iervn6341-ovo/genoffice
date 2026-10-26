@@ -285,7 +285,7 @@ export function lineHeightFactor(fontFamily: string): number {
   ) {
     return 1.775
   }
-  // 標楷體 with DFKai-SB installed renders real at the SimSun-class pitch
+  // BiauKai with DFKai-SB installed renders real at the SimSun-class pitch
   // (Word probe 2026-10-01, kaiu.ttf: 13.1pt @10pt, a 10pt footer line ends
   // 4.7pt lower than at 1.775); a missing face substitutes into the PingFang
   // TC class with the sans faces below
@@ -660,7 +660,7 @@ export function isFontAvailable(font: string): boolean {
   return available
 }
 
-/** Whether the real 標楷體 face (DFKai-SB, kaiu.ttf) resolves on this machine. */
+/** Whether the real BiauKai face (DFKai-SB, kaiu.ttf) resolves on this machine. */
 function dfkaiInstalled(): boolean {
   return isFontAvailable('DFKai-SB') || isFontAvailable('標楷體')
 }
@@ -1082,7 +1082,7 @@ export function cssFontFamily(font: string, followAltName = true): string {
       nfkc,
     )
   ) {
-    // 標楷體 is a Kai (brush) face, not a Ming one: the installed DFKai-SB
+    // BiauKai is a Kai (brush) face, not a Ming one: the installed DFKai-SB
     // (Office) or Apple's BiauKai renders it; the Ming chain is only the tail
     if (/標楷|biaukai|dfkai|kaiu|kaiti tc/i.test(nfkc))
       return `${chain(font, 'DFKai-SB', 'BiauKaiTC', 'Kaiti TC', ...TC_SERIF)},serif`
@@ -1199,7 +1199,7 @@ export function cssEaOnlyFontFamily(ea: string): string {
 /**
  * Chain for a run declaring only a Latin face (w:ascii/w:hAnsi, no w:eastAsia):
  * Word merges rFonts per slot, so CJK keeps the style-inherited East Asian face
- * (a Times New Roman title under a 標楷體 Normal renders its Han in 標楷體).
+ * (a Times New Roman title under a BiauKai Normal renders its Han in BiauKai).
  * --doc-ea-chain carries that inherited chain (doc-style-css, document and
  * paragraph-style level); without it the Latin face's own chain is the backstop.
  */

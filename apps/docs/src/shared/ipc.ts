@@ -478,7 +478,7 @@ export interface DesktopApi {
   addPastedImage(data: ArrayBuffer, ext: string): Promise<AttachmentAddResult>
   /** copy an embedded picture to the OS clipboard as a real bitmap + <img>
    *  html (r136: copying an image exported only the protected placeholder) */
-  copyImageToClipboard(dataUrl: string, metaJson?: string): Promise<boolean>
+  copyImageToClipboard(dataUrl: string, metaJson?: string, slicePayload?: string): Promise<boolean>
   /** read a slice of the extracted text of an attachment */
   readAttachment(path: string, offset: number, maxChars: number): Promise<AttachmentReadResult>
   /** read an image attachment as base64 for multimodal input (≤5MB) */

@@ -19,9 +19,14 @@ export type SystemPrintOutcome =
   | { readonly status: 'error'; readonly message: string }
 
 /** The helper's exit code → outcome (see print-pdf.swift). */
-export function outcomeForExit(code: number | null, stderr: string): SystemPrintOutcome {
+export function outcomeForExit(
+  code: number | null,
+  stderr: string,
+  signal: NodeJS.Signals | null = null,
+): SystemPrintOutcome {
   if (code === 0) return { status: 'printed' }
-  if (code === 1) return { status: 'canceled' }
+  // closed by the user (exit 1) or the panel's process was terminated (a signal): nothing was printed
+  if (code === 1 || (code === null && signal !== null)) return { status: 'canceled' }
   const detail = stderr.trim()
   const reason =
     code === 2 ? 'the PDF could not be opened' : code === 3 ? 'the print job could not start' : ''
@@ -96,8 +101,8 @@ export async function printPdfWithSystemPanel(
       stderr = (stderr + chunk.toString()).slice(-2000)
     })
     child.on('error', (error) => resolve({ status: 'error', message: error.message }))
-    child.on('close', (code) =>
-      resolve(outcomeForExit(code, code === 0 || code === 1 ? '' : stderr)),
+    child.on('close', (code, signal) =>
+      resolve(outcomeForExit(code, code === 0 || code === 1 ? '' : stderr, signal)),
     )
   })
 }

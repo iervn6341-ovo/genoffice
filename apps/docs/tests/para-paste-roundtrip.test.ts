@@ -143,11 +143,13 @@ describe('paragraph formatting HTML round-trip (r117)', () => {
     expect(parseHtml(`<p data-para='{"indentLeft":-284}'>x</p>`).para.indentLeft).toBe(-284)
   })
 
-  it('foreign HTML without data-para still parses as a plain paragraph', () => {
+  it('foreign HTML without data-para is a new paragraph that keeps the indent it declares', () => {
+    // Word keeps a pasted paragraph's left indent (20pt = 400 twips); identity stays unset
     expect(parseHtml('<p style="margin-left:20pt">x</p>').para).toMatchObject({
-      indentLeft: null,
+      indentLeft: 400,
       docxIndex: null,
     })
+    expect(parseHtml('<p>x</p>').para).toMatchObject({ indentLeft: null, docxIndex: null })
   })
 })
 

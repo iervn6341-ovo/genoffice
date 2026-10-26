@@ -5,6 +5,14 @@ export { sdtCheckboxGlyphs, sdtCheckboxIsChecked } from './checkbox-control'
 export { parseDocx, styleRunFormat, type ParseExtras, type ParseOptions } from './parse'
 export { DOCX_ZIP_LIMITS } from './zip-load'
 export { LAZY_MEDIA_SCHEME, isLazyMediaPart, lazyMediaUrl, parseLazyMediaUrl } from './lazy-media'
+export {
+  PENDING_IMG_PREFIX,
+  lookupPendingMedia,
+  pendingMediaOfDataUrl,
+  registerPendingMedia,
+  retargetDrawingToPending,
+  type PendingMedia,
+} from './pending-media'
 export { setAltChunkHtmlConverter, type AltChunkHtmlConverter } from './alt-chunk'
 export { tocLevelOf } from './parse-fields'
 export {

@@ -289,3 +289,51 @@ describe('selection and column distribution', () => {
     editor.destroy()
   })
 })
+
+describe('insertPerSelection (Word inserts as many rows/columns as are selected)', () => {
+  it('adds one row per selected row in a single undo step', async () => {
+    const { addRowAfter, addRowBefore, addColumnAfter } = await import('@tiptap/pm/tables')
+    const { insertPerSelection } = await import('../src/renderer/editor/table-tools')
+    const { editor } = await open(TABLE)
+    const cells = cellPositions(editor)
+    // rows 1-2 (pear/10 .. apple/2)
+    editor.view.dispatch(
+      editor.state.tr.setSelection(CellSelection.create(editor.state.doc, cells[2], cells[5])),
+    )
+    const rowsOf = () => {
+      let n = 0
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'docTableRow') n++
+      })
+      return n
+    }
+    const before = rowsOf()
+    expect(insertPerSelection(addRowAfter, 'row')(editor.state, editor.view.dispatch)).toBe(true)
+    expect(rowsOf()).toBe(before + 2)
+    editor.commands.undo()
+    expect(rowsOf()).toBe(before)
+    // above: still two, and the selection stays on the original rows
+    expect(insertPerSelection(addRowBefore, 'row')(editor.state, editor.view.dispatch)).toBe(true)
+    expect(rowsOf()).toBe(before + 2)
+    expect(editor.state.selection).toBeInstanceOf(CellSelection)
+    // a single selected cell adds one
+    editor.commands.undo()
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(cells[0] + 2))),
+    )
+    expect(insertPerSelection(addRowAfter, 'row')(editor.state, editor.view.dispatch)).toBe(true)
+    expect(rowsOf()).toBe(before + 1)
+    // two selected columns -> two columns
+    editor.commands.undo()
+    editor.view.dispatch(
+      editor.state.tr.setSelection(CellSelection.create(editor.state.doc, cells[0], cells[1])),
+    )
+    const cellCount = () => cellPositions(editor).length
+    const c0 = cellCount()
+    expect(insertPerSelection(addColumnAfter, 'column')(editor.state, editor.view.dispatch)).toBe(
+      true,
+    )
+    expect(cellCount()).toBe(c0 + 2 * 4) // 4 rows x 2 new columns
+    editor.destroy()
+  })
+})

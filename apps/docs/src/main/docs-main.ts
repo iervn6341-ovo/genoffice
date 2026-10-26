@@ -3801,7 +3801,7 @@ export function registerDocsIpc(): void {
   // (the protected wrapper round-tripped as a "protected content" shell).
   ipcMain.handle(
     'docs:copy-image-to-clipboard',
-    async (_event, dataUrl: unknown, meta: unknown): Promise<boolean> => {
+    async (_event, dataUrl: unknown, meta: unknown, slicePayload?: unknown): Promise<boolean> => {
       if (typeof dataUrl !== 'string') return false
       let bytes: Buffer
       let htmlSrc = dataUrl
@@ -3836,9 +3836,17 @@ export function registerDocsIpc(): void {
           /* malformed payload: plain img */
         }
       }
+      // the renderer's exact picture node (crop, effects, alt text, wrap...) for a GenOffice paste;
+      // base64 only, so it needs no escaping
+      const sliceAttr =
+        typeof slicePayload === 'string' &&
+        /^[A-Za-z0-9+/=]+$/.test(slicePayload) &&
+        slicePayload.length < 48 * 1024 * 1024
+          ? ` data-pm-slice="0 0 []" data-genoffice-slice="${slicePayload}"`
+          : ''
       clipboard.write({
         image,
-        html: `<img src="${htmlSrc}" width="${width}" height="${height}"${metaAttr}>`,
+        html: `<img src="${htmlSrc}" width="${width}" height="${height}"${metaAttr}${sliceAttr}>`,
       })
       return true
     },

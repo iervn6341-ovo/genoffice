@@ -8,8 +8,8 @@ import { blocksToPmDoc } from '../src/renderer/editor/convert'
 
 /**
  * Traditional Chinese contracts (LibreOffice comparison, 2026-10-01): headings in
- * 標楷體 / 新細明體 printed regular instead of bold, and a Times New Roman title
- * under a 標楷體 Normal mixed Songti SC and Noto glyphs instead of 標楷體.
+ * BiauKai / PMingLiU printed regular instead of bold, and a Times New Roman title
+ * under a BiauKai Normal mixed Songti SC and Noto glyphs instead of BiauKai.
  */
 
 const families = (chain: string) => chain.split(',').map((f) => f.trim().replace(/^'|'$/g, ''))

@@ -7,6 +7,7 @@ import { ReactNodeViewRenderer } from '@tiptap/react'
 import { Placeholder } from '@tiptap/extensions'
 import { CodeBlockView } from './CodeBlockView'
 import { LocalImage } from './localImage'
+import { TableDragGuard } from './tableDragGuard'
 import { BlockDragHandle } from './blockDragHandle'
 import { BlockKeymap } from './blockKeymap'
 import { AiHighlight } from './aiHighlight'
@@ -90,6 +91,7 @@ export function buildExtensions(options: BuildExtensionsOptions): AnyExtension[]
     // KaTeX-rendered $...$ / $$...$$ formulas (issue #100)
     ...buildMathExtensions(),
     LocalImage,
+    TableDragGuard,
     BlockDragHandle,
     BlockKeymap,
     AiHighlight,

@@ -198,7 +198,7 @@ import {
 } from './parse-package'
 import { parseSdtBlock, sdtMeta, sdtTableXml, splitSdtParts } from './parse-sdt'
 import { sdtCheckboxControl } from './checkbox-control'
-import { parseStyles, runBorderOf } from './parse-styles'
+import { extractStyleXml, parseStyles, runBorderOf } from './parse-styles'
 import {
   VML_PICT_RID_RE,
   VML_WORDART_RE,
@@ -294,6 +294,8 @@ export interface ParseExtras {
   chartParts: Record<string, string>
   /** source-document hashes named by lazily served pictures */
   lazyMediaHashes: string[]
+  /** styleId -> the style's exact `<w:style>` element (copied verbatim by cross-document paste) */
+  styleXml: Record<string, string>
 }
 
 export interface ParseOptions {
@@ -653,7 +655,12 @@ export async function parseDocx(
       bodyInnerStart: scan.innerStart,
       bodyInnerEnd: scan.innerEnd,
     },
-    extras: { elements, chartParts, lazyMediaHashes: [...(lazyHashesByZip.get(zip) ?? [])] },
+    extras: {
+      elements,
+      chartParts,
+      lazyMediaHashes: [...(lazyHashesByZip.get(zip) ?? [])],
+      styleXml: await extractStyleXml(zip),
+    },
   }
 }
 

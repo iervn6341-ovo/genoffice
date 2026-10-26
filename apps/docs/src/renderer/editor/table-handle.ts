@@ -58,7 +58,12 @@ function tableHandlePlugin(): Plugin {
   return new Plugin({
     key: new PluginKey('tableHandle'),
     view(view) {
-      const container = view.dom.parentElement
+      // Resolved on every use: TipTap creates the view in a detached element and moves the
+      // editor DOM (this handle with it) into the real page container afterwards, so a parent
+      // captured at creation time points at an empty detached node — the handle then landed
+      // offset by the page container's origin.
+      const containerOf = (): HTMLElement | null => view.dom.parentElement
+      const container = containerOf()
 
       const handle = document.createElement('button')
       handle.type = 'button'
@@ -85,7 +90,10 @@ function tableHandlePlugin(): Plugin {
       }
 
       const placeHandle = (pos: number) => {
+        const container = containerOf()
         if (!container) return
+        container.style.position ||= 'relative'
+        if (handle.parentElement !== container) container.append(handle)
         const dom = view.nodeDOM(pos)
         if (!(dom instanceof HTMLElement)) return hideHandle()
         const tableRect = dom.getBoundingClientRect()

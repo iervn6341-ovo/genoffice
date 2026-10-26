@@ -123,6 +123,20 @@ export interface ExecuteOutcome {
 export interface SelRange {
   from: number
   to: number
+  /**
+   * Every span of a multi-range selection (a table CellSelection is one span per cell, the head
+   * cell first, so from/to alone cover only that cell). Absent for an ordinary selection.
+   */
+  spans?: SelRange[]
+}
+
+/** does [from, to) touch the selection — any span of a multi-range selection, or a caret inside it */
+function touchesSelection(scoped: SelRange, from: number, to: number): boolean {
+  for (const r of scoped.spans ?? [scoped]) {
+    if (to > r.from && from < r.to) return true
+    if (r.from === r.to && r.from >= from && r.from <= to) return true
+  }
+  return false
 }
 
 export interface RunEnv {
@@ -422,9 +436,8 @@ function matchTarget(doc: PmDocNode, target: Target, sel: SelRange): TopBlock[] 
       const from = b.pos
       const to = b.pos + b.node.nodeSize
       const overlaps = to > scoped.from && from < scoped.to
-      const caretInside = scoped.from === scoped.to && scoped.from >= from && scoped.from <= to
-      if (!overlaps && !caretInside) return false
-      if (overlaps && scoped.from < scoped.to && b.node.isTextblock) {
+      if (!touchesSelection(scoped, from, to)) return false
+      if (!scoped.spans && overlaps && scoped.from < scoped.to && b.node.isTextblock) {
         const contentFrom = from + 1
         const contentTo = contentFrom + b.node.content.size
         const clipFrom = Math.max(scoped.from, contentFrom)
@@ -464,9 +477,7 @@ function paragraphsIn(b: TopBlock, scoped: SelRange | null): ParagraphHit[] {
     const pos = b.pos + 1 + offset
     const end = pos + node.nodeSize
     if (scoped) {
-      const overlaps = end > scoped.from && pos < scoped.to
-      const caretInside = scoped.from === scoped.to && scoped.from >= pos && scoped.from <= end
-      if (!overlaps && !caretInside) return false
+      if (!touchesSelection(scoped, pos, end)) return false
     }
     hits.push({ node, pos })
     return false
@@ -709,9 +720,7 @@ function runStepHangingIndent(op: Op, env: RunEnv): OpResult {
     for (const p of paragraphsIn(b, scoped)) {
       const left = Number(p.node.attrs.indentLeft) || 0
       const nextLeft = Math.max(
-        delta > 0
-          ? Math.floor(left / STEP) * STEP + STEP
-          : Math.ceil(left / STEP) * STEP - STEP,
+        delta > 0 ? Math.floor(left / STEP) * STEP + STEP : Math.ceil(left / STEP) * STEP - STEP,
         0,
       )
       const nextHanging = nextLeft > 0 ? -Math.min(nextLeft, STEP) : 0
@@ -1414,7 +1423,14 @@ export function executeOps(editor: Editor, ops: unknown, ctx: OpContext = {}): E
 
   const tr = editor.state.tr
   const schema = editor.schema
-  const selection = frozenSelectionRange(editor, ctx.selection) ?? editor.state.selection
+  const frozenSel = frozenSelectionRange(editor, ctx.selection)
+  const selection = frozenSel ?? editor.state.selection
+  // a table CellSelection (or any multi-range selection) must reach every one of its ranges
+  const liveRanges = frozenSel ? null : editor.state.selection.ranges
+  const multiRanges =
+    liveRanges && liveRanges.length > 1
+      ? liveRanges.map((r) => ({ from: r.$from.pos, to: r.$to.pos }))
+      : undefined
   const results: OpResult[] = []
   try {
     for (const [op, def] of planned) {
@@ -1422,6 +1438,12 @@ export function executeOps(editor: Editor, ops: unknown, ctx: OpContext = {}): E
       const sel: SelRange = {
         from: tr.mapping.map(selection.from),
         to: tr.mapping.map(selection.to),
+      }
+      if (multiRanges) {
+        sel.spans = multiRanges.map((r) => ({
+          from: tr.mapping.map(r.from),
+          to: tr.mapping.map(r.to),
+        }))
       }
       results.push(def.apply(op, { tr, schema, sel, ctx, editor }))
     }

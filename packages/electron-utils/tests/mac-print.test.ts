@@ -15,6 +15,8 @@ describe('outcomeForExit', () => {
     })
     expect(outcomeForExit(3, '')).toMatchObject({ status: 'error' })
     expect(outcomeForExit(null, 'boom\n')).toEqual({ status: 'error', message: 'boom' })
+    // killed by a signal (the panel's process was terminated): nothing printed, not an error
+    expect(outcomeForExit(null, '', 'SIGTERM')).toEqual({ status: 'canceled' })
   })
 })
 

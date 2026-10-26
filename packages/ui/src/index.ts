@@ -107,6 +107,25 @@ export {
   type RibbonFitTarget,
 } from './ribbon-fit'
 export { keepEditorFocusOnRibbonPress } from './ribbon-focus'
+export {
+  createTableDragGuard,
+  enclosingCellPos,
+  isCellRangeSelection,
+  sliceHasTableStructure,
+  type DragGuardViewLike,
+  type TableDragGuard,
+  type TableDragGuardOptions,
+} from './table-drag-guard'
+export {
+  KEEP_EDIT_ATTR,
+  classifyEditPress,
+  createSelectionKeeper,
+  handleEditorBlur,
+  installKeepEditGuard,
+  type EditPress,
+  type KeepEditGuardOptions,
+  type SelectionKeeper,
+} from './keep-edit'
 export { RibbonFoldGroup } from './RibbonFoldGroup'
 export {
   DEFAULT_PRINTER_SETTINGS,
