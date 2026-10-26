@@ -332,4 +332,10 @@ export const zhTW = {
   paneShowEnded: '放映結束。',
   paneShowRehearseTip: '排練計時：目前頁停留 / 總時長',
   paneShowRehearseTotal: '總時長 {time}',
+  paneShowVideoPlay: '播放',
+  paneShowVideoPause: '暫停',
+  paneShowVideoSeek: '時間軸',
+  paneShowVideoVolume: '音量',
+  paneShowVideoMute: '靜音',
+  paneShowVideoUnmute: '取消靜音',
 } satisfies Record<keyof typeof zh, string>

@@ -218,6 +218,8 @@ export const en = {
   ribbonFlipH: 'Flip Horizontal',
   ribbonFlipV: 'Flip Vertical',
   ribbonDistributeHint: '{title} (select 3 or more elements)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Show or hide the AI Assistant panel',
   ribbonGroupTable: 'Table',
@@ -494,6 +496,8 @@ export const en = {
   ribbonRuler: 'Ruler',
   ribbonRulerTip: 'Show or hide the ruler (inches)',
   ribbonGridlines: 'Gridlines',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Show or hide gridlines (half-inch grid)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

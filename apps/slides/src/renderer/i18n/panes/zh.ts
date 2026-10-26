@@ -331,4 +331,10 @@ export const zh = {
   paneShowEnded: '放映结束。',
   paneShowRehearseTip: '排练计时：当前页停留 / 总时长',
   paneShowRehearseTotal: '总时长 {time}',
+  paneShowVideoPlay: '播放',
+  paneShowVideoPause: '暂停',
+  paneShowVideoSeek: '时间轴',
+  paneShowVideoVolume: '音量',
+  paneShowVideoMute: '静音',
+  paneShowVideoUnmute: '取消静音',
 }

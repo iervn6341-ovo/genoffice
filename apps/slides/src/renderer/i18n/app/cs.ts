@@ -151,6 +151,7 @@ export const cs = {
   appCtxCellAnchorMiddle: 'Zarovnat text svisle na střed',
   appCtxCellAnchorBottom: 'Zarovnat text dolů',
   appStatusMergeFailed: 'Tuto buňku nelze sloučit/rozdělit',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Příprava tisku…',
   appPrintTitle: 'Tisk',
   appPrintLayoutFull: 'Snímky na celou stránku',

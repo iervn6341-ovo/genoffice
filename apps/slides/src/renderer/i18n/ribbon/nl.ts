@@ -221,6 +221,8 @@ export const nl = {
   ribbonFlipH: 'Horizontaal spiegelen',
   ribbonFlipV: 'Verticaal spiegelen',
   ribbonDistributeHint: '{title} (selecteer 3 of meer elementen)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Het AI-assistentpaneel weergeven of verbergen',
   ribbonGroupTable: 'Tabel',
@@ -509,6 +511,8 @@ export const nl = {
   ribbonRuler: 'Liniaal',
   ribbonRulerTip: 'De liniaal weergeven of verbergen (inches)',
   ribbonGridlines: 'Rasterlijnen',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Rasterlijnen weergeven of verbergen (raster van een halve inch)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

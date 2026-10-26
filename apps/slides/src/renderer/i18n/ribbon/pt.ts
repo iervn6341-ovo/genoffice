@@ -222,6 +222,8 @@ export const pt = {
   ribbonFlipH: 'Inverter horizontalmente',
   ribbonFlipV: 'Inverter verticalmente',
   ribbonDistributeHint: '{title} (selecione 3 ou mais elementos)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Mostrar ou ocultar o painel do Assistente de IA',
   ribbonGroupTable: 'Tabela',
@@ -505,6 +507,8 @@ export const pt = {
   ribbonRuler: 'Régua',
   ribbonRulerTip: 'Mostrar ou ocultar a régua (polegadas)',
   ribbonGridlines: 'Linhas de Grade',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Mostrar ou ocultar as linhas de grade (grade de meia polegada)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

@@ -1218,6 +1218,10 @@ export function Ribbon({
   onEditChart,
   onOpenChartDataDialog,
   onArrange,
+  alignTo,
+  hasMultiSelection,
+  onAlignTo,
+  onReorder,
   onFlip,
   canDistribute,
 }: Props) {
@@ -1577,13 +1581,13 @@ export function Ribbon({
       )}
     </div>
   )
-  // Apply a typed font size: any positive value, 0.5pt steps, clamped to 1-999.
+  // Apply a typed font size: any positive value, 0.5pt steps, clamped to 1-4000 (PowerPoint's range).
   // While text-editing, restore the selection saved when the input took focus so the size applies
   // to the selection instead of element-level
   const commitSizeDraft = () => {
     const v = parseFloat((sizeDraft ?? '').replace(',', '.'))
     if (!Number.isFinite(v) || v <= 0) return
-    const pt = Math.min(999, Math.max(1, Math.round(v * 2) / 2))
+    const pt = Math.min(4000, Math.max(1, Math.round(v * 2) / 2))
     if (editing) restoreEditSelection()
     onFontSize(pt)
   }
@@ -2121,6 +2125,10 @@ export function Ribbon({
     onAlign,
     onDirection,
     onArrange,
+    alignTo,
+    hasMultiSelection,
+    onAlignTo,
+    onReorder,
     onFlip,
     onCopy,
     onCut,
@@ -2231,6 +2239,8 @@ export function Ribbon({
     <div
       className={`ribbon ${collapse.rootClass}`}
       ref={collapse.rootRef}
+      // the ribbon never ends a text edit: see classifyEditPress
+      data-keep-edit=""
       onMouseDownCapture={(e) => {
         // Portalled task-pane buttons need normal keyboard/mouse focus.
         if (!(e.target as Element).closest('.ribbon-gallery-pane')) keepEditorFocusOnRibbonPress(e)
@@ -3608,6 +3618,29 @@ export function Ribbon({
                         onClick={() => onEditChart?.({ gridlines: !contextChartStyle?.gridlines })}
                       >
                         {t('ribbonGridlines')}
+                      </button>
+                    </div>
+                    <div className="rb-drop-title">{t('ribbonAxesVisibility')}</div>
+                    <div className="rb-row">
+                      <button
+                        data-testid="chart-axis-cat"
+                        disabled={contextChartStyle?.hasAxes === false}
+                        className={`rb-icon ${contextChartStyle?.catAxisHidden ? '' : 'active'}`}
+                        onClick={() =>
+                          onEditChart?.({ catAxisVisible: !!contextChartStyle?.catAxisHidden })
+                        }
+                      >
+                        {t('ribbonCatAxis')}
+                      </button>
+                      <button
+                        data-testid="chart-axis-val"
+                        disabled={contextChartStyle?.hasAxes === false}
+                        className={`rb-icon ${contextChartStyle?.valAxisHidden ? '' : 'active'}`}
+                        onClick={() =>
+                          onEditChart?.({ valAxisVisible: !!contextChartStyle?.valAxisHidden })
+                        }
+                      >
+                        {t('ribbonValAxis')}
                       </button>
                     </div>
                   </div>

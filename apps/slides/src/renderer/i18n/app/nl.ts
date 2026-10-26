@@ -162,6 +162,7 @@ export const nl = {
   appCtxCellAnchorMiddle: 'Tekst verticaal centreren',
   appCtxCellAnchorBottom: 'Tekst onder uitlijnen',
   appStatusMergeFailed: 'Kan deze cel niet samenvoegen/splitsen',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Afdrukken voorbereiden…',
   appPrintTitle: 'Afdrukken',
   appPrintLayoutFull: "Dia's op volledige pagina",

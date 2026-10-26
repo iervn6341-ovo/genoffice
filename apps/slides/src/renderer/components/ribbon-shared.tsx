@@ -872,8 +872,15 @@ export interface Props {
   ) => void
   /** Mirror the selection horizontally/vertically (a:xfrm flipH/flipV) */
   onFlip?: (axis: 'h' | 'v') => void
-  /** Whether distribute operations are allowed (≥3 selected elements) */
+  /** Whether distribute operations are allowed (≥3 selected elements, ≥2 when aligning to the slide) */
   canDistribute?: boolean
+  /** What Align / Distribute measure against (PowerPoint's "Align to Slide" / "Align Selected Objects") */
+  alignTo?: 'selection' | 'slide'
+  /** Two or more elements are selected (Align Selected Objects only means something then) */
+  hasMultiSelection?: boolean
+  onAlignTo?: (to: 'selection' | 'slide') => void
+  /** Z-order of the selection (Bring to Front / Send to Back / forward / backward) */
+  onReorder?: (dir: 'front' | 'back' | 'forward' | 'backward') => void
 }
 
 /** Ribbon locals + props handed to the extracted tab components; rebuilt every render. */
@@ -907,6 +914,10 @@ export interface RibbonTabCtx extends Pick<
   | 'onAlign'
   | 'onDirection'
   | 'onArrange'
+  | 'alignTo'
+  | 'hasMultiSelection'
+  | 'onAlignTo'
+  | 'onReorder'
   | 'onFlip'
   | 'onCopy'
   | 'onCut'

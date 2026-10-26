@@ -68,7 +68,6 @@ import {
   listSystemPrinters,
 } from '@genoffice/electron-utils'
 import {
-  resolveGroupChildId,
   runTxn,
   type Op,
   type OpRecord,
@@ -79,6 +78,7 @@ import {
 import { matchesElementRef } from '@genoffice/pptx-engine/identity'
 import { buildPagePptx, parsePageSpec } from '@genoffice/pipelines/slides'
 import { sniffImageMime } from './media-mime'
+import { applyTransformBatch, transformPayload } from './batch-transform'
 import {
   newPasteCascade,
   pageKey,
@@ -86,11 +86,16 @@ import {
   recordPaste,
   type PasteCascade,
 } from './paste-cascade'
+import {
+  MARKER_ELEMENTS,
+  MARKER_SLIDE,
+  readCustomFormat,
+  writeSystemClipboard,
+} from './system-clipboard'
 import { getUiLang, normalizeLang, setUiLang } from '@genoffice/i18n'
 import { ProjectStore } from '@genoffice/project-store'
 import {
   copyElementData,
-  findGroupChild,
   patchBodyPrAutofit,
   getElementLink,
   getSlideLinks,
@@ -154,7 +159,20 @@ import {
   type TextElement,
   openedDeckTheme,
   tableStyleGallery,
+  buildNativeClipboard,
+  parseGvml,
+  parseTableClip,
+  htmlTableToItem,
+  htmlTextToItem,
+  elementPlainText,
+  tableToHtml,
+  GVML_FORMAT,
+  TABLE_CLIP_FORMAT,
+  itemsBbox,
+  type ParsedNativeClipboard,
+  type TableElement,
   type TableStyleFlags,
+  resizeTable,
 } from '@genoffice/pptx-engine'
 import {
   buildRenderSlide,
@@ -162,6 +180,7 @@ import {
   makeViewport,
   EMU_PER_PX_96,
   type RenderSlide,
+  type TableRenderNode,
 } from '@genoffice/pptx-render'
 import { refineComplexWidths, shapedMetricsReady } from './shaped-metrics'
 import { cfbKind, isCfbHeader } from './cfb-sniff'
@@ -273,6 +292,8 @@ import {
   journalOps,
   makeMediaResolver,
   pushHistory,
+  redoStep,
+  undoStep,
   pictureResetBaseline,
   refreshPictureResetBaseline,
   rebuildSlide,
@@ -293,6 +314,7 @@ import {
   type Session,
 } from './session-state'
 import { registerAiIpc, registerSlidesOnlyAiIpc } from './ai-ipc'
+import { applyTableGridTxn } from './table-grid-txn'
 import { listPrivateFontFaces, getPrivateFontData, registerEmbeddedFonts } from './fonts'
 import { listMetafileFonts } from './metafile-fonts'
 import {
@@ -1093,6 +1115,13 @@ export function applySessionTxn(session: Session, req: ApplyTxnOp): ApplyTxnResu
   }
 }
 
+/** Current frame width (EMU) of a top-level element: a resize is told apart from a plain move by it */
+function frameWidthEmu(session: Session, slideIndex: number, sourceId: string): number | null {
+  const slide = session.opened.deck.slides[slideIndex]
+  const el = slide ? findEl(slide, sourceId) : undefined
+  return el ? el.transform.offset.cx : null
+}
+
 /**
  * spAutoFit (autofit='resize', "resize shape to fit text"): after a text change, the box height
  * grows/shrinks with the content and is written back to cy. rendered = the
@@ -1124,6 +1153,90 @@ function applyAutofitResize(
   }
   el.dirtyTransform = true
   return rebuildSlide(session, slideIndex)
+}
+
+/**
+ * Sync stored table row heights in EMU (<a:tr h="..."> and frame cy) with the actual
+ * rendered row heights produced by text wrapping and layout.
+ */
+function syncTableRowHeights(
+  session: Session,
+  slideIndex: number,
+  sourceId: string,
+  rendered: RenderSlide | null,
+): RenderSlide | null {
+  if (!rendered) return rendered
+  const slide = session.opened.deck.slides[slideIndex]
+  const el = slide?.elements.find((e) => matchesElementRef(e, sourceId))
+  if (!el || el.type !== 'table') return rendered
+  const node = rendered.nodes.find((n) => n.sourceId === el.id) as TableRenderNode | undefined
+  if (!node || node.type !== 'table' || !node.gridY || node.gridY.length <= 1) return rendered
+  const table = el as TableElement
+  const nRows = node.gridY.length - 1
+  if (table.rowHeights.length !== nRows) return rendered
+  const baseWidthPx = session.opened.deck.size.cx / EMU_PER_PX_96
+  const scale = session.fitWidthPx / baseWidthPx
+  const renderedHeightsEmu: number[] = []
+  let anyDiff = false
+  for (let r = 0; r < nRows; r++) {
+    const hPx = node.gridY[r + 1]! - node.gridY[r]!
+    const hEmu = Math.max(Math.round((hPx / scale) * EMU_PER_PX_96), 1)
+    renderedHeightsEmu.push(hEmu)
+    if (Math.abs(hEmu - (table.rowHeights[r] ?? 0)) > 95) anyDiff = true
+  }
+  if (!anyDiff) return rendered
+  resizeTable(
+    slide,
+    table.id,
+    table.transform.offset.cx,
+    renderedHeightsEmu.reduce((a, b) => a + b, 0),
+    renderedHeightsEmu,
+  )
+  return rebuildSlide(session, slideIndex)
+}
+
+/**
+ * Scan all tables across all slides and sync stored row heights with rendered heights
+ * before saving so the file matches the on-screen rendered state.
+ */
+function syncAllTableHeights(session: Session): void {
+  const deck = session.opened.deck
+  const baseWidthPx = deck.size.cx / EMU_PER_PX_96
+  const scale = session.fitWidthPx / baseWidthPx
+  deck.slides.forEach((slide, sIdx) => {
+    const tables = slide.elements.filter((e) => e.type === 'table') as TableElement[]
+    if (!tables.length) return
+    const rendered = buildRenderSlide(slide, deck.size, {
+      fitWidthPx: session.fitWidthPx,
+      media: makeMediaResolver(session.opened, slide.path),
+      metrics: getFontMetrics(),
+      slideNo: getFirstSlideNumber(session.opened.archive) + sIdx,
+    })
+    if (!rendered) return
+    for (const table of tables) {
+      const node = rendered.nodes.find((n) => n.sourceId === table.id) as TableRenderNode | undefined
+      if (!node || node.type !== 'table' || !node.gridY || node.gridY.length <= 1) continue
+      const nRows = node.gridY.length - 1
+      if (table.rowHeights.length !== nRows) continue
+      const renderedHeightsEmu: number[] = []
+      let anyDiff = false
+      for (let r = 0; r < nRows; r++) {
+        const hPx = node.gridY[r + 1]! - node.gridY[r]!
+        const hEmu = Math.max(Math.round((hPx / scale) * EMU_PER_PX_96), 1)
+        renderedHeightsEmu.push(hEmu)
+        if (Math.abs(hEmu - (table.rowHeights[r] ?? 0)) > 95) anyDiff = true
+      }
+      if (anyDiff) {
+        resizeTable(
+          slide,
+          table.id,
+          table.transform.offset.cx,
+          renderedHeightsEmu.reduce((a, b) => a + b, 0),
+          renderedHeightsEmu,
+        )
+      }
+    }
+  })
 }
 
 /**
@@ -1482,6 +1595,7 @@ export function registerSlidesIpc(): void {
         target: { slide: op.slideIndex, el: id },
         font,
         ...(op.groupId ? { group: op.groupId } : {}),
+        ...(op.cells?.length ? { cells: op.cells } : {}),
       })),
     })
     if (!r.applied) {
@@ -1525,6 +1639,7 @@ export function registerSlidesIpc(): void {
         target: { slide: op.slideIndex, el: id },
         format,
         ...(op.groupId ? { group: op.groupId } : {}),
+        ...(op.cells?.length ? { cells: op.cells } : {}),
       })),
     })
     if (!r.applied) {
@@ -1549,41 +1664,23 @@ export function registerSlidesIpc(): void {
   ipcMain.handle('slides:edit-transform', (e, op: EditTransformOp) => {
     const session = sessions.get(e.sender.id)
     if (!session) return null
-    const slide = session.opened.deck.slides[op.slideIndex]
-    if (!slide) return null
-    const childId = op.groupId ? resolveGroupChildId(slide, op.groupId, op.sourceId) : op.sourceId
-    const grpChild = op.groupId ? findGroupChild(slide, op.groupId, childId) : null
-    if (op.groupId && !grpChild) return null
-    // px -> EMU (inverting the viewport scale)
-    const baseWidthPx = session.opened.deck.size.cx / EMU_PER_PX_96
-    const scale = op.fitWidthPx / baseWidthPx
-    const toEmu = (px: number) => Math.round((px / scale) * EMU_PER_PX_96)
-    // In-group editing: the pixel box is in group-local coords (with ext/chExt scaling baked in); divide out the group scale first, then convert back to the child EMU coordinate system
-    let box: { x: number; y: number; cx: number; cy: number }
-    if (grpChild) {
-      const ch = grpChild.grp.childOffset
-      const chX = ch?.x ?? grpChild.grp.transform.offset.x
-      const chY = ch?.y ?? grpChild.grp.transform.offset.y
-      const gExt = grpChild.grp.transform.offset
-      const gsx = ch?.cx ? gExt.cx / ch.cx : 1
-      const gsy = ch?.cy ? gExt.cy / ch.cy : 1
-      box = {
-        x: toEmu(op.xPx / gsx) + chX,
-        y: toEmu(op.yPx / gsy) + chY,
-        cx: toEmu(op.wPx / gsx),
-        cy: toEmu(op.hPx / gsy),
-      }
-    } else {
-      box = { x: toEmu(op.xPx), y: toEmu(op.yPx), cx: toEmu(op.wPx), cy: toEmu(op.hPx) }
-    }
-    const payload = {
-      op: 'setTransform',
-      target: { slide: op.slideIndex, el: op.sourceId },
-      box,
-      rotDeg: op.rotationDeg,
-      // Tables redistribute gridCol widths / tr heights so the file matches the frame
-      ...(op.groupId ? { group: op.groupId } : { resizeTableGrid: true }),
-    }
+    if (!session.opened.deck.slides[op.slideIndex]) return null
+    const payload = transformPayload(session, op.slideIndex, op.fitWidthPx, {
+      sourceId: op.sourceId,
+      ...(op.groupId ? { groupId: op.groupId } : {}),
+      xPx: op.xPx,
+      yPx: op.yPx,
+      wPx: op.wPx,
+      hPx: op.hPx,
+      rotationDeg: op.rotationDeg,
+      resizeTableGrid: true,
+      ...(op.keepTableSize ? { keepTableSize: true } : {}),
+      ...(op.tableRowHeightsPx ? { tableRowHeightsPx: op.tableRowHeightsPx } : {}),
+    })
+    if (!payload) return null
+    const widthBefore = frameWidthEmu(session, op.slideIndex, op.sourceId)
+    // preview frames of a resize gesture have already applied the new width by the time it settles
+    const wasResizeGesture = !!session.transformPreview
     // Validate BEFORE the preview bookkeeping: a failed first preview must not set
     // transformPreview (later frames would skip pushHistory and the eventual commit
     // would lose its undo step) and must not clear the redo stack.
@@ -1618,7 +1715,18 @@ export function registerSlidesIpc(): void {
       }
       return null
     }
-    return rebuildSlide(session, op.slideIndex)
+    let rendered = rebuildSlide(session, op.slideIndex)
+    // "Resize shape to fit text": a settled width change re-wraps the text, so the height follows it
+    // (previews keep the box under the pointer; the gesture's end snaps it to the fitted height)
+    if (
+      !op.preview &&
+      !op.groupId &&
+      (wasResizeGesture || widthBefore !== frameWidthEmu(session, op.slideIndex, op.sourceId))
+    ) {
+      rendered = applyAutofitResize(session, op.slideIndex, op.sourceId, rendered)
+      rendered = syncTableRowHeights(session, op.slideIndex, op.sourceId, rendered)
+    }
+    return rendered
   })
 
   // Connector endpoint drag: box+flip re-derived from the two endpoints;
@@ -1651,24 +1759,28 @@ export function registerSlidesIpc(): void {
     return session.opened.deck.slides.map((_, i) => rebuildSlide(session, i))
   })
 
-  // Shim: the whole selection is one atomic transaction of setTransform ops — the
-  // executor's plan step reproduces the legacy "every element must exist" gate.
+  // The whole selection is one atomic transaction of setTransform ops and ONE undo step
+  // (arrow-key nudge, multi-drag/resize/rotate commits, align/distribute). The executor's plan
+  // step reproduces the legacy "every element must exist" gate; see batch-transform.ts.
   ipcMain.handle('slides:batch-edit-transform', (e, op: BatchEditTransformOp) => {
     const session = sessions.get(e.sender.id)
     if (!session) return null
-    const baseWidthPx = session.opened.deck.size.cx / EMU_PER_PX_96
-    const scale = op.fitWidthPx / baseWidthPx
-    const toEmu = (px: number) => Math.round((px / scale) * EMU_PER_PX_96)
-    const r = sessionTxn(session, {
-      ops: op.items.map((item) => ({
-        op: 'setTransform',
-        target: { slide: op.slideIndex, el: item.sourceId },
-        box: { x: toEmu(item.xPx), y: toEmu(item.yPx), cx: toEmu(item.wPx), cy: toEmu(item.hPx) },
-        rotDeg: item.rotationDeg,
-        // Legacy parity: the batch path never redistributed table grids
-      })),
+    const widthsBefore = op.items.map((i) => frameWidthEmu(session, op.slideIndex, i.sourceId))
+    const wasResizeGesture = !!session.transformPreview
+    if (!applyTransformBatch(session, op)) return null
+    let rendered = rebuildSlide(session, op.slideIndex)
+    // same fit-to-text rule as a single-element commit, for the elements whose width changed
+    op.items.forEach((item, i) => {
+      if (
+        !item.groupId &&
+        (wasResizeGesture ||
+          widthsBefore[i] !== frameWidthEmu(session, op.slideIndex, item.sourceId))
+      ) {
+        rendered = applyAutofitResize(session, op.slideIndex, item.sourceId, rendered)
+        rendered = syncTableRowHeights(session, op.slideIndex, item.sourceId, rendered)
+      }
     })
-    return r ? rebuildSlide(session, op.slideIndex) : null
+    return rendered
   })
 
   // AI batch surface: raw ops arrive as one transaction — the shared core in
@@ -2466,8 +2578,12 @@ export function registerSlidesIpc(): void {
     const bundle = copySlide(session.opened, slideIndex)
     if (!bundle) return false
     slideClipboard = { bundle, ...(pngBase64 ? { png: pngBase64 } : {}) }
-    // Marker so plain ⌘V knows the latest copy was a slide (element copies / external copies overwrite it)
-    clipboard.writeBuffer('io.genoffice.slides.slide', Buffer.from('1'))
+    // Marker so plain ⌘V knows the latest copy was a slide (element copies / external copies
+    // overwrite it); the page rendering rides along so other apps paste a picture of the slide
+    void writeSystemClipboard({
+      marker: MARKER_SLIDE,
+      ...(pngBase64 ? { png: Buffer.from(pngBase64, 'base64') } : {}),
+    })
     return true
   })
 
@@ -3165,6 +3281,8 @@ export function registerSlidesIpc(): void {
           kind: op.kind,
           row: op.row,
           col: op.col,
+          ...(op.rows != null ? { rows: op.rows } : {}),
+          ...(op.cols != null ? { cols: op.cols } : {}),
         },
       ],
     })
@@ -3186,6 +3304,7 @@ export function registerSlidesIpc(): void {
           kind: op.kind,
           index: op.index,
           ...(op.before ? { before: true } : {}),
+          ...(op.count && op.count > 1 ? { count: op.count } : {}),
         },
       ],
     })
@@ -3201,17 +3320,22 @@ export function registerSlidesIpc(): void {
     if (!session) return null
     const baseWidthPx = session.opened.deck.size.cx / EMU_PER_PX_96
     const scale = op.fitWidthPx / baseWidthPx
-    const r = sessionTxn(session, {
-      ops: [
-        {
-          op: 'setTableRowHeight',
-          target: { slide: op.slideIndex, el: op.sourceId },
-          row: op.row,
-          hEmu: (op.hPx / scale) * EMU_PER_PX_96,
-        },
-      ],
-    })
-    return r ? rebuildSlide(session, op.slideIndex) : null
+    const ok = applyTableGridTxn(
+      session,
+      {
+        ops: [
+          {
+            op: 'setTableRowHeight',
+            target: { slide: op.slideIndex, el: op.sourceId },
+            row: op.row,
+            hEmu: (op.hPx / scale) * EMU_PER_PX_96,
+          },
+        ],
+      },
+      op,
+      journaledTxn,
+    )
+    return ok ? rebuildSlide(session, op.slideIndex) : null
   })
 
   ipcMain.handle('slides:set-table-cell-anchor', (e, op: SetTableCellAnchorOp) => {
@@ -3236,17 +3360,32 @@ export function registerSlidesIpc(): void {
     if (!session) return null
     const baseWidthPx = session.opened.deck.size.cx / EMU_PER_PX_96
     const scale = op.fitWidthPx / baseWidthPx
-    const r = sessionTxn(session, {
-      ops: [
-        {
-          op: 'setTableColWidth',
-          target: { slide: op.slideIndex, el: op.sourceId },
-          col: op.col,
-          wEmu: (op.wPx / scale) * EMU_PER_PX_96,
-        },
-      ],
-    })
-    return r ? rebuildSlide(session, op.slideIndex) : null
+    const ok = applyTableGridTxn(
+      session,
+      {
+        ops: [
+          {
+            op: 'setTableColWidth',
+            target: { slide: op.slideIndex, el: op.sourceId },
+            col: op.col,
+            wEmu: (op.wPx / scale) * EMU_PER_PX_96,
+          },
+          ...(op.neighbor
+            ? [
+                {
+                  op: 'setTableColWidth' as const,
+                  target: { slide: op.slideIndex, el: op.sourceId },
+                  col: op.neighbor.col,
+                  wEmu: (op.neighbor.wPx / scale) * EMU_PER_PX_96,
+                },
+              ]
+            : []),
+        ],
+      },
+      op,
+      journaledTxn,
+    )
+    return ok ? rebuildSlide(session, op.slideIndex) : null
   })
 
   ipcMain.handle('slides:edit-table-style', (e, op: EditTableStyleOp) => {
@@ -3289,6 +3428,33 @@ export function registerSlidesIpc(): void {
             op: 'setChartQuickLayout',
             target: { slide: op.slideIndex, el: op.sourceId },
             layout: op.quickLayout,
+          },
+        ],
+      })
+      if (!r) return null
+      const rebuilt = rebuildSlideWithReparse(session, op.slideIndex)
+      return rebuilt
+        ? {
+            slide: rebuilt,
+            sourceId: session.opened.deck.slides[op.slideIndex]?.elements[elIdx]?.id ?? null,
+          }
+        : null
+    }
+    // Showing/hiding an axis is a focused chart-part edit (only c:delete changes), so
+    // imported charts keep their series formatting and extension XML.
+    if (
+      Object.keys(op).every((key) =>
+        ['slideIndex', 'sourceId', 'catAxisVisible', 'valAxisVisible'].includes(key),
+      ) &&
+      (op.catAxisVisible !== undefined || op.valAxisVisible !== undefined)
+    ) {
+      const r = sessionTxn(session, {
+        ops: [
+          {
+            op: 'setChartAxisVisibility',
+            target: { slide: op.slideIndex, el: op.sourceId },
+            ...(op.catAxisVisible !== undefined ? { cat: op.catAxisVisible } : {}),
+            ...(op.valAxisVisible !== undefined ? { val: op.valAxisVisible } : {}),
           },
         ],
       })
@@ -3596,11 +3762,20 @@ export function registerSlidesIpc(): void {
       return false
     }
   }
+  /** PowerPoint (or another GenOffice process) put native shapes / a table on the clipboard */
+  const hasNativeShapes = () =>
+    readCustomFormat(GVML_FORMAT).length > 0 || readCustomFormat(TABLE_CLIP_FORMAT).length > 0
+  /** HTML that pastes as something better than a flat text run: a table, or formatted text */
+  const hasHtmlTable = () => {
+    const html = clipboard.readHTML()
+    if (!html || html.length > 400_000) return false
+    return /<table\b/i.test(html) || htmlTextToItem(html, { widthEmu: 1 }) !== null
+  }
 
-  ipcMain.handle('slides:clipboard-external', () => {
-    if (slideClipboard && clipboardMarker('io.genoffice.slides.slide')) return { kind: 'slide' }
-    if (elementClipboard && clipboardMarker('io.genoffice.slides.elements'))
-      return { kind: 'internal' }
+  ipcMain.handle('slides:clipboard-external', (_e, skipNative?: boolean) => {
+    if (slideClipboard && clipboardMarker(MARKER_SLIDE)) return { kind: 'slide' }
+    if (elementClipboard && clipboardMarker(MARKER_ELEMENTS)) return { kind: 'internal' }
+    if (!skipNative && (hasNativeShapes() || hasHtmlTable())) return { kind: 'native' }
     const img = clipboard.readImage()
     if (!img.isEmpty()) return { kind: 'image', base64: img.toPNG().toString('base64'), ext: 'png' }
     const text = clipboard.readText()
@@ -3610,28 +3785,57 @@ export function registerSlidesIpc(): void {
 
   // Menu-enable probe: is there anything a paste would act on? (no image decode)
   ipcMain.handle('slides:clipboard-probe', () => {
-    if (slideClipboard && clipboardMarker('io.genoffice.slides.slide')) return true
-    if (elementClipboard && clipboardMarker('io.genoffice.slides.elements')) return true
+    if (slideClipboard && clipboardMarker(MARKER_SLIDE)) return true
+    if (elementClipboard && clipboardMarker(MARKER_ELEMENTS)) return true
+    if (hasNativeShapes() || hasHtmlTable()) return true
     if (clipboard.availableFormats().some((f) => f.startsWith('image/'))) return true
     return clipboard.readText().trim().length > 0
   })
 
-  ipcMain.handle('slides:copy-elements', (e, op: CopyElementsOp) => {
+  ipcMain.handle('slides:copy-elements', async (e, op: CopyElementsOp) => {
     const session = sessions.get(e.sender.id)
     if (!session) return 0
     const slide = session.opened.deck.slides[op.slideIndex]
     if (!slide) return 0
-    const items = op.sourceIds
+    const els = op.sourceIds
       .map((id) => slide.elements.find((el) => el.id === id))
       .filter((el): el is NonNullable<typeof el> => !!el)
-      .map((el) => copyElementData(session.opened, slide, el))
+    // A copied placeholder becomes a free shape that keeps its frame and look (PowerPoint does the same)
+    const items = els.map((el) => copyElementData(session.opened, slide, el, { demotePlaceholder: true }))
     if (items.length) {
       elementClipboard = {
         items,
         cascade: newPasteCascade(op.cut ? null : pageKey(e.sender.id, op.slideIndex)),
       }
-      // Write our marker to the OS clipboard: an external copy overwrites it, so at paste time it tells whether internal or external is newer
-      clipboard.writeBuffer('io.genoffice.slides.elements', Buffer.from('1'))
+      // Every rendition goes on the system clipboard in one write. Our marker tells a later paste
+      // here that this copy is newer than anything external (and that the lossless in-app items
+      // apply); the rest is for other apps: PowerPoint's native shape/table formats paste as
+      // editable objects, plus a picture, plain text, and an HTML table for spreadsheets.
+      try {
+        const external = els.map((el) =>
+          copyElementData(session.opened, slide, el, {
+            demotePlaceholder: true,
+            bakeForExternal: true,
+          }),
+        )
+        const themePath = session.opened.archive.resolveSlideChain(slide.path).themePath
+        const built = await buildNativeClipboard(
+          external,
+          themePath ? session.opened.archive.readText(themePath) : null,
+        )
+        const text = els.map(elementPlainText).filter(Boolean).join('\n')
+        const table = els.length === 1 && els[0]!.type === 'table' ? (els[0] as TableElement) : null
+        await writeSystemClipboard({
+          marker: MARKER_ELEMENTS,
+          ...(built.gvml ? { gvml: built.gvml } : {}),
+          ...(built.table ? { table: built.table } : {}),
+          ...(op.png ? { png: Buffer.from(op.png, 'base64') } : {}),
+          ...(text ? { text } : {}),
+          ...(table ? { html: tableToHtml(table) } : {}),
+        })
+      } catch {
+        clipboard.writeBuffer(MARKER_ELEMENTS, Buffer.from('1'))
+      }
     }
     return items.length
   })
@@ -3667,6 +3871,55 @@ export function registerSlidesIpc(): void {
     return rebuilt ? { slide: rebuilt, sourceIds: r.records![0]!.created! } : null
   })
 
+  // Paste what another app put on the system clipboard as editable elements: PowerPoint's native
+  // shape (GVML) / table packages, or an HTML table (Excel, Numbers, Sheets, web pages). Like
+  // PowerPoint, the pasted selection lands centred on the page; repeats cascade.
+  let externalCascade: { stamp: string; cascade: PasteCascade } | null = null
+  ipcMain.handle('slides:paste-system', async (e, op: PasteElementsOp) => {
+    const session = sessions.get(e.sender.id)
+    if (!session || !session.opened.deck.slides[op.slideIndex]) return null
+    let parsed: ParsedNativeClipboard | null = null
+    let stamp = ''
+    for (const [fmt, parse] of [
+      [GVML_FORMAT, parseGvml],
+      [TABLE_CLIP_FORMAT, parseTableClip],
+    ] as const) {
+      const buf = readCustomFormat(fmt)
+      if (!buf.length) continue
+      parsed = await parse(new Uint8Array(buf))
+      stamp = `${fmt}:${buf.length}:${buf.subarray(0, 48).toString('base64')}`
+      if (parsed) break
+    }
+    if (!parsed) {
+      const html = clipboard.readHTML()
+      const item = /<table\b/i.test(html)
+        ? htmlTableToItem(html, { maxWidthEmu: Math.round(session.opened.deck.size.cx * 0.9) })
+        : htmlTextToItem(html, { widthEmu: Math.round(session.opened.deck.size.cx * 0.6) })
+      if (!item) return null
+      const bbox = itemsBbox([item]) ?? { x: 0, y: 0, cx: 0, cy: 0 }
+      parsed = { items: [item], bbox }
+      stamp = `html:${html.length}:${html.slice(0, 64)}`
+    }
+    if (!externalCascade || externalCascade.stamp !== stamp) {
+      externalCascade = { stamp, cascade: newPasteCascade(null) }
+    }
+    const size = session.opened.deck.size
+    const baseWidthPx = size.cx / EMU_PER_PX_96
+    const scale = op.fitWidthPx / baseWidthPx
+    const target = pageKey(e.sender.id, op.slideIndex)
+    const shift = Math.round((pasteShiftPx(externalCascade.cascade, target) / scale) * EMU_PER_PX_96)
+    const dx = Math.round((size.cx - parsed.bbox.cx) / 2 - parsed.bbox.x) + shift
+    const dy = Math.round((size.cy - parsed.bbox.cy) / 2 - parsed.bbox.y) + shift
+    const r = sessionTxn(session, {
+      ops: [{ op: 'pasteElements', target: { slide: op.slideIndex }, items: parsed.items, dx, dy }],
+    })
+    if (!r) return null
+    recordPaste(externalCascade.cascade, target)
+    session.fitWidthPx = op.fitWidthPx
+    const rebuilt = rebuildSlide(session, op.slideIndex)
+    return rebuilt ? { slide: rebuilt, sourceIds: r.records![0]!.created! } : null
+  })
+
   // Duplicate in place (⌘D / Option+drag copy): does not touch the app clipboard; the caller supplies the offset
   ipcMain.handle('slides:duplicate-elements', (e, op: DuplicateElementsOp) => {
     const session = sessions.get(e.sender.id)
@@ -3676,7 +3929,7 @@ export function registerSlidesIpc(): void {
     const items = op.sourceIds
       .map((id) => slide.elements.find((el) => el.id === id))
       .filter((el): el is NonNullable<typeof el> => !!el)
-      .map((el) => copyElementData(session.opened, slide, el))
+      .map((el) => copyElementData(session.opened, slide, el, { demotePlaceholder: true }))
     if (!items.length) return null
     const baseWidthPx = session.opened.deck.size.cx / EMU_PER_PX_96
     const scale = op.fitWidthPx / baseWidthPx
@@ -3983,10 +4236,24 @@ export function registerSlidesIpc(): void {
     const el = slide.elements.find((x) => x.id === sourceId)
     if (!el || el.type !== 'picture') return null
     const media = (
-      el as { media?: { kind: 'video' | 'audio'; target?: string; external?: boolean } }
+      el as {
+        media?: {
+          kind: 'video' | 'audio'
+          target?: string
+          external?: boolean
+          autoPlay?: boolean
+          loop?: boolean
+          trim?: { startMs?: number; endMs?: number }
+        }
+      }
     ).media
     if (!media?.target) return null
-    if (media.external) return { kind: media.kind, dataUrl: media.target }
+    const extra = {
+      ...(media.autoPlay ? { autoPlay: true } : {}),
+      ...(media.loop ? { loop: true } : {}),
+      ...(media.trim ? { trim: media.trim } : {}),
+    }
+    if (media.external) return { kind: media.kind, dataUrl: media.target, ...extra }
     const bytes = session.opened.archive.readBytes(media.target)
     if (!bytes) return null
     const ext = media.target.split('.').pop()?.toLowerCase() ?? ''
@@ -3994,6 +4261,7 @@ export function registerSlidesIpc(): void {
     return {
       kind: media.kind,
       dataUrl: `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`,
+      ...extra,
     }
   })
 
@@ -4564,11 +4832,12 @@ export function registerSlidesIpc(): void {
     return true
   })
 
-  ipcMain.handle('slides:history-batch-end', (e) => {
+  ipcMain.handle('slides:history-batch-end', (e, opts?: { snapshot?: boolean }) => {
     const session = sessions.get(e.sender.id)
     if (!session) return null
     const before = endHistoryBatch(session)
-    return before ? registerAiSnapshot(session, before) : null
+    // UI gesture groups (withHistoryGroup) only want the collapse; the AI panel also wants a rollback point
+    return before && opts?.snapshot !== false ? registerAiSnapshot(session, before) : null
   })
 
   ipcMain.handle('slides:ai-snapshot-restore', (e, id: number) => {
@@ -4583,10 +4852,7 @@ export function registerSlidesIpc(): void {
     const session = sessions.get(e.sender.id)
     // Undo disabled in master view: the masterEdit.slide model cannot roll back with snapshots (v1 trade-off; undoable after exiting)
     if (!session || session.masterEdit) return null
-    settleStaleHistoryBatch(session)
-    if (session.undoStack.length === 0) return null
-    session.redoStack.push(takeSnapshot(session))
-    restoreSnapshot(session, session.undoStack.pop()!)
+    if (!undoStep(session)) return null
     scheduleHistoryNotify(session)
     scheduleDeckBroadcast(session)
     return buildAllRenderSlides(session.opened, session.fitWidthPx)
@@ -4595,10 +4861,7 @@ export function registerSlidesIpc(): void {
   ipcMain.handle('slides:redo', (e) => {
     const session = sessions.get(e.sender.id)
     if (!session || session.masterEdit) return null
-    settleStaleHistoryBatch(session)
-    if (session.redoStack.length === 0) return null
-    session.undoStack.push(takeSnapshot(session))
-    restoreSnapshot(session, session.redoStack.pop()!)
+    if (!redoStep(session)) return null
     scheduleHistoryNotify(session)
     scheduleDeckBroadcast(session)
     return buildAllRenderSlides(session.opened, session.fitWidthPx)
@@ -4627,6 +4890,7 @@ export function registerSlidesIpc(): void {
       slidesOpenedHook?.(e.sender, session.path)
     }
     try {
+      syncAllTableHeights(session)
       await savePptxToFile(session.opened, session.path)
       autosaveBackoff.delete(session.path)
       void rm(autosavePathFor(session.path), { force: true }).catch(() => {})
@@ -4667,6 +4931,7 @@ export function registerSlidesIpc(): void {
     const r = await showSaveDialogWithMemory(dialog, parent, options, getDraftsDir())
     if (r.canceled || !r.filePath) return { ok: false }
     try {
+      syncAllTableHeights(session)
       await savePptxToFile(session.opened, r.filePath)
       session.path = r.filePath
       autosaveBackoff.delete(r.filePath)

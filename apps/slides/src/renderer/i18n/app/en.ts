@@ -150,6 +150,7 @@ export const en = {
   appCtxCellAnchorMiddle: 'Center Text Vertically',
   appCtxCellAnchorBottom: 'Align Text Bottom',
   appStatusMergeFailed: 'Cannot merge/split this cell',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Preparing to print…',
   appPrintTitle: 'Print',
   appPrintLayoutFull: 'Full Page Slides',

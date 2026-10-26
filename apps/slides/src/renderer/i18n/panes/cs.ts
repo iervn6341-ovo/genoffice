@@ -335,4 +335,10 @@ export const cs = {
   paneShowEnded: 'Konec prezentace.',
   paneShowRehearseTip: 'Vyzkoušet časování: čas na tomto snímku / celkový čas',
   paneShowRehearseTotal: 'Celkem {time}',
+  paneShowVideoPlay: 'Přehrát',
+  paneShowVideoPause: 'Pozastavit',
+  paneShowVideoSeek: 'Časová osa',
+  paneShowVideoVolume: 'Hlasitost',
+  paneShowVideoMute: 'Ztlumit',
+  paneShowVideoUnmute: 'Zrušit ztlumení',
 } satisfies Record<keyof typeof zh, string>

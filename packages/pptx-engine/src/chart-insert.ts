@@ -41,6 +41,9 @@ export interface ChartStyleOptions {
   gridlines?: boolean
   catAxisTitle?: string
   valAxisTitle?: string
+  /** Hide the primary category / value axis (c:delete val="1"); its scale still applies */
+  catAxisHidden?: boolean
+  valAxisHidden?: boolean
   /** Gap between bars (% of bar width, c:gapWidth, PowerPoint default 150) */
   gapWidthPct?: number
 }
@@ -290,7 +293,21 @@ export function buildChartSpaceXml(opts: NewChartOptions): string {
     legend +
     '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>' +
     '</c:chartSpace>'
-  return injectSeriesColors(xml, opts)
+  return hidePrimaryAxes(injectSeriesColors(xml, opts), opts)
+}
+
+/** Primary category axis = axId 111111111, primary value axis = axId 222222222 in every kind built here. */
+function hidePrimaryAxes(xml: string, opts: ChartStyleOptions): string {
+  let out = xml
+  const hide = (axId: string) => {
+    out = out.replace(
+      new RegExp(`(<c:(?:catAx|valAx|dateAx)><c:axId val="${axId}"/>.*?<c:delete val=")0("/>)`, 's'),
+      (_m, head: string, tail: string) => `${head}1${tail}`,
+    )
+  }
+  if (opts.catAxisHidden) hide('111111111')
+  if (opts.valAxisHidden) hide('222222222')
+  return out
 }
 
 /**

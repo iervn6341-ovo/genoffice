@@ -1080,17 +1080,59 @@ function parsePicture(
   const clrChange = parseClrChange(blip, ctx)
   const lum = parseLum(blip)
   const biLevel = parseBiLevel(blip)
-  // Audio/video: a:videoFile/a:audioFile under p:nvPr; blipFill is the poster frame
+  // Audio/video: a:videoFile/a:audioFile or p14:media under p:nvPr; blipFill is the poster frame
   const nvPr = node['p:nvPicPr']?.['p:nvPr']
   const avNode = nvPr?.['a:videoFile'] ?? nvPr?.['a:audioFile']
+  let p14MediaNode: Record<string, unknown> | undefined
+  const extList = nvPr?.['p:extLst']?.['p:ext']
+  const exts = Array.isArray(extList) ? extList : extList ? [extList] : []
+  for (const ext of exts) {
+    if (ext && typeof ext === 'object') {
+      const p14 =
+        (ext as Record<string, unknown>)['p14:media'] ?? (ext as Record<string, unknown>)['media']
+      if (p14 && typeof p14 === 'object') {
+        p14MediaNode = p14 as Record<string, unknown>
+        break
+      }
+    }
+  }
+
   let media: PictureElement['media']
-  if (avNode !== undefined) {
-    const kind = nvPr?.['a:videoFile'] !== undefined ? ('video' as const) : ('audio' as const)
-    const link = avNode?.['@_r:link']
+  if (avNode !== undefined || p14MediaNode !== undefined) {
+    const kind =
+      nvPr?.['a:audioFile'] !== undefined && nvPr?.['a:videoFile'] === undefined
+        ? ('audio' as const)
+        : ('video' as const)
+    const link = avNode?.['@_r:link'] ?? p14MediaNode?.['@_r:embed']
     const rel = link ? ctx.avRels?.get(String(link)) : undefined
+    const autoPlay =
+      p14MediaNode?.['@_autoPlay'] === '1' ||
+      p14MediaNode?.['@_autoPlay'] === 'true' ||
+      p14MediaNode?.['@_autoPlay'] === true
+    const loop =
+      p14MediaNode?.['@_loop'] === '1' ||
+      p14MediaNode?.['@_loop'] === 'true' ||
+      p14MediaNode?.['@_loop'] === true
+    const trimNode = (p14MediaNode?.['p14:trim'] ?? p14MediaNode?.['trim']) as
+      | Record<string, unknown>
+      | undefined
+    let trim: { startMs?: number; endMs?: number } | undefined
+    if (trimNode && typeof trimNode === 'object') {
+      const st = Number(trimNode['@_st'] ?? trimNode['@_start'])
+      const end = Number(trimNode['@_end'])
+      if (Number.isFinite(st) || Number.isFinite(end)) {
+        trim = {
+          ...(Number.isFinite(st) ? { startMs: st } : {}),
+          ...(Number.isFinite(end) ? { endMs: end } : {}),
+        }
+      }
+    }
     media = {
       kind,
       ...(rel ? { target: rel.target, ...(rel.external ? { external: true } : {}) } : {}),
+      ...(autoPlay ? { autoPlay: true } : {}),
+      ...(loop ? { loop: true } : {}),
+      ...(trim ? { trim } : {}),
     }
   }
   return {

@@ -4,7 +4,11 @@
  * highlight stays and repeated clicks keep working.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
-import { resizeSelectionFont, setSelectionFontSizePt } from '../src/renderer/TextEditOverlay'
+import {
+  liveFontSize,
+  resizeSelectionFont,
+  setSelectionFontSizePt,
+} from '../src/renderer/TextEditOverlay'
 
 // jsdom has no execCommand: emulate the browser product — wrap the selection in <font size="7">.
 // An element-only selection (what reselectSpans produces) wraps that element's contents, matching
@@ -73,14 +77,27 @@ describe('resizeSelectionFont ladder stepping', () => {
     expect(currentSizePx(root)).toBe((44 * 96) / 72)
   })
 
-  it('steps ±10pt beyond the ladder and clamps at 8pt', () => {
+  it('steps ±10pt beyond the ladder and clamps at 1pt', () => {
     const { root } = setupEditor((100 * 96) / 72)
     resizeSelectionFont(1)
     expect(currentSizePx(root)).toBe((110 * 96) / 72)
 
     const { root: small } = setupEditor((8 * 96) / 72)
     resizeSelectionFont(-1)
-    expect(currentSizePx(small)).toBe((8 * 96) / 72)
+    expect(currentSizePx(small)).toBe((7 * 96) / 72)
+
+    const { root: tiny } = setupEditor((1 * 96) / 72)
+    resizeSelectionFont(-1)
+    expect(currentSizePx(tiny)).toBe((1 * 96) / 72)
+  })
+
+  it('a size with px rounding noise still moves a whole stop on every click', () => {
+    // 12pt authored, read back from layout as 15.999px → must not read as "just under 12 → 12"
+    const { root } = setupEditor(15.999)
+    resizeSelectionFont(1)
+    expect(currentSizePx(root)).toBe((14 * 96) / 72)
+    resizeSelectionFont(1)
+    expect(currentSizePx(root)).toBe((16 * 96) / 72)
   })
 
   it('keeps the text selected after each step', () => {
@@ -101,5 +118,78 @@ describe('setSelectionFontSizePt', () => {
     const sel = window.getSelection()!
     expect(sel.isCollapsed).toBe(false)
     expect(sel.toString()).toBe('Annual timeline')
+  })
+})
+
+describe('liveFontSize (ribbon size box while editing)', () => {
+  // The editor DOM carries [data-src-para] paragraph blocks; norm = viewport px per model px
+  function paraEditor(
+    runs: Array<{ text: string; px: number }>,
+    norm = 1,
+  ): { root: HTMLElement; spans: HTMLElement[] } {
+    const root = document.createElement('div')
+    root.tabIndex = 0
+    root.dataset.norm = String(norm)
+    Object.defineProperty(root, 'isContentEditable', { value: true })
+    const para = document.createElement('div')
+    para.setAttribute('data-src-para', '0')
+    const spans = runs.map((r) => {
+      const span = document.createElement('span')
+      span.style.fontSize = `${r.px}px`
+      span.textContent = r.text
+      para.appendChild(span)
+      return span
+    })
+    root.appendChild(para)
+    document.body.appendChild(root)
+    root.focus()
+    return { root, spans }
+  }
+  const select = (from: Node, to: Node) => {
+    const range = document.createRange()
+    range.setStartBefore(from)
+    range.setEndAfter(to)
+    const sel = window.getSelection()!
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+
+  it('reads the selected run, not the element the selection happens to sit in', () => {
+    const { spans } = paraEditor([{ text: 'Alpha', px: 16 }]) // 12pt
+    select(spans[0]!, spans[0]!)
+    expect(liveFontSize()).toEqual({ sizePt: 12, mixed: false })
+    resizeSelectionFont(1)
+    // the selection now sits at the paragraph (parent of the new span): still the new size
+    expect(liveFontSize()).toEqual({ sizePt: 14, mixed: false })
+    resizeSelectionFont(1)
+    expect(liveFontSize()).toEqual({ sizePt: 16, mixed: false })
+    resizeSelectionFont(-1)
+    expect(liveFontSize()).toEqual({ sizePt: 14, mixed: false })
+  })
+
+  it('divides the viewport scale out (norm) and rounds to half points', () => {
+    const { spans } = paraEditor([{ text: 'Alpha', px: 16 * 1.5 + 0.1 }], 1.5)
+    select(spans[0]!, spans[0]!)
+    expect(liveFontSize()).toEqual({ sizePt: 12, mixed: false })
+  })
+
+  it('a mixed selection reports the smallest size and flags it', () => {
+    const { spans } = paraEditor([
+      { text: 'Alpha', px: 16 },
+      { text: 'Beta', px: 24 },
+    ])
+    select(spans[0]!, spans[1]!)
+    expect(liveFontSize()).toEqual({ sizePt: 12, mixed: true })
+  })
+
+  it('a caret reads the size it will type with', () => {
+    const { spans } = paraEditor([{ text: 'Alpha', px: 24 }])
+    const range = document.createRange()
+    range.setStart(spans[0]!.firstChild!, 2)
+    range.collapse(true)
+    const sel = window.getSelection()!
+    sel.removeAllRanges()
+    sel.addRange(range)
+    expect(liveFontSize()).toEqual({ sizePt: 18, mixed: false })
   })
 })

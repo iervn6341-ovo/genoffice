@@ -572,7 +572,14 @@ export interface PictureElement extends ElementBase {
    * Audio/video (a:videoFile/a:audioFile under p:nvPr): blipFill is the poster
    * frame; target is the media file's zip path or an external URL (external).
    */
-  media?: { kind: 'video' | 'audio'; target?: string; external?: boolean }
+  media?: {
+    kind: 'video' | 'audio'
+    target?: string
+    external?: boolean
+    autoPlay?: boolean
+    loop?: boolean
+    trim?: { startMs?: number; endMs?: number }
+  }
   /** Picture outline geometry <a:prstGeom> (ellipse avatars/rounded-corner frames etc. from picture styles; rect omitted) */
   presetGeometry?: string
   adjust?: Record<string, number>

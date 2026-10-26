@@ -148,6 +148,7 @@ export const ar = {
   appCtxCellAnchorMiddle: 'توسيط النص عموديًا',
   appCtxCellAnchorBottom: 'محاذاة النص لأسفل',
   appStatusMergeFailed: 'تعذر دمج/تقسيم هذه الخلية',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'جارٍ التحضير للطباعة…',
   appPrintTitle: 'طباعة',
   appPrintLayoutFull: 'شرائح بحجم الصفحة',

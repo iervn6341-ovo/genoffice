@@ -1,7 +1,9 @@
 import type { TableRenderNode } from '@genoffice/pptx-render'
 import { describe, expect, it } from 'vitest'
 import {
+  TABLE_BORDER_GRIP_PX,
   tableCellAtPoint,
+  tableCellInterior,
   tableCellOverlayBox,
   tableLocalPointFromStage,
 } from '../src/renderer/table-hit'
@@ -55,5 +57,33 @@ describe('table cell hit testing', () => {
       { x: 60, y: 40, w: 60, h: 40 },
     )
     expect(overlay).toMatchObject({ x: 110, y: 100, w: 60, h: 40, rotationDeg: 90 })
+  })
+})
+
+describe('tableCellInterior (cell body vs. border grip)', () => {
+  const gap = TABLE_BORDER_GRIP_PX
+
+  it('returns the cell for a press well inside it', () => {
+    expect(tableCellInterior(makeTable(), { x: 30, y: 20 }, gap)).toMatchObject({ row: 0, col: 0 })
+    expect(tableCellInterior(makeTable(), { x: 90, y: 60 }, gap)).toMatchObject({ row: 1, col: 1 })
+  })
+
+  it('treats a press on a cell border or the table frame as the move grip (no cell)', () => {
+    const t = makeTable()
+    expect(tableCellInterior(t, { x: 60, y: 20 }, gap)).toBeUndefined() // shared column border
+    expect(tableCellInterior(t, { x: 58, y: 20 }, gap)).toBeUndefined() // within the band
+    expect(tableCellInterior(t, { x: 30, y: 40 }, gap)).toBeUndefined() // shared row border
+    expect(tableCellInterior(t, { x: 1, y: 20 }, gap)).toBeUndefined() // outer frame
+    expect(tableCellInterior(t, { x: 30, y: 79 }, gap)).toBeUndefined()
+  })
+
+  it('returns nothing outside the table', () => {
+    expect(tableCellInterior(makeTable(), { x: 500, y: 500 }, gap)).toBeUndefined()
+  })
+
+  it('scales the band with the gap argument (zoomed-out canvas = larger slide-px band)', () => {
+    const t = makeTable()
+    expect(tableCellInterior(t, { x: 10, y: 20 }, 5)).toBeDefined()
+    expect(tableCellInterior(t, { x: 10, y: 20 }, 12)).toBeUndefined()
   })
 })

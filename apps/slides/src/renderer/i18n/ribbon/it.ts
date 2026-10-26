@@ -224,6 +224,8 @@ export const it = {
   ribbonFlipH: 'Capovolgi orizzontalmente',
   ribbonFlipV: 'Capovolgi verticalmente',
   ribbonDistributeHint: '{title} (seleziona almeno 3 elementi)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: "Mostra o nascondi il pannello dell'Assistente IA",
   ribbonGroupTable: 'Tabella',
@@ -517,6 +519,8 @@ export const it = {
   ribbonRuler: 'Righello',
   ribbonRulerTip: 'Mostra o nascondi il righello (pollici)',
   ribbonGridlines: 'Griglia',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Mostra o nascondi la griglia (griglia di mezzo pollice)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

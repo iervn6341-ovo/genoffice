@@ -5233,6 +5233,10 @@ body.vib .slide-list {
   border-radius: 6px;
   box-shadow: var(--slides-shadow-menu);
   padding: 4px;
+  /* Taller than the window (29-item table menu): cap and scroll instead of clipping. */
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .shape-gallery-pop {
@@ -9878,6 +9882,13 @@ body.show-curtain::after {
   user-select: none;
   pointer-events: none;
 }
+/* Selection kept while a ribbon / pane field holds focus (CSS Custom Highlight API, see
+   paintKeptSelection): the text still reads as selected, like PowerPoint's inactive selection */
+::highlight(go-kept-selection) {
+  background-color: Highlight;
+  color: HighlightText;
+}
+
 /* Dark content preview (dark-content.ts): screen-only repaint of the authored inline colors via
    --dk-* twins; the inline declarations stay authored, so commit still reads the real colors. */
 .slide-text-editor.dk {
@@ -10329,4 +10340,14 @@ body.show-curtain::after {
   padding: 2px 6px;
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* Table cell-range selection (components/TableCellLayer.tsx): the press-to-select row / column /
+   table handles show on hover, in the chrome color the layer picked for the slide behind them */
+.tcl-gutter {
+  cursor: pointer;
+  border-radius: 1px;
+}
+.tcl-gutter:hover {
+  background: var(--tcl-gutter);
 }

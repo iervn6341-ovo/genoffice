@@ -39,6 +39,7 @@ import {
 } from '../edit-text'
 import {
   GuidedError,
+  optionalCells,
   register,
   requireFinite,
   requireHexColor,
@@ -233,6 +234,7 @@ register({
 register({
   name: 'setFont',
   validate(op, ctx) {
+    optionalCells(op)
     if (typeof op.font !== 'object' || op.font === null) {
       throw new GuidedError('op "setFont" needs "font": an ElementFontPatch object.')
     }
@@ -299,7 +301,7 @@ register({
       ok = setGroupChildFont(slide, groupId, id, font)
     } else {
       id = resolveElement(ctx, op, { allowPart: true }).el.id
-      ok = setElementFont(slide, id, font)
+      ok = setElementFont(slide, id, font, optionalCells(op))
     }
     if (!ok) {
       throw new GuidedError(`op "setFont": element "${id}" has no editable text to format.`)
@@ -312,6 +314,7 @@ register({
 register({
   name: 'setParagraphFormat',
   validate(op, ctx) {
+    optionalCells(op)
     if (typeof op.format !== 'object' || op.format === null) {
       throw new GuidedError(
         'op "setParagraphFormat" needs "format": a ParagraphFormatPatch object.',
@@ -386,7 +389,7 @@ register({
       ok = setGroupChildParagraphFormat(slide, groupId, id, format)
     } else {
       id = resolveElement(ctx, op, { allowPart: true }).el.id
-      ok = setElementParagraphFormat(slide, id, format)
+      ok = setElementParagraphFormat(slide, id, format, undefined, optionalCells(op))
     }
     if (!ok) {
       throw new GuidedError(`op "setParagraphFormat": element "${id}" has no paragraphs to format.`)

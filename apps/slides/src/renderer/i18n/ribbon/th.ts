@@ -219,6 +219,8 @@ export const th = {
   ribbonFlipH: 'พลิกแนวนอน',
   ribbonFlipV: 'พลิกแนวตั้ง',
   ribbonDistributeHint: '{title} (ต้องเลือกองค์ประกอบอย่างน้อย 3 รายการ)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'แสดง/ซ่อนแผงผู้ช่วย AI',
   ribbonGroupTable: 'ตาราง',
@@ -488,6 +490,8 @@ export const th = {
   ribbonRuler: 'ไม้บรรทัด',
   ribbonRulerTip: 'แสดง/ซ่อนไม้บรรทัด (นิ้ว)',
   ribbonGridlines: 'เส้นตาราง',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'แสดง/ซ่อนเส้นตาราง (ตารางครึ่งนิ้ว)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

@@ -337,4 +337,10 @@ export const es = {
   paneShowEnded: 'Fin de la presentación.',
   paneShowRehearseTip: 'Ensayar intervalos: tiempo en esta diapositiva / tiempo total',
   paneShowRehearseTotal: 'Total {time}',
+  paneShowVideoPlay: 'Reproducir',
+  paneShowVideoPause: 'Pausa',
+  paneShowVideoSeek: 'Línea de tiempo',
+  paneShowVideoVolume: 'Volumen',
+  paneShowVideoMute: 'Silenciar',
+  paneShowVideoUnmute: 'Activar sonido',
 } satisfies Record<keyof typeof zh, string>

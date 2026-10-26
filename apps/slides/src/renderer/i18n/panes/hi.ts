@@ -336,4 +336,10 @@ export const hi = {
   paneShowEnded: 'स्लाइड शो समाप्त।',
   paneShowRehearseTip: 'समय का पूर्वाभ्यास: इस स्लाइड पर समय / कुल समय',
   paneShowRehearseTotal: 'कुल {time}',
+  paneShowVideoPlay: 'चलाएँ',
+  paneShowVideoPause: 'रोकें',
+  paneShowVideoSeek: 'टाइमलाइन',
+  paneShowVideoVolume: 'वॉल्यूम',
+  paneShowVideoMute: 'म्यूट करें',
+  paneShowVideoUnmute: 'अनम्यूट करें',
 } satisfies Record<keyof typeof zh, string>

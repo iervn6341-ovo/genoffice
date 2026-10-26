@@ -19,6 +19,7 @@ import type {
 import type { BrushFormat } from './format-brush'
 import type { InkTool } from './ink'
 import type { SlidesViewMode } from './components/ribbon-shared'
+import type { CellAddr, TableCellSel } from './table-selection'
 import type { ShowScreen } from './show-screen'
 import type { CustomShow } from './slideshow-utils'
 
@@ -44,6 +45,8 @@ export interface EditingCellState {
   sourceId: string
   row: number
   col: number
+  /** Typed straight onto a selected cell: its text is replaced by this first character */
+  replaceWith?: string
 }
 
 export interface SlideShowState {
@@ -134,6 +137,12 @@ export interface ActionCtx {
   setEditing: Set<EditingState | null>
   editingCell: EditingCellState | null
   setEditingCell: Set<EditingCellState | null>
+  /** Table cell-range selection (the table itself stays the selected element) */
+  cellSel: TableCellSel | null
+  setCellSel: Set<TableCellSel | null>
+  /** Cells (row, tc index) the table commands act on — the range selection or the cell being
+   *  edited; null = no cell scope, so a table command takes the whole table */
+  tableCells: CellAddr[] | null
   /** The caret is in the notes pane: text commands act on its selection */
   editingNotes: boolean
   enteredGroupId: string | null

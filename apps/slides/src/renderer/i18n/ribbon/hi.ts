@@ -218,6 +218,8 @@ export const hi = {
   ribbonFlipH: 'क्षैतिज पलटें',
   ribbonFlipV: 'लंबवत पलटें',
   ribbonDistributeHint: '{title} (3 या अधिक तत्व चुनें)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'AI सहायक पैनल दिखाएँ या छिपाएँ',
   ribbonGroupTable: 'तालिका',
@@ -503,6 +505,8 @@ export const hi = {
   ribbonRuler: 'रूलर',
   ribbonRulerTip: 'रूलर दिखाएँ या छिपाएँ (इंच)',
   ribbonGridlines: 'ग्रिडलाइन',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'ग्रिडलाइन दिखाएँ या छिपाएँ (आधा इंच ग्रिड)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

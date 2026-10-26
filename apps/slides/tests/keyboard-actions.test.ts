@@ -259,3 +259,117 @@ describe('Delete/Backspace on the thumbnail pane', () => {
     expect(slideActions.deleteSlideAt).not.toHaveBeenCalled()
   })
 })
+
+describe('arrow-key nudge of a multi-selection', () => {
+  const boxOf = (x: number, y: number) => ({ x, y, w: 100, h: 50, rotationDeg: 0 })
+  const nodes: Record<string, ReturnType<typeof boxOf>> = {
+    a: boxOf(10, 10),
+    b: boxOf(200, 40),
+    c: boxOf(300, 80),
+  }
+  const make = (onTransform: (...a: unknown[]) => Promise<void>) =>
+    makeCtx({
+      selectedIds: ['a', 'b', 'c'],
+      findNodeCtx: (id: string) => (nodes[id] ? { node: { box: nodes[id] } } : null),
+      onTransform,
+    })
+
+  it('hands every selected element to onTransform in the same keypress', () => {
+    const onTransform = vi.fn((..._a: unknown[]) => Promise.resolve())
+    handleGlobalKeydown(make(onTransform), keydown('ArrowRight', { metaKey: false }))
+    expect(onTransform.mock.calls.map((c: unknown[]) => [c[0], (c[1] as { x: number }).x])).toEqual(
+      [
+        ['a', 11],
+        ['b', 201],
+        ['c', 301],
+      ],
+    )
+  })
+
+  it('shift moves by 10 and keeps size and rotation', () => {
+    const onTransform = vi.fn((..._a: unknown[]) => Promise.resolve())
+    handleGlobalKeydown(make(onTransform), keydown('ArrowDown', { metaKey: false, shiftKey: true }))
+    expect(onTransform.mock.calls[0]![1]).toEqual({ x: 10, y: 20, w: 100, h: 50, rotationDeg: 0 })
+  })
+
+  it('a quick second press steps from the box already requested, not the stale render', async () => {
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((r) => (release = r))
+    const onTransform = vi.fn((..._a: unknown[]) => gate)
+    const ctx = make(onTransform)
+    handleGlobalKeydown(ctx, keydown('ArrowLeft', { metaKey: false }))
+    handleGlobalKeydown(ctx, keydown('ArrowLeft', { metaKey: false }))
+    const second = onTransform.mock.calls.slice(3).map((c: unknown[]) => (c[1] as { x: number }).x)
+    expect(second).toEqual([8, 198, 298])
+    release()
+    await gate
+    await Promise.resolve()
+    // once the nudges landed, the next press starts from the rendered box again
+    handleGlobalKeydown(ctx, keydown('ArrowLeft', { metaKey: false }))
+    expect((onTransform.mock.calls[6]![1] as { x: number }).x).toBe(9)
+  })
+})
+
+describe('Esc drops the element selection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    document.body.innerHTML = ''
+  })
+
+  it('clears the selection when elements are selected', () => {
+    const setSelectedIds = vi.fn()
+    const ctx = makeCtx({ selectedIds: ['a', 'b'], setSelectedIds })
+    const e = keydown('Escape', { metaKey: false })
+    handleGlobalKeydown(ctx, e, 'MacIntel')
+    expect(setSelectedIds).toHaveBeenCalledWith([])
+    expect(e.defaultPrevented).toBe(true)
+  })
+
+  it('leaves in-group editing first (group stays selected)', () => {
+    const setSelectedIds = vi.fn()
+    const ctx = makeCtx({
+      selectedIds: ['child'],
+      enteredGroupId: 'g1',
+      setSelectedIds,
+      setEnteredGroupId: vi.fn(),
+    })
+    handleGlobalKeydown(ctx, keydown('Escape', { metaKey: false }), 'MacIntel')
+    expect(setSelectedIds).toHaveBeenCalledWith(['g1'])
+  })
+
+  it('does nothing while a menu is open (Esc closes the menu only)', () => {
+    const menu = document.createElement('div')
+    menu.className = 'ctx-menu'
+    document.body.appendChild(menu)
+    const setSelectedIds = vi.fn()
+    const ctx = makeCtx({ selectedIds: ['a'], setSelectedIds })
+    handleGlobalKeydown(ctx, keydown('Escape', { metaKey: false }), 'MacIntel')
+    expect(setSelectedIds).not.toHaveBeenCalled()
+  })
+
+  it('does nothing while editing text or typing in a field', () => {
+    const setSelectedIds = vi.fn()
+    handleGlobalKeydown(
+      makeCtx({ selectedIds: ['a'], editing: { sourceId: 'a' }, setSelectedIds }),
+      keydown('Escape', { metaKey: false }),
+      'MacIntel',
+    )
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    input.focus()
+    handleGlobalKeydown(
+      makeCtx({ selectedIds: ['a'], setSelectedIds }),
+      keydown('Escape', { metaKey: false }),
+      'MacIntel',
+    )
+    expect(setSelectedIds).not.toHaveBeenCalled()
+  })
+
+  it('with nothing selected it is a no-op', () => {
+    const setSelectedIds = vi.fn()
+    const e = keydown('Escape', { metaKey: false })
+    handleGlobalKeydown(makeCtx({ selectedIds: [], setSelectedIds }), e, 'MacIntel')
+    expect(setSelectedIds).not.toHaveBeenCalled()
+    expect(e.defaultPrevented).toBe(false)
+  })
+})

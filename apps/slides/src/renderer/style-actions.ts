@@ -3,7 +3,7 @@
  * format, fill/stroke, background, theme, table style, and chart edits.
  * Functions read the latest App state through ActionCtx.
  */
-import type { RenderSlide, ShapeRenderNode } from '@genoffice/pptx-render'
+import type { RenderSlide, ShapeRenderNode, TableRenderNode } from '@genoffice/pptx-render'
 import type { TextCaseMode } from '@genoffice/pptx-engine/text-case'
 import type {
   EditBackgroundOp,
@@ -14,6 +14,7 @@ import type {
 } from '../shared/ipc'
 import type { ActionCtx } from './action-context'
 import { FIT_WIDTH } from './app-constants'
+import { withHistoryGroup } from './history-group'
 import {
   applySelectionFontFamily,
   applySelectionParagraphFormat,
@@ -34,6 +35,31 @@ function typing(ctx: ActionCtx): boolean {
   return !!(ctx.editing || ctx.editingCell || ctx.editingNotes)
 }
 
+/** `cells` scope for a table that has a cell-range selection (spread into a font/paragraph op) */
+function cellScope(ctx: ActionCtx): { cells?: Array<{ row: number; col: number }> } {
+  return ctx.selectedNode?.type === 'table' && ctx.tableCells?.length
+    ? { cells: ctx.tableCells }
+    : {}
+}
+
+/** Non-bullet runs a toggle judges by: the text of the box, or of the selected cells of a table */
+function judgedRuns(ctx: ActionCtx, id: string) {
+  const node = ctx.findNodeCtx(id)?.node
+  if (node?.type === 'table') {
+    const cells = ctx.tableCells
+    return (node as TableRenderNode).cells
+      .filter((c) => !cells || cells.some((x) => x.row === c.row && x.col === c.col))
+      .flatMap((c) => c.text?.lines ?? [])
+      .flatMap((l) => l.runs)
+      .filter((r) => !r.isBullet && r.text.trim())
+  }
+  const text =
+    node && (node.type === 'text' || node.type === 'shape')
+      ? (node as ShapeRenderNode).text
+      : undefined
+  return text?.lines.flatMap((l) => l.runs).filter((r) => !r.isBullet && r.text.trim()) ?? []
+}
+
 export function onFormat(ctx: ActionCtx, cmd: FormatCmd): void {
   if (typing(ctx) || !ELEMENT_FORMAT_CMDS.has(cmd)) {
     if (cmd === 'fontSizeUp') resizeSelectionFont(1)
@@ -50,13 +76,7 @@ export function onFormat(ctx: ActionCtx, cmd: FormatCmd): void {
     const sign = cmd === 'superscript' ? 1 : -1
     let allOn = true
     for (const id of ctx.selectedIds) {
-      const node = ctx.findNodeCtx(id)?.node
-      const text =
-        node && (node.type === 'text' || node.type === 'shape')
-          ? (node as ShapeRenderNode).text
-          : undefined
-      const runs =
-        text?.lines.flatMap((l) => l.runs).filter((r) => !r.isBullet && r.text.trim()) ?? []
+      const runs = judgedRuns(ctx, id)
       if (!runs.length || runs.some((r) => Math.sign(r.baselinePct ?? 0) !== sign)) allOn = false
     }
     patch = { baseline: allOn ? 0 : cmd === 'superscript' ? 30 : -25 }
@@ -68,6 +88,7 @@ export function onFormat(ctx: ActionCtx, cmd: FormatCmd): void {
       sourceIds: ctx.selectedIds,
       ...patch,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -86,6 +107,7 @@ export function onFontFamily(ctx: ActionCtx, family: string): void {
       sourceIds: ctx.selectedIds,
       fontFamily: family,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -103,6 +125,7 @@ export function onFontSize(ctx: ActionCtx, pt: number): void {
       sourceIds: ctx.selectedIds,
       fontSizePt: pt,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -129,6 +152,7 @@ export function onAlign(ctx: ActionCtx, align: 'left' | 'center' | 'right' | 'ju
       sourceIds: ctx.selectedIds,
       align,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -141,13 +165,7 @@ export function onTextToggle(
   if (!ctx.selectedIds.length) return
   let allOn = true
   for (const id of ctx.selectedIds) {
-    const node = ctx.findNodeCtx(id)?.node
-    const text =
-      node && (node.type === 'text' || node.type === 'shape')
-        ? (node as ShapeRenderNode).text
-        : undefined
-    const runs =
-      text?.lines.flatMap((l) => l.runs).filter((r) => !r.isBullet && r.text.trim()) ?? []
+    const runs = judgedRuns(ctx, id)
     if (!runs.length || runs.some((r) => !r[kind])) allOn = false
   }
   const groupId = ctx.groupIdOf(ctx.selectedIds[0]!)
@@ -157,6 +175,7 @@ export function onTextToggle(
       sourceIds: ctx.selectedIds,
       [kind]: !allOn,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -171,6 +190,7 @@ export function onElementTextColor(ctx: ActionCtx, hex: string): void {
       sourceIds: ctx.selectedIds,
       color: hex,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -263,6 +283,7 @@ export function onParagraphFormat(ctx: ActionCtx, patch: ParagraphFormatPatch): 
       sourceIds: targetIds,
       ...patch,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -359,6 +380,8 @@ export async function onEditTableStyle(
       ctx.setSelectedIds([result.sourceId])
       if (ctx.editingCell?.sourceId === oldId)
         ctx.setEditingCell({ ...ctx.editingCell, sourceId: result.sourceId })
+      if (ctx.cellSel?.sourceId === oldId)
+        ctx.setCellSel({ ...ctx.cellSel, sourceId: result.sourceId })
     }
   }
 }
@@ -380,6 +403,8 @@ export async function onEditChart(
     if (result.sourceId) ctx.setSelectedIds([result.sourceId])
   } else if (op.quickLayout) {
     ctx.setStatus(t('ribbonQuickLayoutUnavailable'))
+  } else if (op.catAxisVisible !== undefined || op.valAxisVisible !== undefined) {
+    ctx.setStatus(t('ribbonAxisUnavailable'))
   }
 }
 
@@ -422,6 +447,7 @@ export function onFontExtra(
       sourceIds: ctx.selectedIds,
       ...patch,
       ...(groupId ? { groupId } : {}),
+      ...cellScope(ctx),
     })
     .then((r) => r && ctx.applySlide(ctx.current, r))
 }
@@ -433,35 +459,41 @@ export async function onTextAnchor(
   anchor: 'top' | 'middle' | 'bottom',
 ): Promise<void> {
   let slide: RenderSlide | null = null
-  for (const sourceId of textTargets(ctx)) {
-    slide =
-      (await window.slidesApi.setTextAnchor({ slideIndex: ctx.current, sourceId, anchor })) ?? slide
-  }
+  // one undo step for the whole selection
+  await withHistoryGroup(async () => {
+    for (const sourceId of textTargets(ctx)) {
+      slide =
+        (await window.slidesApi.setTextAnchor({ slideIndex: ctx.current, sourceId, anchor })) ??
+        slide
+    }
+  })
   if (slide) ctx.applySlide(ctx.current, slide)
 }
 
 /** Home → Paragraph → Columns: flow the box's text across `num` columns (1 = back to one) */
 export async function onTextColumns(ctx: ActionCtx, num: number, spacing?: number): Promise<void> {
   let slide: RenderSlide | null = null
-  for (const sourceId of textTargets(ctx)) {
-    // A plain text box keeps its size when it has no autofit, so its second column would hang out
-    // of a one-line box. PowerPoint's text boxes resize to fit their text, which balances the
-    // columns: columns on such a box switch it to "resize shape to fit text".
-    const node = ctx.findNodeCtx(sourceId)?.node
-    const grow =
-      num > 1 &&
-      node?.type === 'text' &&
-      ((node as { text?: { autofit?: string } }).text?.autofit ?? 'none') === 'none'
-    slide =
-      (await window.slidesApi.setTextBodyProps({
-        slideIndex: ctx.current,
-        sourceId,
-        props: {
-          columns: spacing === undefined ? { num } : { num, spacing },
-          ...(grow ? { autofit: 'resize' as const } : {}),
-        },
-      })) ?? slide
-  }
+  await withHistoryGroup(async () => {
+    for (const sourceId of textTargets(ctx)) {
+      // A plain text box keeps its size when it has no autofit, so its second column would hang out
+      // of a one-line box. PowerPoint's text boxes resize to fit their text, which balances the
+      // columns: columns on such a box switch it to "resize shape to fit text".
+      const node = ctx.findNodeCtx(sourceId)?.node
+      const grow =
+        num > 1 &&
+        node?.type === 'text' &&
+        ((node as { text?: { autofit?: string } }).text?.autofit ?? 'none') === 'none'
+      slide =
+        (await window.slidesApi.setTextBodyProps({
+          slideIndex: ctx.current,
+          sourceId,
+          props: {
+            columns: spacing === undefined ? { num } : { num, spacing },
+            ...(grow ? { autofit: 'resize' as const } : {}),
+          },
+        })) ?? slide
+    }
+  })
   if (slide) ctx.applySlide(ctx.current, slide)
 }
 
@@ -470,13 +502,15 @@ export async function onTextDirection(
   vert: 'horz' | 'vert' | 'vert270' | 'wordArtVert',
 ): Promise<void> {
   let slide: RenderSlide | null = null
-  for (const sourceId of textTargets(ctx)) {
-    slide =
-      (await window.slidesApi.setTextBodyProps({
-        slideIndex: ctx.current,
-        sourceId,
-        props: { vert },
-      })) ?? slide
-  }
+  await withHistoryGroup(async () => {
+    for (const sourceId of textTargets(ctx)) {
+      slide =
+        (await window.slidesApi.setTextBodyProps({
+          slideIndex: ctx.current,
+          sourceId,
+          props: { vert },
+        })) ?? slide
+    }
+  })
   if (slide) ctx.applySlide(ctx.current, slide)
 }

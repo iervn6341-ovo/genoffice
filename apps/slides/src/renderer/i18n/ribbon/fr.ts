@@ -225,6 +225,8 @@ export const fr = {
   ribbonFlipH: 'Miroir horizontal',
   ribbonFlipV: 'Miroir vertical',
   ribbonDistributeHint: '{title} (sélectionnez au moins 3 éléments)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: "Afficher ou masquer le panneau de l'assistant IA",
   ribbonGroupTable: 'Tableau',
@@ -516,6 +518,8 @@ export const fr = {
   ribbonRuler: 'Règle',
   ribbonRulerTip: 'Afficher ou masquer la règle (pouces)',
   ribbonGridlines: 'Quadrillage',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Afficher ou masquer le quadrillage (grille de 0,5 pouce)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

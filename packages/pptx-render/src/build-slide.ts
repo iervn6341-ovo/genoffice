@@ -48,7 +48,8 @@ import {
   resolveReflection,
   type MediaResolver,
 } from './fill'
-import { layoutText } from './text-layout'
+import { layoutText, minContentWidthPx } from './text-layout'
+import { tableMinScale } from './table-floor'
 import { HeuristicMetrics, type FontMetricsProvider } from './metrics'
 import {
   isConnectorPreset,
@@ -232,7 +233,14 @@ function buildNodeInner(
     case 'group':
       return buildGroup(el as GroupElement, box, vp, metrics, media)
     case 'table':
-      return buildTable(el as TableElement, box, vp, metrics, media)
+      return buildTable(
+        el as TableElement,
+        box,
+        vp,
+        metrics,
+        media,
+        parentOffset.scaleX === undefined && parentOffset.scaleY === undefined,
+      )
     case 'chart': {
       const chartEl = el as ChartElement
       const appCreated = chartEl.descr === 'aislides-chart'
@@ -666,6 +674,7 @@ function buildTable(
   vp: Viewport,
   metrics: FontMetricsProvider,
   media: MediaResolver | undefined,
+  topLevel = false,
 ): TableRenderNode {
   // a:gridCol w is authoritative in PowerPoint: a stale frame cx (generator tools write
   // placeholder exts) never squeezes the columns — the table renders at its grid width,
@@ -690,27 +699,50 @@ function buildTable(
 
   // Measure pass: grow any row whose cell content wraps taller than the stored height
   // (rowSpan cells are skipped — their height is ambiguous to attribute to one row).
-  el.rows.forEach((row, r) => {
+  // `heights` is grown in place; the return value is the height each row's text needs.
+  const measureRows = (xs: number[], heights: number[]): number[] => {
+    const need: number[] = heights.map(() => 0)
+    el.rows.forEach((row, r) => {
+      const gridCols = tableRowGridCols(row)
+      row.forEach((cell, tcIdx) => {
+        const cIdx = gridCols[tcIdx]!
+        if (cell.merged || (cell.rowSpan ?? 1) > 1) return
+        if (hasMathPreview(cell) || !cell.text || !cell.text.paragraphs.length) return
+        const x = xs[cIdx] ?? 0
+        const w = (xs[Math.min(cIdx + (cell.gridSpan ?? 1), xs.length - 1)] ?? x) - x
+        const probe = layoutText({
+          body: cell.text,
+          boxWidthPx: w,
+          boxHeightPx: heights[r] ?? 0,
+          metrics,
+          vp,
+          media,
+          trimEdgeSpacing: true,
+        })
+        // PowerPoint sizes auto rows by the glyph extent (last baseline + descent), not
+        // the line-box sum — with explicit lnSpc the box extends below the ink (18pt probe)
+        const needed = (probe.inkBottom ?? probe.contentHeight) + probe.insets.t + probe.insets.b
+        need[r] = Math.max(need[r] ?? 0, needed)
+        if (needed > (heights[r] ?? 0)) heights[r] = needed
+      })
+    })
+    return need
+  }
+  const rowNeedPx = measureRows(colX, rowPx)
+
+  // Column content floor: the widest unbreakable word of a single-column cell plus its insets.
+  // Spanning cells give no per-column requirement (the span can borrow from any of its columns).
+  const colNeedPx: number[] = colPx.map(() => 0)
+  el.rows.forEach((row) => {
     const gridCols = tableRowGridCols(row)
     row.forEach((cell, tcIdx) => {
       const cIdx = gridCols[tcIdx]!
-      if (cell.merged || (cell.rowSpan ?? 1) > 1) return
+      if (cell.merged || (cell.gridSpan ?? 1) > 1) return
       if (hasMathPreview(cell) || !cell.text || !cell.text.paragraphs.length) return
-      const x = colX[cIdx] ?? 0
-      const w = (colX[Math.min(cIdx + (cell.gridSpan ?? 1), colX.length - 1)] ?? x) - x
-      const probe = layoutText({
-        body: cell.text,
-        boxWidthPx: w,
-        boxHeightPx: rowPx[r] ?? 0,
-        metrics,
-        vp,
-        media,
-        trimEdgeSpacing: true,
-      })
-      // PowerPoint sizes auto rows by the glyph extent (last baseline + descent), not
-      // the line-box sum — with explicit lnSpc the box extends below the ink (18pt probe)
-      const needed = (probe.inkBottom ?? probe.contentHeight) + probe.insets.t + probe.insets.b
-      if (needed > (rowPx[r] ?? 0)) rowPx[r] = needed
+      colNeedPx[cIdx] = Math.max(
+        colNeedPx[cIdx] ?? 0,
+        minContentWidthPx({ body: cell.text, metrics, vp }),
+      )
     })
   })
 
@@ -718,6 +750,31 @@ function buildTable(
   for (const h of rowPx) rowY.push(rowY[rowY.length - 1]! + h)
   const totalH = rowY[rowY.length - 1]!
   if (totalH > box.h + 0.5) box = { ...box, h: totalH }
+
+  // Narrowest table width at which scaling the columns proportionally keeps the table's bottom
+  // inside the slide (rows grow as their text re-wraps). Only computed when the narrowest legal
+  // scale would push it out, so ordinary tables pay for one extra measure pass.
+  let fitMinWPx: number | undefined
+  if (topLevel && !box.rotationDeg && totalW > 0 && el.rows.length) {
+    const limit = box.y + totalH <= vp.heightPx ? vp.heightPx : box.y + totalH
+    const kLo = tableMinScale(colPx, colNeedPx)
+    const bottomAt = (k: number): number => {
+      const xs = colX.map((v) => v * k)
+      const hs = [...rowPx]
+      measureRows(xs, hs)
+      return box.y + hs.reduce((a, b) => a + b, 0)
+    }
+    if (kLo < 1 && bottomAt(kLo) > limit) {
+      let lo = kLo
+      let hi = 1
+      for (let i = 0; i < 16; i++) {
+        const mid = (lo + hi) / 2
+        if (bottomAt(mid) > limit) lo = mid
+        else hi = mid
+      }
+      fitMinWPx = hi * totalW
+    }
+  }
 
   const cells: TableCellRender[] = []
   el.rows.forEach((row, r) => {
@@ -784,6 +841,9 @@ function buildTable(
     ...(el.bgFill ? { bgFill: resolveFill(el.bgFill, vp, media) } : {}),
     gridX: colX,
     gridY: rowY,
+    rowNeedPx,
+    colNeedPx,
+    ...(fitMinWPx != null ? { fitMinWPx } : {}),
     ...(el.rtl ? { rtl: true } : {}),
     ...(el.styleFlags ? { styleFlags: el.styleFlags } : {}),
     ...(el.styleId ? { styleId: el.styleId } : {}),
@@ -816,6 +876,8 @@ function chartStyleInfo(m: ChartElement['chart']): import('./render-tree').Chart
     dataLabels: !!m.dataLabels,
     gridlines: !!m.valAxis?.gridColor,
     valAxisHidden: !!m.valAxis?.hidden,
+    catAxisHidden: !!m.catAxis?.hidden,
+    hasAxes: kind !== 'pie' && kind !== 'pie3D' && kind !== 'doughnut' && kind !== 'unknown',
     ...(m.dataTable ? { dataTable: true } : {}),
     ...(m.pointValueLabels ? { pointValueLabels: true } : {}),
     ...(m.title ? { title: m.title } : {}),

@@ -223,6 +223,8 @@ export const ko = {
   ribbonFlipH: '좌우 대칭',
   ribbonFlipV: '상하 대칭',
   ribbonDistributeHint: '{title}(요소를 3개 이상 선택해야 함)',
+  ribbonAlignToSlide: '슬라이드에 맞춤',
+  ribbonAlignToSelection: '선택한 개체 맞춤',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'AI 도우미 패널 표시/숨기기',
   // Insert
@@ -502,6 +504,8 @@ export const ko = {
   ribbonRuler: '눈금자',
   ribbonRulerTip: '눈금자 표시/숨기기(인치)',
   ribbonGridlines: '눈금선',
+  ribbonAxesVisibility: '축 표시',
+  ribbonAxisUnavailable: '이 차트에는 표시하거나 숨길 축이 없습니다.',
   ribbonGridlinesTip: '눈금선 표시/숨기기(0.5인치 간격)',
   ribbonDarkContent: '콘텐츠 어둡게 보기',
   ribbonDarkContentTip:

@@ -10,6 +10,8 @@ import type { GradientFillSpec, SetEffectsPatch } from '../../shared/ipc'
 import { Dropdown, useDismissablePopover } from '@genoffice/ui'
 import { useI18n } from '../i18n/locale'
 import { pathGradientCanvas } from '../konva-adapter'
+import { fitSizeToLimits, sanitizePosPx } from '../min-size'
+import { minSizeOfNodes } from '../selection-min'
 import { ColorWell } from './ColorWell'
 import { IconSidebarCollapse } from './icons'
 
@@ -1206,14 +1208,19 @@ export function FormatPane({
     patch: Partial<{ x: number; y: number; w: number; h: number; rotationDeg: number }>,
   ) => {
     if (!node || !box) return
-    onTransform(node.sourceId, {
+    const next = {
       x: box.x,
       y: box.y,
       w: box.w,
       h: box.h,
       rotationDeg: box.rotationDeg,
       ...patch,
-    })
+    }
+    // A typed NaN/Infinity/absurd value must never reach the model
+    const x = sanitizePosPx(next.x)
+    const y = sanitizePosPx(next.y)
+    if (x == null || y == null || !Number.isFinite(next.rotationDeg)) return
+    onTransform(node.sourceId, { ...next, x, y })
   }
 
   /** PPT-style collapsible section header (chevron + label over a divider) */
@@ -1237,7 +1244,7 @@ export function FormatPane({
   // ---- PPT Size/Position section helpers: values are shown in cm / ° / % ----
   const vscale = viewScale ?? 1
   const pxPerCm = (96 / 2.54) * vscale
-  const MIN_SIZE_PX = 1
+  const MIN_SIZE_PX = 1 // basis for the % fields only; typed sizes go through fitSizeToLimits
   const fmtNum = (v: number) => String(Math.round(v * 100) / 100)
   const fmtCm = (px: number) => `${fmtNum(px / pxPerCm)} ${t('paneSizeCm')}`
 
@@ -1370,16 +1377,20 @@ export function FormatPane({
   }
   const transparencyOf = (color: string) => Math.round(((255 - alphaOf(color)) / 255) * 100)
 
-  /** Size commit honoring the aspect-ratio lock (editing one dim scales the other). */
+  /** Size commit honoring the aspect-ratio lock (editing one dim scales the other). The value is
+   * clamped to the element's floor (same as a dragged handle) and PowerPoint's size limit; a
+   * non-numeric value is ignored. */
   const sizeCommit = (patch: { w?: number; h?: number }) => {
-    if (!box) return
-    let w = Math.max(MIN_SIZE_PX, patch.w ?? box.w)
-    let h = Math.max(MIN_SIZE_PX, patch.h ?? box.h)
+    if (!box || !node) return
+    let w = patch.w ?? box.w
+    let h = patch.h ?? box.h
     if (lockRatio) {
-      if (patch.h != null && patch.w == null) w = Math.max(MIN_SIZE_PX, box.w * (h / box.h))
-      if (patch.w != null && patch.h == null) h = Math.max(MIN_SIZE_PX, box.h * (w / box.w))
+      if (patch.h != null && patch.w == null) w = box.w * (h / box.h)
+      if (patch.w != null && patch.h == null) h = box.h * (w / box.w)
     }
-    commit({ w, h })
+    const fit = fitSizeToLimits(w, h, minSizeOfNodes([node]), { lockRatio })
+    if (!fit) return
+    commit({ w: fit.w, h: fit.h })
   }
 
   // Scale basis the % fields are measured against: for pictures with "relative to
@@ -1470,7 +1481,7 @@ export function FormatPane({
     !!shape || !!pic || !!(node?.type === 'chart' && chartData && onChartPointColor)
 
   return (
-    <aside className="format-pane">
+    <aside className="format-pane" data-keep-edit="">
       <div className="ai-panel-header">
         <span className="ai-panel-title">
           {typeName ? t('paneFormatTitleTyped', { type: typeName }) : t('paneFormatTitle')}

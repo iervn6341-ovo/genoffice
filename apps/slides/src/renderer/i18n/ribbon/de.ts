@@ -223,6 +223,8 @@ export const de = {
   ribbonFlipH: 'Horizontal spiegeln',
   ribbonFlipV: 'Vertikal spiegeln',
   ribbonDistributeHint: '{title} (mindestens 3 Elemente auswählen)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'KI-Assistent-Bereich ein-/ausblenden',
   ribbonGroupTable: 'Tabelle',
@@ -510,6 +512,8 @@ export const de = {
   ribbonRuler: 'Lineal',
   ribbonRulerTip: 'Lineal ein-/ausblenden (Zoll)',
   ribbonGridlines: 'Gitternetzlinien',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Gitternetzlinien ein-/ausblenden (0,5-Zoll-Raster)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

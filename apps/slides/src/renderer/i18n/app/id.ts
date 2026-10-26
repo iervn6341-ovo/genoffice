@@ -154,6 +154,7 @@ export const id = {
   appCtxCellAnchorMiddle: 'Teks Tengah Vertikal',
   appCtxCellAnchorBottom: 'Teks Rata Bawah',
   appStatusMergeFailed: 'Tidak dapat menggabung/memisahkan sel ini',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Menyiapkan pencetakan…',
   appPrintTitle: 'Cetak',
   appPrintLayoutFull: 'Slide Halaman Penuh',

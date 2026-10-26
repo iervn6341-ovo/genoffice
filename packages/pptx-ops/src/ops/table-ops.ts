@@ -8,6 +8,7 @@ import {
   applyParagraphFormat,
   editChartElement,
   setChartLegendPosition,
+  setChartAxisVisibility,
   canSetChartQuickLayout,
   setChartQuickLayout,
   type ChartQuickLayout,
@@ -18,6 +19,7 @@ import {
   ensureTableStylePart,
   markChartEditable,
   mergeTableCells,
+  clearTableCellText,
   setTableCellAnchor,
   setTableColWidth,
   setTableRowHeight,
@@ -39,6 +41,7 @@ import {
   GuidedError,
   register,
   requireFinite,
+  requireCellList,
   requireHexColor,
   resolveElement,
   type Op,
@@ -86,11 +89,32 @@ register({
 })
 
 register({
+  name: 'clearTableCells',
+  validate(op, ctx) {
+    resolveElement(ctx, op, { types: ['table'] })
+    requireCellList(op, 'clearTableCells')
+  },
+  apply(op, ctx): OpRecord {
+    const { slide, el } = resolveElement(ctx, op, { types: ['table'] })
+    const cells = requireCellList(op, 'clearTableCells')
+    if (!clearTableCellText(slide, el.id, cells)) {
+      throw new GuidedError(`op "clearTableCells": none of the cells exist on table "${el.id}".`)
+    }
+    return { op }
+  },
+})
+
+register({
   name: 'tableMerge',
   validate(op, ctx) {
     resolveElement(ctx, op, { types: ['table'] })
     if (typeof op.kind !== 'string' || typeof op.row !== 'number' || typeof op.col !== 'number') {
       throw new GuidedError('op "tableMerge" needs "kind", "row" and "col".')
+    }
+    if (op.kind === 'merge-range' || op.kind === 'split-range') {
+      if (!Number.isInteger(op.rows) || !Number.isInteger(op.cols)) {
+        throw new GuidedError(`op "tableMerge" kind "${op.kind}" needs integer "rows" and "cols".`)
+      }
     }
   },
   apply(op, ctx): OpRecord {
@@ -99,6 +123,9 @@ register({
       kind: op.kind,
       row: op.row,
       col: op.col,
+      ...(op.kind === 'merge-range' || op.kind === 'split-range'
+        ? { rows: op.rows, cols: op.cols }
+        : {}),
     } as TableMergeOp)
     if (!r) {
       throw new GuidedError(
@@ -123,6 +150,7 @@ register({
       kind: op.kind,
       index: op.index,
       ...(op.before ? { before: true } : {}),
+      ...(typeof op.count === 'number' && op.count > 1 ? { count: op.count } : {}),
     } as TableStructureOp)
     if (!r) {
       throw new GuidedError(
@@ -382,6 +410,28 @@ register({
     )
       throw new GuidedError(`op "setChartLegendPosition": chart "${el.id}" rejected the edit.`)
     return { op, after: op.position }
+  },
+})
+
+register({
+  name: 'setChartAxisVisibility',
+  validate(op, ctx) {
+    resolveElement(ctx, op, { types: ['chart'] })
+    const { cat, val } = op as { cat?: unknown; val?: unknown }
+    if (cat === undefined && val === undefined)
+      throw new GuidedError('op "setChartAxisVisibility": give cat and/or val (true = show, false = hide).')
+    if ((cat !== undefined && typeof cat !== 'boolean') || (val !== undefined && typeof val !== 'boolean'))
+      throw new GuidedError('op "setChartAxisVisibility": cat and val must be booleans.')
+  },
+  apply(op, ctx): OpRecord {
+    const { index, el } = resolveElement(ctx, op, { types: ['chart'] })
+    const visibility = {
+      ...(typeof op.cat === 'boolean' ? { cat: op.cat } : {}),
+      ...(typeof op.val === 'boolean' ? { val: op.val } : {}),
+    }
+    if (!setChartAxisVisibility(ctx.opened, index, el.id, visibility))
+      throw new GuidedError(`op "setChartAxisVisibility": chart "${el.id}" has no such axis to change.`)
+    return { op, after: visibility }
   },
 })
 

@@ -332,4 +332,10 @@ export const he = {
   paneShowEnded: 'סוף הצגת השקופיות.',
   paneShowRehearseTip: 'חזרה על תזמונים: זמן בשקופית זו / זמן כולל',
   paneShowRehearseTotal: 'סה״כ {time}',
+  paneShowVideoPlay: 'הפעל',
+  paneShowVideoPause: 'השהה',
+  paneShowVideoSeek: 'ציר זמן',
+  paneShowVideoVolume: 'עוצמת קול',
+  paneShowVideoMute: 'השתק',
+  paneShowVideoUnmute: 'בטל השתקה',
 } satisfies Record<keyof typeof zh, string>

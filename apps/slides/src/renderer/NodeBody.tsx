@@ -50,6 +50,7 @@ import {
 } from './konva-adapter'
 import { ChartBody } from './ChartBody'
 import { needsTextFrameHitArea } from './text-hit-area'
+import { GLYPH_LAYER_NAME } from './text-unstretch'
 import { warpGlyphs, measureGlyph } from './text-warp'
 import {
   equationRasterForGlyph,
@@ -349,76 +350,84 @@ export const NodeBody = React.memo(function NodeBody({
                   {...strokeToKonva(cell.borders.r)}
                 />
               )}
-              {/* Highlight backgrounds first, so a run's highlight never covers a neighbor's glyphs */}
-              {cellGlyphs.map(
-                (g, j) =>
-                  g.highlight && (
-                    <Rect
-                      key={`hl${j}`}
-                      x={cell.x + (cell.text?.insets.l ?? 0) + g.highlight.x}
-                      y={cell.y + (cell.text?.insets.t ?? 0) + g.highlight.y}
-                      width={g.highlight.w}
-                      height={g.highlight.h}
-                      fill={g.highlight.color}
-                      listening={false}
-                    />
-                  ),
+              {/* Cell text wrapped in a glyph layer so handle drag counter-scales glyphs (no horizontal/vertical text stretch) */}
+              {cellGlyphs.length > 0 && (
+                <Group
+                  name={GLYPH_LAYER_NAME}
+                  x={cell.x + (cell.text?.insets.l ?? 0)}
+                  y={cell.y + (cell.text?.insets.t ?? 0)}
+                >
+                  {cellGlyphs.map(
+                    (g, j) =>
+                      g.highlight && (
+                        <Rect
+                          key={`hl${j}`}
+                          x={g.highlight.x}
+                          y={g.highlight.y}
+                          width={g.highlight.w}
+                          height={g.highlight.h}
+                          fill={g.highlight.color}
+                          listening={false}
+                        />
+                      ),
+                  )}
+                  {cellGlyphs.map((g, j) => {
+                    const mathImage = equationRasterForGlyph(g)
+                    if (mathImage)
+                      return (
+                        <KImage
+                          key={j}
+                          image={mathImage}
+                          x={g.x}
+                          y={g.y}
+                          width={g.mathWidthPx ?? g.fontSize}
+                          height={g.mathHeightPx ?? g.fontSize}
+                          rotation={g.rotation ?? 0}
+                          scaleX={g.scaleX ?? 1}
+                          scaleY={g.scaleY ?? 1}
+                          offsetX={g.offsetX ?? 0}
+                          offsetY={g.offsetY ?? 0}
+                          shadowColor={g.shadowEnabled ? g.shadowColor : undefined}
+                          shadowBlur={g.shadowEnabled ? g.shadowBlur : undefined}
+                          shadowOffsetX={g.shadowEnabled ? g.shadowOffsetX : undefined}
+                          shadowOffsetY={g.shadowEnabled ? g.shadowOffsetY : undefined}
+                          listening={false}
+                        />
+                      )
+                    return (
+                      <Text
+                        key={j}
+                        x={g.x}
+                        y={g.y}
+                        text={g.text}
+                        fontSize={g.fontSize}
+                        fontFamily={g.fontFamily}
+                        fontStyle={g.fontStyle}
+                        textDecoration={g.textDecoration}
+                        rotation={g.rotation ?? 0}
+                        letterSpacing={g.letterSpacing ?? 0}
+                        fill={g.fill}
+                        direction={g.direction ?? 'inherit'}
+                        {...(g.stroke
+                          ? {
+                              stroke: g.stroke,
+                              strokeWidth: g.strokeWidth,
+                              fillAfterStrokeEnabled: true,
+                            }
+                          : {})}
+                        {...(g.shadowEnabled
+                          ? {
+                              shadowColor: g.shadowColor,
+                              shadowBlur: g.shadowBlur,
+                              shadowOffsetX: g.shadowOffsetX,
+                              shadowOffsetY: g.shadowOffsetY,
+                            }
+                          : {})}
+                      />
+                    )
+                  })}
+                </Group>
               )}
-              {cellGlyphs.map((g, j) => {
-                const mathImage = equationRasterForGlyph(g)
-                if (mathImage)
-                  return (
-                    <KImage
-                      key={j}
-                      image={mathImage}
-                      x={cell.x + (cell.text?.insets.l ?? 0) + g.x}
-                      y={cell.y + (cell.text?.insets.t ?? 0) + g.y}
-                      width={g.mathWidthPx ?? g.fontSize}
-                      height={g.mathHeightPx ?? g.fontSize}
-                      rotation={g.rotation ?? 0}
-                      scaleX={g.scaleX ?? 1}
-                      scaleY={g.scaleY ?? 1}
-                      offsetX={g.offsetX ?? 0}
-                      offsetY={g.offsetY ?? 0}
-                      shadowColor={g.shadowEnabled ? g.shadowColor : undefined}
-                      shadowBlur={g.shadowEnabled ? g.shadowBlur : undefined}
-                      shadowOffsetX={g.shadowEnabled ? g.shadowOffsetX : undefined}
-                      shadowOffsetY={g.shadowEnabled ? g.shadowOffsetY : undefined}
-                      listening={false}
-                    />
-                  )
-                return (
-                  <Text
-                    key={j}
-                    x={cell.x + (cell.text?.insets.l ?? 0) + g.x}
-                    y={cell.y + (cell.text?.insets.t ?? 0) + g.y}
-                    text={g.text}
-                    fontSize={g.fontSize}
-                    fontFamily={g.fontFamily}
-                    fontStyle={g.fontStyle}
-                    textDecoration={g.textDecoration}
-                    rotation={g.rotation ?? 0}
-                    letterSpacing={g.letterSpacing ?? 0}
-                    fill={g.fill}
-                    direction={g.direction ?? 'inherit'}
-                    {...(g.stroke
-                      ? {
-                          stroke: g.stroke,
-                          strokeWidth: g.strokeWidth,
-                          fillAfterStrokeEnabled: true,
-                        }
-                      : {})}
-                    {...(g.shadowEnabled
-                      ? {
-                          shadowColor: g.shadowColor,
-                          shadowBlur: g.shadowBlur,
-                          shadowOffsetX: g.shadowOffsetX,
-                          shadowOffsetY: g.shadowOffsetY,
-                        }
-                      : {})}
-                  />
-                )
-              })}
             </React.Fragment>
           )
         })}
@@ -763,6 +772,7 @@ export const NodeBody = React.memo(function NodeBody({
       {/* PowerPoint flips geometry only: text in a flipped shape stays readable. The
           container Group mirrors everything, so counter-flip the text layer. */}
       <Group
+        name={GLYPH_LAYER_NAME}
         scaleX={!!box.flipH !== !!flipHInherited ? -1 : 1}
         scaleY={!!box.flipV !== !!flipVInherited ? -1 : 1}
         x={!!box.flipH !== !!flipHInherited ? box.w : 0}

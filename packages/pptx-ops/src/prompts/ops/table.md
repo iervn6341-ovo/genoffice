@@ -35,10 +35,14 @@ Common mistakes
 
 ### tableMerge
 
-`{kind:"merge-right"|"merge-down"|"split",row,col}`
+`{kind:"merge-right"|"merge-down"|"split"|"merge-range"|"split-range",row,col,rows?,cols?}`
 
 Merges the cell at (row, col) with its right or lower neighbor, or splits a
-merged cell back into its grid cells.
+merged cell back into its grid cells. `merge-range` merges the whole rectangle
+whose top-left cell is (row, col) and that spans `rows` x `cols` cells into
+one cell (the text of the other cells is appended to it); `split-range` splits
+every merged cell inside that rectangle. A rectangle must not cut an existing
+merge in two.
 
 ```json
 {
@@ -56,10 +60,11 @@ Common mistakes
 
 ### tableStructure
 
-`{kind:"insert-row"|"delete-row"|"insert-col"|"delete-col",index,before?}`
+`{kind:"insert-row"|"delete-row"|"insert-col"|"delete-col",index,before?,count?}`
 
 Inserts or deletes a row or column. Insert goes after `index` unless
-`before:true`.
+`before:true`. `count` (default 1) inserts that many copies, or deletes that
+many rows/columns starting at `index`.
 
 ```json
 {
@@ -82,6 +87,24 @@ Inserts or deletes a row or column. Insert goes after `index` unless
 Common mistakes
 
 - Tables with merged cells refuse row/column surgery: split the merges first (`tableMerge` with `kind:"split"`).
+
+### clearTableCells
+
+`{cells:[{row,col}]}`
+
+Deletes the text of the listed cells and keeps their formatting (what the Delete key does on a
+selected cell range).
+
+```json
+{
+  "op": "clearTableCells",
+  "target": { "slide": 0, "el": "e_TABLE" },
+  "cells": [
+    { "row": 0, "col": 0 },
+    { "row": 0, "col": 1 }
+  ]
+}
+```
 
 ### setTableRowHeight
 
@@ -184,6 +207,16 @@ Repositions or removes a chart legend through a focused native chartSpace patch.
 
 ```json
 { "op": "setChartLegendPosition", "target": { "slide": 0, "el": "e_CHART" }, "position": "b" }
+```
+
+### setChartAxisVisibility
+
+`{cat?:boolean, val?:boolean}`
+
+`true` shows the axis, `false` hides it. Shows or hides the primary category and/or value axis through a focused native chartSpace patch (only `c:delete` changes). Preserves imported series, linked data, formatting, and extensions. A hidden axis keeps its scale. Charts without axes (pie/doughnut) are rejected.
+
+```json
+{ "op": "setChartAxisVisibility", "target": { "slide": 0, "el": "e_CHART" }, "val": false }
 ```
 
 ### setChartQuickLayout

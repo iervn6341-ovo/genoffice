@@ -335,4 +335,10 @@ export const ru = {
   paneShowEnded: 'Показ завершен.',
   paneShowRehearseTip: 'Настройка времени: время на этом слайде / общее время',
   paneShowRehearseTotal: 'Всего {time}',
+  paneShowVideoPlay: 'Воспроизвести',
+  paneShowVideoPause: 'Пауза',
+  paneShowVideoSeek: 'Шкала времени',
+  paneShowVideoVolume: 'Громкость',
+  paneShowVideoMute: 'Выключить звук',
+  paneShowVideoUnmute: 'Включить звук',
 } satisfies Record<keyof typeof zh, string>

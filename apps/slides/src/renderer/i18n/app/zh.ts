@@ -138,6 +138,7 @@ export const zh = {
   appCtxCellAnchorMiddle: '文字垂直居中',
   appCtxCellAnchorBottom: '文字底端对齐',
   appStatusMergeFailed: '无法合并/拆分该单元格',
+  appStatusTablePasteLimit: '仅粘贴前 50 个单元格',
   appPrintProgress: '正在准备打印…',
   appPrintTitle: '打印',
   appPrintLayoutFull: '整页幻灯片',

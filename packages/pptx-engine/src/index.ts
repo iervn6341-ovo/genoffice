@@ -9,6 +9,10 @@ import { parseChartXml } from './chart'
 import { PackageArchive, relsPathFor, resolveTarget, type Relationship } from './zip'
 import { parseClrMap, parseTheme, type Theme } from './theme'
 import { builtinTableStyleDefXml } from './table-style'
+import { demotePlaceholderXml, bakeInheritedTextXml } from './placeholder-demote'
+import { getSlideNotesParagraphs, setSlideNotesParagraphs } from './notes'
+import { bakeTableStyleXml } from './table-bake'
+export { demotePlaceholderXml } from './placeholder-demote'
 import {
   parseSlide,
   parseDecorations,
@@ -63,7 +67,13 @@ import {
 } from './insert'
 import { BLANK_SLIDE_XML } from './blank'
 import { escapeXmlAttr } from './xml-utils'
-import { elementSpid } from './animation'
+import {
+  elementSpid,
+  cNvPrIdsInXml as animCNvPrIds,
+  getSlideAnimations as readSlideAnimations,
+  setSlideAnimations as writeSlideAnimations,
+  type SlideAnimation,
+} from './animation'
 import { stripStaleEmbeddedFonts } from './embedded-fonts'
 import { ensureCreationId, matchesElementRef } from './identity'
 import { listMasterParts, parseMasterPart } from './master-edit'
@@ -2068,7 +2078,27 @@ export function duplicateSlide(
 export function copySlide(opened: OpenedPptx, sourceIndex: number): SlideBundle | null {
   const slide = opened.deck.slides[sourceIndex]
   if (!slide) return null
-  return collectSlideBundle(opened.archive, slide.path, patchSlideXml(slide))
+  const slideXml = patchSlideXml(slide)
+  const bundle = collectSlideBundle(opened.archive, slide.path, slideXml)
+  const tableStyles: Array<{ id: string; xml?: string }> = []
+  const tsXml = opened.archive.readText('ppt/tableStyles.xml')
+  for (const m of slideXml.matchAll(TABLE_STYLE_ID_RE)) {
+    const id = m[1]!
+    if (tableStyles.some((t) => t.id === id)) continue
+    const def = tblStyleDefXml(tsXml, id)
+    tableStyles.push(def ? { id, xml: def } : { id })
+  }
+  let notes: Paragraph[] = []
+  try {
+    notes = getSlideNotesParagraphs(opened.archive, slide.path)
+  } catch {
+    /* notes are a courtesy: a malformed notes part never blocks the copy */
+  }
+  return {
+    ...bundle,
+    ...(tableStyles.length ? { tableStyles } : {}),
+    ...(notes.length ? { notes } : {}),
+  }
 }
 
 /**
@@ -2096,16 +2126,39 @@ export function pasteSlide(
 
   const newPath = nextSlidePath(archive)
   const relsXml = materializeSlideBundle(archive, bundle, newPath, layoutPath)
-  archive.entries.set(newPath, Buffer.from(bundle.slideXml, 'utf8'))
+  let slideXml = bundle.slideXml
+  if (bundle.tableStyles?.length) {
+    const renames = landTableStyles(
+      opened,
+      neighbour?.path ?? deck.slides[0]!.path,
+      [{ xml: '', rels: [], tableStyles: bundle.tableStyles }],
+    )
+    for (const [from, to] of renames) {
+      slideXml = slideXml.replaceAll(
+        `<a:tableStyleId>${from}</a:tableStyleId>`,
+        `<a:tableStyleId>${to}</a:tableStyleId>`,
+      )
+    }
+  }
+  archive.entries.set(newPath, Buffer.from(slideXml, 'utf8'))
   archive.entries.set(relsPathFor(newPath), Buffer.from(relsXml, 'utf8'))
 
+  let landed: Slide | null
   if (anchorIndex < 0) {
     // registerNewSlide can only insert after a slide, so land at 1 and move up
-    const slide = registerNewSlide(opened, 0, newPath)
-    if (slide) moveSlide(opened, deck.slides.indexOf(slide), 0)
-    return slide
+    landed = registerNewSlide(opened, 0, newPath)
+    if (landed) moveSlide(opened, deck.slides.indexOf(landed), 0)
+  } else {
+    landed = registerNewSlide(opened, anchorIndex, newPath)
   }
-  return registerNewSlide(opened, anchorIndex, newPath)
+  if (landed && bundle.notes?.length) {
+    try {
+      setSlideNotesParagraphs(opened, deck.slides.indexOf(landed), bundle.notes as Paragraph[])
+    } catch {
+      /* the slide itself pasted fine; notes are best-effort */
+    }
+  }
+  return landed
 }
 
 /**
@@ -2970,6 +3023,9 @@ export function editChartElement(
     /** '' = clear */
     catAxisTitle?: string
     valAxisTitle?: string
+    /** Show/hide the primary axes (carried over from the existing chart on rebuild) */
+    catAxisHidden?: boolean
+    valAxisHidden?: boolean
     gapWidthPct?: number
     /** Doughnut hole size percent (kept from the existing chart when unspecified) */
     holeSizePct?: number
@@ -3075,6 +3131,8 @@ export function editChartElement(
   const gridlines = patch.gridlines ?? !!existing.valAxis?.gridColor
   const catAxisTitle = patch.catAxisTitle ?? existing.catAxis?.title
   const valAxisTitle = patch.valAxisTitle ?? existing.valAxis?.title
+  const catAxisHidden = patch.catAxisHidden ?? !!existing.catAxis?.hidden
+  const valAxisHidden = patch.valAxisHidden ?? !!existing.valAxis?.hidden
   const gapWidthPct = patch.gapWidthPct ?? existing.gapWidthPct
   // Colors: when unspecified and every existing series has an explicit color, rebuild with those colors (type/data changes keep the palette)
   const existingColors = existing.series.map((s) => s.color)
@@ -3097,6 +3155,8 @@ export function editChartElement(
     gridlines,
     ...(catAxisTitle ? { catAxisTitle } : {}),
     ...(valAxisTitle ? { valAxisTitle } : {}),
+    ...(catAxisHidden ? { catAxisHidden } : {}),
+    ...(valAxisHidden ? { valAxisHidden } : {}),
     ...(gapWidthPct != null ? { gapWidthPct } : {}),
     ...(barDir ? { barDir } : {}),
     ...(pointColors.some((row) => row?.some((c) => c != null)) ? { pointColors } : {}),
@@ -3175,6 +3235,61 @@ export function setChartLegendPosition(
   if (position === 'none') delete (el as ChartElement).chart.legendPos
   else (el as ChartElement).chart.legendPos = position
   if (next !== xml) slide.structureDirty = true
+  return true
+}
+
+/**
+ * Show or hide the primary category / value axis with a focused chart-part
+ * patch (only the first c:catAx/c:dateAx/c:valAx's c:delete is touched), so
+ * imported charts keep series formatting, linked data and extensions. A hidden
+ * axis keeps its scale; only its labels and line disappear.
+ */
+export function setChartAxisVisibility(
+  opened: OpenedPptx,
+  slideIndex: number,
+  elementId: string,
+  visibility: { cat?: boolean; val?: boolean },
+): boolean {
+  const slide = opened.deck.slides[slideIndex]
+  const el = slide?.elements.find((item) => item.id === elementId)
+  if (!slide || !el || el.type !== 'chart') return false
+  const path = chartPartPath(opened, slide, el as ChartElement)
+  const xml = path ? opened.archive.readText(path) : null
+  if (!path || !xml) return false
+  const setDelete = (source: string, tags: string[], visible: boolean): string | null => {
+    const open = new RegExp(`<c:(?:${tags.join('|')})\\b[^>]*>`)
+    const m = open.exec(source)
+    if (!m) return null
+    const name = /^<c:(\w+)/.exec(m[0])![1]!
+    const end = source.indexOf(`</c:${name}>`, m.index)
+    if (end < 0) return null
+    const frag = source.slice(m.index, end)
+    const value = visible ? '0' : '1'
+    const del = /<c:delete\b[^>]*\/>/.exec(frag)
+    let next: string
+    if (del) next = frag.replace(del[0], `<c:delete val="${value}"/>`)
+    else if (/<c:scaling\b[\s\S]*?<\/c:scaling>/.test(frag))
+      next = frag.replace(/(<c:scaling\b[\s\S]*?<\/c:scaling>)/, `$1<c:delete val="${value}"/>`)
+    else return null
+    return source.slice(0, m.index) + next + source.slice(end)
+  }
+  let next: string | null = xml
+  if (visibility.cat !== undefined) next = setDelete(next, ['catAx', 'dateAx'], visibility.cat)
+  if (next && visibility.val !== undefined) next = setDelete(next, ['valAx'], visibility.val)
+  if (!next) return false
+  const chart = (el as ChartElement).chart
+  if (visibility.cat !== undefined && chart.catAxis) {
+    if (visibility.cat) delete chart.catAxis.hidden
+    else chart.catAxis.hidden = true
+  } else if (visibility.cat === false) chart.catAxis = { hidden: true }
+  if (visibility.val !== undefined && chart.valAxis) {
+    if (visibility.val) delete chart.valAxis.hidden
+    else chart.valAxis.hidden = true
+  } else if (visibility.val === false) chart.valAxis = { hidden: true }
+  if (next !== xml) {
+    opened.archive.entries.set(path, Buffer.from(next, 'utf8'))
+    slide.structureDirty = true
+  }
   return true
 }
 
@@ -4243,7 +4358,25 @@ function applyFontPatch(paragraphs: Paragraph[], patch: ElementFontPatch): void 
   }
 }
 
-export function setElementFont(slide: Slide, elementId: string, patch: ElementFontPatch): boolean {
+/** One table cell, addressed as (row, tc index) — the same coordinates the render tree reports */
+export interface TableCellRef {
+  row: number
+  col: number
+}
+
+const inCellList = (cells: readonly TableCellRef[] | undefined, r: number, c: number): boolean =>
+  !cells || cells.some((x) => x.row === r && x.col === c)
+
+/**
+ * `cells` restricts a table edit to those cells (the table's cell-range selection); without it
+ * every cell changes, like formatting a whole selected table.
+ */
+export function setElementFont(
+  slide: Slide,
+  elementId: string,
+  patch: ElementFontPatch,
+  cells?: readonly TableCellRef[],
+): boolean {
   const el = slide.elements.find((e) => e.id === elementId)
   if (!el) return false
   const apply = (paragraphs: Paragraph[]) => applyFontPatch(paragraphs, patch)
@@ -4261,7 +4394,7 @@ export function setElementFont(slide: Slide, elementId: string, patch: ElementFo
       const row = table.rows[r]!
       for (let c = 0; c < row.length; c++) {
         const cell = row[c]!
-        if (cell.merged || !cell.text?.paragraphs.length) continue
+        if (cell.merged || !cell.text?.paragraphs.length || !inCellList(cells, r, c)) continue
         apply(cell.text.paragraphs)
         if (editTableCellText(slide, elementId, r, c, cell.text.paragraphs)) changed = true
       }
@@ -4580,13 +4713,15 @@ function mergePPrDirty(el: SlideElement, d: PPrDirty): void {
  * Change paragraph formatting directly on a selected element (bullet/line
  * spacing/paragraph spacing/alignment), applied to all of its paragraphs
  * (text/shape/table; same as clicking bullets with a shape selected in PowerPoint).
- * paraIndices restricts the patch to those paragraphs (editing-mode selection).
+ * paraIndices restricts the patch to those paragraphs (editing-mode selection); `cells`
+ * restricts a table edit to its selected cell range.
  */
 export function setElementParagraphFormat(
   slide: Slide,
   elementId: string,
   patch: ParagraphFormatPatch,
   paraIndices?: number[],
+  cells?: readonly TableCellRef[],
 ): boolean {
   const el = slide.elements.find((e) => e.id === elementId)
   if (!el) return false
@@ -4609,7 +4744,7 @@ export function setElementParagraphFormat(
       const row = table.rows[r]!
       for (let c = 0; c < row.length; c++) {
         const cell = row[c]!
-        if (cell.merged || !cell.text?.paragraphs.length) continue
+        if (cell.merged || !cell.text?.paragraphs.length || !inCellList(cells, r, c)) continue
         applyParagraphFormat(cell.text.paragraphs, patch)
         if (editTableCellText(slide, elementId, r, c, cell.text.paragraphs)) changed = true
       }
@@ -4655,10 +4790,10 @@ export function setGroupChildParagraphFormat(
 // ── Table row/column structure editing ──────────────────────────────────
 
 export type TableStructureOp =
-  | { kind: 'insert-row'; index: number; before?: boolean }
-  | { kind: 'delete-row'; index: number }
-  | { kind: 'insert-col'; index: number; before?: boolean }
-  | { kind: 'delete-col'; index: number }
+  | { kind: 'insert-row'; index: number; before?: boolean; count?: number }
+  | { kind: 'delete-row'; index: number; count?: number }
+  | { kind: 'insert-col'; index: number; before?: boolean; count?: number }
+  | { kind: 'delete-col'; index: number; count?: number }
 
 /** Row/column surgery is unsafe when the table has merged cells (gridSpan/rowSpan/hMerge/vMerge); refuse. */
 function tableHasMerges(xml: string): boolean {
@@ -4708,68 +4843,74 @@ export function editTableStructure(
   let xml = patchedElementXml(el)
   if (tableHasMerges(xml)) return null
 
-  const trSpans: Array<{ start: number; end: number }> = []
-  for (let i = 0; ; i++) {
-    const span = nthTagSpan(xml, 'a:tr', i)
-    if (!span) break
-    trSpans.push(span)
-  }
-  const nRows = trSpans.length
-  const gridCols = gridColSpans(xml)
-  const nCols = gridCols.length
-  if (!nRows || !nCols) return null
-
-  if (op.kind === 'insert-row' || op.kind === 'delete-row') {
-    const at = op.index
-    const ref = trSpans[at]
-    if (!ref) return null
-    const refXml = xml.slice(ref.start, ref.end)
-    const rowH = Number(/<a:tr\s[^>]*\bh="(\d+)"/.exec(refXml)?.[1] ?? 0)
-    if (op.kind === 'insert-row') {
-      const clone = clearTcText(refXml)
-      const insertAt = op.before ? ref.start : ref.end
-      xml = xml.slice(0, insertAt) + clone + xml.slice(insertAt)
-      xml = bumpFrameExt(xml, 'cy', rowH)
-    } else {
-      if (nRows <= 1) return null
-      xml = xml.slice(0, ref.start) + xml.slice(ref.end)
-      xml = bumpFrameExt(xml, 'cy', -rowH)
+  // Insert/delete N at once (the cell-range selection spans N rows/columns): repeating the
+  // single step at the same index inserts N clones before/after the reference, or deletes
+  // the N rows/columns that follow it
+  const count = Math.max(1, Math.min(200, Math.floor(op.count ?? 1)))
+  for (let step = 0; step < count; step++) {
+    const trSpans: Array<{ start: number; end: number }> = []
+    for (let i = 0; ; i++) {
+      const span = nthTagSpan(xml, 'a:tr', i)
+      if (!span) break
+      trSpans.push(span)
     }
-  } else {
-    const at = op.index
-    const refCol = gridCols[at]
-    if (!refCol) return null
-    const colW = Number(/\bw="(\d+)"/.exec(refCol.open)?.[1] ?? 0)
-    if (op.kind === 'delete-col' && nCols <= 1) return null
+    const nRows = trSpans.length
+    const gridCols = gridColSpans(xml)
+    const nCols = gridCols.length
+    if (!nRows || !nCols) return null
 
-    // Process tc row by row (replace back-to-front so offsets stay valid)
-    for (let r = nRows - 1; r >= 0; r--) {
-      const tr = nthTagSpan(xml, 'a:tr', r)
-      if (!tr) return null
-      const trXml = xml.slice(tr.start, tr.end)
-      const tc = nthTagSpan(trXml, 'a:tc', at)
-      if (!tc) return null
-      let newTr: string
-      if (op.kind === 'insert-col') {
-        const clone = clearTcText(trXml.slice(tc.start, tc.end))
-        const insertAt = op.before ? tc.start : tc.end
-        newTr = trXml.slice(0, insertAt) + clone + trXml.slice(insertAt)
+    if (op.kind === 'insert-row' || op.kind === 'delete-row') {
+      const at = op.index
+      const ref = trSpans[at]
+      if (!ref) return null
+      const refXml = xml.slice(ref.start, ref.end)
+      const rowH = Number(/<a:tr\s[^>]*\bh="(\d+)"/.exec(refXml)?.[1] ?? 0)
+      if (op.kind === 'insert-row') {
+        const clone = clearTcText(refXml)
+        const insertAt = op.before ? ref.start : ref.end
+        xml = xml.slice(0, insertAt) + clone + xml.slice(insertAt)
+        xml = bumpFrameExt(xml, 'cy', rowH)
       } else {
-        newTr = trXml.slice(0, tc.start) + trXml.slice(tc.end)
+        if (nRows <= 1) return null
+        xml = xml.slice(0, ref.start) + xml.slice(ref.end)
+        xml = bumpFrameExt(xml, 'cy', -rowH)
       }
-      xml = xml.slice(0, tr.start) + newTr + xml.slice(tr.end)
-    }
-    // gridCol and frame width
-    const gc = gridColSpans(xml)[at]!
-    if (op.kind === 'insert-col') {
-      // Fresh self-closing clone: copying the full span would duplicate the
-      // reference column's a16:colId, which must stay unique per column
-      const insertAt = op.before ? gc.start : gc.end
-      xml = xml.slice(0, insertAt) + `<a:gridCol w="${colW}"/>` + xml.slice(insertAt)
-      xml = bumpFrameExt(xml, 'cx', colW)
     } else {
-      xml = xml.slice(0, gc.start) + xml.slice(gc.end)
-      xml = bumpFrameExt(xml, 'cx', -colW)
+      const at = op.index
+      const refCol = gridCols[at]
+      if (!refCol) return null
+      const colW = Number(/\bw="(\d+)"/.exec(refCol.open)?.[1] ?? 0)
+      if (op.kind === 'delete-col' && nCols <= 1) return null
+
+      // Process tc row by row (replace back-to-front so offsets stay valid)
+      for (let r = nRows - 1; r >= 0; r--) {
+        const tr = nthTagSpan(xml, 'a:tr', r)
+        if (!tr) return null
+        const trXml = xml.slice(tr.start, tr.end)
+        const tc = nthTagSpan(trXml, 'a:tc', at)
+        if (!tc) return null
+        let newTr: string
+        if (op.kind === 'insert-col') {
+          const clone = clearTcText(trXml.slice(tc.start, tc.end))
+          const insertAt = op.before ? tc.start : tc.end
+          newTr = trXml.slice(0, insertAt) + clone + trXml.slice(insertAt)
+        } else {
+          newTr = trXml.slice(0, tc.start) + trXml.slice(tc.end)
+        }
+        xml = xml.slice(0, tr.start) + newTr + xml.slice(tr.end)
+      }
+      // gridCol and frame width
+      const gc = gridColSpans(xml)[at]!
+      if (op.kind === 'insert-col') {
+        // Fresh self-closing clone: copying the full span would duplicate the
+        // reference column's a16:colId, which must stay unique per column
+        const insertAt = op.before ? gc.start : gc.end
+        xml = xml.slice(0, insertAt) + `<a:gridCol w="${colW}"/>` + xml.slice(insertAt)
+        xml = bumpFrameExt(xml, 'cx', colW)
+      } else {
+        xml = xml.slice(0, gc.start) + xml.slice(gc.end)
+        xml = bumpFrameExt(xml, 'cx', -colW)
+      }
     }
   }
 
@@ -4790,6 +4931,10 @@ export type TableMergeOp =
   | { kind: 'merge-right'; row: number; col: number }
   | { kind: 'merge-down'; row: number; col: number }
   | { kind: 'split'; row: number; col: number }
+  /** Merge the rectangle (top-left row/col, rows × cols, tc coordinates) into one cell */
+  | { kind: 'merge-range'; row: number; col: number; rows: number; cols: number }
+  /** Split every merged cell inside the rectangle (the rectangle must not cut a merge in two) */
+  | { kind: 'split-range'; row: number; col: number; rows: number; cols: number }
 
 const tcAttr = (tcOpen: string, name: string): number => {
   const m = new RegExp(`\\b${name}="(\\d+)"`).exec(tcOpen)
@@ -4812,6 +4957,141 @@ function tcParagraphsXml(tcXml: string): string {
   return paras.filter((p) => /<a:t>(?=[^<]*\S)[^<]*<\/a:t>/.test(p)).join('')
 }
 
+/** True when no merged cell straddles the rectangle's edge (every merge is fully inside or fully outside). */
+function rangeIsMergeClosed(
+  table: TableElement,
+  r0: number,
+  c0: number,
+  r1: number,
+  c1: number,
+): boolean {
+  for (let r = 0; r < table.rows.length; r++) {
+    const row = table.rows[r]!
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c]!
+      if (cell.merged) continue
+      const er = r + (cell.rowSpan ?? 1) - 1
+      const ec = c + (cell.gridSpan ?? 1) - 1
+      const overlaps = r <= r1 && er >= r0 && c <= c1 && ec >= c0
+      const inside = r >= r0 && er <= r1 && c >= c0 && ec <= c1
+      if (overlaps && !inside) return false
+    }
+  }
+  return true
+}
+
+/** Merge a whole rectangle into its top-left cell (text of the other cells folds into it, row-major). */
+function mergeRangeXml(
+  xml: string,
+  table: TableElement,
+  op: { row: number; col: number; rows: number; cols: number },
+): string | null {
+  const { row, col, rows, cols } = op
+  if (![row, col, rows, cols].every(Number.isInteger) || row < 0 || col < 0) return null
+  if (rows < 1 || cols < 1 || rows * cols < 2) return null
+  const r1 = row + rows - 1
+  const c1 = col + cols - 1
+  if (r1 >= table.rows.length || c1 >= (table.rows[row]?.length ?? 0)) return null
+  if (!rangeIsMergeClosed(table, row, col, r1, c1)) return null
+
+  // Pass 1: gather the non-empty paragraphs of every cell in the rectangle, row-major
+  const folded: string[] = []
+  const tcXmlAt = (r: number, c: number): string | null => {
+    const tr = nthTagSpan(xml, 'a:tr', r)
+    if (!tr) return null
+    const trXml = xml.slice(tr.start, tr.end)
+    const tc = nthTagSpan(trXml, 'a:tc', c)
+    return tc ? trXml.slice(tc.start, tc.end) : null
+  }
+  for (let r = row; r <= r1; r++) {
+    for (let c = col; c <= c1; c++) {
+      const tcXml = tcXmlAt(r, c)
+      if (tcXml == null) return null
+      folded.push(tcParagraphsXml(tcXml))
+    }
+  }
+  const allParas = folded.join('')
+
+  // Pass 2: rewrite rows back-to-front so earlier offsets stay valid
+  for (let r = r1; r >= row; r--) {
+    const trSpan = nthTagSpan(xml, 'a:tr', r)
+    if (!trSpan) return null
+    let rowXml = xml.slice(trSpan.start, trSpan.end)
+    for (let c = c1; c >= col; c--) {
+      const span = nthTagSpan(rowXml, 'a:tc', c)
+      if (!span) return null
+      let tcXml = rowXml.slice(span.start, span.end)
+      // drop whatever merge markers the cell carried; the rectangle redefines them
+      for (const name of ['gridSpan', 'rowSpan', 'hMerge', 'vMerge']) {
+        tcXml = setTcAttrXml(tcXml, name, null)
+      }
+      if (r === row && c === col) {
+        if (cols > 1) tcXml = setTcAttrXml(tcXml, 'gridSpan', cols)
+        if (rows > 1) tcXml = setTcAttrXml(tcXml, 'rowSpan', rows)
+        if (allParas) {
+          // keep bodyPr/lstStyle, replace the paragraphs with the folded text
+          tcXml = tcXml.replace(
+            /(<a:txBody(?:\s[^>]*)?>)([\s\S]*?)(<\/a:txBody>)/,
+            (_m, open: string, inner: string, close: string) => {
+              const head =
+                /<a:bodyPr\b(?:[^>]*?)(?:\/>|>[\s\S]*?<\/a:bodyPr>)/.exec(inner)?.[0] ??
+                '<a:bodyPr/>'
+              const lst =
+                /<a:lstStyle\b(?:[^>]*?)(?:\/>|>[\s\S]*?<\/a:lstStyle>)/.exec(inner)?.[0] ?? ''
+              return `${open}${head}${lst}${allParas}${close}`
+            },
+          )
+        }
+      } else {
+        tcXml = clearTcText(tcXml)
+        if (c > col) tcXml = setTcAttrXml(tcXml, 'hMerge', 1)
+        if (r > row) tcXml = setTcAttrXml(tcXml, 'vMerge', 1)
+      }
+      rowXml = rowXml.slice(0, span.start) + tcXml + rowXml.slice(span.end)
+    }
+    xml = xml.slice(0, trSpan.start) + rowXml + xml.slice(trSpan.end)
+  }
+  return xml
+}
+
+/** Un-merge every merged cell inside the rectangle (the covered cells stay empty, like PowerPoint). */
+function splitRangeXml(
+  xml: string,
+  table: TableElement,
+  op: { row: number; col: number; rows: number; cols: number },
+): string | null {
+  const { row, col, rows, cols } = op
+  if (![row, col, rows, cols].every(Number.isInteger) || row < 0 || col < 0) return null
+  if (rows < 1 || cols < 1) return null
+  const r1 = row + rows - 1
+  const c1 = col + cols - 1
+  if (r1 >= table.rows.length || c1 >= (table.rows[row]?.length ?? 0)) return null
+  if (!rangeIsMergeClosed(table, row, col, r1, c1)) return null
+  let any = false
+  for (let r = row; r <= r1; r++)
+    for (let c = col; c <= c1; c++) {
+      const cell = table.rows[r]![c]!
+      if (cell.merged || (cell.gridSpan ?? 1) > 1 || (cell.rowSpan ?? 1) > 1) any = true
+    }
+  if (!any) return null
+  for (let r = r1; r >= row; r--) {
+    const trSpan = nthTagSpan(xml, 'a:tr', r)
+    if (!trSpan) return null
+    let rowXml = xml.slice(trSpan.start, trSpan.end)
+    for (let c = c1; c >= col; c--) {
+      const span = nthTagSpan(rowXml, 'a:tc', c)
+      if (!span) return null
+      let tcXml = rowXml.slice(span.start, span.end)
+      for (const name of ['gridSpan', 'rowSpan', 'hMerge', 'vMerge']) {
+        tcXml = setTcAttrXml(tcXml, name, null)
+      }
+      rowXml = rowXml.slice(0, span.start) + tcXml + rowXml.slice(span.end)
+    }
+    xml = xml.slice(0, trSpan.start) + rowXml + xml.slice(trSpan.end)
+  }
+  return xml
+}
+
 /**
  * Merge/split cells (XML surgery + materialize/reparse). v1 constraints:
  * merge-right requires anchor rowSpan=1 and a plain right neighbor; merge-down
@@ -4831,6 +5111,20 @@ export function mergeTableCells(
   if (!el || el.type !== 'table') return null
 
   let xml = patchedElementXml(el)
+  if (op.kind === 'merge-range' || op.kind === 'split-range') {
+    const next =
+      op.kind === 'merge-range'
+        ? mergeRangeXml(xml, el as TableElement, op)
+        : splitRangeXml(xml, el as TableElement, op)
+    if (!next) return null
+    el.dirty = el.dirtyTransform = el.dirtyFill = el.dirtyStroke = false
+    el.dirtyPPr = undefined
+    el.anchor.originalXml = next
+    slide.structureDirty = true
+    const freshRange = materializeSlide(opened, slideIndex)
+    const newElRange = freshRange?.elements[elIndex]
+    return freshRange && newElRange ? { slide: freshRange, elementId: newElRange.id } : null
+  }
   const tr = nthTagSpan(xml, 'a:tr', op.row)
   if (!tr) return null
   let trXml = xml.slice(tr.start, tr.end)
@@ -5016,7 +5310,13 @@ function scaleToSum(values: number[], target: number): number[] {
  * internal grid at its old size, so other software renders the old dimensions
  *. The frame ext is synced to the redistributed sums.
  */
-export function resizeTable(slide: Slide, elementId: string, cx: number, cy: number): boolean {
+export function resizeTable(
+  slide: Slide,
+  elementId: string,
+  cx: number,
+  cy: number,
+  rowHeightsEmu?: number[],
+): boolean {
   const el = slide.elements.find((e) => e.id === elementId)
   if (!el || el.type !== 'table') return false
   const table = el as TableElement
@@ -5035,7 +5335,10 @@ export function resizeTable(slide: Slide, elementId: string, cx: number, cy: num
     ci < widths.length ? m.replace(/\bw="-?\d+"/, `w="${widths[ci++]}"`) : m,
   )
 
-  const heights = scaleToSum(table.rowHeights, targetCy)
+  const heights =
+    rowHeightsEmu && rowHeightsEmu.length === table.rowHeights.length
+      ? rowHeightsEmu.map((h) => Math.max(1, Math.round(h)))
+      : scaleToSum(table.rowHeights, targetCy)
   let ri = 0
   xml = xml.replace(/<a:tr(\s[^>]*)?>/g, (m) => {
     if (ri >= heights.length) return m
@@ -5106,6 +5409,32 @@ export function setTableCellAnchor(
   return true
 }
 
+/**
+ * Delete the text of the given cells but keep their formatting (the Delete key on a cell-range
+ * selection): each cell ends with one empty paragraph that carries the first run's format.
+ */
+export function clearTableCellText(
+  slide: Slide,
+  elementId: string,
+  cells: readonly TableCellRef[],
+): boolean {
+  const el = slide.elements.find((e) => e.id === elementId)
+  if (!el || el.type !== 'table') return false
+  const table = el as TableElement
+  let changed = false
+  for (const { row, col } of cells) {
+    const cell = table.rows[row]?.[col]
+    if (!cell || cell.merged) continue
+    const p0 = cell.text?.paragraphs[0]
+    const r0 = p0?.runs.find((r) => !r.field && !r.rawXml)
+    const para: Paragraph = p0
+      ? { ...p0, runs: r0 ? [{ ...r0, text: '' }] : [{ text: '' }] }
+      : { runs: [{ text: '' }] }
+    if (editTableCellText(slide, elementId, row, col, [para])) changed = true
+  }
+  return changed
+}
+
 // ── Element clipboard ───────────────────────────────────────────────────
 
 export interface ElementClipboardItem {
@@ -5117,24 +5446,76 @@ export interface ElementClipboardItem {
   parts?: Readonly<Record<string, string>>
   /** ContentType per dependency: keyed by lower-case extension or by part path */
   contentTypes?: Readonly<Record<string, string>>
+  /**
+   * Table styles the element references (a:tableStyleId): the source deck's
+   * <a:tblStyle> definition when tableStyles.xml carries one (custom styles — the
+   * paste target must receive it or the table lands unstyled); `xml` absent =
+   * a built-in gallery style the target can regenerate from its own theme.
+   */
+  tableStyles?: ReadonlyArray<{ id: string; xml?: string }>
+  /**
+   * Animations that target this element (or a child of it); `spid` is the source slide's shape id.
+   * Pasting appends them for the new shape, like PowerPoint (an animated shape keeps its effect).
+   */
+  animations?: ReadonlyArray<SlideAnimation>
+  /** xmlns declarations of the source slide root (prefix → uri): lets a consumer re-declare every prefix the slice uses */
+  ns?: Readonly<Record<string, string>>
 }
 
-const RID_ATTR_RE = /\br:(?:embed|link|id)="(rId\d+)"/g
+/** `xmlns:prefix="uri"` declarations on a slide part's root element */
+function rootNamespaces(slideXml: string): Record<string, string> {
+  const root = /<p:sld\b[^>]*>/.exec(slideXml)?.[0] ?? ''
+  const ns: Record<string, string> = {}
+  for (const m of root.matchAll(/\bxmlns:([A-Za-z0-9]+)="([^"]+)"/g)) ns[m[1]!] = m[2]!
+  return ns
+}
+
+/** Every relationship-id attribute an element slice can carry: pictures/media/charts/OLE (embed|link|id|pict), SmartArt (dm|lo|qs|cs) */
+const RID_ATTR_RE = /\br:(?:embed|link|id|pict|dm|lo|qs|cs)="(rId\d+)"/g
+const DIAGRAM_DRAWING_REL = 'http://schemas.microsoft.com/office/2007/relationships/diagramDrawing'
+const TABLE_STYLE_ID_RE = /<a:tableStyleId>\s*([^<\s][^<]*?)\s*<\/a:tableStyleId>/g
+
+/** The `<a:tblStyle styleId="id">…</a:tblStyle>` definition inside a tableStyles.xml, if present */
+function tblStyleDefXml(tableStylesXml: string | null, styleId: string): string | undefined {
+  if (!tableStylesXml) return undefined
+  const key = `styleId="${styleId}"`
+  const at = tableStylesXml.indexOf(key)
+  if (at < 0) return undefined
+  const start = tableStylesXml.lastIndexOf('<a:tblStyle', at)
+  if (start < 0) return undefined
+  const head = tableStylesXml.slice(start, tableStylesXml.indexOf('>', at) + 1)
+  if (head.endsWith('/>')) return head
+  const close = tableStylesXml.indexOf('</a:tblStyle>', at)
+  return close < 0 ? undefined : tableStylesXml.slice(start, close + '</a:tblStyle>'.length)
+}
 
 /** Copy: grab the element's current XML and the relationships it references (part paths that pictures/charts etc. point at). */
 export function copyElementData(
   opened: OpenedPptx,
   slide: Slide,
   el: SlideElement,
+  opts?: {
+    /** Copy/duplicate hands over a free shape: a placeholder copy keeps its resolved frame and look */
+    demotePlaceholder?: boolean
+    /** For receivers that have no access to this deck: inherited text look and a custom table style become explicit */
+    bakeForExternal?: boolean
+  },
 ): ElementClipboardItem {
-  const xml = patchedElementXml(el)
+  let xml = patchedElementXml(el)
+  if (opts?.demotePlaceholder) xml = demotePlaceholderXml(el, xml)
+  if (opts?.bakeForExternal) {
+    xml = bakeInheritedTextXml(el, xml)
+    if (el.type === 'table') xml = bakeTableStyleXml(el as TableElement, xml)
+  }
   const slideRels = opened.archive.readRels(slide.path)
   const rels: ElementClipboardItem['rels'] = []
   const parts: Record<string, string> = {}
   const contentTypes: Record<string, string> = {}
   const seen = new Set<string>()
-  for (const m of xml.matchAll(RID_ATTR_RE)) {
-    const rid = m[1]!
+  const queue: string[] = []
+  for (const m of xml.matchAll(RID_ATTR_RE)) queue.push(m[1]!)
+  for (let qi = 0; qi < queue.length; qi++) {
+    const rid = queue[qi]!
     if (seen.has(rid)) continue
     seen.add(rid)
     const rel = slideRels.get(rid)
@@ -5152,8 +5533,43 @@ export function copyElementData(
       target,
       ...(external ? { external: true } : {}),
     })
+    // A SmartArt data model names its pre-rendered drawing (a slide-level relationship that no
+    // r:* attribute in the frame mentions) through dsp:dataModelExt relId — drag that along too
+    if (!external && rel.type.endsWith('/diagramData') && parts[target]) {
+      const dataXml = Buffer.from(parts[target]!, 'base64').toString('utf8')
+      for (const dm of dataXml.matchAll(/\brelId="(rId\d+)"/g)) {
+        if (slideRels.get(dm[1]!)?.type === DIAGRAM_DRAWING_REL) queue.push(dm[1]!)
+      }
+    }
   }
-  return { xml, rels, ...(Object.keys(parts).length ? { parts, contentTypes } : {}) }
+  // Table styles: a custom style lives only in the source deck's tableStyles.xml
+  const tableStyles: Array<{ id: string; xml?: string }> = []
+  if (xml.includes('<a:tableStyleId>')) {
+    const tsXml = opened.archive.readText('ppt/tableStyles.xml')
+    for (const m of xml.matchAll(TABLE_STYLE_ID_RE)) {
+      const id = m[1]!
+      if (tableStyles.some((t) => t.id === id)) continue
+      const def = tblStyleDefXml(tsXml, id)
+      tableStyles.push(def ? { id, xml: def } : { id })
+    }
+  }
+  const ids = animCNvPrIds(xml)
+  const animations = ids.size
+    ? readSlideAnimations(slide, true)
+        .filter((a) => ids.has(a.spid))
+        .map((a) => {
+          const { nativeId: _nativeId, nativeXml: _nativeXml, ...rest } = a
+          return rest
+        })
+    : []
+  return {
+    xml,
+    rels,
+    ...(Object.keys(parts).length ? { parts, contentTypes } : {}),
+    ...(tableStyles.length ? { tableStyles } : {}),
+    ...(animations.length ? { animations } : {}),
+    ns: rootNamespaces(slide.originalXml),
+  }
 }
 
 /** 'ppt/media/image1.png' → the relative Target '../media/image1.png' in the slide rels */
@@ -5162,11 +5578,53 @@ function relTargetFromSlide(absTarget: string): string {
 }
 
 /**
- * Paste: land bundled dependency parts (byte-identical ones already in the
+ * Land the table styles a pasted table references: a custom style missing from the
+ * target's tableStyles.xml is copied over (a populated part without the id renders the
+ * table unstyled); one whose id exists with a *different* definition (Google Slides
+ * exports reuse one GUID for unrelated styles) gets a fresh id; a built-in gallery style
+ * is regenerated from the target slide's theme. Returns old→new id for renamed styles.
+ */
+function landTableStyles(
+  opened: OpenedPptx,
+  slidePath: string,
+  items: readonly ElementClipboardItem[],
+): Map<string, string> {
+  const renamed = new Map<string, string>()
+  const done = new Set<string>()
+  for (const item of items) {
+    for (const ts of item.tableStyles ?? []) {
+      if (done.has(ts.id)) continue
+      done.add(ts.id)
+      const existing = tblStyleDefXml(opened.archive.readText('ppt/tableStyles.xml'), ts.id)
+      if (!ts.xml) {
+        if (!existing) ensureBuiltinTableStylePart(opened, ts.id, slidePath)
+        continue
+      }
+      if (!existing) {
+        ensureTableStylePart(opened, ts.id, ts.xml)
+      } else if (existing.replace(/\s+/g, '') !== ts.xml.replace(/\s+/g, '')) {
+        const fresh = `{${globalThis.crypto.randomUUID().toUpperCase()}}`
+        renamed.set(ts.id, fresh)
+        ensureTableStylePart(
+          opened,
+          fresh,
+          ts.xml.replace(`styleId="${ts.id}"`, `styleId="${fresh}"`),
+        )
+      }
+    }
+  }
+  return renamed
+}
+
+/** Connector endpoints (`stCxn`/`endCxn`) reference shape ids: remap to the pasted ids, drop references to shapes that were not copied */
+const CXN_REF_RE = /<a:(stCxn|endCxn)\b[^>]*\/>/g
+
+/**
+ * Paste: land bundled dependency parts (byte-identical media already in the
  * target are shared, so a same-deck paste copies no media), rels surgery
  * (reuse the rId when the target slide already has a relationship with the
- * same type+target), renumber cNvPr ids, offset the whole thing, append, and
- * reparse.
+ * same type+target), renumber cNvPr ids (connector endpoints follow), land table
+ * styles, offset the whole thing, append, and reparse.
  */
 export function pasteElements(
   opened: OpenedPptx,
@@ -5203,9 +5661,21 @@ export function pasteElements(
     ? importClipboardParts(archive, bundledParts, bundledCT)
     : null
 
+  const styleRenames = landTableStyles(opened, slide.path, items)
+
+  // One id space for the whole paste: every source cNvPr id gets a fresh slide-unique id
   let nextId = nextCNvPrId(slide)
+  const idMap = new Map<string, number>()
+  for (const item of items) {
+    for (const m of item.xml.matchAll(/<p:cNvPr\s[^>]*\bid="(\d+)"/g)) {
+      if (!idMap.has(m[1]!)) idMap.set(m[1]!, nextId++)
+    }
+  }
+
   const xmls = items.map((item) => {
     let xml = item.xml
+    // old rId → new rId (one pass: a rewritten id must not be rewritten again by a later mapping)
+    const ridMap = new Map<string, string>()
     for (const rel of item.rels) {
       const landed = rel.external ? rel.target : (pathMap?.get(rel.target) ?? rel.target)
       const key = `${rel.type} ${landed}`
@@ -5221,14 +5691,42 @@ export function pasteElements(
         relsDirty = true
         byKey.set(key, rid)
       }
-      if (rid !== rel.rid) {
-        xml = xml.replace(new RegExp(`\\br:(embed|link|id)="${rel.rid}"`, 'g'), `r:$1="${rid}"`)
-      }
+      ridMap.set(rel.rid, rid)
+    }
+    if ([...ridMap].some(([from, to]) => from !== to)) {
+      xml = xml.replace(
+        /\br:(embed|link|id|pict|dm|lo|qs|cs)="(rId\d+)"/g,
+        (whole, attr: string, rid: string) =>
+          ridMap.has(rid) ? `r:${attr}="${ridMap.get(rid)}"` : whole,
+      )
+    }
+    // the SmartArt data part points at its drawing by relId: follow the new id
+    for (const rel of item.rels) {
+      if (!rel.type.endsWith('/diagramData') || rel.external) continue
+      const landedPath = pathMap?.get(rel.target) ?? rel.target
+      const bytes = archive.readBytes(landedPath)
+      if (!bytes) continue
+      const before = Buffer.from(bytes).toString('utf8')
+      const after = before.replace(/\brelId="(rId\d+)"/g, (whole, rid: string) =>
+        ridMap.has(rid) ? `relId="${ridMap.get(rid)}"` : whole,
+      )
+      if (after !== before) archive.entries.set(landedPath, Buffer.from(after, 'utf8'))
     }
     xml = xml.replace(
-      /(<p:cNvPr\s[^>]*\bid=")\d+(")/g,
-      (_a, pre: string, post: string) => `${pre}${nextId++}${post}`,
+      /(<p:cNvPr\s[^>]*\bid=")(\d+)(")/g,
+      (whole, pre: string, id: string, post: string) =>
+        idMap.has(id) ? `${pre}${idMap.get(id)}${post}` : whole,
     )
+    xml = xml.replace(CXN_REF_RE, (tag) => {
+      const ref = /\bid="(\d+)"/.exec(tag)?.[1]
+      return ref && idMap.has(ref) ? tag.replace(/\bid="\d+"/, `id="${idMap.get(ref)}"`) : ''
+    })
+    for (const [from, to] of styleRenames) {
+      xml = xml.replaceAll(
+        `<a:tableStyleId>${from}</a:tableStyleId>`,
+        `<a:tableStyleId>${to}</a:tableStyleId>`,
+      )
+    }
     // Pasted elements are new identities: mint fresh creationIds so durable ids
     // never collide with their source elements on the same slide
     xml = xml.replace(
@@ -5246,7 +5744,26 @@ export function pasteElements(
   })
 
   if (relsDirty) archive.entries.set(relsPath, Buffer.from(relsXml, 'utf8'))
-  return appendRawElements(opened, slideIndex, xmls)
+  const result = appendRawElements(opened, slideIndex, xmls)
+  // An animated shape keeps its effect when copied (PowerPoint appends it to the target's sequence)
+  const carried = items.flatMap((i) => i.animations ?? [])
+  if (result && carried.length) {
+    const fresh = opened.deck.slides[slideIndex]!
+    const remapped: SlideAnimation[] = []
+    for (const a of carried) {
+      const to = idMap.get(String(a.spid))
+      if (to === undefined) continue
+      remapped.push({
+        ...a,
+        spid: to,
+        ...(a.presetXml
+          ? { presetXml: a.presetXml.replaceAll(`spid="${a.spid}"`, `spid="${to}"`) }
+          : {}),
+      })
+    }
+    if (remapped.length) writeSlideAnimations(fresh, [...readSlideAnimations(fresh, true), ...remapped])
+  }
+  return result
 }
 
 function directXmlChild(xml: string, parentTag: string, childTag: string): string | null {
@@ -5945,4 +6462,154 @@ export function setGroupChildShapePresetGeometry(
   delete shape.customGeometry
   slide.structureDirty = true
   return true
+}
+export * from './clipboard-native'
+export * from './clipboard-text'
+export * from './clipboard-html-text'
+
+
+// ── PowerPoint's slide clipboard package ────────────────────────────────
+
+const PRES_MAIN_CT = 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'
+const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml'
+const TABLE_STYLES_CT = 'application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml'
+const REL_BASE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+/**
+ * The clipboard rendition PowerPoint pastes slides from: a minimal pptx (presentation,
+ * the slides, their master/layout/theme chain, media, charts, table styles) with every part
+ * under `clipboard/` rather than `ppt/`. Notes are left out, like the in-app slide bundle's
+ * layout re-pointing they would need the destination's notes master.
+ */
+export async function buildSlidesClipboardPackage(
+  opened: OpenedPptx,
+  indices: readonly number[],
+): Promise<Uint8Array | null> {
+  const { archive, deck } = opened
+  const slides = indices.map((i) => deck.slides[i]).filter((s): s is Slide => !!s)
+  if (!slides.length) return null
+  const parts: Record<string, string> = {}
+  const cts: Record<string, string> = {}
+  const masters: string[] = []
+  const slideRels: string[] = []
+  const renamed = (p: string) => (p.startsWith('ppt/') ? `clipboard/${p.slice(4)}` : p)
+  const files = new Map<string, Uint8Array | string>()
+  for (const [k, slide] of slides.entries()) {
+    const chain = archive.resolveSlideChain(slide.path)
+    if (!chain.masterPath) return null
+    if (!masters.includes(chain.masterPath)) masters.push(chain.masterPath)
+    collectPart(archive, chain.masterPath, parts, cts)
+    const lines: string[] = []
+    for (const rel of archive.readRels(slide.path).values()) {
+      if (rel.type.endsWith('/notesSlide') || rel.type.endsWith('/slide')) continue
+      if (rel.targetMode === 'External') {
+        lines.push(
+          `<Relationship Id="${rel.id}" Type="${rel.type}" Target="${escapeXmlAttr(rel.target)}" TargetMode="External"/>`,
+        )
+        continue
+      }
+      collectPart(archive, resolveTarget(slide.path, rel.target), parts, cts)
+      lines.push(`<Relationship Id="${rel.id}" Type="${rel.type}" Target="${escapeXmlAttr(rel.target)}"/>`)
+    }
+    const slidePath = `clipboard/slides/slide${k + 1}.xml`
+    files.set(slidePath, patchSlideXml(slide))
+    files.set(
+      relsPathFor(slidePath),
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${lines.join('')}</Relationships>`,
+    )
+    slideRels.push(slidePath)
+  }
+  for (const [path, b64] of Object.entries(parts)) {
+    files.set(renamed(path), new Uint8Array(Buffer.from(b64, 'base64')))
+  }
+  const presSrc = archive.readText('ppt/presentation.xml') ?? ''
+  const defaultTextStyle = /<p:defaultTextStyle>[\s\S]*?<\/p:defaultTextStyle>/.exec(presSrc)?.[0] ?? ''
+  const size = deck.size
+  const masterIds = masters
+    .map((_, i) => `<p:sldMasterId id="${2147483648 + i * 20000}" r:id="rId${i + 1}"/>`)
+    .join('')
+  const slideIds = slideRels
+    .map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${masters.length + i + 1}"/>`)
+    .join('')
+  files.set(
+    'clipboard/presentation.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${REL_BASE}" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1"><p:sldMasterIdLst>${masterIds}</p:sldMasterIdLst><p:sldIdLst>${slideIds}</p:sldIdLst><p:sldSz cx="${size.cx}" cy="${size.cy}"/><p:notesSz cx="6858000" cy="9144000"/>${defaultTextStyle}</p:presentation>`,
+  )
+  const presRels: string[] = masters.map(
+    (m, i) =>
+      `<Relationship Id="rId${i + 1}" Type="${REL_BASE}/slideMaster" Target="${escapeXmlAttr(renamed(m).slice('clipboard/'.length))}"/>`,
+  )
+  slideRels.forEach((p, i) =>
+    presRels.push(
+      `<Relationship Id="rId${masters.length + i + 1}" Type="${REL_BASE}/slide" Target="${escapeXmlAttr(p.slice('clipboard/'.length))}"/>`,
+    ),
+  )
+  let nextRid = masters.length + slideRels.length + 1
+  const themePath = archive.resolveSlideChain(slides[0]!.path).themePath
+  if (themePath) {
+    presRels.push(
+      `<Relationship Id="rId${nextRid++}" Type="${REL_BASE}/theme" Target="${escapeXmlAttr(renamed(themePath).slice('clipboard/'.length))}"/>`,
+    )
+  }
+  const tableStyles = archive.readText('ppt/tableStyles.xml')
+  if (tableStyles) {
+    files.set('clipboard/tableStyles.xml', tableStyles)
+    presRels.push(`<Relationship Id="rId${nextRid++}" Type="${REL_BASE}/tableStyles" Target="tableStyles.xml"/>`)
+  }
+  files.set(
+    'clipboard/_rels/presentation.xml.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${presRels.join('')}</Relationships>`,
+  )
+  files.set(
+    '_rels/.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_BASE}/officeDocument" Target="clipboard/presentation.xml"/></Relationships>`,
+  )
+  const defaults = new Map<string, string>([
+    ['rels', 'application/vnd.openxmlformats-package.relationships+xml'],
+    ['xml', 'application/xml'],
+  ])
+  const overrides = new Map<string, string>([
+    ['clipboard/presentation.xml', PRES_MAIN_CT],
+    ...slideRels.map((p) => [p, SLIDE_CT] as [string, string]),
+  ])
+  if (tableStyles) overrides.set('clipboard/tableStyles.xml', TABLE_STYLES_CT)
+  for (const [key, ct] of Object.entries(cts)) {
+    if (key.includes('/')) overrides.set(renamed(key), ct)
+    else defaults.set(key, ct)
+  }
+  files.set(
+    '[Content_Types].xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">${[...defaults].map(([e, t]) => `<Default Extension="${e}" ContentType="${t}"/>`).join('')}${[...overrides].map(([p, t]) => `<Override PartName="/${p}" ContentType="${t}"/>`).join('')}</Types>`,
+  )
+  const zip = new JSZip()
+  for (const [path, data] of files) zip.file(path, data)
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
+}
+
+/**
+ * Read PowerPoint's slide clipboard package: the `clipboard/` parts move to `ppt/` and the result
+ * opens as an ordinary deck whose slides can be bundled with copySlide.
+ */
+export async function openSlidesClipboardPackage(bytes: Uint8Array): Promise<OpenedPptx | null> {
+  let src: JSZip
+  try {
+    src = await JSZip.loadAsync(bytes)
+  } catch {
+    return null
+  }
+  if (!src.file('clipboard/presentation.xml')) return null
+  const out = new JSZip()
+  for (const [name, file] of Object.entries(src.files)) {
+    if (file.dir) continue
+    const dest = name.startsWith('clipboard/') ? `ppt/${name.slice('clipboard/'.length)}` : name
+    if (name === '_rels/.rels' || name === '[Content_Types].xml') {
+      const text = (await file.async('string')).replaceAll('clipboard/', 'ppt/')
+      out.file(dest, text)
+    } else out.file(dest, await file.async('uint8array'))
+  }
+  try {
+    return await openPptx(await out.generateAsync({ type: 'uint8array' }))
+  } catch {
+    return null
+  }
 }

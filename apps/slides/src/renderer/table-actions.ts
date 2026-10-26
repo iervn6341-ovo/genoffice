@@ -5,8 +5,8 @@
  */
 import type { EditParagraph } from '../shared/ipc'
 import type { ActionCtx } from './action-context'
-import { FIT_WIDTH } from './app-constants'
 import { t } from './i18n/locale'
+import type { TableCellSel } from './table-selection'
 
 export async function tableStructureOp(
   ctx: ActionCtx,
@@ -14,6 +14,10 @@ export async function tableStructureOp(
   kind: 'insert-row' | 'delete-row' | 'insert-col' | 'delete-col',
   index: number,
   before?: boolean,
+  /** how many rows / columns at once (the selected range spans that many) */
+  count?: number,
+  /** cell selection to restore once the table has its new id (default: none) */
+  next?: (newSourceId: string) => TableCellSel | null,
 ): Promise<void> {
   const r = await window.slidesApi.tableStructure({
     slideIndex: ctx.current,
@@ -21,11 +25,13 @@ export async function tableStructureOp(
     kind,
     index,
     ...(before ? { before: true } : {}),
+    ...(count && count > 1 ? { count } : {}),
   })
   if (r) {
     ctx.applySlide(ctx.current, r.slide)
     ctx.setSelectedIds([r.sourceId])
     ctx.setEditingCell(null)
+    ctx.setCellSel(next ? next(r.sourceId) : null)
   } else {
     ctx.setStatus(
       kind.startsWith('delete')
@@ -38,9 +44,13 @@ export async function tableStructureOp(
 export async function tableMergeOp(
   ctx: ActionCtx,
   sourceId: string,
-  kind: 'merge-right' | 'merge-down' | 'split',
+  kind: 'merge-right' | 'merge-down' | 'split' | 'merge-range' | 'split-range',
   row: number,
   col: number,
+  /** merge-range / split-range: the rectangle's size (row/col is its top-left cell) */
+  size?: { rows: number; cols: number },
+  /** cell selection to restore once the table has its new id (default: none) */
+  next?: (newSourceId: string) => TableCellSel | null,
 ): Promise<void> {
   const r = await window.slidesApi.tableMerge({
     slideIndex: ctx.current,
@@ -48,59 +58,63 @@ export async function tableMergeOp(
     kind,
     row,
     col,
+    ...(size ? { rows: size.rows, cols: size.cols } : {}),
   })
   if (r) {
     ctx.applySlide(ctx.current, r.slide)
     ctx.setSelectedIds([r.sourceId])
     ctx.setEditingCell(null)
+    ctx.setCellSel(next ? next(r.sourceId) : null)
   } else {
     ctx.setStatus(t('appStatusMergeFailed'))
   }
 }
 
-export async function onTableColResize(
-  ctx: ActionCtx,
-  sourceId: string,
-  col: number,
-  wPx: number,
-): Promise<void> {
-  const updated = await window.slidesApi.setTableColWidth({
-    slideIndex: ctx.current,
-    sourceId,
-    col,
-    wPx,
-    fitWidthPx: FIT_WIDTH,
-  })
-  if (updated) ctx.applySlide(ctx.current, updated)
+/** `cellEdit_<tableId>_<row>_<col>` (the id TextEditOverlay's cell pseudo-node carries) → the cell */
+export function parseCellEditKey(
+  key: string | undefined,
+): { sourceId: string; row: number; col: number } | null {
+  const m = /^cellEdit_(.+)_(\d+)_(\d+)$/.exec(key ?? '')
+  return m ? { sourceId: m[1]!, row: Number(m[2]), col: Number(m[3]) } : null
 }
 
-export async function onTableRowResize(
-  ctx: ActionCtx,
-  sourceId: string,
-  row: number,
-  hPx: number,
-): Promise<void> {
-  const updated = await window.slidesApi.setTableRowHeight({
-    slideIndex: ctx.current,
-    sourceId,
-    row,
-    hPx,
-    fitWidthPx: FIT_WIDTH,
-  })
-  if (updated) ctx.applySlide(ctx.current, updated)
-}
+export const cellEditKey = (c: { sourceId: string; row: number; col: number }): string =>
+  `cellEdit_${c.sourceId}_${c.row}_${c.col}`
 
-export async function commitCellEdit(ctx: ActionCtx, paragraphs: EditParagraph[]): Promise<void> {
-  if (!ctx.editingCell) return
+/**
+ * Write the cell editor's text back. `owner` names the cell the editor DOM was populated for
+ * (the overlay is reused when the target cell changes, so a late blur / press-guard commit may
+ * run after the current editing cell is already another one — the text still belongs to its
+ * own cell, and the newer edit session must survive).
+ */
+export async function commitCellEdit(
+  ctx: ActionCtx,
+  paragraphs: EditParagraph[],
+  owner?: string,
+): Promise<void> {
+  const target = parseCellEditKey(owner) ?? ctx.editingCell
+  if (!target) return
   const updated = await window.slidesApi.editTableCell({
     slideIndex: ctx.current,
-    sourceId: ctx.editingCell.sourceId,
-    row: ctx.editingCell.row,
-    col: ctx.editingCell.col,
+    sourceId: target.sourceId,
+    row: target.row,
+    col: target.col,
     paragraphs,
   })
   if (updated) ctx.applySlide(ctx.current, updated)
-  ctx.setEditingCell(null)
+  endCellEdit(ctx, target)
+}
+
+/** Leave cell editing, unless the editor has meanwhile moved on to another cell */
+export function endCellEdit(
+  ctx: Pick<ActionCtx, 'setEditingCell'>,
+  cell: { sourceId: string; row: number; col: number },
+): void {
+  ctx.setEditingCell((cur) =>
+    cur && (cur.sourceId !== cell.sourceId || cur.row !== cell.row || cur.col !== cell.col)
+      ? cur
+      : null,
+  )
 }
 
 /** Cell Tab/Shift+Tab: commit the current cell (if content changed) and jump to the next/previous cell;

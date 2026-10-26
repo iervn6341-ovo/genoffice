@@ -337,4 +337,10 @@ export const id = {
   paneShowEnded: 'Peragaan slide berakhir.',
   paneShowRehearseTip: 'Latih Pengaturan Waktu: waktu pada slide ini / total waktu',
   paneShowRehearseTotal: 'Total {time}',
+  paneShowVideoPlay: 'Putar',
+  paneShowVideoPause: 'Jeda',
+  paneShowVideoSeek: 'Lini masa',
+  paneShowVideoVolume: 'Volume',
+  paneShowVideoMute: 'Bisukan',
+  paneShowVideoUnmute: 'Bunyikan',
 } satisfies Record<keyof typeof zh, string>

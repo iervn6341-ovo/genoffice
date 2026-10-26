@@ -216,6 +216,8 @@ export const he = {
   ribbonFlipH: 'היפוך אופקי',
   ribbonFlipV: 'היפוך אנכי',
   ribbonDistributeHint: '{title} (בחר 3 רכיבים או יותר)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'הצגה או הסתרה של חלונית עוזר ה-AI',
   ribbonGroupTable: 'טבלה',
@@ -483,6 +485,8 @@ export const he = {
   ribbonRuler: 'סרגל',
   ribbonRulerTip: 'הצגה או הסתרה של הסרגל (אינצ׳ים)',
   ribbonGridlines: 'קווי רשת',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'הצגה או הסתרה של קווי רשת (רשת של חצי אינץ׳)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

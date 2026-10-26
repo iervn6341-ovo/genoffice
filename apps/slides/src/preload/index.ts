@@ -214,7 +214,7 @@ const api: SlidesApi = {
   }) => ipcRenderer.invoke('slides:set-text-body-props', op),
   setEffects: (op: { slideIndex: number; sourceId: string; effects: SetEffectsPatch }) =>
     ipcRenderer.invoke('slides:set-effects', op),
-  clipboardExternal: () => ipcRenderer.invoke('slides:clipboard-external'),
+  clipboardExternal: (skipNative?: boolean) => ipcRenderer.invoke('slides:clipboard-external', skipNative),
   groupElements: (op: GroupElementsOp) => ipcRenderer.invoke('slides:group-elements', op),
   ungroupElement: (op: UngroupElementOp) => ipcRenderer.invoke('slides:ungroup-element', op),
   batchEditTransform: (op: BatchEditTransformOp) =>
@@ -287,6 +287,7 @@ const api: SlidesApi = {
     ipcRenderer.invoke('slides:get-chart-data', slideIndex, sourceId),
   copyElements: (op: CopyElementsOp) => ipcRenderer.invoke('slides:copy-elements', op),
   pasteElements: (op: PasteElementsOp) => ipcRenderer.invoke('slides:paste-elements', op),
+  pasteSystem: (op: PasteElementsOp) => ipcRenderer.invoke('slides:paste-system', op),
   duplicateElements: (op: DuplicateElementsOp) =>
     ipcRenderer.invoke('slides:duplicate-elements', op),
   addTable: (op: AddTableOp) => ipcRenderer.invoke('slides:add-table', op),
@@ -346,7 +347,8 @@ const api: SlidesApi = {
   nativeClipboard: (op: 'cut' | 'copy' | 'paste') =>
     ipcRenderer.invoke('slides:native-clipboard', op),
   beginHistoryBatch: () => ipcRenderer.invoke('slides:history-batch-begin'),
-  endHistoryBatch: () => ipcRenderer.invoke('slides:history-batch-end'),
+  endHistoryBatch: (opts?: { snapshot?: boolean }) =>
+    ipcRenderer.invoke('slides:history-batch-end', opts),
   applyEditScript: (op: ApplyEditScriptOp) => ipcRenderer.invoke('slides:apply-edit-script', op),
   applyTxn: (op: ApplyTxnOp) => ipcRenderer.invoke('slides:apply-txn', op),
   aiSnapshotRestore: (id: number) => ipcRenderer.invoke('slides:ai-snapshot-restore', id),

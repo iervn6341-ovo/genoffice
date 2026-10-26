@@ -38,6 +38,26 @@ export function tableCellAtPoint(
   )
 }
 
+/** Screen-px band along every cell border (and the table frame) that stays a grip for moving the table.
+ * TableCellLayer insets its cell hit areas by the same amount. */
+export const TABLE_BORDER_GRIP_PX = 5
+
+/** Like tableCellAtPoint, but only for the cell body: null within `gap` of the cell's border. */
+export function tableCellInterior(
+  table: Pick<TableRenderNode, 'cells'>,
+  point: { x: number; y: number },
+  gap: number,
+) {
+  const c = tableCellAtPoint(table, point)
+  if (!c) return undefined
+  const inside =
+    point.x >= c.x + gap &&
+    point.x < c.x + c.w - gap &&
+    point.y >= c.y + gap &&
+    point.y < c.y + c.h - gap
+  return inside ? c : undefined
+}
+
 export function tableCellOverlayBox(
   box: {
     x: number

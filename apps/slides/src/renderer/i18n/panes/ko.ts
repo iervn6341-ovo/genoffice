@@ -334,4 +334,10 @@ export const ko = {
   paneShowEnded: '슬라이드 쇼가 끝났습니다.',
   paneShowRehearseTip: '예행 연습: 현재 슬라이드 시간 / 전체 시간',
   paneShowRehearseTotal: '전체 {time}',
+  paneShowVideoPlay: '재생',
+  paneShowVideoPause: '일시 중지',
+  paneShowVideoSeek: '타임라인',
+  paneShowVideoVolume: '볼륨',
+  paneShowVideoMute: '음소거',
+  paneShowVideoUnmute: '음소거 해제',
 } satisfies Record<keyof typeof zh, string>

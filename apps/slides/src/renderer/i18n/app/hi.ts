@@ -158,6 +158,7 @@ export const hi = {
   appCtxCellAnchorMiddle: 'टेक्स्ट लंबवत केंद्रित करें',
   appCtxCellAnchorBottom: 'टेक्स्ट नीचे संरेखित करें',
   appStatusMergeFailed: 'इस कक्ष को मर्ज/विभाजित नहीं किया जा सकता',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'मुद्रण की तैयारी हो रही है…',
   appPrintTitle: 'प्रिंट करें',
   appPrintLayoutFull: 'पूर्ण पृष्ठ स्लाइड',

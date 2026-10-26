@@ -335,4 +335,10 @@ export const ja = {
   paneShowEnded: 'スライドショーの最後です。',
   paneShowRehearseTip: 'リハーサル：現在のスライドの時間 / 合計時間',
   paneShowRehearseTotal: '合計 {time}',
+  paneShowVideoPlay: '再生',
+  paneShowVideoPause: '一時停止',
+  paneShowVideoSeek: 'タイムライン',
+  paneShowVideoVolume: '音量',
+  paneShowVideoMute: 'ミュート',
+  paneShowVideoUnmute: 'ミュート解除',
 } satisfies Record<keyof typeof zh, string>

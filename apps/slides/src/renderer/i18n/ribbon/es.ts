@@ -225,6 +225,8 @@ export const es = {
   ribbonFlipH: 'Voltear horizontalmente',
   ribbonFlipV: 'Voltear verticalmente',
   ribbonDistributeHint: '{title} (seleccione 3 o más elementos)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Mostrar u ocultar el panel del asistente de IA',
   ribbonGroupTable: 'Tabla',
@@ -514,6 +516,8 @@ export const es = {
   ribbonRuler: 'Regla',
   ribbonRulerTip: 'Mostrar u ocultar la regla (pulgadas)',
   ribbonGridlines: 'Líneas de cuadrícula',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Mostrar u ocultar las líneas de cuadrícula (cuadrícula de media pulgada)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

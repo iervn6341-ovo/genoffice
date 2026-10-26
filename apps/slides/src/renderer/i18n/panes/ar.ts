@@ -334,4 +334,10 @@ export const ar = {
   paneShowEnded: 'انتهى عرض الشرائح.',
   paneShowRehearseTip: 'التمرن على التوقيت: الوقت على هذه الشريحة / الوقت الإجمالي',
   paneShowRehearseTotal: 'الإجمالي {time}',
+  paneShowVideoPlay: 'تشغيل',
+  paneShowVideoPause: 'إيقاف مؤقت',
+  paneShowVideoSeek: 'المخطط الزمني',
+  paneShowVideoVolume: 'مستوى الصوت',
+  paneShowVideoMute: 'كتم الصوت',
+  paneShowVideoUnmute: 'إلغاء كتم الصوت',
 } satisfies Record<keyof typeof zh, string>

@@ -11,12 +11,21 @@ import * as arrangeActions from './arrange-actions'
 import * as slideActions from './slide-actions'
 import * as showActions from './show-actions'
 import * as styleActions from './style-actions'
+import * as tableSelectActions from './table-select-actions'
 import { shouldRouteUndoToDeck } from './undo-routing'
 
 /** Whether focus is in a text input (input/textarea/contentEditable) — these cases use native undo/delete */
-function inTextField(): boolean {
-  const el = document.activeElement as HTMLElement | null
-  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+function inTextField(target?: EventTarget | null): boolean {
+  // the key's own target counts too: a field that blurs itself on Enter has already lost
+  // activeElement by the time this window-level listener runs
+  const els = [document.activeElement, target ?? null] as Array<HTMLElement | null>
+  return els.some(
+    (el) =>
+      !!el &&
+      (el.tagName === 'INPUT' ||
+        el.tagName === 'TEXTAREA' ||
+        (el as HTMLElement).isContentEditable),
+  )
 }
 
 // Shortcuts: ⌘/Ctrl+Z undo, ⇧⌘Z / Ctrl+Y redo, ⌘/Ctrl+=/-/0 zoom,
@@ -28,7 +37,7 @@ export function handleGlobalKeydown(
 ): void {
   if (ctx.slideShow || ctx.presenter) return // In show/presenter view: navigation keys are handled by those views
   const mod = e.metaKey || e.ctrlKey
-  const inField = inTextField()
+  const inField = inTextField(e.target)
   const { editing, selectedIds, slide } = ctx
   // F5 show from start / ⇧F5 from current slide
   if (e.key === 'F5' && !mod) {
@@ -121,6 +130,9 @@ export function handleGlobalKeydown(
     return
   }
   if (editing || inField) return
+  // Cells (not text) selected in a table: arrows move the block, Tab / Enter / Delete / clipboard act on it
+  if (ctx.cellSel && !e.defaultPrevented && tableSelectActions.handleCellSelectionKey(ctx, e))
+    return
   // ⌘C/⌘X with text dragged in plain DOM (e.g. AI panel, focus on body): let the
   // native copy run instead of hijacking it for the slide/element clipboard
   if (mod && !e.altKey && !e.shiftKey && ['c', 'C', 'x', 'X'].includes(e.key)) {
@@ -157,6 +169,20 @@ export function handleGlobalKeydown(
     e.preventDefault()
     ctx.setSelectedIds([ctx.enteredGroupId])
     ctx.setEnteredGroupId(null)
+    return
+  }
+  // Esc with elements selected (not editing, no context menu / dialog open): drop the selection (PowerPoint)
+  if (
+    e.key === 'Escape' &&
+    !mod &&
+    !e.altKey &&
+    !e.shiftKey &&
+    !e.defaultPrevented &&
+    selectedIds.length > 0 &&
+    !document.querySelector('.ctx-menu, .modal-backdrop, .modal, [role="dialog"], dialog[open]')
+  ) {
+    e.preventDefault()
+    ctx.setSelectedIds([])
     return
   }
   // Typing directly on a selected text shape = select-all replace and enter editing
@@ -335,17 +361,27 @@ export function handleGlobalKeydown(
   else if (e.key === 'ArrowDown') dy = step
   else return
   e.preventDefault()
-  // Nudge the whole multi-selection; undo granularity is one step per element for now
+  // Nudge the whole multi-selection: onTransform collects the commits of this keypress and
+  // applies them as one batch, so one press = one undo step however many elements moved.
+  // Key repeat can outrun the IPC round trip: until a nudge has landed, the next press steps
+  // from the box it already asked for instead of the (stale) rendered one.
+  const sent: Promise<void>[] = []
+  const asked = new Map<string, NudgeBox>()
   for (const id of selectedIds) {
     const nodeCtx = ctx.findNodeCtx(id)
-    if (nodeCtx) {
-      const b = nodeCtx.node.box
-      void ctx.onTransform(
-        id,
-        { x: b.x + dx, y: b.y + dy, w: b.w, h: b.h, rotationDeg: b.rotationDeg },
-        undefined,
-        nodeCtx.groupId,
-      )
-    }
+    if (!nodeCtx) continue
+    const b = nudgeTarget.get(id) ?? nodeCtx.node.box
+    const next = { x: b.x + dx, y: b.y + dy, w: b.w, h: b.h, rotationDeg: b.rotationDeg }
+    nudgeTarget.set(id, next)
+    asked.set(id, next)
+    sent.push(ctx.onTransform(id, next, undefined, nodeCtx.groupId))
   }
+  void Promise.allSettled(sent).then(() => {
+    // only forget what this press asked for: a later press may already have moved the target on
+    for (const [id, box] of asked) if (nudgeTarget.get(id) === box) nudgeTarget.delete(id)
+  })
 }
+
+/** Boxes arrow-key nudges have requested but the slide has not rendered yet (see above) */
+type NudgeBox = { x: number; y: number; w: number; h: number; rotationDeg: number }
+const nudgeTarget = new Map<string, NudgeBox>()

@@ -222,6 +222,8 @@ export const id = {
   ribbonFlipH: 'Balik horizontal',
   ribbonFlipV: 'Balik vertikal',
   ribbonDistributeHint: '{title} (pilih minimal 3 elemen)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Tampilkan/sembunyikan panel Asisten AI',
   ribbonGroupTable: 'Tabel',
@@ -504,6 +506,8 @@ export const id = {
   ribbonRuler: 'Penggaris',
   ribbonRulerTip: 'Tampilkan/sembunyikan penggaris (inci)',
   ribbonGridlines: 'Garis Kisi',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Tampilkan/sembunyikan garis kisi (kisi setengah inci)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

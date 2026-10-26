@@ -328,6 +328,28 @@ export function endHistoryBatch(session: Session): HistorySnapshot | null {
   return batch.before
 }
 
+/**
+ * One undo step: the deck returns to the snapshot taken before the last edit and the state it
+ * left becomes the redo step. A history group still open (a renderer that died mid-gesture)
+ * is collapsed first. False when there is nothing to undo.
+ */
+export function undoStep(session: Session): boolean {
+  settleStaleHistoryBatch(session)
+  if (session.undoStack.length === 0) return false
+  session.redoStack.push(takeSnapshot(session))
+  restoreSnapshot(session, session.undoStack.pop()!)
+  return true
+}
+
+/** Counterpart of undoStep. */
+export function redoStep(session: Session): boolean {
+  settleStaleHistoryBatch(session)
+  if (session.redoStack.length === 0) return false
+  session.undoStack.push(takeSnapshot(session))
+  restoreSnapshot(session, session.redoStack.pop()!)
+  return true
+}
+
 /** Preserve the old deck and its history when AI replaces the entire presentation. */
 export function carryHistoryForReplacement(
   previous: Session | undefined,

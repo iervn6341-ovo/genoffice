@@ -231,6 +231,8 @@ export interface SetElementFontOp {
   fontSizeStep?: 1 | -1
   /** Superscript 30 / subscript -25 / normal 0 */
   baseline?: number
+  /** Table only: restrict the change to these cells (row, tc index) — the cell-range selection */
+  cells?: Array<{ row: number; col: number }>
   /** In-group editing: all sourceIds are direct children of that group */
   groupId?: string
 }
@@ -271,6 +273,8 @@ export interface SetElementParagraphFormatOp {
   rtl?: boolean
   /** Indent level increment/decrement (multi-level lists; applies to all paragraphs) */
   indentDelta?: 1 | -1
+  /** Table only: restrict the change to these cells (row, tc index) — the cell-range selection */
+  cells?: Array<{ row: number; col: number }>
   /** In-group editing: all sourceIds are direct children of that group */
   groupId?: string
 }
@@ -527,6 +531,8 @@ export interface CopyElementsOp {
   sourceIds: string[]
   /** The copy backs a cut: the originals are being removed, so pasting back onto the source page lands in place. */
   cut?: boolean
+  /** base64 PNG (no data: prefix) of the selection, for apps that paste a picture */
+  png?: string
 }
 
 /** Paste clipboard elements onto the given page (pastes land at the source position; occupied spots cascade the offset). */
@@ -826,15 +832,20 @@ export interface TableStructureIpcOp {
   kind: 'insert-row' | 'delete-row' | 'insert-col' | 'delete-col'
   index: number
   before?: boolean
+  /** insert / delete this many rows or columns at once (default 1) */
+  count?: number
 }
 
 /** Merge/split cells (row/col are model coordinates; col is the tc index). */
 export interface TableMergeIpcOp {
   slideIndex: number
   sourceId: string
-  kind: 'merge-right' | 'merge-down' | 'split'
+  kind: 'merge-right' | 'merge-down' | 'split' | 'merge-range' | 'split-range'
   row: number
   col: number
+  /** merge-range / split-range: the rectangle's size in cells (row/col is its top-left) */
+  rows?: number
+  cols?: number
 }
 
 /** Drag-resize column width (pixel value; the main process converts back to EMU). */
@@ -844,6 +855,14 @@ export interface SetTableColWidthOp {
   col: number
   wPx: number
   fitWidthPx: number
+  /** Dragging an inner column border moves it between two columns (the table keeps its width, like
+   * PowerPoint): the neighbouring column's new width rides along in the same undo step */
+  neighbor?: { col: number; wPx: number }
+  /** Live frame of a border drag: applied to the model but not an undo step of its own — the first
+   * frame pushes the pre-gesture snapshot and the settled commit (no flag) joins it */
+  preview?: boolean
+  /** Border drag abandoned (Esc): the preview frames are rolled back, no undo step is left */
+  cancel?: boolean
 }
 
 /** Drag-resize row height (pixel value; the main process converts back to EMU). */
@@ -853,6 +872,10 @@ export interface SetTableRowHeightOp {
   row: number
   hPx: number
   fitWidthPx: number
+  /** Same gesture contract as SetTableColWidthOp.preview */
+  preview?: boolean
+  /** Same gesture contract as SetTableColWidthOp.cancel */
+  cancel?: boolean
 }
 
 /** Vertical alignment of cell text. */
@@ -892,19 +915,29 @@ export interface UngroupElementOp {
 }
 
 /**
- * Batch geometry transform (multi-element position ops like align/distribute).
- * Each item is equivalent to an independent editTransform; only positions update, size/rotation unchanged.
+ * Batch geometry transform of a whole selection (arrow-key nudge, multi-drag/resize/rotate
+ * commits, align/distribute): every item is applied as ONE atomic transaction and takes ONE undo step.
+ * Each item is equivalent to an independent editTransform (box + rotation; `groupId` for children of
+ * an entered group, `resizeTableGrid` to redistribute a table's grid to the new frame).
  */
 export interface BatchEditTransformOp {
   slideIndex: number
   fitWidthPx: number
   items: Array<{
     sourceId: string
+    /** In-group editing: sourceId is a direct child of that group; the box is group-local px */
+    groupId?: string
     xPx: number
     yPx: number
     wPx: number
     hPx: number
     rotationDeg: number
+    /** Tables only: redistribute gridCol widths / tr heights to the new frame */
+    resizeTableGrid?: boolean
+    /** Tables only: a pure move — the sent size is the DRAWN size (rows may be grown by text), so leave the stored grid and frame size alone */
+    keepTableSize?: boolean
+    /** Tables only: rendered row heights in viewport px so the stored row heights match text wrapping */
+    tableRowHeightsPx?: number[]
   }>
 }
 
@@ -927,6 +960,10 @@ export interface EditTransformOp {
    * and the final commit (preview omitted/false) push nothing — a whole drag takes one undo step.
    */
   preview?: boolean
+  /** Tables only: a pure move — the sent size is the DRAWN size (rows may be grown by text), so leave the stored grid and frame size alone */
+  keepTableSize?: boolean
+  /** Tables only: rendered row heights in viewport px so the stored row heights match text wrapping */
+  tableRowHeightsPx?: number[]
 }
 
 /**
@@ -1199,6 +1236,9 @@ export interface EditChartOp {
     | 'mac-11'
   dataLabels?: boolean
   gridlines?: boolean
+  /** Show (true) / hide (false) the primary category / value axis */
+  catAxisVisible?: boolean
+  valAxisVisible?: boolean
   /** Axis title: '' = clear */
   catAxisTitle?: string
   valAxisTitle?: string
@@ -1554,9 +1594,11 @@ export interface SlidesApi {
     }
   }) => Promise<RenderSlide | null>
   /** External clipboard content probe (internal/slide = last copy came from this app) */
-  clipboardExternal: () => Promise<
+  clipboardExternal: (skipNative?: boolean) => Promise<
     | { kind: 'internal' }
     | { kind: 'slide' }
+    /** PowerPoint-native shapes / table (GVML, Table ClipFormat) or an HTML table: paste as editable elements via pasteSystem */
+    | { kind: 'native' }
     | { kind: 'image'; base64: string; ext: string }
     | { kind: 'text'; text: string }
     | { kind: 'none' }
@@ -1623,6 +1665,10 @@ export interface SlidesApi {
   pasteElements: (
     op: PasteElementsOp,
   ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
+  /** Paste PowerPoint-native shapes/table or an HTML table from the system clipboard as editable elements, centred on the page */
+  pasteSystem: (
+    op: PasteElementsOp,
+  ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
   duplicateElements: (
     op: DuplicateElementsOp,
   ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
@@ -1655,7 +1701,13 @@ export interface SlidesApi {
   getMediaData: (
     slideIndex: number,
     sourceId: string,
-  ) => Promise<{ kind: 'video' | 'audio'; dataUrl: string } | null>
+  ) => Promise<{
+    kind: 'video' | 'audio'
+    dataUrl: string
+    autoPlay?: boolean
+    loop?: boolean
+    trim?: { startMs?: number; endMs?: number }
+  } | null>
   /** Show a dialog to pick a 3D model (glb/gltf), embed + poster placeholder */
   insertModel3d: (
     slideIndex: number,
@@ -1748,7 +1800,8 @@ export interface SlidesApi {
   /** Nestable history transaction; all edits between begin/end become one undo step.
       The outermost end registers an AI rollback point and returns its id (null when nothing changed). */
   beginHistoryBatch: () => Promise<boolean>
-  endHistoryBatch: () => Promise<number | null>
+  /** `snapshot: false` (UI gesture groups) skips registering an AI rollback point */
+  endHistoryBatch: (opts?: { snapshot?: boolean }) => Promise<number | null>
   /** Apply an edit script's collected primitives as ONE atomic op transaction (the executor rolls back on any failure); returns the rebuilt slide or a guided error */
   applyEditScript: (
     op: ApplyEditScriptOp,

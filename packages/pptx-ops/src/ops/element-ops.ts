@@ -136,7 +136,14 @@ register({
     const { slide, el } = resolveElement(ctx, op, { allowPart: true })
     const before = { ...el.transform.offset, rot: el.transform.rot }
     const isTable = el.type === 'table' && op.resizeTableGrid === true
-    if (isTable) resizeTable(slide, el.id, box.cx, box.cy)
+    if (isTable) {
+      const rowHeightsEmu = Array.isArray(
+        (op as unknown as { tableRowHeightsEmu?: number[] }).tableRowHeightsEmu,
+      )
+        ? (op as unknown as { tableRowHeightsEmu?: number[] }).tableRowHeightsEmu
+        : undefined
+      resizeTable(slide, el.id, box.cx, box.cy, rowHeightsEmu)
+    }
     el.transform = {
       ...el.transform,
       offset: {

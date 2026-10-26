@@ -218,6 +218,8 @@ export const ar = {
   ribbonFlipH: 'انعكاس أفقي',
   ribbonFlipV: 'انعكاس رأسي',
   ribbonDistributeHint: '{title} (حدد 3 عناصر على الأقل)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'إظهار أو إخفاء لوحة مساعد الذكاء الاصطناعي',
   ribbonGroupTable: 'جدول',
@@ -491,6 +493,8 @@ export const ar = {
   ribbonRuler: 'مسطرة',
   ribbonRulerTip: 'إظهار أو إخفاء المسطرة (بوصة)',
   ribbonGridlines: 'خطوط الشبكة',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'إظهار أو إخفاء خطوط الشبكة (شبكة نصف بوصة)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

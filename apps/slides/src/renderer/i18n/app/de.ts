@@ -163,6 +163,7 @@ export const de = {
   appCtxCellAnchorMiddle: 'Text vertikal zentrieren',
   appCtxCellAnchorBottom: 'Text unten ausrichten',
   appStatusMergeFailed: 'Zelle kann nicht verbunden/geteilt werden',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Druck wird vorbereitet…',
   appPrintTitle: 'Drucken',
   appPrintLayoutFull: 'Ganzseitige Folien',

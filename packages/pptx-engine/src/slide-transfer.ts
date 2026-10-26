@@ -45,6 +45,10 @@ export interface SlideBundle {
   /** source deck's slide size, so the caller can warn about a mismatch */
   readonly slideSize?: { cx: number; cy: number }
   readonly chain?: SlideBundleChain
+  /** Table styles the slide's tables reference (custom ones carry their definition) */
+  readonly tableStyles?: ReadonlyArray<{ id: string; xml?: string }>
+  /** Speaker notes (rich paragraphs); the pasted slide gets them like PowerPoint's copy does */
+  readonly notes?: ReadonlyArray<unknown>
 }
 
 function extOf(path: string): string {
@@ -301,7 +305,12 @@ function reusableParts(
   }
   const reusable = new Set<string>()
   for (const sourcePath of Object.keys(parts)) {
-    if (!sourcePath.includes('/_rels/') && identical(sourcePath)) reusable.add(sourcePath)
+    // Only passive media may be shared between two shapes. A chart / SmartArt / OLE part
+    // is owned by one frame: sharing it would couple the copy to the original (editing
+    // one edits both, and a frame's data part carries ids that point back at its own drawing)
+    if (sourcePath.startsWith('ppt/media/') && !sourcePath.includes('/_rels/') && identical(sourcePath)) {
+      reusable.add(sourcePath)
+    }
   }
   return reusable
 }

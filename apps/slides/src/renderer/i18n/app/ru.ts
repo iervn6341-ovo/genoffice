@@ -153,6 +153,7 @@ export const ru = {
   appCtxCellAnchorMiddle: 'Текст по центру',
   appCtxCellAnchorBottom: 'Текст снизу',
   appStatusMergeFailed: 'Не удаётся объединить/разделить ячейку',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Подготовка к печати…',
   appPrintTitle: 'Печать',
   appPrintLayoutFull: 'Слайды на всю страницу',

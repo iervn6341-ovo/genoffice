@@ -434,6 +434,17 @@ export interface TableRenderNode extends RenderNodeBase {
       gridX stays in logical column order; when rtl is set, visual x = table width − gridX. */
   gridX: number[]
   gridY: number[]
+  /** Height each row needs for its wrapped cell text at the current column widths (px, 0 = nothing
+      forces it): a row cannot be dragged shorter than this, so a resize gesture's floor is built from it. */
+  rowNeedPx?: number[]
+  /** Width each grid column needs so none of its cells has to cut a word apart (px, 0 = no
+      requirement): the widest unbreakable word of the column's single-column cells plus its insets.
+      Spanning (merged) cells and empty cells give none. A resize gesture's width floor is built from it. */
+  colNeedPx?: number[]
+  /** Narrowest total width (px) at which proportionally narrowing the columns still leaves the
+      table's bottom inside the slide (rows grow as their text re-wraps); absent = the content floor
+      alone decides. Top-level, unrotated tables only. */
+  fitMinWPx?: number
   /** tblPr rtl="1": cell geometry is mirrored (logical column 1 rendered rightmost) */
   rtl?: boolean
   /** tblPr region toggles (for the Ribbon "Table Design" display) */
@@ -483,6 +494,9 @@ export interface ChartStyleInfo {
   dataLabels: boolean
   gridlines: boolean
   valAxisHidden?: boolean
+  catAxisHidden?: boolean
+  /** False for charts without axes (pie/doughnut/…): the axis toggles do not apply */
+  hasAxes?: boolean
   dataTable?: boolean
   pointValueLabels?: boolean
   title?: string

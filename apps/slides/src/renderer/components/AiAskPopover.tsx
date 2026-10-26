@@ -8,6 +8,7 @@
  */
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useI18n, type StringKey } from '../i18n/locale'
+import { onNodeGesture } from '../node-gesture'
 import {
   EDIT_INSTRUCTION_MAX,
   EDIT_QUEUE_MAX,
@@ -68,10 +69,30 @@ export function AiAskTrigger({ getAnchorRect, onOpen }: TriggerProps): React.JSX
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const pointerDownRef = useRef(false)
+  /** A move/resize gesture ran since the press: its geometry only reaches the model with the commit */
+  const gestureRef = useRef(false)
+  /** Pointer is up but the gesture's commit has not landed: the model still holds the old box */
+  const settlingRef = useRef(false)
+  const settleTimerRef = useRef<number | null>(null)
+  const remeasureRef = useRef<() => void>(() => {})
+
+  useEffect(
+    () =>
+      onNodeGesture((g) => {
+        if (g.kind === 'move' || g.kind === 'resize') gestureRef.current = true
+        // the commit's reply is in: the next render carries the final box and re-measures the chip
+        else if (g.kind === 'committed' && settlingRef.current) {
+          settlingRef.current = false
+          // normally the render of the committed slide re-measures; this covers one that came first
+          window.setTimeout(() => remeasureRef.current(), 0)
+        }
+      }),
+    [],
+  )
 
   useLayoutEffect(() => {
     const update = () => {
-      const rect = pointerDownRef.current ? null : getAnchorRect()
+      const rect = pointerDownRef.current || settlingRef.current ? null : getAnchorRect()
       if (!rect) {
         setPos(null)
         return
@@ -84,6 +105,7 @@ export function AiAskTrigger({ getAnchorRect, onOpen }: TriggerProps): React.JSX
         top: Math.min(rect.bottom + 4, bottom - h - EDGE),
       })
     }
+    remeasureRef.current = update
     update()
     const onPointerDown = (event: PointerEvent) => {
       if (btnRef.current?.contains(event.target as Node)) return
@@ -92,6 +114,19 @@ export function AiAskTrigger({ getAnchorRect, onOpen }: TriggerProps): React.JSX
     }
     const onPointerUp = () => {
       pointerDownRef.current = false
+      if (gestureRef.current) {
+        // Measuring now would put the chip at the pre-commit box and hop it when the commit lands
+        // (the anchor getter changes with the committed slide and re-measures through this effect);
+        // the timer covers a gesture whose commit never changes the slide.
+        gestureRef.current = false
+        settlingRef.current = true
+        if (settleTimerRef.current != null) window.clearTimeout(settleTimerRef.current)
+        settleTimerRef.current = window.setTimeout(() => {
+          settlingRef.current = false
+          remeasureRef.current()
+        }, 700)
+        return
+      }
       update()
     }
     const scroller = document.querySelector('.stage-wrap')

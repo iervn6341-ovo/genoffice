@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { showKeyCommand, type ShowKeyCommand } from './slideshow-utils'
+import { claimShowSpace } from './show-video-space'
 
 /** What a show window does for each key command; the latest handlers are read on every key. */
 export interface ShowKeyHandlers {
@@ -22,6 +23,8 @@ export function useShowKeys(handlers: ShowKeyHandlers): void {
     let buffer = ''
     let timer: ReturnType<typeof setTimeout> | undefined
     const onKey = (e: KeyboardEvent) => {
+      // Space over a video plays / pauses it instead of turning the page
+      if (claimShowSpace(e)) return
       const r = showKeyCommand(e.key, buffer, {
         meta: e.metaKey,
         ctrl: e.ctrlKey,

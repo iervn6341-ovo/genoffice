@@ -3,7 +3,7 @@
  * thumbnail/section/canvas/element menus from the latest App state (ActionCtx);
  * item callbacks dispatch into the extracted action modules.
  */
-import type { PictureRenderNode } from '@genoffice/pptx-render'
+import type { PictureRenderNode, TableRenderNode } from '@genoffice/pptx-render'
 import type { ActionCtx } from './action-context'
 import type { CtxItem } from './components/ContextMenu'
 import { isEditableText } from './konva-adapter'
@@ -15,8 +15,12 @@ import * as insertActions from './insert-actions'
 import * as pictureEditActions from './picture-edit-actions'
 import * as styleActions from './style-actions'
 import * as tableActions from './table-actions'
+import * as tableLayoutActions from './table-layout-actions'
+import * as tableSelectActions from './table-select-actions'
+import { cellAddrsInRect } from './table-selection'
+import { getLang, t } from './i18n/locale'
+import { tableRibbonLabels } from './i18n/table-ribbon'
 import { TABLE_SHADING_COLORS } from './components/table-shading-colors'
-import { t } from './i18n/locale'
 
 export function buildCtxItems(ctx: ActionCtx): Array<CtxItem | null> {
   const { ctxMenu, slides, sections, selectedIds, slide, current } = ctx
@@ -139,130 +143,111 @@ export function buildCtxItems(ctx: ActionCtx): Array<CtxItem | null> {
     })
   // Ungroup: single selection and it's a group
   const canUngroup = single && node?.type === 'group'
-  const tableItems: Array<CtxItem | null> = cell
-    ? [
-        {
-          label: t('appCtxInsertRowAbove'),
-          onClick: () =>
-            void tableActions.tableStructureOp(ctx, ctxMenu.targetId, 'insert-row', cell.row, true),
-        },
-        {
-          label: t('appCtxInsertRowBelow'),
-          onClick: () =>
-            void tableActions.tableStructureOp(ctx, ctxMenu.targetId, 'insert-row', cell.row),
-        },
-        {
-          label: t('appCtxInsertColLeft'),
-          onClick: () =>
-            void tableActions.tableStructureOp(ctx, ctxMenu.targetId, 'insert-col', cell.col, true),
-        },
-        {
-          label: t('appCtxInsertColRight'),
-          onClick: () =>
-            void tableActions.tableStructureOp(ctx, ctxMenu.targetId, 'insert-col', cell.col),
-        },
-        {
-          label: t('appCtxDeleteRow'),
-          danger: true,
-          onClick: () =>
-            void tableActions.tableStructureOp(ctx, ctxMenu.targetId, 'delete-row', cell.row),
-        },
-        {
-          label: t('appCtxDeleteCol'),
-          danger: true,
-          onClick: () =>
-            void tableActions.tableStructureOp(ctx, ctxMenu.targetId, 'delete-col', cell.col),
-        },
-        null,
-        {
-          label: t('appCtxMergeRight'),
-          onClick: () =>
-            void tableActions.tableMergeOp(
-              ctx,
-              ctxMenu.targetId,
-              'merge-right',
-              cell.row,
-              cell.col,
-            ),
-        },
-        {
-          label: t('appCtxMergeDown'),
-          onClick: () =>
-            void tableActions.tableMergeOp(ctx, ctxMenu.targetId, 'merge-down', cell.row, cell.col),
-        },
-        {
-          label: t('appCtxCellAnchorTop'),
-          onClick: () =>
-            void window.slidesApi
-              .setTableCellAnchor({
-                slideIndex: current,
-                sourceId: ctxMenu.targetId,
-                row: cell.row,
-                col: cell.col,
-                anchor: 'top',
-              })
-              .then((r) => r && ctx.applySlide(current, r)),
-        },
-        {
-          label: t('appCtxCellAnchorMiddle'),
-          onClick: () =>
-            void window.slidesApi
-              .setTableCellAnchor({
-                slideIndex: current,
-                sourceId: ctxMenu.targetId,
-                row: cell.row,
-                col: cell.col,
-                anchor: 'middle',
-              })
-              .then((r) => r && ctx.applySlide(current, r)),
-        },
-        {
-          label: t('appCtxCellAnchorBottom'),
-          onClick: () =>
-            void window.slidesApi
-              .setTableCellAnchor({
-                slideIndex: current,
-                sourceId: ctxMenu.targetId,
-                row: cell.row,
-                col: cell.col,
-                anchor: 'bottom',
-              })
-              .then((r) => r && ctx.applySlide(current, r)),
-        },
-        {
-          label: t('appCtxSplitCell'),
-          disabled: (() => {
-            const tbl = slide?.nodes.find((n) => n.sourceId === ctxMenu.targetId)
-            const cr =
-              tbl?.type === 'table'
-                ? tbl.cells.find((c) => c.row === cell.row && c.col === cell.col)
-                : undefined
-            return !((cr?.gridSpan ?? 1) > 1 || (cr?.rowSpan ?? 1) > 1)
-          })(),
-          onClick: () =>
-            void tableActions.tableMergeOp(ctx, ctxMenu.targetId, 'split', cell.row, cell.col),
-        },
-        null,
-        {
-          label: t('appCtxCellShading'),
-          swatches: [...TABLE_SHADING_COLORS, 'none'],
-          onSwatch: (c) =>
-            void window.slidesApi
-              .editTableStyle({
-                slideIndex: current,
-                sourceId: ctxMenu.targetId,
-                shadingColor: c,
-                cells: [{ row: cell.row, col: cell.col }],
-              })
-              .then((r) => {
-                if (!r) return
-                ctx.applySlide(current, r.slide)
-                if (r.sourceId) ctx.setSelectedIds([r.sourceId])
-              }),
-        },
-        null,
-      ]
-    : []
+  // Table commands act on the selected cell block (right-clicking inside it keeps the block,
+  // outside it targets just that cell)
+  const ctxTable = cell && node?.type === 'table' ? (node as TableRenderNode) : null
+  const range = ctxTable ? tableSelectActions.commandRange(ctx, ctxTable, cell) : null
+  const multiCell = !!range && (range.r1 > range.r0 || range.c1 > range.c0)
+  const structure = (kind: tableSelectActions.StructureKind) =>
+    ctxTable && range
+      ? void tableSelectActions.structureForRange(ctx, ctxTable, range, kind)
+      : undefined
+  const anchorOp = (anchor: 'top' | 'middle' | 'bottom') => {
+    if (!ctxTable || !range) return
+    const cells = cellAddrsInRect(ctxTable, range)
+    void tableLayoutActions.runOps(
+      ctx,
+      cells.map((c) => ({
+        op: 'setTableCellAnchor',
+        target: { slide: current, el: ctxMenu.targetId },
+        row: c.row,
+        col: c.col,
+        anchor,
+      })),
+    )
+  }
+  const tableItems: Array<CtxItem | null> =
+    cell && ctxTable && range
+      ? [
+          { label: t('appCtxInsertRowAbove'), onClick: () => structure('row-above') },
+          { label: t('appCtxInsertRowBelow'), onClick: () => structure('row-below') },
+          { label: t('appCtxInsertColLeft'), onClick: () => structure('col-left') },
+          { label: t('appCtxInsertColRight'), onClick: () => structure('col-right') },
+          { label: t('appCtxDeleteRow'), danger: true, onClick: () => structure('del-row') },
+          { label: t('appCtxDeleteCol'), danger: true, onClick: () => structure('del-col') },
+          null,
+          ...(multiCell
+            ? [
+                {
+                  label: tableRibbonLabels(getLang()).mergeCells,
+                  onClick: () => void tableSelectActions.mergeSelectedCells(ctx),
+                } as CtxItem,
+              ]
+            : [
+                {
+                  label: t('appCtxMergeRight'),
+                  onClick: () =>
+                    void tableActions.tableMergeOp(
+                      ctx,
+                      ctxMenu.targetId,
+                      'merge-right',
+                      cell.row,
+                      cell.col,
+                    ),
+                } as CtxItem,
+                {
+                  label: t('appCtxMergeDown'),
+                  onClick: () =>
+                    void tableActions.tableMergeOp(
+                      ctx,
+                      ctxMenu.targetId,
+                      'merge-down',
+                      cell.row,
+                      cell.col,
+                    ),
+                } as CtxItem,
+              ]),
+          { label: t('appCtxCellAnchorTop'), onClick: () => anchorOp('top') },
+          { label: t('appCtxCellAnchorMiddle'), onClick: () => anchorOp('middle') },
+          { label: t('appCtxCellAnchorBottom'), onClick: () => anchorOp('bottom') },
+          {
+            label: t('appCtxSplitCell'),
+            disabled: !tableSelectActions.rangeHasMerge(ctxTable, range),
+            onClick: () =>
+              multiCell
+                ? void tableSelectActions.splitSelectedCells(ctx)
+                : void tableActions.tableMergeOp(
+                    ctx,
+                    ctxMenu.targetId,
+                    'split',
+                    cell.row,
+                    cell.col,
+                  ),
+          },
+          null,
+          {
+            label: t('appCtxCellShading'),
+            swatches: [...TABLE_SHADING_COLORS, 'none'],
+            onSwatch: (c) =>
+              void window.slidesApi
+                .editTableStyle({
+                  slideIndex: current,
+                  sourceId: ctxMenu.targetId,
+                  shadingColor: c,
+                  cells: cellAddrsInRect(ctxTable, range),
+                })
+                .then((r) => {
+                  if (!r) return
+                  ctx.applySlide(current, r.slide)
+                  if (r.sourceId) {
+                    ctx.setSelectedIds([r.sourceId])
+                    if (ctx.cellSel) ctx.setCellSel({ ...ctx.cellSel, sourceId: r.sourceId })
+                  }
+                }),
+          },
+          null,
+        ]
+      : []
   return [
     ...tableItems,
     { label: t('appCtxCut'), hint: '⌘X', onClick: () => void clipboardActions.cutSelected(ctx) },
@@ -276,22 +261,18 @@ export function buildCtxItems(ctx: ActionCtx): Array<CtxItem | null> {
     null,
     {
       label: t('appCtxBringToFront'),
-      disabled: !single,
       onClick: () => void arrangeActions.reorderSelected(ctx, ctxMenu.targetId, 'front'),
     },
     {
       label: t('appCtxSendToBack'),
-      disabled: !single,
       onClick: () => void arrangeActions.reorderSelected(ctx, ctxMenu.targetId, 'back'),
     },
     {
       label: t('appCtxBringForward'),
-      disabled: !single,
       onClick: () => void arrangeActions.reorderSelected(ctx, ctxMenu.targetId, 'forward'),
     },
     {
       label: t('appCtxSendBackward'),
-      disabled: !single,
       onClick: () => void arrangeActions.reorderSelected(ctx, ctxMenu.targetId, 'backward'),
     },
     null,

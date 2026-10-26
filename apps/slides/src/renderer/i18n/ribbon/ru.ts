@@ -222,6 +222,8 @@ export const ru = {
   ribbonFlipH: 'Отразить по горизонтали',
   ribbonFlipV: 'Отразить по вертикали',
   ribbonDistributeHint: '{title} (выделите не менее 3 элементов)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Показать или скрыть панель ИИ-помощника',
   ribbonGroupTable: 'Таблица',
@@ -503,6 +505,8 @@ export const ru = {
   ribbonRuler: 'Линейка',
   ribbonRulerTip: 'Показать или скрыть линейку (дюймы)',
   ribbonGridlines: 'Линии сетки',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Показать или скрыть линии сетки (сетка 0,5 дюйма)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

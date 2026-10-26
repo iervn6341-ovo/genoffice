@@ -158,6 +158,7 @@ export const pt = {
   appCtxCellAnchorMiddle: 'Centralizar Texto Verticalmente',
   appCtxCellAnchorBottom: 'Alinhar Texto na Parte Inferior',
   appStatusMergeFailed: 'Não é possível mesclar/dividir esta célula',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Preparando para imprimir…',
   appPrintTitle: 'Imprimir',
   appPrintLayoutFull: 'Slides em Página Inteira',

@@ -146,6 +146,7 @@ export const th = {
   appCtxCellAnchorMiddle: 'ข้อความกึ่งกลางแนวตั้ง',
   appCtxCellAnchorBottom: 'ข้อความชิดล่าง',
   appStatusMergeFailed: 'ไม่สามารถผสาน/แยกเซลล์นี้ได้',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'กำลังเตรียมพิมพ์…',
   appPrintTitle: 'พิมพ์',
   appPrintLayoutFull: 'สไลด์เต็มหน้า',

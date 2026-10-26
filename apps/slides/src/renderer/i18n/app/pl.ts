@@ -158,6 +158,7 @@ export const pl = {
   appCtxCellAnchorMiddle: 'Wyśrodkuj tekst w pionie',
   appCtxCellAnchorBottom: 'Wyrównaj tekst do dołu',
   appStatusMergeFailed: 'Nie można scalić/podzielić tej komórki',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Przygotowywanie do drukowania…',
   appPrintTitle: 'Drukuj',
   appPrintLayoutFull: 'Slajdy na całej stronie',

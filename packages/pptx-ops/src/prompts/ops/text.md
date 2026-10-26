@@ -64,13 +64,14 @@ Applies the given properties to every run of the element (or every cell of a
 table) and leaves everything else untouched. Use it for "make the title blue
 and bold" style requests; use `setText` when the words change.
 
-| Field                                | Type        | Notes                                          |
-| ------------------------------------ | ----------- | ---------------------------------------------- |
-| font.fontFamily                      | string      | Omit to keep the theme font (recommended)      |
-| font.fontSizePt                      | number > 0  | Points                                         |
-| font.bold, italic, underline, strike | boolean     | Only the keys you pass change                  |
-| font.color                           | `"#RRGGBB"` | Explicit color; clears theme-color inheritance |
-| group                                | string      | Only for a direct child of a group             |
+| Field                                | Type          | Notes                                           |
+| ------------------------------------ | ------------- | ----------------------------------------------- |
+| font.fontFamily                      | string        | Omit to keep the theme font (recommended)       |
+| font.fontSizePt                      | number > 0    | Points                                          |
+| font.bold, italic, underline, strike | boolean       | Only the keys you pass change                   |
+| font.color                           | `"#RRGGBB"`   | Explicit color; clears theme-color inheritance  |
+| group                                | string        | Only for a direct child of a group              |
+| cells                                | `[{row,col}]` | Tables only: restrict the change to these cells |
 
 ```json
 {
@@ -97,19 +98,20 @@ Common mistakes
 Paragraph-level formatting for every paragraph of the element: alignment,
 bullets, spacing, direction, indent level.
 
-| Field                                     | Type                                            | Notes                                        |
-| ----------------------------------------- | ----------------------------------------------- | -------------------------------------------- |
-| format.align                              | `"left"` / `"center"` / `"right"` / `"justify"` |                                              |
-| format.bullet                             | `"char"` / `"number"` / `"none"`                | `"char"` uses `bulletChar` or a round bullet |
-| format.bulletChar                         | string                                          | Custom glyph, with `bullet:"char"`           |
-| format.bulletSizePct                      | number >= 0                                     | Percent of text size (100 = same)            |
-| format.bulletColor                        | `"#RRGGBB"`                                     |                                              |
-| format.bulletHangEmu                      | number >= 0                                     | Hanging indent in EMU                        |
-| format.lineSpacingPct                     | number >= 0                                     | 100 = single spacing                         |
-| format.spaceBeforePt, format.spaceAfterPt | number >= 0                                     | Points                                       |
-| format.rtl                                | boolean                                         | Base direction                               |
-| format.indentDelta                        | 1 or -1                                         | Shift the list level (clamped 0..8)          |
-| group                                     | string                                          | Only for a direct child of a group           |
+| Field                                     | Type                                            | Notes                                           |
+| ----------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
+| format.align                              | `"left"` / `"center"` / `"right"` / `"justify"` |                                                 |
+| format.bullet                             | `"char"` / `"number"` / `"none"`                | `"char"` uses `bulletChar` or a round bullet    |
+| format.bulletChar                         | string                                          | Custom glyph, with `bullet:"char"`              |
+| format.bulletSizePct                      | number >= 0                                     | Percent of text size (100 = same)               |
+| format.bulletColor                        | `"#RRGGBB"`                                     |                                                 |
+| format.bulletHangEmu                      | number >= 0                                     | Hanging indent in EMU                           |
+| format.lineSpacingPct                     | number >= 0                                     | 100 = single spacing                            |
+| format.spaceBeforePt, format.spaceAfterPt | number >= 0                                     | Points                                          |
+| format.rtl                                | boolean                                         | Base direction                                  |
+| format.indentDelta                        | 1 or -1                                         | Shift the list level (clamped 0..8)             |
+| group                                     | string                                          | Only for a direct child of a group              |
+| cells                                     | `[{row,col}]`                                   | Tables only: restrict the change to these cells |
 
 ```json
 {

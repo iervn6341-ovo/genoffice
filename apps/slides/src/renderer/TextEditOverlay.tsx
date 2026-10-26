@@ -23,14 +23,23 @@ import { displayFontFamily, konvaBaselineDrop } from './konva-adapter'
 import { ZOOM_PREVIEW_EVENT } from './zoom-preview'
 import { stepFontSizePt } from '@genoffice/pptx-engine/font-size-step'
 import { bulletRunText } from './bullet-presets'
+import {
+  classifyEditPress,
+  createSelectionKeeper,
+  handleEditorBlur,
+  installKeepEditGuard,
+} from '@genoffice/ui'
 import { darkContentColor } from './dark-content'
 
 interface Props {
   node: ShapeRenderNode
   /** Viewport scale (RenderSlide.scale) — editing renders in viewport px; divided back out when committing to pt */
   scale: number
-  onCommit: (paragraphs: EditParagraph[]) => void
-  onCancel: () => void
+  /** `owner` = the session (text box / `cellEdit_<table>_<row>_<col>`) whose text these paragraphs are:
+   * the editor DOM is reused when the edit target changes, so a late commit (blur, press guard) must be
+   * written back to the cell the DOM was populated for, not to whichever cell is current by then */
+  onCommit: (paragraphs: EditParagraph[], owner?: string) => void
+  onCancel: (owner?: string) => void
   /** Tab/Shift+Tab (for table cell editing): commit current content and jump to the next/previous cell.
    * paragraphs=null means content unchanged (the host may skip committing and only jump). */
   onTabNav?: (paragraphs: EditParagraph[] | null, dir: 1 | -1) => void
@@ -774,6 +783,64 @@ export function releaseFragmentsAtEdit(
   }
 }
 
+/**
+ * Pure content comparison: has the user changed the text since the session opened? A model
+ * refresh under an untouched editor may re-populate it; a touched one must keep its DOM.
+ */
+export function editorIsDirty(initialJson: string, current: EditParagraph[]): boolean {
+  return JSON.stringify(current) !== initialJson
+}
+
+/** Character offsets of the selection inside `root` (null when the selection is elsewhere) */
+export function selectionOffsets(
+  root: HTMLElement,
+  given?: Range,
+): { start: number; end: number } | null {
+  const sel = window.getSelection()
+  if (!given && !sel?.rangeCount) return null
+  const r = given ?? sel!.getRangeAt(0)
+  if (!root.contains(r.startContainer) || !root.contains(r.endContainer)) return null
+  const offsetOf = (node: Node, off: number): number => {
+    const pre = document.createRange()
+    pre.selectNodeContents(root)
+    pre.setEnd(node, off)
+    return pre.toString().length
+  }
+  return {
+    start: offsetOf(r.startContainer, r.startOffset),
+    end: offsetOf(r.endContainer, r.endOffset),
+  }
+}
+
+/** Range covering character offsets [start, end) of `root`'s text (clamped to the text length) */
+export function rangeFromOffsets(root: HTMLElement, start: number, end: number): Range {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const range = document.createRange()
+  let pos = 0
+  let startSet = false
+  let last: Text | null = null
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    last = n
+    const len = n.data.length
+    if (!startSet && start <= pos + len) {
+      range.setStart(n, Math.max(0, start - pos))
+      startSet = true
+    }
+    if (startSet && end <= pos + len) {
+      range.setEnd(n, Math.max(0, end - pos))
+      return range
+    }
+    pos += len
+  }
+  if (!startSet) {
+    range.selectNodeContents(root)
+    range.collapse(false)
+    return range
+  }
+  if (last) range.setEnd(last, last.data.length)
+  return range
+}
+
 export function TextEditOverlay({
   node,
   scale,
@@ -884,9 +951,35 @@ export function TextEditOverlay({
   // Initial content: see populateEditorDom; snapshot the initial extraction, unchanged commits go through onCancel
   // (no empty undo step / no dirty flag — opening to look and clicking away isn't an edit)
   const initialRef = useRef<string>('')
+  // One edit session = same text box (or cell), zoom norm, entry caret and type-to-replace seed.
+  // The model may refresh under a live session (format pane, find/replace, background re-layout):
+  // a session the user has already touched keeps its DOM and selection, an untouched one is
+  // re-populated with the selection carried over by character offsets.
+  const sessionKey = node.id.startsWith('cellEdit_') ? node.id : node.sourceId
+  const populatedRef = useRef<{
+    key: string
+    norm: number
+    caret: unknown
+    replace: unknown
+  } | null>(null)
   useEffect(() => {
     const div = ref.current
     if (!div) return
+    const prev = populatedRef.current
+    const sameSession =
+      !!prev &&
+      prev.key === sessionKey &&
+      prev.norm === norm &&
+      prev.caret === caretPoint &&
+      prev.replace === replaceWith
+    populatedRef.current = { key: sessionKey, norm, caret: caretPoint, replace: replaceWith }
+    let carried: { start: number; end: number } | null = null
+    if (sameSession) {
+      if (editorIsDirty(initialRef.current, extractParagraphs(div, norm))) return
+      carried =
+        selectionOffsets(div) ??
+        (keeper.peek()?.root === div ? selectionOffsets(div, keeper.peek()!.range) : null)
+    }
     div.dataset.norm = String(norm) // The ribbon helpers for font size increase/decrease/set take the conversion factor from here
     // Same anchor offset as the engine (the dy text-layout bakes into line tops), removed back
     // during populate — the engine anchors against the glyph extent (inkBottom), so mirror it
@@ -904,6 +997,18 @@ export function TextEditOverlay({
       vertText,
     )
     initialRef.current = JSON.stringify(extractParagraphs(div, norm))
+    if (carried) {
+      const range = rangeFromOffsets(div, carried.start, carried.end)
+      if (div.contains(document.activeElement)) {
+        const sel = window.getSelection()
+        sel?.removeAllRanges()
+        sel?.addRange(range)
+      } else if (keeper.peek()?.root === div) {
+        // focus is parked on a pane / ribbon field: hand the carried range to the restore path
+        keeper.set(div, range)
+      }
+      return
+    }
     div.focus()
     const sel = window.getSelection()
     if (sel && replaceWith) {
@@ -936,15 +1041,16 @@ export function TextEditOverlay({
         sel.addRange(range)
       }
     }
-  }, [node, norm, caretPoint, replaceWith])
+  }, [node, norm, caretPoint, replaceWith, sessionKey])
 
   const commit = () => {
-    savedSel = null
+    forgetEditSelection()
     const div = ref.current
-    if (!div) return onCancel()
+    const owner = populatedRef.current?.key
+    if (!div) return onCancel(owner)
     const paras = extractParagraphs(div, norm)
-    if (JSON.stringify(paras) === initialRef.current) return onCancel()
-    onCommit(paras)
+    if (JSON.stringify(paras) === initialRef.current) return onCancel(owner)
+    onCommit(paras, owner)
   }
 
   // Targeted layout release (native listeners: React's onBeforeInput synthetic event does
@@ -986,24 +1092,21 @@ export function TextEditOverlay({
     }
   }, [])
 
-  // While focus is parked on a keep-edit control the editor is already blurred, so its
-  // onBlur can't fire again — a press anywhere else must still commit instead of silently dropping the edit
+  // Presses while the editor is live (shared guard, see packages/ui keep-edit.ts): keep-edit zones
+  // (ribbon, format pane, text dialogs) never end the edit, a press outside every zone commits —
+  // immediately when focus is already parked off the editor.
   const commitRef = useRef(commit)
   commitRef.current = commit
-  useEffect(() => {
-    const onDown = (ev: MouseEvent) => {
-      const div = ref.current
-      if (!div || div.contains(document.activeElement)) return
-      const t = ev.target instanceof HTMLElement ? ev.target : null
-      if (t && (div.parentElement?.contains(t) || t.closest('[data-keep-edit]'))) return
-      commitRef.current()
-    }
-    document.addEventListener('mousedown', onDown, true)
-    return () => {
-      document.removeEventListener('mousedown', onDown, true)
-      savedSel = null
-    }
-  }, [])
+  useEffect(
+    () =>
+      installKeepEditGuard({
+        editor: () => ref.current,
+        frame: () => frameRef.current,
+        keeper,
+        commit: () => commitRef.current(),
+      }),
+    [],
+  )
 
   return (
     // Outer layer = the whole text box (the edit-frame border is drawn here);
@@ -1053,11 +1156,22 @@ export function TextEditOverlay({
         contentEditable
         spellCheck
         suppressContentEditableWarning
+        onFocus={keeper.clearPaint}
+        // Table cells: a press-and-drag on selected text must only ever select. Chromium would
+        // start a native text drag (move/copy of the selection); nothing in a cell editor needs
+        // it, and a stray drop is the one way mouse selection could rewrite cell content.
+        onDragStart={(e) => {
+          if (node.id.startsWith('cellEdit_')) e.preventDefault()
+        }}
+        onDrop={(e) => {
+          if (node.id.startsWith('cellEdit_') && !e.dataTransfer.files.length) e.preventDefault()
+        }}
         onBlur={(e) => {
           // Keep-edit controls (font size input, native color picker) take focus without committing;
           // they save/restore the selection and apply to it instead of element-level
-          const to = e.relatedTarget instanceof HTMLElement ? e.relatedTarget : null
-          if (to?.closest('[data-keep-edit]')) return
+          // focus parks on a ribbon / pane field: the keeper remembers what was selected so the
+          // field can hand it back
+          if (handleEditorBlur(e, keeper)) return
           commit()
         }}
         onClick={(e) => {
@@ -1464,25 +1578,18 @@ export function extractParagraphs(root: HTMLElement, norm: number): EditParagrap
  * Selection handoff for ribbon controls that must take real focus (font size input, native color
  * picker): save the editor's Range before focus leaves, restore it (re-focusing the
  * editor) right before applying, so the command hits the original selection instead of element-level.
+ * The store and the press guard are shared with the other editors (packages/ui keep-edit.ts).
  */
-let savedSel: { root: HTMLElement; range: Range } | null = null
+const keeper = createSelectionKeeper('go-kept-selection')
 
-export function saveEditSelection(): void {
-  const root = document.activeElement
-  const sel = window.getSelection()
-  if (!(root instanceof HTMLElement) || !root.isContentEditable || !sel?.rangeCount) return
-  savedSel = { root, range: sel.getRangeAt(0).cloneRange() }
-}
-
-export function restoreEditSelection(): boolean {
-  if (!savedSel?.root.isConnected) return false
-  savedSel.root.focus()
-  const sel = window.getSelection()
-  if (!sel) return false
-  sel.removeAllRanges()
-  sel.addRange(savedSel.range)
-  return true
-}
+/** Snapshot the editor's selection as focus leaves it for a keep-edit control (called from the blur,
+ *  when the document selection still sits inside the editor) */
+export const rememberEditSelection = (root: HTMLElement): void => keeper.remember(root)
+export const saveEditSelection = (): void => keeper.save()
+export const restoreEditSelection = (): boolean => keeper.restore()
+/** Drop the kept selection (the session ended) */
+export const forgetEditSelection = (): void => keeper.forget()
+export { classifyEditPress }
 
 /** Nearest <a href> wrapping a node (bounded by the contentEditable root). */
 function linkAround(node: Node | null): HTMLAnchorElement | null {
@@ -1497,7 +1604,9 @@ function linkAround(node: Node | null): HTMLAnchorElement | null {
  */
 export function selectionLink(): LinkTargetOp | null {
   const sel = window.getSelection()
-  const node = sel?.rangeCount ? sel.getRangeAt(0).startContainer : savedSel?.range.startContainer
+  const node = sel?.rangeCount
+    ? sel.getRangeAt(0).startContainer
+    : keeper.peek()?.range.startContainer
   const a = linkAround(node ?? null)
   return a ? decodeLinkTarget(a.getAttribute('href')) : null
 }
@@ -1602,7 +1711,7 @@ export function applySelectionParagraphFormat(patch: {
   const root =
     startEl?.closest('[data-src-para]')?.parentElement ??
     (startEl?.querySelector('[data-src-para]') ? startEl : null) ??
-    (savedSel?.root.isConnected ? savedSel.root : null)
+    (keeper.peek()?.root.isConnected ? keeper.peek()!.root : null)
   if (!root) return false
   const blocks = Array.from(root.children).filter(
     (el): el is HTMLElement =>
@@ -1838,6 +1947,46 @@ export function liveTextToggles(): TextToggles {
   }
 }
 
+/**
+ * Font size (model pt, half-point resolution) at the editing selection, for the ribbon size box.
+ * A caret reads the size it will type with; a range reads every text run it covers — `mixed`
+ * when they differ (the box then shows the smallest, like the element-level display). The old
+ * read of the selection's focus element was wrong after a grow/shrink click, whose re-selection
+ * sits at the parent of the resized span: the box kept showing the pre-click size.
+ */
+export function liveFontSize(): { sizePt: number; mixed: boolean } | null {
+  const root = liveEditRoot()
+  if (!root) return null
+  const sel = window.getSelection()
+  if (!sel?.rangeCount || !root.contains(sel.anchorNode)) return null
+  const norm = parseFloat(root.dataset.norm ?? '') || 1
+  const range = sel.getRangeAt(0)
+  const sizeOf = (el: Element | null): number | null => {
+    if (!el) return null
+    const px = parseFloat(window.getComputedStyle(el).fontSize)
+    return Number.isFinite(px) ? pxToPt(px, norm) : null
+  }
+  const sizes = new Set<number>()
+  if (range.collapsed) {
+    const n = sel.focusNode
+    const s = sizeOf(n instanceof Element ? n : (n?.parentElement ?? null))
+    if (s != null) sizes.add(s)
+  } else {
+    for (const { node } of coveredText(root, range)) {
+      const s = sizeOf(node.parentElement)
+      if (s != null) sizes.add(s)
+    }
+    // a range that covers no text (e.g. only a line break) reads like a caret at its start
+    if (!sizes.size) {
+      const n = range.startContainer
+      const s = sizeOf(n instanceof Element ? n : n.parentElement)
+      if (s != null) sizes.add(s)
+    }
+  }
+  if (!sizes.size) return null
+  return { sizePt: Math.min(...sizes), mixed: sizes.size > 1 }
+}
+
 export function liveAlign(): 'left' | 'center' | 'right' | 'justify' | null | undefined {
   const root = liveEditRoot()
   if (!(root instanceof HTMLElement)) return undefined
@@ -1928,6 +2077,9 @@ function reselectSpans(spans: HTMLElement[]): void {
   sel.removeAllRanges()
   sel.addRange(range)
   saveEditSelection()
+  // The browser's own selectionchange arrives a task later; the ribbon size box listens for it
+  // and a click right after would otherwise still see the pre-click size
+  document.dispatchEvent(new Event('selectionchange'))
 }
 
 /** css font-family list → first family name (unquoted). Save/display only care about the preferred font. */
@@ -1964,7 +2116,8 @@ export function setSelectionFontSizePt(pt: number): void {
   const root = document.activeElement
   if (!(root instanceof HTMLElement) || !root.isContentEditable) return
   const norm = parseFloat(root.dataset.norm ?? '') || 1
-  const px = Math.min(400, Math.max(8, (pt * 96) / 72)) * norm
+  // PowerPoint's range: 1–4000pt
+  const px = (Math.min(4000, Math.max(1, pt)) * 96 * norm) / 72
   document.execCommand('styleWithCSS', false, 'false')
   document.execCommand('fontSize', false, '7')
   const spans: HTMLElement[] = []

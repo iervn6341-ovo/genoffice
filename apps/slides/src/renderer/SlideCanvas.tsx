@@ -34,8 +34,31 @@ import type {
   GroupRenderNode,
 } from '@genoffice/pptx-render'
 import { boxPivotProps, fillToKonva, isEditableText } from './konva-adapter'
-import { tableCellAtPoint, tableCellOverlayBox, tableLocalPointFromStage } from './table-hit'
+import {
+  TABLE_BORDER_GRIP_PX,
+  tableCellAtPoint,
+  tableCellInterior,
+  tableCellOverlayBox,
+  tableLocalPointFromStage,
+} from './table-hit'
 import { isPromptPlaceholder, textHitAtPoint } from './text-hit-area'
+import {
+  clampAnchorPos,
+  colDragRange,
+  ALL_ANCHORS,
+  anchorsForScreenSize,
+  clampTransformBox,
+  resolveColDrag,
+  resolveRowDrag,
+  rowDragFloor,
+  type AnchorRect,
+  type MinSize,
+} from './min-size'
+import { isConnectorNode, minSizeOfNodes, selectionBounds } from './selection-min'
+import { emitNodeGesture } from './node-gesture'
+import type { GridChange } from './table-grid-preview'
+import { unstretchGlyphLayer } from './text-unstretch'
+import { centerShift, contentBoundHeight, drawnTableHeight } from './resize-geometry'
 import type { EditCaret } from './action-context'
 import {
   computeSnap,
@@ -56,11 +79,6 @@ import {
 } from './draw-shape'
 import { shapePreviewPath } from './components/gallery-previews'
 import { adjustHandleSpecs } from './adjust-handles'
-
-/** Whether a node is a connector (read-only, no Transformer attached). */
-function isConnectorNode(node: RenderNode): boolean {
-  return (node.type === 'shape' || node.type === 'text') && !!(node as ShapeRenderNode).line
-}
 
 /** Luminance (0..1) + alpha (0..1) pair — the unit the background-darkness composite works in. */
 type LumAlpha = { lum: number; alpha: number }
@@ -396,12 +414,22 @@ interface Props {
    * groupId: geometry commit for a child while editing inside a group (box is in group-local coordinates) */
   onTransform: (
     sourceId: string,
-    box: { x: number; y: number; w: number; h: number; rotationDeg: number },
+    box: {
+      x: number
+      y: number
+      w: number
+      h: number
+      rotationDeg: number
+      tableRowHeightsPx?: number[]
+    },
     preview?: boolean,
     groupId?: string,
-  ) => void
+  ) => void | Promise<void>
   /** Double-click a table cell: row/col are model coordinates */
   onEditTableCell: (sourceId: string, row: number, col: number) => void
+  /** Press inside a cell of a not-yet-selected table: select the table AND that cell and let the
+   * cell layer take over the gesture (drag = block selection). Only borders / the frame move a table. */
+  onTableCellPress?: (sourceId: string, cell: { row: number; col: number }) => void
   /** Double-click an audio/video element: trigger the playback overlay */
   onPlayMedia?: (sourceId: string) => void
   /** Right-click: hit element gives sourceId, blank area gives null; table hits include cell model coordinates */
@@ -412,8 +440,17 @@ interface Props {
     cell?: { row: number; col: number },
   ) => void
   /** Drag to resize a column (col is the tc index, wPx is the column's new width in slide px) */
-  onTableColResize: (sourceId: string, col: number, wPx: number) => void
+  onTableColResize: (
+    sourceId: string,
+    col: number,
+    wPx: number,
+    neighbor?: { col: number; wPx: number },
+  ) => void
   onTableRowResize?: (sourceId: string, row: number, hPx: number) => void
+  /** A border drag is in flight: the table follows the pointer live (nothing is committed until release) */
+  onTableGridMove?: (sourceId: string, change: GridChange) => void
+  /** The border drag was abandoned (Esc): drop the live frames */
+  onTableGridCancel?: () => void
   images: Map<string, HTMLImageElement>
   /** Element/cell currently edited in the DOM overlay: canvas skips drawing its text (avoids ghosting under the overlay) */
   editingText?: { sourceId: string; cell?: { row: number; col: number } } | null
@@ -605,10 +642,18 @@ function AdjustHandles({
     return { x: lx, y: ly }
   }
   const z = Math.max(zoom, 0.1)
+  // A yellow handle sitting on a resize handle (tiny shape, or a preset whose handle lies on a corner /
+  // edge middle) would swallow the press meant for the resize handle: the resize handle wins there.
+  const anchorPts = anchorsForScreenSize(b.w * zoom, b.h * zoom, 8 * chromeScale).map((name) => ({
+    x: name.includes('left') ? 0 : name.includes('right') ? b.w : b.w / 2,
+    y: name.startsWith('top') ? 0 : name.startsWith('bottom') ? b.h : b.h / 2,
+  }))
+  const reach = (4 + 5) * chromeScale // anchor half-size + adjust-handle radius, screen px
   return (
     <>
       {specs.map((spec) => {
         const p = spec.pos(b.w, b.h, val)
+        if (anchorPts.some((a) => Math.hypot(a.x - p.x, a.y - p.y) * zoom < reach)) return null
         const s = toStage(p.x, p.y)
         const valuesAt = (t: Konva.Node) => {
           const l = toLocal(t.x(), t.y())
@@ -642,6 +687,25 @@ function AdjustHandles({
   )
 }
 
+/** A column / row border drag as the press found the table (the live preview re-grids it afterwards) */
+interface GripDrag {
+  id: string
+  kind: 'col' | 'row'
+  /** Grid column / row whose far border is dragged */
+  idx: number
+  /** Column widths / row heights at the press (px) */
+  sizes: number[]
+  /** Content need per column / row at the press (px) */
+  needs?: number[]
+  /** Slide-space start of the dragged column / row (its logical left / top edge) */
+  origin: number
+  /** rtl columns: slide-space visual-left edge of the dragged column */
+  edge: number
+  /** The grip's own resting coordinate (to put it back after a cancel) */
+  home: number
+  cancelled: boolean
+}
+
 export function SlideCanvas({
   slide,
   selectedIds,
@@ -649,8 +713,11 @@ export function SlideCanvas({
   onEditText,
   onTransform,
   onEditTableCell,
+  onTableCellPress,
   onTableColResize,
   onTableRowResize,
+  onTableGridMove,
+  onTableGridCancel,
   onPlayMedia,
   onContextMenu,
   images,
@@ -668,6 +735,100 @@ export function SlideCanvas({
   ref,
 }: Props) {
   const trRef = useRef<Konva.Transformer>(null)
+  const gripRef = useRef<GripDrag | null>(null)
+  const gripEscRef = useRef<(() => void) | null>(null)
+  /** Esc while a column / row border is held abandons the drag (the table goes back, no undo step) */
+  const armGripEscape = (node: Konva.Node) => {
+    gripEscRef.current?.()
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape' || !gripRef.current) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      gripRef.current.cancelled = true
+      node.stopDrag()
+    }
+    window.addEventListener('keydown', onKey, true)
+    gripEscRef.current = () => window.removeEventListener('keydown', onKey, true)
+  }
+  const gripPressRef = useRef<{ x: number; y: number } | null>(null)
+  /**
+   * A press near a row / column line that then travels mostly ALONG the line (a row border dragged sideways,
+   * a column border dragged up or down) is a table move that happened to start at the border, not a resize:
+   * hand the drag to the table so nothing gets resized behind the pointer's back.
+   */
+  const yieldGripToTableMove = (
+    e: Konva.KonvaEventObject<DragEvent>,
+    kind: 'row' | 'col',
+    tableId: string,
+    home: { x: number; y: number },
+  ): boolean => {
+    const press = gripPressRef.current
+    const ev = e.evt as MouseEvent | undefined
+    if (!press || !ev || typeof ev.clientX !== 'number') return false
+    const dx = Math.abs(ev.clientX - press.x)
+    const dy = Math.abs(ev.clientY - press.y)
+    const across = kind === 'row' ? dy : dx
+    const along = kind === 'row' ? dx : dy
+    if (across >= along) return false
+    const stage = e.target.getStage()
+    const group = stage?.findOne(`#node_${tableId}`)
+    if (!stage || !group || !group.draggable()) return false
+    e.target.stopDrag()
+    e.target.position(home)
+    group.startDrag()
+    return true
+  }
+  const disarmGripEscape = () => {
+    gripEscRef.current?.()
+    gripEscRef.current = null
+  }
+  useEffect(() => () => gripEscRef.current?.(), [])
+
+  /** Minimum size of the current selection for resize gestures (see min-size.ts) */
+  /** The floor is fixed when a drag starts: preview frames re-lay the element out smaller as the pointer
+   * moves, and a floor derived from the shrinking geometry would ratchet down with it. */
+  const gestureMinRef = useRef<{ anchor: string; min: MinSize } | null>(null)
+  const selectionMin = (anchor?: string): MinSize => {
+    if (
+      trActiveRef.current &&
+      gestureMinRef.current &&
+      gestureMinRef.current.anchor === (anchor ?? '')
+    )
+      return gestureMinRef.current.min
+    return computeSelectionMin(anchor)
+  }
+  const computeSelectionMin = (anchor?: string): MinSize => {
+    const targets = selectedIds
+      .map((id) => findNodeDeep(slide.nodes, id))
+      .filter((n): n is RenderNode => !!n)
+    const min = minSizeOfNodes(targets)
+    // Proportional (picture) corner drags keep w:h, so the floor must hold in both sides at once
+    const corner = !!anchor && !anchor.includes('center') && !anchor.includes('middle')
+    if (corner && targets.length > 0 && targets.every((n) => n.type === 'picture')) {
+      const bb = selectionBounds(targets)
+      if (bb.w > 0 && bb.h > 0) {
+        const f = Math.max(min.w / bb.w, min.h / bb.h)
+        return { w: bb.w * f, h: bb.h * f }
+      }
+    }
+    return min
+  }
+  /** True while a handle is being dragged: the handle set must not change under the pointer */
+  const trActiveRef = useRef(false)
+  const anchorsRef = useRef<string[]>([...ALL_ANCHORS])
+  const liveAnchors = (): string[] => {
+    if (trActiveRef.current) return anchorsRef.current
+    const targets = selectedIds
+      .map((id) => findNodeDeep(slide.nodes, id))
+      .filter((n): n is RenderNode => !!n && !isConnectorNode(n))
+    if (targets.length === 0) return anchorsRef.current
+    const b = targets.length === 1 ? targets[0]!.box : selectionBounds(targets)
+    const w = 'w' in b ? b.w : 0
+    const h = 'h' in b ? b.h : 0
+    const next = anchorsForScreenSize(w * zoom, h * zoom, 8 * chromeScale)
+    if (next.join() !== anchorsRef.current.join()) anchorsRef.current = next
+    return anchorsRef.current
+  }
   const layerRef = useRef<Konva.Layer>(null)
   const stageRef = useRef<Konva.Stage>(null)
 
@@ -1076,6 +1237,7 @@ export function SlideCanvas({
             onEditText={onEditText}
             onTransform={onTransform}
             onEditTableCell={onEditTableCell}
+            onTableCellPress={onTableCellPress}
             onPlayMedia={onPlayMedia}
             onDragGuides={(g, sp) => {
               setGuides(g)
@@ -1246,67 +1408,190 @@ export function SlideCanvas({
           // rtl tables render mirrored: gridX stays logical, so visual boundary = width − gridX
           const tblGridW = tbl.gridX[tbl.gridX.length - 1] ?? n.box.w
           const visX = (i: number) => (tbl.rtl ? tblGridW - tbl.gridX[i]! : tbl.gridX[i]!)
+          // While a border is dragged the live preview re-grids the table under the pointer: the
+          // limits and the pointer→size conversion keep reading the table as the press found it
+          const held = (kind: 'col' | 'row', idx: number) => {
+            const g = gripRef.current
+            return g && g.id === n.sourceId && g.kind === kind && g.idx === idx ? g : null
+          }
+          const colWant = (g: GripDrag, x: number) =>
+            tbl.rtl ? g.edge - (x + 3) : x + 3 - g.origin
+          const rowWant = (g: GripDrag, y: number) => y + 3 - g.origin
+          // The table's outer frame always moves the table: border grips stop short of it, so a press
+          // near the outer edge (even right at a row/column line) never turns into a row/column resize
+          const edge = (TABLE_BORDER_GRIP_PX * 2 + 2) / Math.max(zoom, 0.1)
+          const lastCol = tbl.gridX.length - 2
+          const lastRow = tbl.gridY.length - 2
           return [
             ...tbl.gridX.slice(1).flatMap((_, col) =>
-              spansX(visX(col + 1))
+              col === lastCol || spansX(visX(col + 1)) || n.box.h - 2 * edge <= 0
                 ? []
                 : [
                     <Rect
                       key={`colgrip_${col}`}
                       x={n.box.x + visX(col + 1) - 3}
-                      y={n.box.y}
+                      y={n.box.y + edge}
                       width={6}
-                      height={n.box.h}
+                      height={n.box.h - 2 * edge}
                       fill="transparent"
                       draggable
-                      dragBoundFunc={(pos) => ({ x: pos.x, y: n.box.y + CANVAS_BLEED })}
+                      dragBoundFunc={(pos) => {
+                        // the grip stops where a neighbouring column would start cutting a word apart
+                        const g = held('col', col)
+                        const widths =
+                          g?.sizes ?? tbl.gridX.slice(1).map((v, i) => v - tbl.gridX[i]!)
+                        const { lo, hi } = colDragRange(widths, col, g?.needs ?? tbl.colNeedPx)
+                        const start = CANVAS_BLEED + (g?.origin ?? n.box.x + tbl.gridX[col]!) - 3
+                        const x = tbl.rtl
+                          ? pos.x
+                          : Math.min(Math.max(pos.x, start + lo), start + hi)
+                        return { x, y: n.box.y + edge + CANVAS_BLEED }
+                      }}
                       onMouseEnter={(e) => {
                         const st = e.target.getStage()
                         if (st) st.container().style.cursor = 'col-resize'
                       }}
                       onMouseLeave={(e) => {
                         const st = e.target.getStage()
-                        if (st) st.container().style.cursor = 'default'
+                        if (st && !gripRef.current) st.container().style.cursor = 'default'
+                      }}
+                      onMouseDown={(e) => {
+                        gripPressRef.current = { x: e.evt.clientX, y: e.evt.clientY }
+                      }}
+                      onDragStart={(e) => {
+                        if (
+                          yieldGripToTableMove(e, 'col', n.sourceId, {
+                            x: n.box.x + visX(col + 1) - 3,
+                            y: n.box.y + edge,
+                          })
+                        )
+                          return
+                        gripRef.current = {
+                          id: n.sourceId,
+                          kind: 'col',
+                          idx: col,
+                          sizes: tbl.gridX.slice(1).map((v, i) => v - tbl.gridX[i]!),
+                          needs: tbl.colNeedPx,
+                          origin: n.box.x + tbl.gridX[col]!,
+                          edge: n.box.x + visX(col),
+                          home: n.box.x + visX(col + 1) - 3,
+                          cancelled: false,
+                        }
+                        armGripEscape(e.target)
+                      }}
+                      onDragMove={(e) => {
+                        const g = held('col', col)
+                        if (!g) return
+                        // rtl: the grip is the column's visual-left edge; width grows leftward
+                        const r = resolveColDrag(g.sizes, col, colWant(g, e.target.x()), g.needs)
+                        onTableGridMove?.(n.sourceId, {
+                          kind: 'col',
+                          col,
+                          wPx: r.wPx,
+                          ...(r.neighbor ? { neighbor: r.neighbor } : {}),
+                        })
                       }}
                       onDragEnd={(e) => {
-                        // rtl: the grip is the column's visual-left edge; width grows leftward
-                        const newW = Math.max(
-                          12,
-                          tbl.rtl
-                            ? n.box.x + visX(col) - (e.target.x() + 3)
-                            : e.target.x() + 3 - (n.box.x + tbl.gridX[col]!),
-                        )
-                        onTableColResize(n.sourceId, col, newW)
+                        const g = held('col', col)
+                        disarmGripEscape()
+                        gripRef.current = null
+                        if (!g) return
+                        if (g.cancelled) {
+                          e.target.x(g.home)
+                          onTableGridCancel?.()
+                          return
+                        }
+                        const r = resolveColDrag(g.sizes, col, colWant(g, e.target.x()), g.needs)
+                        onTableColResize(n.sourceId, col, r.wPx, r.neighbor)
                       }}
                     />,
                   ],
             ),
             ...(onTableRowResize
               ? tbl.gridY.slice(1).flatMap((b, row) =>
-                  spansY(b)
+                  row === lastRow || spansY(b) || n.box.w - 2 * edge <= 0
                     ? []
                     : [
                         <Rect
                           key={`rowgrip_${row}`}
-                          x={n.box.x}
+                          x={n.box.x + edge}
                           y={n.box.y + b - 3}
-                          width={n.box.w}
+                          width={n.box.w - 2 * edge}
                           height={6}
                           fill="transparent"
                           draggable
-                          dragBoundFunc={(pos) => ({ x: n.box.x + CANVAS_BLEED, y: pos.y })}
+                          dragBoundFunc={(pos) => {
+                            // a row stops where its wrapped text starts to need the height (the engine
+                            // would grow it straight back, which would show as a snap on release)
+                            const g = held('row', row)
+                            const cur = g ? g.sizes[row]! : tbl.gridY[row + 1]! - tbl.gridY[row]!
+                            const need = g ? g.needs?.[row] : tbl.rowNeedPx?.[row]
+                            const start =
+                              CANVAS_BLEED + (g?.origin ?? n.box.y + tbl.gridY[row]!) - 3
+                            return {
+                              x: n.box.x + edge + CANVAS_BLEED,
+                              y: Math.max(pos.y, start + rowDragFloor(cur, need)),
+                            }
+                          }}
                           onMouseEnter={(e) => {
                             const st = e.target.getStage()
                             if (st) st.container().style.cursor = 'row-resize'
                           }}
                           onMouseLeave={(e) => {
                             const st = e.target.getStage()
-                            if (st) st.container().style.cursor = 'default'
+                            if (st && !gripRef.current) st.container().style.cursor = 'default'
+                          }}
+                          onMouseDown={(e) => {
+                            gripPressRef.current = { x: e.evt.clientX, y: e.evt.clientY }
+                          }}
+                          onDragStart={(e) => {
+                            if (
+                              yieldGripToTableMove(e, 'row', n.sourceId, {
+                                x: n.box.x + edge,
+                                y: n.box.y + b - 3,
+                              })
+                            )
+                              return
+                            gripRef.current = {
+                              id: n.sourceId,
+                              kind: 'row',
+                              idx: row,
+                              sizes: tbl.gridY.slice(1).map((v, i) => v - tbl.gridY[i]!),
+                              needs: tbl.rowNeedPx,
+                              origin: n.box.y + tbl.gridY[row]!,
+                              edge: 0,
+                              home: n.box.y + b - 3,
+                              cancelled: false,
+                            }
+                            armGripEscape(e.target)
+                          }}
+                          onDragMove={(e) => {
+                            const g = held('row', row)
+                            if (!g) return
+                            onTableGridMove?.(n.sourceId, {
+                              kind: 'row',
+                              row,
+                              hPx: resolveRowDrag(
+                                rowWant(g, e.target.y()),
+                                g.sizes[row]!,
+                                g.needs?.[row],
+                              ),
+                            })
                           }}
                           onDragEnd={(e) => {
-                            const newH = Math.max(
-                              10,
-                              e.target.y() + 3 - (n.box.y + tbl.gridY[row]!),
+                            const g = held('row', row)
+                            disarmGripEscape()
+                            gripRef.current = null
+                            if (!g) return
+                            if (g.cancelled) {
+                              e.target.y(g.home)
+                              onTableGridCancel?.()
+                              return
+                            }
+                            const newH = resolveRowDrag(
+                              rowWant(g, e.target.y()),
+                              g.sizes[row]!,
+                              g.needs?.[row],
                             )
                             onTableRowResize(n.sourceId, row, newH)
                           }}
@@ -1388,7 +1673,34 @@ export function SlideCanvas({
             styleRotaterAnchor(a, (ROTATER_SIZE * chromeScale) / Math.max(zoom, 0.1))
           }
           rotateAnchorCursor={rotateCursor}
+          // Tiny selections keep only the corner handles (middle ones would overlap them)
+          enabledAnchors={liveAnchors()}
+          onTransformStart={() => {
+            const a = (trRef.current as unknown as { _movingAnchorName?: string } | null)
+              ?._movingAnchorName
+            gestureMinRef.current = { anchor: a ?? '', min: computeSelectionMin(a) }
+            trActiveRef.current = true
+          }}
+          // Dragging a handle past the opposite edge must stop at a minimum size, not mirror the element
+          flipEnabled={false}
+          // Keep the dragged handle inside its legal range so the box can never go through the opposite edge
+          // (Konva would otherwise swap handles mid-drag and re-form the box on the far side)
+          anchorDragBoundFunc={(_old, pos) => {
+            const tr = trRef.current as unknown as {
+              _movingAnchorName?: string
+              _getNodeRect?: () => AnchorRect
+            } | null
+            const name = tr?._movingAnchorName
+            const rect = tr?._getNodeRect?.()
+            return name && rect ? clampAnchorPos(name, pos, rect, selectionMin(name)) : pos
+          }}
           boundBoxFunc={(old, next) => {
+            const min = selectionMin(
+              (trRef.current as unknown as { _movingAnchorName?: string } | null)
+                ?._movingAnchorName,
+            )
+            const clamped = clampTransformBox(old, next, min)
+            if (clamped !== next) return clamped
             // Same-size snapping: when resizing a single, unrotated, non-picture element (keepRatio conflicts),
             // snap when width/height is close to another element's and highlight the matched element
             if (
@@ -1437,6 +1749,8 @@ export function SlideCanvas({
             return out
           }}
           onTransformEnd={() => {
+            trActiveRef.current = false
+            gestureMinRef.current = null
             sizeMatchKeyRef.current = ''
             setSizeMatch(null)
           }}
@@ -1618,6 +1932,7 @@ interface NodeProps {
   onEditText: (id: string, caret?: EditCaret) => void
   onTransform: Props['onTransform']
   onEditTableCell: Props['onEditTableCell']
+  onTableCellPress?: Props['onTableCellPress']
   onPlayMedia?: Props['onPlayMedia']
   onDragGuides: (g: Guide[], spacing?: SpacingIndicator[]) => void
   snapTargets: (excludeIds: string[]) => SnapTarget[]
@@ -1650,8 +1965,12 @@ interface NodeProps {
   selHairline?: number
 }
 
-/** Throttle interval for live resize preview (ms): each preview runs an IPC round-trip + full-page relayout */
-const PREVIEW_THROTTLE_MS = 50
+const boxKey = (b: { x: number; y: number; w: number; h: number; rotationDeg?: number }): string =>
+  `${b.x}|${b.y}|${b.w}|${b.h}|${b.rotationDeg}`
+
+/** Shortest gap between two live resize previews (ms): each one is an IPC round-trip + full-page relayout,
+ * and only one is in flight at a time (the reply carries the layout of the pointer's size at send time) */
+const PREVIEW_MIN_GAP_MS = 12
 
 function NodeView({
   node,
@@ -1659,6 +1978,7 @@ function NodeView({
   onEditText,
   onTransform,
   onEditTableCell,
+  onTableCellPress,
   onPlayMedia,
   onDragGuides,
   snapTargets,
@@ -1688,7 +2008,29 @@ function NodeView({
   /** Most recently rendered model width/height (preview responses update it; during a gesture, scale is always relative to it) */
   const boxRef = useRef({ w: box.w, h: box.h })
   const transformingRef = useRef(false)
+  const pivotKeyRef = useRef('')
   const lastPreviewRef = useRef(0)
+  /** The pointer's size of the running resize (the node itself may be drawn taller, see the table path below) */
+  const rawSizeRef = useRef<{ w: number; h: number } | null>(null)
+  /** One preview request at a time: the next one carries the pointer's latest size */
+  const previewBusyRef = useRef(false)
+  const previewPendingRef = useRef(false)
+  /** Size asked for by the preview whose reply landed last (a reply taller than that is content-bound) */
+  const repliedAskRef = useRef<{ w: number; h: number } | null>(null)
+  /** Height the latest content-bound table layout cannot go under (0 = none) */
+  const contentFloorRef = useRef(0)
+  const gestureIdRef = useRef(0)
+  /** Latest model box (the committed layout of a table resize lands here while the drawn size is held) */
+  const modelBoxRef = useRef(box)
+  /** Finishes a resize whose drawn size is held until the committed layout lands (see onTransformEnd) */
+  const settleRef = useRef<{ key: string; armed: boolean; run: () => void } | null>(null)
+  /** Name of the Transformer handle being dragged ('bottom-right', …) */
+  const movingAnchor = (): string | undefined =>
+    (
+      groupRef.current?.getStage()?.find<Konva.Transformer>('Transformer')[0] as unknown as {
+        _movingAnchorName?: string
+      } | null
+    )?._movingAnchorName
   /** Node position captured on every transform event: boxPivotProps derives Konva x/y from
    * box.w/h, so a live-preview re-render would otherwise teleport the node mid-gesture. */
   const gesturePosRef = useRef<{ x: number; y: number } | null>(null)
@@ -1707,6 +2049,9 @@ function NodeView({
   /** Live drag position: the ghost toggle re-renders mid-drag, and the controlled x/y from
    * boxPivotProps must not teleport the node back to the model position (same idea as gesturePosRef). */
   const dragPosRef = useRef<{ x: number; y: number } | null>(null)
+  /** Press landed inside a cell of a table that was not selected: that gesture selects cells, it must not move the table.
+   * Holds the table's absolute position at press time (the drag-bound pins it there); null = a normal move gesture. */
+  const tablePinRef = useRef<{ x: number; y: number } | null>(null)
   useLayoutEffect(() => {
     const g = groupRef.current
     if (g && dragPosRef.current && g.isDragging()) g.position(dragPosRef.current)
@@ -1748,11 +2093,66 @@ function NodeView({
     const g = groupRef.current
     const prev = boxRef.current
     if (g && transformingRef.current && (prev.w !== box.w || prev.h !== box.h)) {
-      if (box.w > 0) g.scaleX(g.scaleX() * (prev.w / box.w))
-      if (box.h > 0) g.scaleY(g.scaleY() * (prev.h / box.h))
-      if (gesturePosRef.current) g.position(gesturePosRef.current)
+      const raw = rawSizeRef.current
+      if (node.type === 'table' && raw && !box.flipH && !box.flipV) {
+        // A table's rows grow with re-wrapped text: the layout that came back may be taller than the
+        // pointer asked for. Draw it at its own height (the frame follows the content) instead of
+        // squashing it into the pointer's — squashing is what made it pop to full height on release.
+        contentFloorRef.current = contentBoundHeight(repliedAskRef.current?.h, box.h)
+        const curW = prev.w * Math.abs(g.scaleX())
+        const curH = prev.h * Math.abs(g.scaleY())
+        const nextW = raw.w
+        const nextH = drawnTableHeight(raw.h, contentFloorRef.current)
+        if (box.w > 0) g.scaleX(nextW / box.w)
+        if (box.h > 0) g.scaleY(nextH / box.h)
+        const pos = gesturePosRef.current ?? { x: g.x(), y: g.y() }
+        const d = centerShift(
+          movingAnchor(),
+          g.rotation(),
+          { w: curW, h: curH },
+          { w: nextW, h: nextH },
+        )
+        g.position({ x: pos.x + d.dx, y: pos.y + d.dy })
+        gesturePosRef.current = { x: g.x(), y: g.y() }
+        const tr = g.getStage()?.find<Konva.Transformer>('Transformer')[0]
+        tr?.forceUpdate()
+      } else {
+        if (box.w > 0) g.scaleX(g.scaleX() * (prev.w / box.w))
+        if (box.h > 0) g.scaleY(g.scaleY() * (prev.h / box.h))
+        if (gesturePosRef.current) g.position(gesturePosRef.current)
+      }
     }
+    // keep glyphs unstretched across preview responses (the rebase above changed the group scale)
+    if (
+      g &&
+      transformingRef.current &&
+      (node.type === 'shape' || node.type === 'text' || node.type === 'table')
+    )
+      unstretchGlyphLayer(g)
+    // A committed box can differ from where the gesture left the group (a table's rows grow with
+    // wrapped text, an autofit text box re-measures): the controlled x/y props only change when the
+    // model box does, so a position the gesture restored imperatively is never re-applied and the
+    // drawn node stays offset from the model — and from every overlay pinned to the model box
+    // (cell-selection layer, AI button). Re-pin the node to its model pivot whenever the model box
+    // changes outside a gesture.
+    const key = `${box.x}|${box.y}|${box.w}|${box.h}|${box.rotationDeg}`
     boxRef.current = { w: box.w, h: box.h }
+    modelBoxRef.current = box
+    // the committed layout of a held table resize arrived: let go of the gesture's drawn size
+    if (settleRef.current?.armed && boxKey(box) !== settleRef.current.key) settleRef.current.run()
+    // `key` is only marked applied outside a gesture: the preview frames of a resize already carry
+    // the final box, so the committed render must still re-pin the node after the gesture ended.
+    if (g && key !== pivotKeyRef.current && !transformingRef.current && !g.isDragging()) {
+      pivotKeyRef.current = key
+      const pv = boxPivotProps(box)
+      if (Math.abs(g.x() - pv.x) > 1e-3 || Math.abs(g.y() - pv.y) > 1e-3)
+        g.position({ x: pv.x, y: pv.y })
+      // The Transformer measures this group through the getClientRect override above, which reads
+      // boxRef — updated only now, after Konva already applied the new props (and fired the change
+      // events the Transformer refreshes on). Poke it once more so its frame matches the settled
+      // box (a table whose rows grew, an autofit text box that re-measured).
+      g.fire('heightChange')
+    }
   })
 
   // master/layout decoration layer: read-only display, not selectable/draggable
@@ -1768,10 +2168,57 @@ function NodeView({
   // center, so model x/y = position − half size — including mid-gesture, since the offset
   // point stays the drawn box's center under any scale.
 
+  /** Live layout preview: one request at a time, always carrying the pointer's latest size */
+  const sendPreview = (): void => {
+    const raw = rawSizeRef.current
+    if (!raw) return
+    if (previewBusyRef.current) {
+      previewPendingRef.current = true
+      return
+    }
+    const now = performance.now()
+    if (now - lastPreviewRef.current < PREVIEW_MIN_GAP_MS) return
+    lastPreviewRef.current = now
+    previewBusyRef.current = true
+    previewPendingRef.current = false
+    const asked = { ...raw }
+    const gid = gestureIdRef.current
+    void Promise.resolve(
+      onTransform(
+        node.sourceId,
+        { x: box.x, y: box.y, w: asked.w, h: asked.h, rotationDeg: box.rotationDeg },
+        true,
+      ),
+    )
+      .catch(() => undefined)
+      .then(() => {
+        if (gestureIdRef.current !== gid) return
+        repliedAskRef.current = asked
+        previewBusyRef.current = false
+        lastPreviewRef.current = 0
+        if (transformingRef.current && previewPendingRef.current) sendPreview()
+      })
+  }
+
   const common = {
     id: `node_${node.sourceId}`,
     ...boxPivotProps(box),
     draggable,
+    dragBoundFunc: (pos: { x: number; y: number }) => tablePinRef.current ?? pos,
+    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => {
+      tablePinRef.current = null
+      if (node.type !== 'table' || insideGroupId || selected || !onTableCellPress) return
+      if (e.evt.button !== 0 || e.evt.shiftKey || e.evt.metaKey || e.evt.ctrlKey || e.evt.altKey)
+        return
+      const pos = e.target.getStage()?.getPointerPosition()
+      if (!pos) return
+      const local = tableLocalPointFromStage(pos, box, CANVAS_BLEED)
+      // Cell borders (and the frame) stay a grip for moving the table; the cell body selects cells
+      const cell = tableCellInterior(node, local, TABLE_BORDER_GRIP_PX / Math.max(zoom, 0.1))
+      if (!cell) return
+      tablePinRef.current = groupRef.current?.absolutePosition() ?? null
+      onTableCellPress(node.sourceId, { row: cell.row, col: cell.col })
+    },
     // A slight hand slip on click-select (3~5px is common on trackpads) shouldn't trigger a drag: Konva's
     // default 3px threshold is too sensitive, and once it becomes a drag, onDragMove snapping amplifies it into a visible 6px+ jump that commits to the model.
     // The threshold's semantics are "6 screen px": Konva compares in canvas coordinates, so divide by the canvas CSS zoom.
@@ -1802,6 +2249,7 @@ function NodeView({
     onTap: () => onSelect(node.sourceId),
     onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => {
       dragPosRef.current = null
+      if (tablePinRef.current) return
       // Konva stops routing mousemove to shapes while dragging: pin the move cursor here
       setStageCursor(e, 'move')
       if (!(onDuplicateTo && !multiDrag && !insideGroupId)) return
@@ -1815,9 +2263,16 @@ function NodeView({
       }
     },
     onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
+      if (tablePinRef.current) return
       // Alt held mid-drag = duplicate gesture: show the ghost (Alt can be pressed/released at any time during the drag)
       setAltDrag(!!(e.evt?.altKey && onDuplicateTo && !multiDrag && !insideGroupId))
       dragPosRef.current = { x: e.target.x(), y: e.target.y() }
+      emitNodeGesture({
+        sourceId: node.sourceId,
+        kind: 'move',
+        dx: e.target.x() - box.w / 2 - box.x,
+        dy: e.target.y() - box.h / 2 - box.y,
+      })
       // Children in in-group editing use a different coordinate system from page snap targets; don't snap
       if (insideGroupId) {
         onDragGuides([])
@@ -1866,11 +2321,24 @@ function NodeView({
       if (fx != null) t.x(raw.x + (fx - bb.x) + box.w / 2)
       if (fy != null) t.y(raw.y + (fy - bb.y) + box.h / 2)
       dragPosRef.current = { x: t.x(), y: t.y() }
+      emitNodeGesture({
+        sourceId: node.sourceId,
+        kind: 'move',
+        dx: t.x() - box.w / 2 - box.x,
+        dy: t.y() - box.h / 2 - box.y,
+      })
       onDragGuides(snap.guides, indicators)
     },
     onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+      if (tablePinRef.current) {
+        // the gesture was a cell-block selection; the table never moved
+        tablePinRef.current = null
+        e.target.position({ x: box.x + box.w / 2, y: box.y + box.h / 2 })
+        return
+      }
       altKeyCleanupRef.current?.()
       dragPosRef.current = null
+      emitNodeGesture({ sourceId: node.sourceId, kind: 'end' })
       setAltDrag(false)
       onDragGuides([])
       const dropX = e.target.x() - box.w / 2
@@ -1882,73 +2350,150 @@ function NodeView({
         onDuplicateTo(node.sourceId, dropX - box.x, dropY - box.y)
         return
       }
-      onTransform(
-        node.sourceId,
-        {
-          x: dropX,
-          y: dropY,
-          w: box.w,
-          h: box.h,
-          rotationDeg: box.rotationDeg,
-        },
-        undefined,
-        insideGroupId,
-      )
+      void Promise.resolve(
+        onTransform(
+          node.sourceId,
+          {
+            x: dropX,
+            y: dropY,
+            w: box.w,
+            h: box.h,
+            rotationDeg: box.rotationDeg,
+          },
+          undefined,
+          insideGroupId,
+        ),
+      ).finally(() => emitNodeGesture({ sourceId: node.sourceId, kind: 'committed' }))
     },
     onTransformStart: () => {
+      emitNodeGesture({ sourceId: node.sourceId, kind: 'resize' })
+      gestureIdRef.current += 1
       transformingRef.current = true
       lastPreviewRef.current = 0
       gesturePosRef.current = null
+      rawSizeRef.current = { w: boxRef.current.w, h: boxRef.current.h }
+      previewBusyRef.current = false
+      previewPendingRef.current = false
+      repliedAskRef.current = null
+      contentFloorRef.current = 0
     },
     onTransform: (e: Konva.KonvaEventObject<Event>) => {
+      // glyphs must not be stretched by the handle drag (see text-unstretch.ts)
+      if (node.type === 'shape' || node.type === 'text' || node.type === 'table')
+        unstretchGlyphLayer(groupRef.current)
+      const t = e.target
+      const sx = Math.abs(t.scaleX())
+      const sy = Math.abs(t.scaleY())
+      // The pointer's size, before anything below draws the node differently. An axis the dragged
+      // handle does not control keeps what it was (the node may be drawn taller than the pointer
+      // asked, and a middle handle must not feed that drawn height back as a request).
+      {
+        const a = movingAnchor() ?? ''
+        const prev = rawSizeRef.current ?? { w: boxRef.current.w, h: boxRef.current.h }
+        rawSizeRef.current = {
+          w: a.includes('left') || a.includes('right') ? boxRef.current.w * sx : prev.w,
+          h: a.includes('top') || a.includes('bottom') ? boxRef.current.h * sy : prev.h,
+        }
+      }
+      // A table never draws shorter than its content needs (see the rebase effect): the pointer may
+      // ask for less than the re-wrapped rows take, the frame then follows the content
+      if (
+        node.type === 'table' &&
+        !box.flipH &&
+        !box.flipV &&
+        contentFloorRef.current > boxRef.current.h * sy + 0.25
+      ) {
+        const drawnH = drawnTableHeight(boxRef.current.h * sy, contentFloorRef.current)
+        const d = centerShift(
+          movingAnchor(),
+          t.rotation(),
+          { w: boxRef.current.w * sx, h: boxRef.current.h * sy },
+          { w: boxRef.current.w * sx, h: drawnH },
+        )
+        t.scaleY(drawnH / boxRef.current.h)
+        t.position({ x: t.x() + d.dx, y: t.y() + d.dy })
+      }
       // Track the live position first: the preview re-render below re-applies controlled
       // x/y, and the rebase effect restores this value to keep the gesture continuous
-      gesturePosRef.current = { x: e.target.x(), y: e.target.y() }
+      gesturePosRef.current = { x: t.x(), y: t.y() }
       // Live preview during drag: re-lay out text at the new box size (font size unchanged).
       // Commit width/height only (x/y are managed by the Konva gesture and land in the model with the final commit on release).
       // Offset conversion for flipped elements relies on a one-shot back-calculation at gesture end; preview stays disabled for them.
       if (!livePreview || box.flipH || box.flipV) return
-      const t = e.target
-      const sx = Math.abs(t.scaleX())
-      const sy = Math.abs(t.scaleY())
       if (Math.abs(sx - 1) < 1e-3 && Math.abs(sy - 1) < 1e-3) return // Pure rotation / not scaled
-      const now = performance.now()
-      if (now - lastPreviewRef.current < PREVIEW_THROTTLE_MS) return
-      lastPreviewRef.current = now
-      onTransform(
-        node.sourceId,
-        {
-          x: box.x,
-          y: box.y,
-          w: boxRef.current.w * sx,
-          h: boxRef.current.h * sy,
-          rotationDeg: box.rotationDeg,
-        },
-        true,
-      )
+      sendPreview()
     },
     onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
-      transformingRef.current = false
-      gesturePosRef.current = null
+      emitNodeGesture({ sourceId: node.sourceId, kind: 'end' })
+      const gid = gestureIdRef.current
       const t = e.target
       const sx = Math.abs(t.scaleX())
       const sy = Math.abs(t.scaleY())
-      onTransform(
+      // A table is committed at the drawn size so the engine sets stored row heights matching the content;
+      // the frame sits where it was DRAWN, which can be taller than the raw pointer when content needed room
+      const raw = node.type === 'table' ? rawSizeRef.current : null
+      const drawnW = box.w * sx
+      const drawnH = box.h * sy
+      const tbl = node.type === 'table' ? (node as TableRenderNode) : null
+      const tableRowHeightsPx =
+        tbl && tbl.gridY && tbl.gridY.length > 1
+          ? tbl.gridY.slice(1).map((y, i) => (y - tbl.gridY[i]!) * sy)
+          : undefined
+      const settleNow = () => {
+        const held = settleRef.current
+        if (!held || gestureIdRef.current !== gid) return
+        settleRef.current = null
+        window.clearTimeout(timer)
+        transformingRef.current = false
+        gesturePosRef.current = null
+        pivotKeyRef.current = '' // the next render re-pins the node to whatever box the commit yields
+        t.scaleX(t.scaleX() < 0 ? -1 : 1)
+        t.scaleY(t.scaleY() < 0 ? -1 : 1)
+        unstretchGlyphLayer(t as Konva.Group)
+        const pv = boxPivotProps(modelBoxRef.current)
+        t.position({ x: pv.x, y: pv.y })
+        t.fire('heightChange')
+      }
+      let timer = 0
+      const done = onTransform(
         node.sourceId,
         {
           // The offset point stays the drawn box's center at any scale, so the model's
           // unrotated top-left is always position − half of the NEW size
-          x: t.x() - (box.w * sx) / 2,
-          y: t.y() - (box.h * sy) / 2,
-          w: box.w * sx,
-          h: box.h * sy,
+          x: t.x() - drawnW / 2,
+          y: t.y() - drawnH / 2,
+          w: raw ? raw.w : drawnW,
+          h: node.type === 'table' ? drawnH : raw ? raw.h : drawnH,
           rotationDeg: t.rotation(),
+          ...(tableRowHeightsPx ? { tableRowHeightsPx } : {}),
         },
         undefined,
         insideGroupId,
       )
-      t.scaleX(t.scaleX() < 0 ? -1 : 1)
-      t.scaleY(t.scaleY() < 0 ? -1 : 1)
+      void Promise.resolve(done).finally(() =>
+        emitNodeGesture({ sourceId: node.sourceId, kind: 'committed' }),
+      )
+      if (node.type === 'table' && !insideGroupId) {
+        // keep the drawn size until the committed layout lands: resetting now would show the stale
+        // model box for the length of the round trip
+        const held = { key: boxKey(modelBoxRef.current), armed: false, run: settleNow }
+        settleRef.current = held
+        void Promise.resolve(done).finally(() => {
+          // the commit's reply is in: the next render carries its box. When that box equals the held
+          // one (a no-op commit) there is no such render, so the size lets go on its own.
+          held.armed = true
+          if (boxKey(modelBoxRef.current) !== held.key) settleNow()
+          else timer = window.setTimeout(settleNow, 250)
+        })
+      } else {
+        transformingRef.current = false
+        gesturePosRef.current = null
+        pivotKeyRef.current = ''
+        t.scaleX(t.scaleX() < 0 ? -1 : 1)
+        t.scaleY(t.scaleY() < 0 ? -1 : 1)
+        if (node.type === 'shape' || node.type === 'text' || node.type === 'table')
+          unstretchGlyphLayer(groupRef.current)
+      }
     },
   }
 
@@ -1978,6 +2523,7 @@ function NodeView({
               onEditText={onEditText}
               onTransform={onTransform}
               onEditTableCell={onEditTableCell}
+              onTableCellPress={onTableCellPress}
               onPlayMedia={onPlayMedia}
               onDragGuides={onDragGuides}
               snapTargets={snapTargets}

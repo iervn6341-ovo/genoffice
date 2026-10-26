@@ -6,7 +6,9 @@
 import type { ActionCtx } from './action-context'
 import type { PasteSlideMode } from '../shared/ipc'
 import { FIT_WIDTH } from './app-constants'
-import { renderSlidesToPngBase64 } from './export-render'
+import { withHistoryGroup } from './history-group'
+import { renderElementsToPngBase64, renderSlidesToPngBase64 } from './export-render'
+import { copySelectedCells, pasteIntoCells, selectedTable } from './table-select-actions'
 import {
   extractBrushFormat,
   computeBrushApply,
@@ -15,18 +17,48 @@ import {
 import { t } from './i18n/locale'
 
 export async function deleteSelected(ctx: ActionCtx): Promise<void> {
-  for (const id of ctx.selectedIds) {
-    const updated = await window.slidesApi.deleteElement({ slideIndex: ctx.current, sourceId: id })
-    if (updated) ctx.applySlide(ctx.current, updated)
+  const ids = [...ctx.selectedIds]
+  // deleteElement is per element: group the calls so Delete over a selection is one undo step
+  const run = async () => {
+    for (const id of ids) {
+      const updated = await window.slidesApi.deleteElement({
+        slideIndex: ctx.current,
+        sourceId: id,
+      })
+      if (updated) ctx.applySlide(ctx.current, updated)
+    }
   }
+  if (ids.length > 1) await withHistoryGroup(run)
+  else await run()
   ctx.setSelectedIds([])
 }
 
+/** A picture of the selection for apps that cannot take the editable shapes (copy still succeeds without it) */
+async function selectionPng(ctx: ActionCtx): Promise<string | undefined> {
+  try {
+    if (!ctx.slide) return undefined
+    return (await renderElementsToPngBase64(ctx.slide, ctx.selectedIds, ctx.images)) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Cell-range selection inside a table: Copy / Cut / Paste act on the cells, not on the whole table */
+function cellMode(ctx: ActionCtx): boolean {
+  return !!ctx.cellSel && !!selectedTable(ctx) && !ctx.editingCell
+}
+
 export async function copySelected(ctx: ActionCtx): Promise<void> {
+  if (cellMode(ctx)) {
+    await copySelectedCells(ctx)
+    return
+  }
   if (ctx.selectedIds.length === 0) return
+  const png = await selectionPng(ctx)
   const n = await window.slidesApi.copyElements({
     slideIndex: ctx.current,
     sourceIds: ctx.selectedIds,
+    ...(png ? { png } : {}),
   })
   if (n > 0) {
     ctx.setHasClipboard(true)
@@ -35,11 +67,17 @@ export async function copySelected(ctx: ActionCtx): Promise<void> {
 }
 
 export async function cutSelected(ctx: ActionCtx): Promise<void> {
+  if (cellMode(ctx)) {
+    await copySelectedCells(ctx, true)
+    return
+  }
   if (ctx.selectedIds.length === 0) return
+  const png = await selectionPng(ctx)
   const n = await window.slidesApi.copyElements({
     slideIndex: ctx.current,
     sourceIds: ctx.selectedIds,
     cut: true,
+    ...(png ? { png } : {}),
   })
   if (n > 0) {
     ctx.setHasClipboard(true)
@@ -143,7 +181,23 @@ export async function repasteSlideAs(ctx: ActionCtx, mode: PasteSlideMode): Prom
  * overwritten externally) → external images → external text into a text box
  */
 export async function pasteClipboard(ctx: ActionCtx): Promise<void> {
-  const external = await window.slidesApi.clipboardExternal()
+  if (cellMode(ctx)) {
+    await pasteIntoCells(ctx)
+    return
+  }
+  let external = await window.slidesApi.clipboardExternal()
+  if (external.kind === 'native') {
+    // PowerPoint shapes / a table / an HTML table from another app: editable elements, centred like PowerPoint
+    const r = await window.slidesApi.pasteSystem({ slideIndex: ctx.current, fitWidthPx: FIT_WIDTH })
+    if (r) {
+      ctx.applySlide(ctx.current, r.slide)
+      ctx.setSelectedIds(r.sourceIds)
+      ctx.setEditing(null)
+      return
+    }
+    // unreadable native data: fall back to its picture / text rendition
+    external = await window.slidesApi.clipboardExternal(true)
+  }
   if (external.kind === 'slide') {
     await pasteSlideAfter(ctx, ctx.current)
     return
@@ -216,50 +270,58 @@ export function copyFormat(ctx: ActionCtx): void {
 /** ⌘⇧V: paste format onto selected elements (format must have been copied first) */
 export async function pasteFormat(ctx: ActionCtx): Promise<void> {
   if (!ctx.brushFormat || ctx.selectedIds.length === 0 || !ctx.slide) return
+  // fill + stroke + text are separate calls per element: one paste = one undo step
+  await withHistoryGroup(() => pasteFormatEach(ctx))
+  ctx.setStatus(t('appStatusFormatPasted'))
+}
+
+async function pasteFormatEach(ctx: ActionCtx): Promise<void> {
+  if (!ctx.brushFormat || !ctx.slide) return
   for (const id of ctx.selectedIds) {
     const node = ctx.slide.nodes.find((n) => n.sourceId === id)
     if (!node) continue
-    const plan = computeBrushApply(ctx.brushFormat, node)
-    // Apply fill
-    if (plan.fillColor !== undefined) {
-      await window.slidesApi.editFill({
+    await applyBrushFormatTo(ctx, ctx.brushFormat, id, node)
+  }
+}
+
+/**
+ * Apply a copied format to one element. Only the parts the plan carries are written: an outline
+ * (or text) only paste must leave the target's existing fill untouched.
+ */
+async function applyBrushFormatTo(
+  ctx: ActionCtx,
+  brush: NonNullable<ActionCtx['brushFormat']>,
+  targetId: string,
+  node: NonNullable<ActionCtx['slide']>['nodes'][number],
+): Promise<void> {
+  const plan = computeBrushApply(brush, node)
+  if (plan.fillColor !== undefined) {
+    const updated = await window.slidesApi.editFill({
+      slideIndex: ctx.current,
+      sourceId: targetId,
+      fill: plan.fillColor,
+    })
+    if (updated) ctx.applySlide(ctx.current, updated)
+  }
+  if (plan.stroke !== undefined) {
+    const updated = await window.slidesApi.editStroke({
+      slideIndex: ctx.current,
+      sourceId: targetId,
+      stroke: plan.stroke,
+    })
+    if (updated) ctx.applySlide(ctx.current, updated)
+  }
+  if ((plan.runFormat || plan.align) && (node.type === 'shape' || node.type === 'text')) {
+    const paras = buildEditParagraphsWithFormat(node, plan.runFormat, plan.align)
+    if (paras) {
+      const updated = await window.slidesApi.editText({
         slideIndex: ctx.current,
-        sourceId: id,
-        fill: plan.fillColor,
-      })
-    }
-    // Apply stroke
-    if (plan.stroke !== undefined) {
-      await window.slidesApi.editStroke({
-        slideIndex: ctx.current,
-        sourceId: id,
-        stroke: plan.stroke,
-      })
-    }
-    // Apply text format (runs + alignment)
-    if ((plan.runFormat || plan.align) && (node.type === 'shape' || node.type === 'text')) {
-      const paras = buildEditParagraphsWithFormat(node, plan.runFormat, plan.align)
-      if (paras) {
-        const updated = await window.slidesApi.editText({
-          slideIndex: ctx.current,
-          sourceId: id,
-          paragraphs: paras,
-        })
-        if (updated) ctx.applySlide(ctx.current, updated)
-      }
-    } else if (plan.fillColor !== undefined || plan.stroke !== undefined) {
-      // fill/stroke were applied; re-render to get the latest page
-      const updated = await window.slidesApi.editFill({
-        slideIndex: ctx.current,
-        sourceId: id,
-        fill: plan.fillColor ?? 'none',
+        sourceId: targetId,
+        paragraphs: paras,
       })
       if (updated) ctx.applySlide(ctx.current, updated)
     }
   }
-  // Fetch the latest page again
-  // (each operation above already called applySlide; pull once more at the end to be sure it's fresh)
-  ctx.setStatus(t('appStatusFormatPasted'))
 }
 
 /** Format painter button single click: copy current format + enter single-paste mode */
@@ -288,38 +350,12 @@ export function onFormatBrushDoubleClick(ctx: ActionCtx): void {
 
 /** Apply format when an element is clicked in format painter mode */
 export async function applyBrushToElement(ctx: ActionCtx, targetId: string): Promise<void> {
-  if (!ctx.brushFormat || !ctx.slide) return
+  const brush = ctx.brushFormat
+  if (!brush || !ctx.slide) return
   const node = ctx.slide.nodes.find((n) => n.sourceId === targetId)
   if (!node) return
-  const plan = computeBrushApply(ctx.brushFormat, node)
-
-  if (plan.fillColor !== undefined) {
-    const updated = await window.slidesApi.editFill({
-      slideIndex: ctx.current,
-      sourceId: targetId,
-      fill: plan.fillColor,
-    })
-    if (updated) ctx.applySlide(ctx.current, updated)
-  }
-  if (plan.stroke !== undefined) {
-    const updated = await window.slidesApi.editStroke({
-      slideIndex: ctx.current,
-      sourceId: targetId,
-      stroke: plan.stroke,
-    })
-    if (updated) ctx.applySlide(ctx.current, updated)
-  }
-  if ((plan.runFormat || plan.align) && (node.type === 'shape' || node.type === 'text')) {
-    const paras = buildEditParagraphsWithFormat(node, plan.runFormat, plan.align)
-    if (paras) {
-      const updated = await window.slidesApi.editText({
-        slideIndex: ctx.current,
-        sourceId: targetId,
-        paragraphs: paras,
-      })
-      if (updated) ctx.applySlide(ctx.current, updated)
-    }
-  }
+  // fill / outline / text are separate calls: one brush click = one undo step
+  await withHistoryGroup(() => applyBrushFormatTo(ctx, brush, targetId, node))
 
   if (ctx.brushMode === 'once') {
     ctx.setBrushMode(null)

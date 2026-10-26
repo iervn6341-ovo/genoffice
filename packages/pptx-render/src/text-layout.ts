@@ -1701,6 +1701,79 @@ function alignOffset(align: Paragraph['align'], availWidth: number, lineWidth: n
   return 0
 }
 
+/**
+ * Narrowest text-frame width (px, insets included) at which wrapping never has to cut a word
+ * apart: the widest unbreakable token of any paragraph (a Latin/digit run; for CJK one full-width
+ * character, glued to the closing mark / opening bracket kinsoku keeps beside it) plus the
+ * paragraph's own left/right margins, the first-line indent or bullet push for its first word,
+ * and the left/right insets. Uses the same tokenizer, bidi pass and metrics as layoutText, so the
+ * answer is consistent with how the text is later drawn. 0 = no width requirement (no text,
+ * wrap off, vertical text). Multi-column bodies need that width once per column.
+ */
+export function minContentWidthPx(input: {
+  body: TextBody
+  metrics: FontMetricsProvider
+  vp: Viewport
+}): number {
+  const { body, metrics, vp } = input
+  if (body.wrap === false || body.vert) return 0
+  const scale = vp.scale
+  const insetsPx =
+    emuToPx(body.insets?.l ?? DEFAULT_INSETS_EMU.l, scale) +
+    emuToPx(body.insets?.r ?? DEFAULT_INSETS_EMU.r, scale)
+  const fontScale = body.autofit === 'shrink' ? (body.fontScale ?? 1) : 1
+  let need = 0
+  for (const p of body.paragraphs) {
+    if (!p.runs.some((r) => r.text.trim())) continue
+    const marLPx = emuToPx(p.marL ?? (p.level ? p.level * 457200 : 0), scale)
+    const marRPx = emuToPx(p.marR ?? 0, scale)
+    const indentPx = emuToPx(p.indent ?? 0, scale)
+    // First line shift: the first-line indent, or the bullet glyph pushing the text right
+    let firstDx = indentPx
+    const bt = p.bullet?.type
+    if (isBulletKind(bt)) {
+      const st = bulletRunStyle(runStyle(p.runs[0]!, scale, fontScale), p.bullet, scale, fontScale)
+      const glyph = bt === 'number' ? '88.' : bt === 'blip' ? 'MM' : (p.bullet?.char ?? '•')
+      const bulletX = Math.max(marLPx + indentPx, 0)
+      firstDx = Math.max(bulletX + metrics.measure(glyph, st) - marLPx, 0)
+    }
+    const toks = applyBidi(tokenizeParagraph(p, scale, fontScale), p.rtl).map((tok) =>
+      substituteKerning(tok, metrics),
+    )
+    let widest = 0
+    let cluster = 0
+    let clusterIsFirst = false
+    let seenFirst = false
+    let prev: Token | undefined
+    const flush = () => {
+      if (cluster > 0) widest = Math.max(widest, cluster + (clusterIsFirst ? firstDx : 0))
+      cluster = 0
+    }
+    for (const tok of toks) {
+      if (tok.isBreak || tok.isSpace) {
+        flush()
+        prev = undefined
+        continue
+      }
+      const w = tokenWidth(tok, metrics)
+      if (prev && (kinsokuNoStart(tok) || kinsokuNoEnd(prev))) cluster += w
+      else {
+        flush()
+        cluster = w
+        clusterIsFirst = !seenFirst
+      }
+      seenFirst = true
+      prev = tok
+    }
+    flush()
+    if (widest > 0) need = Math.max(need, widest + marLPx + marRPx)
+  }
+  if (need <= 0) return 0
+  const numCol = body.numCol && body.numCol > 1 ? Math.floor(body.numCol) : 1
+  const gap = numCol > 1 ? emuToPx(body.spcCol ?? 0, scale) : 0
+  return need * numCol + (numCol - 1) * gap + insetsPx
+}
+
 function layoutAll(
   body: TextBody,
   availWidth: number,

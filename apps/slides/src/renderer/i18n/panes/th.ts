@@ -333,4 +333,10 @@ export const th = {
   paneShowEnded: 'จบการนำเสนอแล้ว',
   paneShowRehearseTip: 'ซ้อมการกำหนดเวลา: เวลาบนสไลด์นี้ / เวลารวม',
   paneShowRehearseTotal: 'รวม {time}',
+  paneShowVideoPlay: 'เล่น',
+  paneShowVideoPause: 'หยุดชั่วคราว',
+  paneShowVideoSeek: 'ไทม์ไลน์',
+  paneShowVideoVolume: 'ระดับเสียง',
+  paneShowVideoMute: 'ปิดเสียง',
+  paneShowVideoUnmute: 'เปิดเสียง',
 } satisfies Record<keyof typeof zh, string>

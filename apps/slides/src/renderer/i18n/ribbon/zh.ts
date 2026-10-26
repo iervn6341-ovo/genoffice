@@ -219,6 +219,8 @@ export const zh = {
   ribbonFlipH: '水平翻转',
   ribbonFlipV: '垂直翻转',
   ribbonDistributeHint: '{title}（需选中 ≥3 个元素）',
+  ribbonAlignToSlide: '对齐幻灯片',
+  ribbonAlignToSelection: '对齐所选对象',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: '打开/收起 AI 助手面板',
   // Insert
@@ -488,6 +490,8 @@ export const zh = {
   ribbonRuler: '标尺',
   ribbonRulerTip: '显示/隐藏标尺（英寸）',
   ribbonGridlines: '网格线',
+  ribbonAxesVisibility: '显示坐标轴',
+  ribbonAxisUnavailable: '此图表没有可显示或隐藏的坐标轴。',
   ribbonGridlinesTip: '显示/隐藏网格线（半英寸网格）',
   ribbonDarkContent: '深色内容',
   ribbonDarkContentTip: '以深色预览幻灯片内容（仅改变屏幕显示，不更改文件、导出、打印与放映）',

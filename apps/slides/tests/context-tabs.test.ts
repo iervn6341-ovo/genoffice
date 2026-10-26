@@ -33,6 +33,19 @@ describe('slides contextual ribbon tabs', () => {
     expect(contextElementTypeForNode(textGroup)).toBe('textShape')
   })
 
+  it('reveals Shape Format for text boxes (type "text") like PowerPoint', () => {
+    const box = {
+      type: 'text',
+      text: { lines: [{ runs: [{ text: 'Hello' }] }] },
+    } as unknown as RenderNode
+    const emptyBox = { type: 'text', text: { lines: [] } } as unknown as RenderNode
+    expect(contextElementTypeForNode(box)).toBe('textShape')
+    expect(contextElementTypeForNode(emptyBox)).toBe('shape')
+    expect(contextTabForElement(contextElementTypeForNode(box))).toBe('shapeFormat')
+    // revealed, not auto-switched: Home stays active so text formatting is one click away
+    expect(autoContextTabForElement(contextElementTypeForNode(box))).toBeNull()
+  })
+
   it('auto-switches for dedicated object tools but only reveals the shape tab', () => {
     expect(autoContextTabForElement('picture')).toBe('pictureFormat')
     expect(autoContextTabForElement('mixed')).toBe('pictureFormat')

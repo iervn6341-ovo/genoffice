@@ -13,6 +13,7 @@ import { armColorInput } from './color-input'
 import { ContextMenu, type CtxItem } from './components/ContextMenu'
 import type { EditParagraph, MasterPartItem } from '../shared/ipc'
 import { t } from './i18n/locale'
+import { createTransformBatcher, withHistoryGroup } from './history-group'
 
 interface Props {
   initialItems: MasterPartItem[]
@@ -119,7 +120,7 @@ export function MasterView({ initialItems, initialPartPath, onClose }: Props) {
     [sel, items],
   )
 
-  const onTransform = useCallback(
+  const sendTransform = useCallback(
     async (
       sourceId: string,
       box: { x: number; y: number; w: number; h: number; rotationDeg: number },
@@ -140,6 +141,30 @@ export function MasterView({ initialItems, initialPartPath, onClose }: Props) {
     },
     [applyCurrent],
   )
+  // A multi-selection drag commits one element at a time: collect the commits of one tick and
+  // run them in a history group so the gesture is a single undo step
+  const sendTransformRef = useRef(sendTransform)
+  sendTransformRef.current = sendTransform
+  const transformBatcher = useRef(
+    createTransformBatcher(async (_slide, reqs) => {
+      const run = async () => {
+        for (const r of reqs) await sendTransformRef.current(r.sourceId, r.box)
+      }
+      if (reqs.length > 1) await withHistoryGroup(run)
+      else await run()
+    }),
+  )
+  const onTransform = useCallback(
+    async (
+      sourceId: string,
+      box: { x: number; y: number; w: number; h: number; rotationDeg: number },
+      preview?: boolean,
+    ) => {
+      if (preview) return sendTransform(sourceId, box, true)
+      await transformBatcher.current.push(0, { sourceId, box })
+    },
+    [sendTransform],
+  )
 
   const commitEdit = useCallback(
     async (paragraphs: EditParagraph[]) => {
@@ -154,9 +179,14 @@ export function MasterView({ initialItems, initialPartPath, onClose }: Props) {
   )
 
   const deleteSelected = useCallback(async () => {
-    for (const id of selectedIds) {
-      applyCurrent(await window.slidesApi.masterDeleteElement({ sourceId: id }))
+    const run = async () => {
+      for (const id of selectedIds) {
+        applyCurrent(await window.slidesApi.masterDeleteElement({ sourceId: id }))
+      }
     }
+    // Delete over a multi-selection is one undo step
+    if (selectedIds.length > 1) await withHistoryGroup(run)
+    else await run()
     setSelectedIds([])
   }, [selectedIds, applyCurrent])
 

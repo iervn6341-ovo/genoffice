@@ -7,6 +7,8 @@ import type { GroupRenderNode, RenderNode } from '@genoffice/pptx-render'
 import type { ReorderDirection } from '../shared/ipc'
 import type { ActionCtx } from './action-context'
 import { FIT_WIDTH } from './app-constants'
+import { withHistoryGroup } from './history-group'
+import { alignPositions, type AlignOp, type AlignTo } from './align-geometry'
 import { inkNodesOf, rasterizeStroke, type InkStroke } from './ink'
 import { t } from './i18n/locale'
 
@@ -51,16 +53,21 @@ export async function ungroupSelected(ctx: ActionCtx): Promise<void> {
   }
 }
 
-export type AlignOp =
-  'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom' | 'distribute-h' | 'distribute-v'
+export type { AlignOp, AlignTo } from './align-geometry'
 
 /**
  * Align/distribute selected elements.
- * Coordinates are computed in the renderer (pure geometry) and updated in bulk via batchEditTransform.
- * - align: 6 alignments (relative to the bounding box; to the page for single selection)
- * - distribute: 'horizontal' | 'vertical' (≥3 elements)
+ * Coordinates are computed in the renderer (pure geometry, align-geometry.ts) and updated in bulk via
+ * batchEditTransform (one undo step).
+ * - align: 6 alignments, relative to the selection's bounding box or to the slide (`to`);
+ *   a single selected element always aligns to the slide
+ * - distribute: horizontal / vertical, 3+ elements (selection) or 2+ (slide edges)
  */
-export async function alignSelected(ctx: ActionCtx, op: AlignOp): Promise<void> {
+export async function alignSelected(
+  ctx: ActionCtx,
+  op: AlignOp,
+  to: AlignTo = 'selection',
+): Promise<void> {
   const { slide, selectedIds, current } = ctx
   if (!slide || selectedIds.length === 0) return
   const nodes = selectedIds
@@ -68,73 +75,9 @@ export async function alignSelected(ctx: ActionCtx, op: AlignOp): Promise<void> 
     .filter(Boolean) as RenderNode[]
   if (nodes.length === 0) return
 
-  // Bounding box helpers
-  const bbox = (rs: Array<{ x: number; y: number; w: number; h: number }>) => {
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity
-    for (const r of rs) {
-      minX = Math.min(minX, r.x)
-      minY = Math.min(minY, r.y)
-      maxX = Math.max(maxX, r.x + r.w)
-      maxY = Math.max(maxY, r.y + r.h)
-    }
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
-  }
-
   const rects = nodes.map((n) => ({ x: n.box.x, y: n.box.y, w: n.box.w, h: n.box.h }))
-  // Single selection aligns relative to the page
-  const container =
-    nodes.length === 1 ? { x: 0, y: 0, w: slide.widthPx, h: slide.heightPx } : bbox(rects)
-
-  let newPositions: Array<{ x: number; y: number }>
-
-  if (op === 'distribute-h' || op === 'distribute-v') {
-    if (nodes.length < 3) return
-    // Distribute
-    const kind = op === 'distribute-h' ? 'horizontal' : 'vertical'
-    if (kind === 'horizontal') {
-      const indexed = rects.map((r, i) => ({ r, i })).sort((a, b) => a.r.x - b.r.x)
-      const first = indexed[0]!,
-        last = indexed[indexed.length - 1]!
-      const totalSpan = last.r.x + last.r.w - first.r.x
-      const totalWidth = indexed.reduce((s, { r }) => s + r.w, 0)
-      const gap = (totalSpan - totalWidth) / (rects.length - 1)
-      newPositions = rects.map((r) => ({ x: r.x, y: r.y }))
-      let cursor = first.r.x
-      for (const { r, i } of indexed) {
-        newPositions[i] = { x: cursor, y: rects[i]!.y }
-        cursor += r.w + gap
-      }
-    } else {
-      const indexed = rects.map((r, i) => ({ r, i })).sort((a, b) => a.r.y - b.r.y)
-      const first = indexed[0]!,
-        last = indexed[indexed.length - 1]!
-      const totalSpan = last.r.y + last.r.h - first.r.y
-      const totalHeight = indexed.reduce((s, { r }) => s + r.h, 0)
-      const gap = (totalSpan - totalHeight) / (rects.length - 1)
-      newPositions = rects.map((r) => ({ x: r.x, y: r.y }))
-      let cursor = first.r.y
-      for (const { r, i } of indexed) {
-        newPositions[i] = { x: rects[i]!.x, y: cursor }
-        cursor += r.h + gap
-      }
-    }
-  } else {
-    // Align
-    newPositions = rects.map((r) => {
-      let x = r.x,
-        y = r.y
-      if (op === 'left') x = container.x
-      else if (op === 'center-h') x = container.x + (container.w - r.w) / 2
-      else if (op === 'right') x = container.x + container.w - r.w
-      else if (op === 'top') y = container.y
-      else if (op === 'center-v') y = container.y + (container.h - r.h) / 2
-      else if (op === 'bottom') y = container.y + container.h - r.h
-      return { x, y }
-    })
-  }
+  const newPositions = alignPositions(rects, op, to, { w: slide.widthPx, h: slide.heightPx })
+  if (!newPositions) return
 
   const items = nodes.map((n, i) => ({
     sourceId: n.sourceId,
@@ -161,12 +104,38 @@ export async function reorderSelected(
   sourceId: string,
   dir: ReorderDirection,
 ): Promise<void> {
-  const updated = await window.slidesApi.reorderElement({
-    slideIndex: ctx.current,
-    sourceId,
-    dir,
+  // Right-clicking inside a multi-selection reorders the whole selection (PowerPoint), keeping
+  // its internal stacking (see stackSorted for the move order)
+  const sel = ctx.selectedIds.includes(sourceId) ? ctx.selectedIds : [sourceId]
+  const ids = sel.length > 1 ? stackSorted(ctx.slide?.nodes ?? [], sel, dir) : [sourceId]
+  await withHistoryGroup(async () => {
+    for (const id of ids) {
+      const updated = await window.slidesApi.reorderElement({
+        slideIndex: ctx.current,
+        sourceId: id,
+        dir,
+      })
+      if (updated) ctx.applySlide(ctx.current, updated)
+    }
   })
-  if (updated) ctx.applySlide(ctx.current, updated)
+}
+
+/**
+ * Ids in the order the moves must run so the group's relative stacking survives:
+ *  - front: lowest first (each lands on top of the previous, the highest ends up topmost)
+ *  - back: highest first (the lowest ends up bottommost)
+ *  - forward: topmost first (so it is not blocked by a selected neighbour)
+ *  - backward: bottommost first
+ */
+export function stackSorted(
+  nodes: Array<{ sourceId: string }>,
+  ids: string[],
+  dir: ReorderDirection,
+): string[] {
+  const order = new Map(nodes.map((n, i) => [n.sourceId, i]))
+  const z = (id: string) => order.get(id) ?? 0
+  const highestFirst = dir === 'back' || dir === 'forward'
+  return [...ids].sort((a, b) => (highestFirst ? z(b) - z(a) : z(a) - z(b)))
 }
 
 // ── Draw (freehand ink): one stroke = one transparent PNG picture element ────
@@ -275,16 +244,21 @@ export async function rotateSelected(ctx: ActionCtx, deltaDeg: number): Promise<
     }
     return
   }
-  for (const it of items) {
-    await ctx.onTransform(it.sourceId, it.box, undefined, it.groupId)
-  }
+  // In-group children: onTransform batches whatever is requested in the same tick (group-aware)
+  await Promise.all(items.map((it) => ctx.onTransform(it.sourceId, it.box, undefined, it.groupId)))
 }
 
 export async function eraseInk(ctx: ActionCtx, sourceIds: string[]): Promise<void> {
-  for (const id of sourceIds) {
-    const updated = await window.slidesApi.deleteElement({ slideIndex: ctx.current, sourceId: id })
-    if (updated) ctx.applySlide(ctx.current, updated)
-  }
+  // a clear wipes many strokes: still one undo step
+  await withHistoryGroup(async () => {
+    for (const id of sourceIds) {
+      const updated = await window.slidesApi.deleteElement({
+        slideIndex: ctx.current,
+        sourceId: id,
+      })
+      if (updated) ctx.applySlide(ctx.current, updated)
+    }
+  })
 }
 
 export async function clearInk(ctx: ActionCtx): Promise<void> {

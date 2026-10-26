@@ -148,6 +148,7 @@ export const ko = {
   appCtxCellAnchorMiddle: '텍스트 세로 가운데',
   appCtxCellAnchorBottom: '텍스트 아래쪽 맞춤',
   appStatusMergeFailed: '이 셀은 병합/분할할 수 없습니다',
+  appStatusTablePasteLimit: '처음 50개 셀만 붙여넣었습니다',
   appPrintProgress: '인쇄 준비 중…',
   appPrintTitle: '인쇄',
   appPrintLayoutFull: '전체 페이지 슬라이드',

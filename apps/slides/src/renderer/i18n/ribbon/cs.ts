@@ -218,6 +218,8 @@ export const cs = {
   ribbonFlipH: 'Překlopit vodorovně',
   ribbonFlipV: 'Překlopit svisle',
   ribbonDistributeHint: '{title} (vyberte 3 nebo více prvků)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Zobrazit nebo skrýt panel asistenta AI',
   ribbonGroupTable: 'Tabulka',
@@ -498,6 +500,8 @@ export const cs = {
   ribbonRuler: 'Pravítko',
   ribbonRulerTip: 'Zobrazit nebo skrýt pravítko (palce)',
   ribbonGridlines: 'Mřížka',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Zobrazit nebo skrýt mřížku (rozteč půl palce)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

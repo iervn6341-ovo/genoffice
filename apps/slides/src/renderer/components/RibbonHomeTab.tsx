@@ -4,7 +4,7 @@ import { platformShortcuts } from '@genoffice/i18n'
 import type { TextCaseMode } from '@genoffice/pptx-engine/text-case'
 import type { StringKey } from '../i18n/locale'
 import { ColorPicker, isSymbolFontFamily, labelFromTip } from '@genoffice/ui'
-import { saveEditSelection } from '../TextEditOverlay'
+import { restoreEditSelection, saveEditSelection } from '../TextEditOverlay'
 import { armColorInput } from '../color-input'
 import { isNotesDefaultColor } from '../notes-color'
 import { displayFontFamily } from '../konva-adapter'
@@ -183,6 +183,10 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
     onAlign,
     onDirection,
     onArrange,
+    alignTo = 'selection',
+    hasMultiSelection = false,
+    onAlignTo,
+    onReorder,
     onFlip,
     onCopy,
     onCut,
@@ -1126,7 +1130,8 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
                       e.currentTarget.blur()
                     } else if (e.key === 'Escape') {
                       e.preventDefault()
-                      e.currentTarget.blur()
+                      // Esc hands focus (and the text selection) back to the text being edited
+                      if (!(editing && restoreEditSelection())) e.currentTarget.blur()
                     }
                   }}
                 />
@@ -1305,7 +1310,8 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
                       e.currentTarget.blur()
                     } else if (e.key === 'Escape') {
                       e.preventDefault()
-                      e.currentTarget.blur()
+                      // Esc hands focus (and the text selection) back to the text being edited
+                      if (!(editing && restoreEditSelection())) e.currentTarget.blur()
                     }
                   }}
                 />
@@ -1712,6 +1718,59 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
                   {label}
                 </button>
               ))}
+              {onAlignTo && (
+                <>
+                  <div className="rb-menu-div" />
+                  {/* What Align / Distribute measure against; one element always aligns to the slide */}
+                  {(
+                    [
+                      ['slide', t('ribbonAlignToSlide')],
+                      ['selection', t('ribbonAlignToSelection')],
+                    ] as const
+                  ).map(([to, label]) => (
+                    <button
+                      key={to}
+                      role="menuitemradio"
+                      aria-checked={(hasMultiSelection ? alignTo : 'slide') === to}
+                      className={(hasMultiSelection ? alignTo : 'slide') === to ? 'on' : ''}
+                      disabled={to === 'selection' && !hasMultiSelection}
+                      onClick={() => {
+                        setArrangeOpen(false)
+                        onAlignTo(to)
+                      }}
+                    >
+                      <span className="rb-menu-glyph">
+                        {(hasMultiSelection ? alignTo : 'slide') === to ? '✓' : ''}
+                      </span>
+                      {label}
+                    </button>
+                  ))}
+                </>
+              )}
+              {onReorder && (
+                <>
+                  <div className="rb-menu-div" />
+                  {(
+                    [
+                      ['front', t('appCtxBringToFront')],
+                      ['back', t('appCtxSendToBack')],
+                      ['forward', t('appCtxBringForward')],
+                      ['backward', t('appCtxSendBackward')],
+                    ] as const
+                  ).map(([dir, label]) => (
+                    <button
+                      key={dir}
+                      onClick={() => {
+                        setArrangeOpen(false)
+                        onReorder(dir)
+                      }}
+                    >
+                      <span className="rb-menu-glyph" />
+                      {label}
+                    </button>
+                  ))}
+                </>
+              )}
               {onFlip && (
                 <>
                   <div className="rb-menu-div" />

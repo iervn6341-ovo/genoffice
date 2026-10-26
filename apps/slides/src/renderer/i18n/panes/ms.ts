@@ -338,4 +338,10 @@ export const ms = {
   paneShowEnded: 'Persembahan slaid tamat.',
   paneShowRehearseTip: 'Raptai Pemasaan: masa pada slaid ini / jumlah masa',
   paneShowRehearseTotal: 'Jumlah {time}',
+  paneShowVideoPlay: 'Main',
+  paneShowVideoPause: 'Jeda',
+  paneShowVideoSeek: 'Garis masa',
+  paneShowVideoVolume: 'Kelantangan',
+  paneShowVideoMute: 'Bisukan',
+  paneShowVideoUnmute: 'Nyahbisu',
 } satisfies Record<keyof typeof zh, string>

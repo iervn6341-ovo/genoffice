@@ -222,6 +222,8 @@ export const pl = {
   ribbonFlipH: 'Odbij w poziomie',
   ribbonFlipV: 'Odbij w pionie',
   ribbonDistributeHint: '{title} (zaznacz co najmniej 3 elementy)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Pokaż lub ukryj panel Asystenta AI',
   ribbonGroupTable: 'Tabela',
@@ -506,6 +508,8 @@ export const pl = {
   ribbonRuler: 'Linijka',
   ribbonRulerTip: 'Pokaż lub ukryj linijkę (cale)',
   ribbonGridlines: 'Linie siatki',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Pokaż lub ukryj linie siatki (siatka co pół cala)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

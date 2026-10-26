@@ -23,7 +23,9 @@ function nodeHasVisibleText(node: RenderNode): boolean {
 
 export function contextElementTypeForNode(node: RenderNode): ContextElementType {
   if (node.type === 'table' || node.type === 'chart' || node.type === 'picture') return node.type
-  if (node.type === 'shape') return nodeHasVisibleText(node) ? 'textShape' : 'shape'
+  // A text box is a shape with a transparent frame: PowerPoint reveals Shape Format for it too
+  if (node.type === 'shape' || node.type === 'text')
+    return nodeHasVisibleText(node) ? 'textShape' : 'shape'
   if (node.type === 'group') return nodeHasVisibleText(node) ? 'textShape' : 'shape'
   return null
 }

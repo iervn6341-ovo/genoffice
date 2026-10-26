@@ -220,6 +220,8 @@ export const ms = {
   ribbonFlipH: 'Balik mengufuk',
   ribbonFlipV: 'Balik menegak',
   ribbonDistributeHint: '{title} (pilih 3 elemen atau lebih)',
+  ribbonAlignToSlide: 'Align to Slide',
+  ribbonAlignToSelection: 'Align Selected Objects',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'Tunjukkan atau sembunyikan panel Pembantu AI',
   ribbonGroupTable: 'Jadual',
@@ -507,6 +509,8 @@ export const ms = {
   ribbonRuler: 'Pembaris',
   ribbonRulerTip: 'Tunjukkan atau sembunyikan pembaris (inci)',
   ribbonGridlines: 'Garis Grid',
+  ribbonAxesVisibility: 'Show axes',
+  ribbonAxisUnavailable: 'This chart has no axes to show or hide.',
   ribbonGridlinesTip: 'Tunjukkan atau sembunyikan garis grid (grid setengah inci)',
   ribbonDarkContent: 'Dark Content',
   ribbonDarkContentTip:

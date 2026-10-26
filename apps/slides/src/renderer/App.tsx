@@ -27,6 +27,7 @@ import type {
   MasterPartItem,
   NotesParagraphView,
   PasteSlideMode,
+  ReorderDirection,
   SectionInfo,
   ShowSetup,
   SetEffectsPatch,
@@ -51,6 +52,7 @@ import {
   TextEditOverlay,
   firstFontFamily,
   liveAlign,
+  liveFontSize,
   liveTextToggles,
   sameToggles,
   type TextToggles,
@@ -160,6 +162,7 @@ import type {
   SlideShowState,
 } from './action-context'
 import { FIT_WIDTH } from './app-constants'
+import { createTransformBatcher, flushTransforms, withHistoryGroup } from './history-group'
 import { StageRuler } from './components/StageRuler'
 import { formatRulerValue, type RulerUnit } from './ruler-ticks'
 import * as fileActions from './file-actions'
@@ -174,7 +177,21 @@ import * as narrationActions from './narration-actions'
 import * as pictureToolsActions from './picture-tools-actions'
 import { AltTextDialog, PictureQualityDialog } from './components/PictureToolDialogs'
 import * as arrangeActions from './arrange-actions'
+import { minForDistribute, type AlignTo } from './align-geometry'
 import * as tableActions from './table-actions'
+import { createTableGridGesture } from './table-grid-gesture'
+import type { GridChange } from './table-grid-preview'
+import * as tableSelectActions from './table-select-actions'
+import {
+  cellAddrsInRect,
+  clampSel,
+  sameSel,
+  selectionRect as cellSelectionRect,
+  singleCellSel,
+  type CellAddr,
+  type TableCellSel,
+} from './table-selection'
+import { TableCellLayer } from './components/TableCellLayer'
 import * as tableLayoutActions from './table-layout-actions'
 import type { TableTabActions, TableTabInfo } from './components/RibbonTableTabs'
 import * as styleActions from './style-actions'
@@ -217,6 +234,8 @@ function collectFontRuns(
   node: RenderNode,
   scale: number,
   out: Array<{ family: string; sizePt: number }>,
+  /** A table with a cell-range selection reports only those cells (the ribbon acts on them only) */
+  cells?: ReadonlyArray<{ row: number; col: number }> | null,
 ) {
   const pushLayout = (text?: {
     lines: Array<{
@@ -235,7 +254,11 @@ function collectFontRuns(
         })
   }
   if (node.type === 'shape' || node.type === 'text') pushLayout(node.text)
-  else if (node.type === 'table') for (const cell of node.cells) pushLayout(cell.text)
+  else if (node.type === 'table')
+    for (const cell of node.cells) {
+      if (cells && !cells.some((c) => c.row === cell.row && c.col === cell.col)) continue
+      pushLayout(cell.text)
+    }
   else if (node.type === 'group')
     for (const child of node.children) collectFontRuns(child, scale, out)
 }
@@ -396,6 +419,8 @@ export function App() {
   const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null)
   const [editing, setEditing] = useState<EditingState | null>(null)
   const [editingCell, setEditingCell] = useState<EditingCellState | null>(null)
+  /** Table cell-range selection: the table is the selected element, these cells are highlighted */
+  const [cellSel, setCellSel] = useState<TableCellSel | null>(null)
   /** Element-scoped AI edits waiting to be submitted (session-only, see the queue helpers below) */
   const [editQueue, setEditQueue] = useState<EditQueueItem[]>([])
   // Armed shape draw mode (ribbon gallery pick); null = normal selection behavior
@@ -755,6 +780,8 @@ export function App() {
   const [brushMode, setBrushMode] = useState<'once' | 'continuous' | null>(null)
 
   const slide = slides[current]
+  const slideNodesRef = useRef(slide?.nodes)
+  slideNodesRef.current = slide?.nodes
   const hasDoc = !!slide
   // On-screen copy of the current slide for canvas drawing; `slide` stays the authored tree for
   // all logic (edit overlays commit from it, export/show/print never see the preview).
@@ -1804,6 +1831,25 @@ export function App() {
     [brushMode, applyBrushToElement, setSelectedId, enteredGroupId, enteredGroupNode],
   )
 
+  // Press inside a cell of a table that was not selected (SlideCanvas pins the table so the gesture
+  // can't move it): select the table and that cell, and hand the still-held button to the cell layer
+  // so dragging extends a block, like clicking and dragging in a PowerPoint table.
+  const [cellDragFrom, setCellDragFrom] = useState<CellAddr | null>(null)
+  useEffect(() => {
+    if (!cellDragFrom) return
+    const end = () => setCellDragFrom(null)
+    window.addEventListener('mouseup', end, true)
+    return () => window.removeEventListener('mouseup', end, true)
+  }, [cellDragFrom])
+  const handleTableCellPress = useCallback(
+    (sourceId: string, cell: CellAddr) => {
+      handleCanvasSelect(sourceId, false)
+      setCellSel(singleCellSel(sourceId, cell))
+      setCellDragFrom(cell)
+    },
+    [handleCanvasSelect],
+  )
+
   const handleEnterGroup = useCallback((groupId: string, childId: string | null) => {
     setEnteredGroupId(groupId)
     setSelectedIds(childId ? [childId] : [])
@@ -2227,11 +2273,18 @@ export function App() {
   )
 
   // Grouping / alignment (arrange-actions.ts)
+  // Align / Distribute "relative to": selection bounds or the slide (PowerPoint's Align menu switch)
+  const [alignTo, setAlignTo] = useState<AlignTo>('selection')
   const alignSelected = useCallback(
     (op: Parameters<typeof arrangeActions.alignSelected>[1]) =>
-      arrangeActions.alignSelected(ctxRef.current, op),
-    [],
+      arrangeActions.alignSelected(ctxRef.current, op, alignTo),
+    [alignTo],
   )
+  const reorderSelection = useCallback((dir: ReorderDirection) => {
+    const ids = ctxRef.current.selectedIds
+    const last = ids[ids.length - 1]
+    if (last) void arrangeActions.reorderSelected(ctxRef.current, last, dir)
+  }, [])
   const flipSelected = useCallback(
     (axis: 'h' | 'v') => arrangeActions.flipSelected(ctxRef.current, axis),
     [],
@@ -2707,6 +2760,7 @@ export function App() {
         return
       }
       setEditing(null)
+      setCellSel(null)
       setEditingCell({ sourceId, row, col })
     },
     [slide],
@@ -2732,18 +2786,42 @@ export function App() {
   }, [editingCell, slide])
 
   // Table editing (table-actions.ts)
+  // Column / row border drags: the table follows the pointer live, release settles it as one undo step
+  const gridGestureRef = useRef<ReturnType<typeof createTableGridGesture> | null>(null)
+  gridGestureRef.current ??= createTableGridGesture(
+    {
+      getSlide: (i) => ctxRef.current.slides[i],
+      setSlide: (i, updated, settled) => {
+        setSlides((s) => s.map((sl, k) => (k === i ? updated : sl)))
+        if (settled) setDirty(true)
+      },
+    },
+    () => window.slidesApi,
+  )
   const onTableColResize = useCallback(
-    (sourceId: string, col: number, wPx: number) =>
-      tableActions.onTableColResize(ctxRef.current, sourceId, col, wPx),
+    (sourceId: string, col: number, wPx: number, neighbor?: { col: number; wPx: number }) =>
+      gridGestureRef.current!.commit(ctxRef.current.current, sourceId, {
+        kind: 'col',
+        col,
+        wPx,
+        ...(neighbor ? { neighbor } : {}),
+      }),
     [],
   )
   const onTableRowResize = useCallback(
     (sourceId: string, row: number, hPx: number) =>
-      tableActions.onTableRowResize(ctxRef.current, sourceId, row, hPx),
+      gridGestureRef.current!.commit(ctxRef.current.current, sourceId, { kind: 'row', row, hPx }),
     [],
   )
+  const onTableGridMove = useCallback(
+    (sourceId: string, change: GridChange) =>
+      gridGestureRef.current!.move(ctxRef.current.current, sourceId, change),
+    [],
+  )
+  const onTableGridCancel = useCallback(() => void gridGestureRef.current!.cancel(), [])
   const commitCellEdit = useCallback(
-    (paragraphs: EditParagraph[]) => tableActions.commitCellEdit(ctxRef.current, paragraphs),
+    (paragraphs: EditParagraph[], owner?: string) =>
+      tableActions.commitCellEdit(ctxRef.current, paragraphs, owner),
     [],
   )
   const navigateCell = useCallback(
@@ -2799,13 +2877,47 @@ export function App() {
     [slides.length, current],
   )
 
+  const transformBatcher = useRef(
+    createTransformBatcher((slideIndex, reqs) =>
+      flushTransforms(slideIndex, reqs, (updated) => {
+        setSlides((s) => s.map((sl, i) => (i === slideIndex ? updated : sl)))
+        setDirty(true)
+      }),
+    ),
+  )
   const onTransform = useCallback(
     async (
       sourceId: string,
-      box: { x: number; y: number; w: number; h: number; rotationDeg: number },
+      box: {
+        x: number
+        y: number
+        w: number
+        h: number
+        rotationDeg: number
+        tableRowHeightsPx?: number[]
+      },
       preview?: boolean,
       groupId?: string,
     ) => {
+      // A table's drawn size is larger than its stored grid when text grew a row: a commit that
+      // carries the unchanged drawn size is a move, not a resize, and must not rewrite the grid
+      const node = slideNodesRef.current?.find((n) => n.sourceId === sourceId)
+      const keepTableSize =
+        !groupId &&
+        node?.type === 'table' &&
+        Math.abs(box.w - node.box.w) < 0.5 &&
+        Math.abs(box.h - node.box.h) < 0.5
+      if (!preview) {
+        // Settled commits are collected per tick: a multi-selection drag/resize fires one per
+        // node and an arrow nudge loops over the selection — all of it is ONE undo step
+        await transformBatcher.current.push(current, {
+          sourceId,
+          box,
+          ...(groupId ? { groupId } : {}),
+          ...(keepTableSize ? { keepTableSize: true } : {}),
+        })
+        return
+      }
       const updated = await window.slidesApi.editTransform({
         slideIndex: current,
         sourceId,
@@ -2815,8 +2927,10 @@ export function App() {
         hPx: box.h,
         rotationDeg: box.rotationDeg,
         fitWidthPx: FIT_WIDTH,
-        ...(preview ? { preview: true } : {}),
+        preview: true,
         ...(groupId ? { groupId } : {}),
+        ...(keepTableSize ? { keepTableSize: true } : {}),
+        ...(box.tableRowHeightsPx ? { tableRowHeightsPx: box.tableRowHeightsPx } : {}),
       })
       if (updated) {
         setSlides((s) => s.map((sl, i) => (i === current ? updated : sl)))
@@ -2897,7 +3011,11 @@ export function App() {
   const onFontSize = useCallback((pt: number) => styleActions.onFontSize(ctxRef.current, pt), [])
 
   // While editing, track font and size at the caret/selection (ribbon font group display)
-  const [selFont, setSelFont] = useState<{ family: string; sizePt: number } | null>(null)
+  const [selFont, setSelFont] = useState<{
+    family: string
+    sizePt: number
+    sizeMixed?: boolean
+  } | null>(null)
   // Paragraph alignment at the editing caret/selection (overlay DOM); null outside editing
   const [selAlign, setSelAlign] = useState<ParaAlign | null>(null)
   // Effective base direction at the editing caret/selection; null outside editing / mixed
@@ -2934,8 +3052,17 @@ export function App() {
       // The editor DOM is in viewport px (including scale/autofit fontScale); divide by norm to get model pt
       const root = el.closest('[contenteditable="true"]') as HTMLElement | null
       const norm = parseFloat(root?.dataset.norm ?? '') || 1
-      const sizePt = Math.round(((parseFloat(cs.fontSize) * 72) / (96 * norm)) * 2) / 2
-      setSelFont((v) => (v && v.family === family && v.sizePt === sizePt ? v : { family, sizePt }))
+      // Size from the text the selection covers (not the focus element: after a grow/shrink click
+      // that is the parent of the resized span and still holds the old size)
+      const liveSize = liveFontSize()
+      const sizePt =
+        liveSize?.sizePt ?? Math.round(((parseFloat(cs.fontSize) * 72) / (96 * norm)) * 2) / 2
+      const sizeMixed = liveSize?.mixed ?? false
+      setSelFont((v) =>
+        v && v.family === family && v.sizePt === sizePt && !!v.sizeMixed === sizeMixed
+          ? v
+          : { family, sizePt, sizeMixed },
+      )
     }
     update()
     document.addEventListener('selectionchange', update)
@@ -3025,6 +3152,51 @@ export function App() {
     [selectedIds, findNodeCtx],
   )
 
+  // Cells the table commands act on: the range selection, else the cell being edited
+  const tableCells = useMemo<CellAddr[] | null>(() => {
+    if (selectedNode?.type !== 'table') return null
+    const tbl = selectedNode as TableRenderNode
+    if (cellSel && cellSel.sourceId === tbl.sourceId) {
+      return cellAddrsInRect(tbl, cellSelectionRect(tbl, cellSel))
+    }
+    if (editingCell && editingCell.sourceId === tbl.sourceId) {
+      return [{ row: editingCell.row, col: editingCell.col }]
+    }
+    return null
+  }, [selectedNode, cellSel, editingCell])
+
+  // The cell selection only lives while its table is the one selected element; structure edits
+  // shrink the grid under it, so keep it inside
+  useEffect(() => {
+    if (!cellSel) return
+    const tbl =
+      selectedIds.length === 1 && selectedIds[0] === cellSel.sourceId
+        ? slide?.nodes.find((n) => n.sourceId === cellSel.sourceId)
+        : undefined
+    if (!tbl || tbl.type !== 'table' || editing || editingCell) {
+      setCellSel(null)
+      return
+    }
+    const fixed = clampSel(tbl as TableRenderNode, cellSel)
+    if (!fixed) setCellSel(null)
+    else if (!sameSel(fixed, cellSel)) setCellSel(fixed)
+  }, [cellSel, selectedIds, slide, editing, editingCell])
+
+  // Leaving a cell's text editor (Esc / commit) lands on that cell, selected — not on the bare table
+  const prevEditingCellRef = useRef<EditingCellState | null>(null)
+  useEffect(() => {
+    const prev = prevEditingCellRef.current
+    prevEditingCellRef.current = editingCell
+    if (prev && !editingCell && selectedIds.length === 1 && selectedIds[0] === prev.sourceId) {
+      const tbl = slide?.nodes.find((n) => n.sourceId === prev.sourceId)
+      if (tbl?.type === 'table') {
+        setCellSel(singleCellSel(prev.sourceId, { row: prev.row, col: prev.col }))
+      }
+    }
+    // only the editing -> not editing transition matters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingCell])
+
   const [selectedChartData, setSelectedChartData] = useState<Awaited<
     ReturnType<typeof window.slidesApi.getChartData>
   > | null>(null)
@@ -3052,7 +3224,7 @@ export function App() {
     // outline applies to the whole selection and picture-only tools stay disabled
     if (selectedIds.length >= 2) {
       const nodes = selectedIds.map((id) => findNodeCtx(id)?.node)
-      if (nodes.every((n) => n?.type === 'shape')) return 'shape'
+      if (nodes.every((n) => n?.type === 'shape' || n?.type === 'text')) return 'shape'
       if (
         nodes.every((n) => n && (n.type === 'shape' || n.type === 'picture' || n.type === 'group'))
       )
@@ -3073,7 +3245,8 @@ export function App() {
     // (for a group, the first strokeable child stands in)
     const strokeable = (n: RenderNode | undefined): PictureRenderNode | undefined => {
       if (!n) return undefined
-      if (n.type === 'picture' || n.type === 'shape') return n as PictureRenderNode
+      if (n.type === 'picture' || n.type === 'shape' || n.type === 'text')
+        return n as PictureRenderNode
       if (n.type === 'group')
         return (n as GroupRenderNode).children.find(
           (c) => c.type === 'picture' || c.type === 'shape',
@@ -3111,15 +3284,24 @@ export function App() {
         const id = sourceId()
         if (id) void tableActions.tableMergeOp(ctx(), id, kind, row, col)
       },
-      setRowHeightPx: (row, hPx) => {
-        const id = sourceId()
-        if (id) void tableActions.onTableRowResize(ctx(), id, row, hPx)
+      structureRange: (kind) => {
+        const range = tableSelectActions.currentRange(ctx())
+        if (range) void tableSelectActions.structureForRange(ctx(), range.table, range.rect, kind)
       },
-      setColWidthPx: (col, wPx) => {
-        const id = sourceId()
-        if (id) void tableActions.onTableColResize(ctx(), id, col, wPx)
+      mergeRange: () => void tableSelectActions.mergeSelectedCells(ctx()),
+      splitRange: () => void tableSelectActions.splitSelectedCells(ctx()),
+      setRowHeightPx: (rows, hPx) =>
+        void tableLayoutActions.setSelectedRowHeights(ctx(), rows, hPx),
+      setColWidthPx: (cols, wPx) => void tableLayoutActions.setSelectedColWidths(ctx(), cols, wPx),
+      distribute: (axis) => {
+        const range = tableSelectActions.currentRange(ctx())
+        const span = range
+          ? axis === 'rows'
+            ? { from: range.rect.r0, to: range.rect.r1 }
+            : { from: range.rect.c0, to: range.rect.c1 }
+          : null
+        void tableLayoutActions.distributeTable(ctx(), axis, span)
       },
-      distribute: (axis) => void tableLayoutActions.distributeTable(ctx(), axis),
       alignH: (align) => styleActions.onAlign(ctx(), align),
       alignV: (anchor) => void tableLayoutActions.alignTableCells(ctx(), anchor),
       resizeTable: (axis, px) => void tableLayoutActions.resizeTable(ctx(), axis, px),
@@ -3153,9 +3335,17 @@ export function App() {
       activeCell:
         editingCell && editingCell.sourceId === tbl.sourceId
           ? { row: editingCell.row, col: editingCell.col }
-          : null,
+          : cellSel && cellSel.sourceId === tbl.sourceId
+            ? { ...cellSel.anchor }
+            : null,
+      rect: cellSel && cellSel.sourceId === tbl.sourceId ? cellSelectionRect(tbl, cellSel) : null,
+      cells: tableCells,
+      rangeHasMerge:
+        !!cellSel &&
+        cellSel.sourceId === tbl.sourceId &&
+        tableSelectActions.rangeHasMerge(tbl, cellSelectionRect(tbl, cellSel)),
     }
-  }, [selectedNode, slide, editingCell])
+  }, [selectedNode, slide, editingCell, cellSel, tableCells])
 
   // Theme-derived chart colors (fetched when a chart is selected; re-selecting after applying a theme refreshes)
   const [chartColorSchemes, setChartColorSchemes] = useState<Array<{
@@ -3215,7 +3405,8 @@ export function App() {
     } else if (selectedIds.length) {
       const runs: Array<{ family: string; sizePt: number }> = []
       for (const n of slide?.nodes ?? []) {
-        if (selectedIds.includes(n.sourceId)) collectFontRuns(n, slide?.scale ?? 1, runs)
+        if (selectedIds.includes(n.sourceId))
+          collectFontRuns(n, slide?.scale ?? 1, runs, n.type === 'table' ? tableCells : null)
       }
       if (runs.length) {
         const families = new Set(runs.map((r) => r.family))
@@ -3233,7 +3424,7 @@ export function App() {
     if (!st && defaultFont) st = { family: defaultFont, sizePt: 18 }
     if (st) lastFontRef.current = st
     return st
-  }, [inTextEdit, selFont, selectedIds, slide, defaultFont])
+  }, [inTextEdit, selFont, selectedIds, slide, defaultFont, tableCells])
 
   // Current bullet char for the ribbon bullet gallery highlight: '' = no bullet
   // (None tile), a glyph = its preset tile, null = mixed/unknown (no highlight)
@@ -3334,6 +3525,9 @@ export function App() {
     editingCell,
     editingNotes: notesActive,
     setEditingCell,
+    cellSel,
+    setCellSel,
+    tableCells,
     enteredGroupId,
     setEnteredGroupId,
     enteredGroupNode,
@@ -3799,41 +3993,46 @@ export function App() {
           // every selected shape / picture / text box; a group is left to the Format pane
           void (async () => {
             let slide: RenderSlide | null = null
-            for (const id of selectedIds) {
-              const n = findNodeCtx(id)?.node
-              if (!n || (n.type !== 'shape' && n.type !== 'picture' && n.type !== 'text')) continue
-              slide =
-                (await window.slidesApi.setEffects({
-                  slideIndex: current,
-                  sourceId: id,
-                  effects,
-                })) ?? slide
-            }
+            await withHistoryGroup(async () => {
+              for (const id of selectedIds) {
+                const n = findNodeCtx(id)?.node
+                if (!n || (n.type !== 'shape' && n.type !== 'picture' && n.type !== 'text'))
+                  continue
+                slide =
+                  (await window.slidesApi.setEffects({
+                    slideIndex: current,
+                    sourceId: id,
+                    effects,
+                  })) ?? slide
+              }
+            })
             if (slide) applySlide(current, slide)
           })()
         }}
         onPictureStroke={(stroke) => {
           // applies to every selected shape/picture; a selected group pierces one level
           // down so its shape/picture members get the outline (PowerPoint semantics)
-          for (const id of selectedIds) {
-            const n = findNodeCtx(id)?.node
-            if (!n) continue
-            if (n.type === 'picture' || n.type === 'shape') {
-              void onStroke(id, stroke)
-            } else if (n.type === 'group') {
-              for (const c of (n as GroupRenderNode).children) {
-                if (c.type === 'picture' || c.type === 'shape')
-                  void window.slidesApi
-                    .editStroke({
+          void withHistoryGroup(async () => {
+            for (const id of selectedIds) {
+              const n = findNodeCtx(id)?.node
+              if (!n) continue
+              if (n.type === 'picture' || n.type === 'shape' || n.type === 'text') {
+                await onStroke(id, stroke)
+              } else if (n.type === 'group') {
+                for (const c of (n as GroupRenderNode).children) {
+                  if (c.type === 'picture' || c.type === 'shape') {
+                    const r = await window.slidesApi.editStroke({
                       slideIndex: current,
                       sourceId: c.sourceId,
                       stroke,
                       groupId: n.sourceId,
                     })
-                    .then((r) => r && applySlide(current, r))
+                    if (r) applySlide(current, r)
+                  }
+                }
               }
             }
-          }
+          })
         }}
         onChangeShape={
           selectedNode?.type === 'shape' && !selectedNode.line
@@ -3877,23 +4076,26 @@ export function App() {
                 await onStroke(shape.sourceId, stroke)
               }
             }
-            for (const id of selectedIds) {
-              const n = findNodeCtx(id)?.node
-              if (n?.type === 'shape') {
-                await applyTo(n as ShapeRenderNode)
-              } else if (n?.type === 'group') {
-                for (const c of (n as GroupRenderNode).children) {
-                  if (c.type === 'shape') await applyTo(c as ShapeRenderNode, n.sourceId)
+            // fill + outline over the whole selection = one undo step
+            await withHistoryGroup(async () => {
+              for (const id of selectedIds) {
+                const n = findNodeCtx(id)?.node
+                if (n?.type === 'shape' || n?.type === 'text') {
+                  await applyTo(n as ShapeRenderNode)
+                } else if (n?.type === 'group') {
+                  for (const c of (n as GroupRenderNode).children) {
+                    if (c.type === 'shape') await applyTo(c as ShapeRenderNode, n.sourceId)
+                  }
                 }
               }
-            }
+            })
           })()
         }}
         onShapeFill={(fill) => {
-          void (async () => {
+          void withHistoryGroup(async () => {
             for (const id of selectedIds) {
               const n = findNodeCtx(id)?.node
-              if (n?.type === 'shape') {
+              if (n?.type === 'shape' || n?.type === 'text') {
                 await onFill(id, fill)
               } else if (n?.type === 'group') {
                 for (const c of (n as GroupRenderNode).children) {
@@ -3908,14 +4110,14 @@ export function App() {
                 }
               }
             }
-          })()
+          })
         }}
         onShapeFillImage={(mode, source) => {
           void (async () => {
             const targets: Array<{ sourceId: string; groupId?: string }> = []
             for (const id of selectedIds) {
               const n = findNodeCtx(id)?.node
-              if (n?.type === 'shape') {
+              if (n?.type === 'shape' || n?.type === 'text') {
                 targets.push({ sourceId: id })
               } else if (n?.type === 'group') {
                 for (const c of (n as GroupRenderNode).children) {
@@ -3935,7 +4137,7 @@ export function App() {
           })()
         }}
         contextShapeFill={
-          selectedNode?.type === 'shape'
+          selectedNode?.type === 'shape' || selectedNode?.type === 'text'
             ? (selectedNode as ShapeRenderNode).fill.kind === 'solid'
               ? toPickerHex(
                   (selectedNode as ShapeRenderNode & { fill: { color: string } }).fill.color,
@@ -3987,7 +4189,11 @@ export function App() {
         onOpenChartDataDialog={() => void openChartDataDialog()}
         onArrange={(op) => void alignSelected(op)}
         onFlip={(axis) => void flipSelected(axis)}
-        canDistribute={selectedIds.length >= 3}
+        alignTo={alignTo}
+        hasMultiSelection={selectedIds.length >= 2}
+        onAlignTo={setAlignTo}
+        onReorder={reorderSelection}
+        canDistribute={selectedIds.length >= minForDistribute(alignTo)}
       />
 
       <div className="app-main">
@@ -4532,10 +4738,17 @@ export function App() {
                               onEditText={startEdit}
                               onTransform={onTransform}
                               onEditTableCell={startEditCell}
+                              onTableCellPress={
+                                inkTool === 'select' && !brushMode && !drawKind && !cropTarget
+                                  ? handleTableCellPress
+                                  : undefined
+                              }
                               onTableColResize={onTableColResize}
                               onTableRowResize={(id, row, hPx) =>
                                 void onTableRowResize(id, row, hPx)
                               }
+                              onTableGridMove={onTableGridMove}
+                              onTableGridCancel={onTableGridCancel}
                               onPlayMedia={(id) => void startMediaPlayback(id)}
                               onContextMenu={onCanvasContextMenu}
                               onMarqueeSelect={setSelectedIds}
@@ -4661,8 +4874,15 @@ export function App() {
                               <TextEditOverlay
                                 node={cellEditNode}
                                 scale={slide.scale}
+                                replaceWith={editingCell.replaceWith}
                                 onCommit={commitCellEdit}
-                                onCancel={() => setEditingCell(null)}
+                                onCancel={(owner) => {
+                                  // an unchanged editor that belongs to the previous cell must not
+                                  // close the edit session of the cell that replaced it
+                                  const was = tableActions.parseCellEditKey(owner)
+                                  if (was) tableActions.endCellEdit(ctxRef.current, was)
+                                  else setEditingCell(null)
+                                }}
                                 onTabNav={(paragraphs, dir) => void navigateCell(paragraphs, dir)}
                                 onFollowLink={followRunLink}
                                 frameColor={selectionChromeColor(
@@ -4674,6 +4894,47 @@ export function App() {
                                 zoom={zoom}
                               />
                             )}
+                            {selectedNode?.type === 'table' &&
+                              !selectedNode.decoration &&
+                              !findNodeCtx(selectedNode.sourceId)?.groupId &&
+                              !editing &&
+                              !editingCell &&
+                              inkTool === 'select' &&
+                              !brushMode &&
+                              !drawKind &&
+                              !cropTarget && (
+                                <TableCellLayer
+                                  table={selectedNode as TableRenderNode}
+                                  sel={
+                                    cellSel && cellSel.sourceId === selectedNode.sourceId
+                                      ? cellSel
+                                      : null
+                                  }
+                                  zoom={zoom}
+                                  chrome={selectionChromeColor(
+                                    canvasSlide!,
+                                    images,
+                                    selectedNode.box,
+                                  )}
+                                  dragFrom={cellDragFrom}
+                                  onSelect={setCellSel}
+                                  onEditCell={(at) =>
+                                    startEditCell(selectedNode.sourceId, at.row, at.col)
+                                  }
+                                  onContextMenu={(at, x, y) => {
+                                    const tbl = selectedNode as TableRenderNode
+                                    const rect = cellSel ? cellSelectionRect(tbl, cellSel) : null
+                                    const inside =
+                                      !!rect &&
+                                      at.row >= rect.r0 &&
+                                      at.row <= rect.r1 &&
+                                      at.col >= rect.c0 &&
+                                      at.col <= rect.c1
+                                    if (!inside) setCellSel(singleCellSel(tbl.sourceId, at))
+                                    onCanvasContextMenu(tbl.sourceId, x, y, at)
+                                  }}
+                                />
+                              )}
                             {mediaPlay && mediaPlayNode && (
                               <div
                                 style={{

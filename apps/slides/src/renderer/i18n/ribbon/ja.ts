@@ -223,6 +223,8 @@ export const ja = {
   ribbonFlipH: '左右反転',
   ribbonFlipV: '上下反転',
   ribbonDistributeHint: '{title}（3 つ以上の要素を選択）',
+  ribbonAlignToSlide: 'スライドに合わせて配置',
+  ribbonAlignToSelection: '選択したオブジェクトを揃える',
   ribbonAiAssistant: 'AI',
   ribbonAiAssistantTip: 'AI アシスタントパネルの表示/非表示',
   // Insert
@@ -510,6 +512,8 @@ export const ja = {
   ribbonRuler: 'ルーラー',
   ribbonRulerTip: 'ルーラーの表示/非表示（インチ）',
   ribbonGridlines: 'グリッド線',
+  ribbonAxesVisibility: '軸を表示',
+  ribbonAxisUnavailable: 'このグラフには表示/非表示にできる軸がありません。',
   ribbonGridlinesTip: 'グリッド線の表示/非表示（0.5 インチ間隔）',
   ribbonDarkContent: 'コンテンツをダーク表示',
   ribbonDarkContentTip:

@@ -160,6 +160,7 @@ export const fr = {
   appCtxCellAnchorMiddle: 'Texte centré verticalement',
   appCtxCellAnchorBottom: 'Texte en bas',
   appStatusMergeFailed: 'Impossible de fusionner/fractionner cette cellule',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Préparation de l’impression…',
   appPrintTitle: 'Imprimer',
   appPrintLayoutFull: 'Diapositives pleine page',

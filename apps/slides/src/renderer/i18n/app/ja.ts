@@ -151,6 +151,7 @@ export const ja = {
   appCtxCellAnchorMiddle: '文字を上下中央揃え',
   appCtxCellAnchorBottom: '文字を下揃え',
   appStatusMergeFailed: 'このセルは結合/分割できません',
+  appStatusTablePasteLimit: '先頭の 50 セルのみ貼り付けました',
   appPrintProgress: '印刷を準備しています…',
   appPrintTitle: '印刷',
   appPrintLayoutFull: 'スライド(フルページ)',

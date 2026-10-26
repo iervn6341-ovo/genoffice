@@ -160,6 +160,7 @@ export const it = {
   appCtxCellAnchorMiddle: 'Centra testo verticalmente',
   appCtxCellAnchorBottom: 'Allinea testo in basso',
   appStatusMergeFailed: 'Impossibile unire/dividere questa cella',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Preparazione della stampa…',
   appPrintTitle: 'Stampa',
   appPrintLayoutFull: 'Diapositive a pagina intera',

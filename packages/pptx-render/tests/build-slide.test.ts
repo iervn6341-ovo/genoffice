@@ -1063,4 +1063,148 @@ describe('durable ids on chart nodes', () => {
     expect(chart).toBeTruthy()
     expect(chart!.durableId).toMatch(/^e_[0-9a-f]{8}$/)
   })
+
+  it('reports the height each table row needs for its wrapped text (rowNeedPx)', async () => {
+    const { deck } = await openPptx(enginePptx('01_standard_business.pptx'))
+    const slide = deck.slides[0]!
+    const long = {
+      text: {
+        paragraphs: [
+          {
+            runs: [
+              {
+                text: 'a fairly long sentence that has to wrap inside a narrow column',
+                fontSize: 18,
+              },
+            ],
+          },
+        ],
+        insets: { l: 91440, r: 91440, t: 45720, b: 45720 },
+      },
+    }
+    const el: any = {
+      id: 'tbl_1',
+      type: 'table',
+      anchor: { spIndex: -1, originalXml: '', range: [0, 0] },
+      transform: {
+        offset: { x: 0, y: 0, cx: 952500, cy: 381000 },
+        rot: 0,
+        flipH: false,
+        flipV: false,
+      },
+      colWidths: [952500],
+      rowHeights: [190500, 190500],
+      rows: [[long], [{}]],
+    }
+    const rs = buildRenderSlide({ ...slide, elements: [el], decorations: [] }, deck.size, {
+      fitWidthPx: 1280,
+    })
+    const node = rs.nodes[0] as any
+    expect(node.rowNeedPx).toHaveLength(2)
+    expect(node.rowNeedPx[0]).toBeGreaterThan(40)
+    expect(node.rowNeedPx[1]).toBe(0)
+    // the row grew to fit its text, so the need never exceeds the rendered row height
+    expect(node.gridY[1]).toBeCloseTo(node.rowNeedPx[0], 1)
+  })
+
+  describe('table column needs', () => {
+    const cellOf = (text: string, extra: Record<string, unknown> = {}) => ({
+      ...extra,
+      text: {
+        paragraphs: [{ runs: [{ text, fontSize: 18 }] }],
+        insets: { l: 91440, r: 91440, t: 45720, b: 45720 },
+      },
+    })
+    const tableEl = (rows: any[][], cols: number[], rowH: number[], y = 0): any => ({
+      id: 'tbl_1',
+      type: 'table',
+      anchor: { spIndex: -1, originalXml: '', range: [0, 0] },
+      transform: {
+        offset: {
+          x: 0,
+          y: y * 9525,
+          cx: cols.reduce((a, b) => a + b, 0) * 9525,
+          cy: rowH.reduce((a, b) => a + b, 0) * 9525,
+        },
+        rot: 0,
+        flipH: false,
+        flipV: false,
+      },
+      colWidths: cols.map((c) => c * 9525),
+      rowHeights: rowH.map((c) => c * 9525),
+      rows,
+    })
+    const build = async (el: any) => {
+      const { deck } = await openPptx(enginePptx('01_standard_business.pptx'))
+      const slide = deck.slides[0]!
+      const rs = buildRenderSlide({ ...slide, elements: [el], decorations: [] }, deck.size, {
+        fitWidthPx: 1280,
+      })
+      return { node: rs.nodes[0] as any, slideH: rs.heightPx }
+    }
+
+    it('reports per column the widest unbreakable word + insets; spans, empties skip', async () => {
+      const el = tableEl(
+        [
+          [cellOf('Redmine'), cellOf('元件區塊'), cellOf('')],
+          // a merged cell never contributes to a single column, even with a very long word
+          [cellOf('Supercalifragilistic', { gridSpan: 2 }), { merged: true }, cellOf('ab')],
+        ],
+        [300, 300, 300],
+        [40, 40],
+      )
+      const { node } = await build(el)
+      expect(node.colNeedPx).toHaveLength(3)
+      const [c0, c1, c2] = node.colNeedPx as number[]
+      // 9.6px insets each side: "Redmine" must clear the longer column-1 CJK char? just assert shape
+      expect(c0).toBeGreaterThan(19.2 + 20)
+      expect(c1).toBeGreaterThan(19.2 + 10)
+      expect(c1).toBeLessThan(c0) // one full-width char is narrower than "Redmine" at 18pt
+      expect(c2).toBeGreaterThan(19.2) // "ab"
+      // the long word sits in a spanning cell: not charged to column 0
+      expect(c0).toBeLessThan(150)
+    })
+
+    it('an empty column has no requirement', async () => {
+      const { node } = await build(tableEl([[cellOf(''), cellOf('x')]], [200, 200], [40]))
+      expect(node.colNeedPx[0]).toBe(0)
+      expect(node.colNeedPx[1]).toBeGreaterThan(0)
+    })
+
+    it('fitMinWPx appears only when narrowing would push the table past the slide bottom', async () => {
+      const words = 'one two three four five six seven eight nine ten eleven twelve'
+      const mk = (y: number) =>
+        tableEl(
+          [
+            [cellOf(words), cellOf(words)],
+            [cellOf(words), cellOf(words)],
+          ],
+          [400, 400],
+          [50, 50],
+          y,
+        )
+      const top = (await build(mk(0))).node
+      expect(top.fitMinWPx).toBeUndefined()
+      const { node, slideH } = await build(mk(500))
+      expect(node.box.y + node.box.h).toBeLessThanOrEqual(slideH + 1)
+      expect(node.fitMinWPx).toBeGreaterThan(0)
+      expect(node.fitMinWPx).toBeLessThan(800)
+      // at the reported width the proportionally narrowed table still ends inside the slide
+      const k = node.fitMinWPx / 800
+      const narrowed = await build(
+        tableEl(
+          [
+            [cellOf(words), cellOf(words)],
+            [cellOf(words), cellOf(words)],
+          ],
+          [400 * k, 400 * k],
+          [50, 50],
+          500,
+        ),
+      )
+      expect(narrowed.node.box.y + narrowed.node.box.h).toBeLessThanOrEqual(
+        Math.max(narrowed.slideH, node.box.y + node.box.h) + 1,
+      )
+    })
+  })
 })

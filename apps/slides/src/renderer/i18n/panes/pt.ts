@@ -339,4 +339,10 @@ export const pt = {
   paneShowEnded: 'Fim da apresentação de slides.',
   paneShowRehearseTip: 'Testar Intervalos: tempo neste slide / tempo total',
   paneShowRehearseTotal: 'Total {time}',
+  paneShowVideoPlay: 'Reproduzir',
+  paneShowVideoPause: 'Pausar',
+  paneShowVideoSeek: 'Linha do tempo',
+  paneShowVideoVolume: 'Volume',
+  paneShowVideoMute: 'Silenciar',
+  paneShowVideoUnmute: 'Ativar som',
 } satisfies Record<keyof typeof zh, string>

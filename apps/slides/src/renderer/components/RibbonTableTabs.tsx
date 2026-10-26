@@ -28,8 +28,14 @@ export interface TableTabInfo {
   pxPerCm: number
   styleId?: string
   flags: Record<TableFlagKey, boolean> & { rtl: boolean }
-  /** the cell being edited; structure / merge / alignment act on it */
+  /** the cell being edited, or the block's top-left cell; structure / merge / alignment act on it */
   activeCell: { row: number; col: number } | null
+  /** cell-range selection: the highlighted block (grid rectangle, merges included) */
+  rect: { r0: number; c0: number; r1: number; c1: number } | null
+  /** the cells shading / borders / alignment act on (range or edited cell); null = whole table */
+  cells: Array<{ row: number; col: number }> | null
+  /** the block holds a merged cell (Split Cells has something to split) */
+  rangeHasMerge: boolean
 }
 
 export interface TableTabActions {
@@ -40,8 +46,16 @@ export interface TableTabActions {
     before?: boolean,
   ) => void
   merge: (kind: 'merge-right' | 'merge-down' | 'split', row: number, col: number) => void
-  setRowHeightPx: (row: number, hPx: number) => void
-  setColWidthPx: (col: number, wPx: number) => void
+  /** act on the selected block: insert / delete as many rows or columns as it spans */
+  structureRange: (
+    kind: 'row-above' | 'row-below' | 'col-left' | 'col-right' | 'del-row' | 'del-col',
+  ) => void
+  /** Merge Cells / Split Cells on the selected block */
+  mergeRange: () => void
+  splitRange: () => void
+  /** every listed row gets this height / every listed column this width (one undo step) */
+  setRowHeightPx: (rows: number[], hPx: number) => void
+  setColWidthPx: (cols: number[], wPx: number) => void
   distribute: (axis: 'rows' | 'cols') => void
   alignH: (align: 'left' | 'center' | 'right') => void
   alignV: (anchor: 'top' | 'middle' | 'bottom') => void
@@ -385,7 +399,7 @@ export function TableDesignTab({
       <span>{label}</span>
     </label>
   )
-  const cells = info.activeCell ? [info.activeCell] : undefined
+  const cells = info.cells ?? (info.activeCell ? [info.activeCell] : undefined)
   const border = (
     borderMode: NonNullable<EditTableStyleOp['borderMode']>,
     label: string,
@@ -433,7 +447,7 @@ export function TableDesignTab({
               <button
                 type="button"
                 className={`rb-tbl-wide${open ? ' active' : ''}`}
-                data-tip={info.activeCell ? t('ribbonGroupShadingCell') : t('ribbonGroupShading')}
+                data-tip={cells ? t('ribbonGroupShadingCell') : t('ribbonGroupShading')}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={toggle}
               >
@@ -650,9 +664,11 @@ function CmField({
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
+            e.preventDefault()
             commit()
             e.currentTarget.blur()
           } else if (e.key === 'Escape') {
+            e.preventDefault()
             setDraft(null)
             e.currentTarget.blur()
           }
@@ -673,11 +689,20 @@ export function TableLayoutTab({
   const { t, lang } = useI18n()
   const l = tableRibbonLabels(lang)
   const cell = info.activeCell
+  const rect = info.rect
   // no cell cursor: rows/columns go after the last / before the first, the way a whole-table selection behaves
-  const row = cell?.row ?? 0
-  const col = cell?.col ?? 0
+  const row = rect?.r0 ?? cell?.row ?? 0
+  const col = rect?.c0 ?? cell?.col ?? 0
   const lastRow = info.rows - 1
   const lastCol = info.cols - 1
+  // Cell Size fields and Distribute cover every selected row / column
+  const rowSpan = rect
+    ? Array.from({ length: rect.r1 - rect.r0 + 1 }, (_, i) => rect.r0 + i)
+    : [row]
+  const colSpan = rect
+    ? Array.from({ length: rect.c1 - rect.c0 + 1 }, (_, i) => rect.c0 + i)
+    : [col]
+  const multiCell = !!rect && (rect.r1 > rect.r0 || rect.c1 > rect.c0)
   const sumPx = (a: number[]) => a.reduce((x, y) => x + y, 0)
   return (
     <>
@@ -692,10 +717,11 @@ export function TableLayoutTab({
               <button
                 type="button"
                 className="rb-tbl-menuitem"
-                disabled={info.cols < 2}
+                disabled={info.cols - (rect ? rect.c1 - rect.c0 + 1 : 1) < 1}
                 onClick={() => {
                   close()
-                  actions.structure('delete-col', col)
+                  if (rect) actions.structureRange('del-col')
+                  else actions.structure('delete-col', col)
                 }}
               >
                 {t('appCtxDeleteCol')}
@@ -703,10 +729,11 @@ export function TableLayoutTab({
               <button
                 type="button"
                 className="rb-tbl-menuitem"
-                disabled={info.rows < 2}
+                disabled={info.rows - (rect ? rect.r1 - rect.r0 + 1 : 1) < 1}
                 onClick={() => {
                   close()
-                  actions.structure('delete-row', row)
+                  if (rect) actions.structureRange('del-row')
+                  else actions.structure('delete-row', row)
                 }}
               >
                 {t('appCtxDeleteRow')}
@@ -730,25 +757,39 @@ export function TableLayoutTab({
             icon="insert-above"
             iconOnly
             label={t('appCtxInsertRowAbove')}
-            onClick={() => actions.structure('insert-row', row, true)}
+            onClick={() =>
+              rect
+                ? actions.structureRange('row-above')
+                : actions.structure('insert-row', row, true)
+            }
           />
           <SmallBtn
             icon="insert-below"
             iconOnly
             label={t('appCtxInsertRowBelow')}
-            onClick={() => actions.structure('insert-row', cell ? row : lastRow)}
+            onClick={() =>
+              rect
+                ? actions.structureRange('row-below')
+                : actions.structure('insert-row', cell ? row : lastRow)
+            }
           />
           <SmallBtn
             icon="insert-left"
             iconOnly
             label={t('appCtxInsertColLeft')}
-            onClick={() => actions.structure('insert-col', col, true)}
+            onClick={() =>
+              rect ? actions.structureRange('col-left') : actions.structure('insert-col', col, true)
+            }
           />
           <SmallBtn
             icon="insert-right"
             iconOnly
             label={t('appCtxInsertColRight')}
-            onClick={() => actions.structure('insert-col', cell ? col : lastCol)}
+            onClick={() =>
+              rect
+                ? actions.structureRange('col-right')
+                : actions.structure('insert-col', cell ? col : lastCol)
+            }
           />
         </div>
       </Group>
@@ -768,6 +809,17 @@ export function TableLayoutTab({
         >
           {(close) => (
             <div className="rb-tbl-menu">
+              <button
+                type="button"
+                className="rb-tbl-menuitem"
+                disabled={!multiCell}
+                onClick={() => {
+                  close()
+                  actions.mergeRange()
+                }}
+              >
+                {l.mergeCells}
+              </button>
               <button
                 type="button"
                 className="rb-tbl-menuitem"
@@ -794,8 +846,11 @@ export function TableLayoutTab({
         <BigBtn
           icon="split-cells"
           label={t('appCtxSplitCell')}
-          disabled={!cell}
-          onClick={() => cell && actions.merge('split', cell.row, cell.col)}
+          disabled={!cell || (!!rect && !info.rangeHasMerge)}
+          onClick={() => {
+            if (rect && multiCell) actions.splitRange()
+            else if (cell) actions.merge('split', cell.row, cell.col)
+          }}
         />
       </Group>
       <div className="ribbon-sep" />
@@ -805,13 +860,13 @@ export function TableLayoutTab({
             label={l.rowHeight}
             valuePx={info.rowHeightsPx[row] ?? 0}
             pxPerCm={info.pxPerCm}
-            onCommit={(px) => actions.setRowHeightPx(row, px)}
+            onCommit={(px) => actions.setRowHeightPx(rowSpan, px)}
           />
           <CmField
             label={l.colWidth}
             valuePx={info.colWidthsPx[col] ?? 0}
             pxPerCm={info.pxPerCm}
-            onCommit={(px) => actions.setColWidthPx(col, px)}
+            onCommit={(px) => actions.setColWidthPx(colSpan, px)}
           />
         </div>
         <div className="rb-tbl-stack">

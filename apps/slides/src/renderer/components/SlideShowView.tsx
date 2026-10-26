@@ -51,6 +51,7 @@ import {
   type InkTool,
 } from './ShowInk'
 import { CameraBubble } from './ShowCamera'
+import { ShowVideoPlayer } from './ShowVideoControls'
 import {
   closeShowPopovers,
   ShowToolbar,
@@ -859,8 +860,9 @@ function hitLink(
 
 /**
  * Audio/video layer during the show: DOM players stacked over video/audio nodes (click to
- * play/pause, auto-stop on page turn). In the editor media only has poster frames; a show must
- * be able to play, or decks with video are crippled.
+ * play/pause, auto-stop on page turn; videos carry the ShowVideoPlayer control bar). In the
+ * editor media only has poster frames; a show must be able to play, or decks with video are
+ * crippled.
  */
 function ShowMediaLayer({
   slide,
@@ -879,7 +881,18 @@ function ShowMediaLayer({
       n.type === 'picture' && !!(n as import('@genoffice/pptx-render').PictureRenderNode).media,
   )
   const isNarration = (n: { name?: string }) => n.name === NARRATION_NAME
-  const [urls, setUrls] = useState<Record<string, { kind: 'video' | 'audio'; dataUrl: string }>>({})
+  const [urls, setUrls] = useState<
+    Record<
+      string,
+      {
+        kind: 'video' | 'audio'
+        dataUrl: string
+        autoPlay?: boolean
+        loop?: boolean
+        trim?: { startMs?: number; endMs?: number }
+      }
+    >
+  >({})
   const [playing, setPlaying] = useState<Record<string, boolean>>({})
   useEffect(() => {
     let cancelled = false
@@ -917,17 +930,14 @@ function ShowMediaLayer({
         }
         if (media.kind === 'video') {
           return (
-            <video
+            <ShowVideoPlayer
               key={n.sourceId}
               src={media.dataUrl}
               style={style}
-              playsInline
-              onClick={(e) => {
-                e.stopPropagation()
-                toggle(e.currentTarget)
-              }}
-              onPlay={() => setPlaying((p) => ({ ...p, [n.sourceId]: true }))}
-              onPause={() => setPlaying((p) => ({ ...p, [n.sourceId]: false }))}
+              autoPlay={media.autoPlay}
+              loop={media.loop}
+              trim={media.trim}
+              onPlayingChange={(p) => setPlaying((cur) => ({ ...cur, [n.sourceId]: p }))}
             />
           )
         }

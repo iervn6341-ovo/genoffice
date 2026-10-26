@@ -158,6 +158,7 @@ export const ms = {
   appCtxCellAnchorMiddle: 'Tengahkan Teks Secara Menegak',
   appCtxCellAnchorBottom: 'Jajarkan Teks ke Bawah',
   appStatusMergeFailed: 'Tidak dapat mencantum/memisahkan sel ini',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Bersedia untuk mencetak…',
   appPrintTitle: 'Cetak',
   appPrintLayoutFull: 'Slaid Halaman Penuh',

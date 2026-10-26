@@ -340,4 +340,10 @@ export const de = {
   paneShowEnded: 'Ende der Bildschirmpräsentation.',
   paneShowRehearseTip: 'Neue Einblendezeiten testen: Zeit auf dieser Folie / Gesamtzeit',
   paneShowRehearseTotal: 'Gesamt {time}',
+  paneShowVideoPlay: 'Wiedergabe',
+  paneShowVideoPause: 'Pause',
+  paneShowVideoSeek: 'Zeitleiste',
+  paneShowVideoVolume: 'Lautstärke',
+  paneShowVideoMute: 'Stummschalten',
+  paneShowVideoUnmute: 'Ton einschalten',
 } satisfies Record<keyof typeof zh, string>

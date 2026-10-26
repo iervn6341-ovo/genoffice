@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { platformShortcuts } from '@genoffice/i18n'
+import { placeContextMenu } from '../context-menu-position'
 
 export interface CtxItem {
   label: string
@@ -26,18 +27,28 @@ interface Props {
 
 export function ContextMenu({ x, y, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ x, y })
+  const [place, setPlace] = useState<{ x: number; y: number; maxHeight: number | null }>({
+    x,
+    y,
+    maxHeight: null,
+  })
 
+  // Re-place whenever the anchor or the item list changes (the thumbnail menu gains/loses rows
+  // after the clipboard probe resolves) and whenever the window is resized.
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
-    const { innerWidth, innerHeight } = window
-    const r = el.getBoundingClientRect()
-    setPos({
-      x: Math.min(x, Math.max(0, innerWidth - r.width - 4)),
-      y: Math.min(y, Math.max(0, innerHeight - r.height - 4)),
-    })
-  }, [x, y])
+    const measure = () => {
+      // scrollHeight is the uncapped content height even when CSS max-height is clipping it
+      const natural = el.scrollHeight + (el.offsetHeight - el.clientHeight)
+      setPlace(
+        placeContextMenu(x, y, el.offsetWidth, natural, window.innerWidth, window.innerHeight),
+      )
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [x, y, items])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -48,12 +59,18 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('mousedown', onDown)
-    window.addEventListener('wheel', onClose, { once: true })
+    // Wheeling over a menu that scrolls (taller than the window) scrolls it; anywhere else closes it.
+    const onWheel = (e: WheelEvent) => {
+      const el = ref.current
+      if (el && el.contains(e.target as Node) && el.scrollHeight > el.clientHeight) return
+      onClose()
+    }
+    window.addEventListener('wheel', onWheel)
     window.addEventListener('blur', onClose)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('wheel', onClose)
+      window.removeEventListener('wheel', onWheel)
       window.removeEventListener('blur', onClose)
     }
   }, [onClose])
@@ -82,7 +99,11 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
     <div
       ref={ref}
       className="ctx-menu"
-      style={{ left: pos.x, top: pos.y }}
+      style={{
+        left: place.x,
+        top: place.y,
+        ...(place.maxHeight != null ? { maxHeight: place.maxHeight } : null),
+      }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((item, i) =>

@@ -139,6 +139,7 @@ export const zhTW = {
   appCtxCellAnchorMiddle: '文字垂直置中',
   appCtxCellAnchorBottom: '文字靠下對齊',
   appStatusMergeFailed: '無法合併/分割此儲存格',
+  appStatusTablePasteLimit: '僅貼上前 50 個儲存格',
   appPrintProgress: '正在準備列印…',
   appPrintTitle: '列印',
   appPrintLayoutFull: '全頁投影片',

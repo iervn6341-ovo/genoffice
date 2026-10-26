@@ -144,6 +144,7 @@ export const he = {
   appCtxCellAnchorMiddle: 'מרכז טקסט אנכית',
   appCtxCellAnchorBottom: 'ישר טקסט למטה',
   appStatusMergeFailed: 'לא ניתן למזג/לפצל תא זה',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'מתכונן להדפסה…',
   appPrintTitle: 'הדפסה',
   appPrintLayoutFull: 'שקופיות בעמוד מלא',

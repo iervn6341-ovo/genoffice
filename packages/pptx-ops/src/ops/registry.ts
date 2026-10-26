@@ -368,3 +368,28 @@ export function requireLinkTarget(opName: string, link: unknown, field = 'link')
     }
   } else throw new GuidedError(usage)
 }
+
+/** `cells`: [{row, col}] in tc coordinates; every entry must be a pair of non-negative integers. */
+export function requireCellList(op: Op, name: string): Array<{ row: number; col: number }> {
+  const raw = op.cells
+  if (!Array.isArray(raw) || !raw.length) {
+    throw new GuidedError(`op "${name}" needs "cells": a non-empty array of {row, col}.`)
+  }
+  return raw.map((c) => {
+    const cell = c as { row?: unknown; col?: unknown }
+    if (
+      !Number.isInteger(cell?.row) ||
+      !Number.isInteger(cell?.col) ||
+      (cell.row as number) < 0 ||
+      (cell.col as number) < 0
+    ) {
+      throw new GuidedError(`op "${name}": every cell must be {row, col} (0-based integers).`)
+    }
+    return { row: cell.row as number, col: cell.col as number }
+  })
+}
+
+/** Optional `cells` on an op (table cell-range scope): undefined when absent, validated when present. */
+export function optionalCells(op: Op): Array<{ row: number; col: number }> | undefined {
+  return op.cells === undefined ? undefined : requireCellList(op, String(op.op))
+}

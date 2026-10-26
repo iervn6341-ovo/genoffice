@@ -159,6 +159,7 @@ export const es = {
   appCtxCellAnchorMiddle: 'Texto centrado verticalmente',
   appCtxCellAnchorBottom: 'Texto abajo',
   appStatusMergeFailed: 'No se puede combinar/dividir esta celda',
+  appStatusTablePasteLimit: 'Pasted the first 50 cells only',
   appPrintProgress: 'Preparando la impresión…',
   appPrintTitle: 'Imprimir',
   appPrintLayoutFull: 'Diapositivas de página completa',
