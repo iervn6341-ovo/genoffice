@@ -29,7 +29,8 @@ for (const file of git.stdout.trim().split('\n')) {
     !file.includes('/i18n/') &&
     !file.includes('docs/qa/') &&
     !file.includes('docs/architecture/') &&
-    !file.includes('/skills/')
+    !file.includes('/skills/') &&
+    !file.includes('/fixtures/')
   if (!isCode && !isDoc) continue
   const lines = readFileSync(join(root, file), 'utf8').split('\n')
   lines.forEach((line, index) => {

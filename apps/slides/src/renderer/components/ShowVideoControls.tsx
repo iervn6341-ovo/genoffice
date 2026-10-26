@@ -74,6 +74,8 @@ const VolumeIcon = ({ level }: { level: 'mute' | 'low' | 'high' }) => (
 
 export function ShowVideoPlayer({
   src,
+  poster,
+  srcRect,
   style,
   onPlayingChange,
   autoPlay,
@@ -81,6 +83,8 @@ export function ShowVideoPlayer({
   trim,
 }: {
   src: string
+  poster?: string
+  srcRect?: { l: number; t: number; r: number; b: number }
   /** absolute box of the video on the slide (left/top/width/height in px) */
   style: React.CSSProperties
   onPlayingChange?: (playing: boolean) => void
@@ -192,6 +196,24 @@ export function ShowVideoPlayer({
   }
   const blurAfter = (e: React.SyntheticEvent<HTMLElement>) => e.currentTarget.blur()
 
+  const sr = srcRect
+  const spanX = sr ? Math.max(0.001, 1 - sr.l - sr.r) : 1
+  const spanY = sr ? Math.max(0.001, 1 - sr.t - sr.b) : 1
+  const videoStyle: React.CSSProperties = sr
+    ? {
+        position: 'absolute',
+        left: `${(-sr.l * 100) / spanX}%`,
+        top: `${(-sr.t * 100) / spanY}%`,
+        width: `${100 / spanX}%`,
+        height: `${100 / spanY}%`,
+        objectFit: 'fill',
+      }
+    : {
+        width: '100%',
+        height: '100%',
+        objectFit: 'fill',
+      }
+
   return (
     <div
       ref={wrapRef}
@@ -214,6 +236,8 @@ export function ShowVideoPlayer({
         ref={videoRef}
         className="ss-video-el"
         src={src}
+        poster={poster}
+        style={videoStyle}
         playsInline
         preload="auto"
         loop={!!loop && !trim?.endMs}

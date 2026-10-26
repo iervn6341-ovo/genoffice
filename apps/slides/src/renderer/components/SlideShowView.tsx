@@ -914,13 +914,22 @@ function ShowMediaLayer({
       {nodes.map((n) => {
         const media = urls[n.sourceId]
         if (!media) return null
+        const transformParts: string[] = []
+        if (n.box.rotationDeg) transformParts.push(`rotate(${n.box.rotationDeg}deg)`)
+        if (n.box.flipH) transformParts.push('scaleX(-1)')
+        if (n.box.flipV) transformParts.push('scaleY(-1)')
+        const transform = transformParts.length ? transformParts.join(' ') : undefined
+
         const style: React.CSSProperties = {
           position: 'absolute',
           left: n.box.x * k,
           top: n.box.y * k,
           width: n.box.w * k,
           height: n.box.h * k,
+          transform,
+          transformOrigin: 'center center',
           cursor: 'pointer',
+          borderRadius: n.clip?.cornerRadiusPx ? `${n.clip.cornerRadiusPx * k}px` : undefined,
         }
         const isPlaying = !!playing[n.sourceId]
         const toggle = (el: HTMLMediaElement | null) => {
@@ -933,6 +942,8 @@ function ShowMediaLayer({
             <ShowVideoPlayer
               key={n.sourceId}
               src={media.dataUrl}
+              poster={n.dataUrl}
+              srcRect={n.srcRect}
               style={style}
               autoPlay={media.autoPlay}
               loop={media.loop}
