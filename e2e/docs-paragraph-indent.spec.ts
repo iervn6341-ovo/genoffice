@@ -5,7 +5,7 @@ import { launchShell, waitForPageWithUrl } from './helpers'
 /**
  * Paragraph dialog indents checked against Word for Mac (zh-TW):
  *  - Special = (none) / First line / Hanging with a "By" value; East Asian
- *    Word counts indents in characters (字元), 2 字元 being the default;
+ *    Word counts indents in characters, 2 characters being the default;
  *  - Left shows where the first line starts (a hanging paragraph's w:left
  *    minus the hang), and OK on untouched fields never rewrites them;
  *  - ⌘T steps a hanging indent by the document's default tab stop
@@ -72,7 +72,7 @@ test('paragraph dialog: hanging / first-line indent in characters, ⌘T uses the
       return Math.round(parseFloat(getComputedStyle(node as Element).fontSize) * 0.75 * 20)
     })
 
-    // Hanging: By defaults to 2 字元; Left stays 0 (first line at the margin)
+    // Hanging: By defaults to 2 characters; Left stays 0 (first line at the margin)
     let dialog = await openParagraphDialog(p, '懸掛段落')
     await dialog.getByRole('button', { name: '特殊' }).click()
     await p.getByRole('option', { name: '凸排' }).click()
@@ -87,7 +87,7 @@ test('paragraph dialog: hanging / first-line indent in characters, ⌘T uses the
         left: 2 * charTwips,
       })
 
-    // reopened: Left 0, Hanging 2 字元; OK without edits keeps the exact twips
+    // reopened: Left 0, Hanging 2 characters; OK without edits keeps the exact twips
     dialog = await openParagraphDialog(p, '懸掛段落')
     await expect(dialog.locator('label', { hasText: '左縮排' }).locator('input')).toHaveValue('0')
     await expect(dialog.getByRole('button', { name: '特殊' })).toContainText('凸排')
@@ -99,7 +99,7 @@ test('paragraph dialog: hanging / first-line indent in characters, ⌘T uses the
         left: 2 * charTwips,
       })
 
-    // First line: 2 字元, body lines at the margin
+    // First line: 2 characters, body lines at the margin
     dialog = await openParagraphDialog(p, '首行段落')
     await dialog.getByRole('button', { name: '特殊' }).click()
     await p.getByRole('option', { name: '首行' }).click()
