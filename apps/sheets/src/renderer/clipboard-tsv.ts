@@ -8,16 +8,32 @@
  */
 import {
   CellModeEnum,
+  numfmt,
   CellValueType,
   IUniverInstanceService,
   extractPureTextFromCell,
   type ICellData,
+  type Worksheet,
 } from '@univerjs/core'
 import { ISheetClipboardService } from '@univerjs/preset-sheets-core'
 
 import type { UniverRuntime } from './univer-state'
 
 type ClipboardCell = ICellData & { displayV?: string }
+
+/// The grid shows `#####` when a number does not fit its column; the clipboard carries the
+/// whole formatted text, like Excel's.
+export function withFullDisplay(
+  cell: ClipboardCell | null | undefined,
+  pattern: string | null | undefined,
+): ClipboardCell | null | undefined {
+  if (!cell || typeof cell.displayV !== 'string' || !/^#+$/.test(cell.displayV)) return cell
+  if (typeof cell.v !== 'number' || !Number.isFinite(cell.v)) return cell
+  const text = numfmt.format(pattern && pattern !== 'General' ? pattern : 'General', cell.v, {
+    throws: false,
+  })
+  return typeof text === 'string' && text !== '' ? { ...cell, displayV: text } : cell
+}
 
 /// One TSV field: booleans as TRUE/FALSE, newlines normalized to \n, and
 /// CSV-style quoting when the text carries tabs/newlines/quotes.
@@ -61,6 +77,30 @@ interface CopyContent {
   discreteRange: { rows: number[]; cols: number[] }
 }
 
+/// The plain-text slice of a copied block (rows / columns as listed, with the full display text).
+export function plainTextOfBlock(
+  worksheet: Worksheet,
+  rows: readonly number[],
+  cols: readonly number[],
+): string {
+  const matrix = worksheet.getMatrixWithMergedCells(
+    Math.min(...rows),
+    Math.min(...cols),
+    Math.max(...rows),
+    Math.max(...cols),
+    CellModeEnum.Both,
+  )
+  return plainTextFromCells(
+    rows,
+    cols,
+    (row, column) =>
+      withFullDisplay(
+        (matrix.getValue(row, column) as ClipboardCell | undefined) ?? null,
+        worksheet.getComposedCellStyle(row, column)?.n?.pattern,
+      ) ?? null,
+  )
+}
+
 export function installTsvClipboardFix(runtime: UniverRuntime): { dispose(): void } {
   const injector = runtime.univer.__getInjector()
   const instanceService = injector.get(IUniverInstanceService)
@@ -101,7 +141,11 @@ export function installTsvClipboardFix(runtime: UniverRuntime): { dispose(): voi
       const plain = plainTextFromCells(
         rows,
         cols,
-        (row, column) => matrix.getValue(row, column) ?? null,
+        (row, column) =>
+          withFullDisplay(
+            matrix.getValue(row, column) ?? null,
+            worksheet.getComposedCellStyle(row, column)?.n?.pattern,
+          ) ?? null,
       )
       return { ...content, plain }
     } catch {

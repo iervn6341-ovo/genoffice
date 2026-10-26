@@ -1489,6 +1489,8 @@ export const ja = {
     '先にこのブック内のセルをコピーしてから、「形式を選択して貼り付け」を使用してください。',
   appPasteSpecialNotAfterCut:
     '「形式を選択して貼り付け」のこの選択肢は、切り取りではなくコピーの後に使用できます。',
+  appCopyMultiSelection: 'この操作は複数の選択範囲に対しては実行できません。',
+  appVisualCannotCopy: 'このオブジェクトはコピーできません。',
   appPasteSpecialTooLarge: '貼り付け内容がシートに収まらないか、大きすぎます。',
   appPasteSpecialOverlap:
     'コピー範囲と貼り付け範囲が重なっています。サイズと形状が同じ場合を除き、重ねることはできません。',

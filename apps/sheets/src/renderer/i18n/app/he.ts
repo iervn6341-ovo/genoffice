@@ -1381,6 +1381,8 @@ export const he = {
   appPasteSpecialDialog: 'הדבקה מיוחדת…',
   appPasteSpecialNeedsCopy: 'העתק תחילה תאים בחוברת עבודה זו, ואז השתמש בהדבקה מיוחדת.',
   appPasteSpecialNotAfterCut: 'אפשרות זו של הדבקה מיוחדת פועלת לאחר העתקה, לא לאחר גזירה.',
+  appCopyMultiSelection: 'לא ניתן להשתמש בפקודה זו בבחירות מרובות.',
+  appVisualCannotCopy: 'לא ניתן להעתיק אובייקט זה.',
   appPasteSpecialTooLarge: 'ההדבקה אינה נכנסת בגיליון או שהיא גדולה מדי.',
   appPasteSpecialOverlap:
     'אזור ההעתקה ואזור ההדבקה חופפים. הם אינם יכולים לחפוף אלא אם כן הם באותו גודל ובאותה צורה.',

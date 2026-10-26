@@ -51,6 +51,7 @@ import {
 import type { LazyWorkbookState, UniverRuntime } from './univer-state'
 import {
   clearVisualSelection,
+  requestVisualFocus,
   type ChartEditData,
   type ChartVectorRead,
   type ShapeEditChanges,
@@ -75,7 +76,7 @@ export interface VisualActionContext {
   refreshLazyVisuals: (state: LazyWorkbookState) => void
 }
 
-function queueCtxVisualInstall(ctx: VisualActionContext, runtime: UniverRuntime): void {
+export function queueCtxVisualInstall(ctx: VisualActionContext, runtime: UniverRuntime): void {
   queueVisualInstall(
     runtime,
     ctx.lazyWorkbookRef,
@@ -87,7 +88,7 @@ function queueCtxVisualInstall(ctx: VisualActionContext, runtime: UniverRuntime)
   )
 }
 
-function pushVisualAddUndo(
+export function pushVisualAddUndo(
   ctx: VisualActionContext,
   runtime: UniverRuntime,
   state: LazyWorkbookState,
@@ -422,6 +423,8 @@ export function insertShapeAtAnchor(
     fillColor: '#DDEBF7',
   }
   pushVisualAddUndo(ctx, runtime, state, visual)
+  // Excel selects the shape it has just drawn (handles shown, Shape tools available)
+  requestVisualFocus(visual.id)
   ctx.setPendingEdits(journalSize(state.editJournal))
   queueCtxVisualInstall(ctx, runtime)
   ctx.setMessage(t('appShapeInserted'))

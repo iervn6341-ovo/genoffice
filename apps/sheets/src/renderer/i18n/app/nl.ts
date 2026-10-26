@@ -1475,6 +1475,8 @@ export const nl = {
   appPasteSpecialNeedsCopy:
     'Kopieer eerst cellen in deze werkmap en gebruik daarna Plakken speciaal.',
   appPasteSpecialNotAfterCut: 'Deze optie van Plakken speciaal werkt na Kopiëren, niet na Knippen.',
+  appCopyMultiSelection: 'Deze opdracht kan niet worden gebruikt voor meerdere selecties.',
+  appVisualCannotCopy: 'Dit object kan niet worden gekopieerd.',
   appPasteSpecialTooLarge: 'De inhoud past niet op het blad of is te groot om te plakken.',
   appPasteSpecialOverlap:
     'Het kopieergebied en het plakgebied overlappen elkaar. Ze mogen elkaar niet overlappen, tenzij ze dezelfde grootte en vorm hebben.',

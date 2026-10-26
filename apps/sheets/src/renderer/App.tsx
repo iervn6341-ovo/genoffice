@@ -296,6 +296,12 @@ import {
   type SymbolCellTarget,
 } from './data-tools-actions'
 import { installTsvClipboardFix } from './clipboard-tsv'
+import { installClipboardBridge } from './clipboard-bridge'
+import {
+  copyVisualObject,
+  extractVisualPayload,
+  pasteVisualPayload,
+} from './visual-clipboard-actions'
 import { installFilteredCopyHook } from './filtered-copy'
 import { installFilterRangeOutlineSuppression } from './filter-range-outline'
 import { installFormulaBarAutosize } from './formula-bar-autosize'
@@ -325,12 +331,20 @@ import { installCfFormulaFold } from './cf-formula-fold'
 import { installSheetRenameFix } from './sheet-rename-fix'
 import { installArrowCollapse } from './arrow-collapse-fix'
 import { installSheetTabContextMenu } from './sheet-tab-context-menu'
+import { IContextMenuService } from '@univerjs/ui'
+import { ISheetSelectionRenderService } from '@univerjs/sheets-ui'
+import { installContextMenuResizeClose } from './context-menu-resize-close'
+import { installSelectionGrabGuard } from './selection-grab-guard'
+import { installMacCommandMultiSelect } from './mac-command-multiselect'
+import { installContextSubmenuExclusive } from './context-submenu-exclusive'
 import { installContextSubmenuReopenFix } from './context-submenu-reopen-fix'
 import { installMenuInputEnter } from './menu-input-enter'
 import { installClipboardAnchorTile } from './clipboard-anchor-tile'
 import { installSelectionWrapGuard } from './selection-wrap-fix'
 import { sharedFormulaResolverFor } from './shared-formula-journal'
 import { installCellClipAnchorFix } from './cell-clip-anchor-fix'
+import { installCellEditorOverlayFix } from './cell-editor-overlay-fix'
+import { installHeaderLabelClip } from './header-label-clip'
 import { installBorderOverflowExclusionFix } from './border-overflow-exclusion'
 import { installCfEmptySheetFastPath } from './cf-empty-fast-path'
 import { installMergeBorderFix } from './merge-border-fix'
@@ -521,6 +535,7 @@ import {
   isVisualDragActive,
   setChartDialogListener,
   setEquationEditListener,
+  setVisualClipboardListener,
   setVisualSelectionListener,
   subscribeChartElementSelection,
   type ChartDialogKind,
@@ -529,7 +544,9 @@ import {
   type ShapeEditChanges,
 } from './WorkbookVisuals'
 import { ChartFormatPane, SelectDataDialog } from './ChartPanels'
+import { ILayoutService } from '@univerjs/preset-sheets-core'
 import { handleSheetsControl, type ControlRequest } from './control'
+import { setGridFocusHandler } from './grid-focus-return'
 
 // Source sheet id of an in-flight copy-sheet command; the next insert-sheet
 // mutation is that copy and must journal as a duplicate, not a blank add.
@@ -1067,6 +1084,20 @@ export function App(): React.JSX.Element {
         setSelectedVisual((current) => (current?.id === visual.id ? current : visual)),
       deselect: () => setSelectedVisual(null),
     })
+    setGridFocusHandler(() => {
+      try {
+        univerRef.current?.univer.__getInjector().get(ILayoutService).focus()
+      } catch {
+        /* Univer is shutting down */
+      }
+    })
+    setVisualClipboardListener({
+      copy: (visual, cut) => void copyVisualObject(visualContext(), visual, cut),
+      paste: (html) => {
+        const payload = extractVisualPayload(html)
+        return payload ? pasteVisualPayload(visualContext(), payload) : false
+      },
+    })
     setChartDialogListener((editKey, dialog) => setChartDialog({ kind: dialog, editKey }))
     setEquationEditListener((visual) => {
       setSelectedVisual(visual)
@@ -1074,6 +1105,8 @@ export function App(): React.JSX.Element {
     })
     return () => {
       setVisualSelectionListener(null)
+      setGridFocusHandler(null)
+      setVisualClipboardListener(null)
       setChartDialogListener(null)
       setEquationEditListener(null)
     }
@@ -1710,6 +1743,10 @@ export function App(): React.JSX.Element {
     installBorderOverflowExclusionFix()
     installCfEmptySheetFastPath()
     installCellClipAnchorFix()
+    // Entering edit must not move the text: the editor overlay lays out like the grid.
+    installCellEditorOverlayFix()
+    // Short rows/columns must not let their header number spill into neighbours.
+    installHeaderLabelClip()
     // Borders stored on a merged range's main cell must render their edge
     // segments like Excel; stock Univer drops them entirely.
     installMergeBorderFix()
@@ -1774,6 +1811,12 @@ export function App(): React.JSX.Element {
     const filteredCopyDisposable = installFilteredCopyHook(runtime)
     // Excel-compatible TSV plain text (TRUE/FALSE, quoted newlines).
     const tsvClipboardDisposable = installTsvClipboardFix(runtime)
+    // Copies carry the block (formulas, formats, merges, sheet features) to other workbook
+    // windows and Excel; pastes from other windows, Excel and text go through the paste plan.
+    const clipboardBridgeDisposable = installClipboardBridge(runtime, {
+      getContext: () => ribbonContext(),
+      getState: () => lazyWorkbookRef.current,
+    })
     // Formula view: swap formula cells to their formula text per sheet.
     const formulaViewDisposable = installFormulaViewInterceptor(runtime, lazyWorkbookRef)
     // Formula bar shows harvested formula text on streamed workbooks whose
@@ -1833,6 +1876,32 @@ export function App(): React.JSX.Element {
     // A context-menu submenu re-hovered within Univer's close delay stays
     // invisible; re-trigger its positioning (genoffice#337).
     const contextSubmenuReopenDisposable = installContextSubmenuReopenFix()
+    // Only one context-menu submenu at a time: moving to another item hides
+    // the previous submenu immediately instead of after Univer's 500 ms delay.
+    const contextSubmenuExclusiveDisposable = installContextSubmenuExclusive()
+    // Resizing the window closes an open context menu (Excel) instead of
+    // letting Univer re-clamp it taller/shorter.
+    const contextMenuResizeCloseDisposable = installContextMenuResizeClose(
+      runtime.univer.__getInjector().get(IContextMenuService),
+    )
+    // A mouse selection never fills or moves the cells under an old selection
+    // frame: its fill handle / border grab only after the pointer rested there.
+    const selectionGrabGuardDisposable = installSelectionGrabGuard({
+      getControls: () => {
+        try {
+          const unitId = runtime.univerAPI.getActiveWorkbook()?.getId()
+          if (!unitId) return []
+          const render = runtime.univer.__getInjector().get(IRenderManagerService).getRenderById(unitId)
+          return render?.with(ISheetSelectionRenderService).getSelectionControls() ?? []
+        } catch {
+          return []
+        }
+      },
+    })
+    // ⌘+click adds a range to the selection on a Mac (Univer only reads Ctrl).
+    const macCommandMultiSelectOff = installMacCommandMultiSelect(
+      navigator.platform.toLowerCase().includes('mac'),
+    )
     // Enter in a context-menu count box (insert N rows/columns, column
     // width) runs the row's action instead of only committing the number.
     installMenuInputEnter(runtime)
@@ -3202,6 +3271,7 @@ export function App(): React.JSX.Element {
       wrapMeasureDisposable.dispose()
       dateTextDisposable.dispose()
       filteredCopyDisposable.dispose()
+      clipboardBridgeDisposable.dispose()
       tsvClipboardDisposable.dispose()
       formulaViewDisposable.dispose()
       formulaTextDisposable.dispose()
@@ -3223,6 +3293,10 @@ export function App(): React.JSX.Element {
       arrowCollapseDisposable.dispose()
       sheetTabContextMenuDisposable.dispose()
       contextSubmenuReopenDisposable.dispose()
+      contextSubmenuExclusiveDisposable.dispose()
+      contextMenuResizeCloseDisposable.dispose()
+      selectionGrabGuardDisposable.dispose()
+      macCommandMultiSelectOff()
       multiRowAutofitDisposable.dispose()
       cfFormulaFoldDisposable.dispose()
       cfDisplayKeyDisposable.dispose()

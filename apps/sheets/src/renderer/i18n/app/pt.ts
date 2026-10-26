@@ -1481,6 +1481,8 @@ export const pt = {
     'Copie primeiro as células desta pasta de trabalho e depois use Colar Especial.',
   appPasteSpecialNotAfterCut:
     'Esta opção de Colar Especial funciona após Copiar, não após Recortar.',
+  appCopyMultiSelection: 'Esse comando não pode ser usado em seleções múltiplas.',
+  appVisualCannotCopy: 'Não é possível copiar este objeto.',
   appPasteSpecialTooLarge: 'Essa colagem não cabe na planilha ou é muito grande.',
   appPasteSpecialOverlap:
     'A área de cópia e a área de colagem se sobrepõem. Elas não podem se sobrepor, a menos que tenham o mesmo tamanho e forma.',

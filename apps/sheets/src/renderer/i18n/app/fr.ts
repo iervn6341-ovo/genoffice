@@ -1506,6 +1506,8 @@ export const fr = {
     "Copiez d'abord des cellules de ce classeur, puis utilisez le collage spécial.",
   appPasteSpecialNotAfterCut:
     'Cette option du collage spécial est disponible après Copier, pas après Couper.',
+  appCopyMultiSelection: 'Cette commande ne peut pas être utilisée avec des sélections multiples.',
+  appVisualCannotCopy: 'Cet objet ne peut pas être copié.',
   appPasteSpecialTooLarge: 'Ce collage ne tient pas dans la feuille ou est trop volumineux.',
   appPasteSpecialOverlap:
     'La zone de copie et la zone de collage se chevauchent. Elles ne doivent pas se chevaucher, sauf si elles ont la même taille et la même forme.',

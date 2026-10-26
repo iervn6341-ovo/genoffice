@@ -344,12 +344,8 @@ export function applyAiPivotAdd(
   const targetSheet = workbook?.getSheetBySheetId(targetSheetId)
   if (!sourceSheet) throw new Error(`Unknown sheet: ${op.sheetId}`)
   if (!targetSheet) throw new Error(`Unknown sheet: ${targetSheetId}`)
-  if (
-    state.editJournal.sheets.added.has(op.sheetId) ||
-    state.editJournal.sheets.added.has(targetSheetId)
-  ) {
-    throw new Error(t('appPivotOnAddedSheet'))
-  }
+  // A sheet added this session is fine: the two-phase save writes the sheet first and then
+  // re-addresses the pivot by the sheet's final name (held-sheet-remap.ts).
   const source = parseRange(op.sourceRange)
   const sourceRows = source.endRow - source.startRow + 1
   const sourceColumns = source.endColumn - source.startColumn + 1

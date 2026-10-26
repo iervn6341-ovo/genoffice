@@ -230,3 +230,44 @@ export async function clearWithExtras(
     )
   })
 }
+
+/// Sets (or, with a null target, removes) the hyperlinks of the given cells as one undoable edit:
+/// the journal and the streamed targets change together and ⌘Z puts every cell's link back.
+export async function setHyperlinksUndoable(
+  ctx: RibbonCommandContext,
+  runtime: UniverRuntime,
+  sheetId: string,
+  links: readonly { row: number; column: number; target: string | null }[],
+): Promise<void> {
+  const state = ctx.lazyWorkbookRef.current
+  if (!state || links.length === 0) return
+  await withJournalUndo(
+    ctx,
+    hyperlinkKind,
+    JSON.stringify({
+      sheetId,
+      cells: links.map(({ row, column }) => `${row}:${column}`),
+    } satisfies HyperlinkKey),
+    () => {
+      const targets = state.hyperlinkTargets.get(sheetId) ?? new Map<string, string>()
+      state.hyperlinkTargets.set(sheetId, targets)
+      for (const { row, column, target } of links) {
+        recordHyperlinkEdit(state.editJournal, sheetId, row, column, target)
+        if (target === null) targets.delete(`${row}:${column}`)
+        else targets.set(`${row}:${column}`, target)
+      }
+      ctx.setPendingEdits(journalSize(state.editJournal))
+    },
+  )
+  void runtime
+}
+
+/// The effective link target of one cell (the journal's edit wins over the file's own).
+export function hyperlinkTargetAt(
+  state: LazyWorkbookState,
+  sheetId: string,
+  row: number,
+  column: number,
+): string | null {
+  return effectiveTarget(state, sheetId, `${row}:${column}`)
+}

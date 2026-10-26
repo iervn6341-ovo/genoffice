@@ -16,6 +16,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path'
 import {
   app,
   BrowserWindow,
+  clipboard,
   desktopCapturer,
   dialog,
   ipcMain,
@@ -24,6 +25,7 @@ import {
   screen,
   shell,
   systemPreferences,
+  webContents,
   WebContentsView,
 } from 'electron'
 import type {
@@ -172,6 +174,7 @@ import {
   cleanupImportTempDirectory,
   cleanupSessionResources,
 } from './temp-files'
+import { addedSheetFinalNames, remapHeldToSavedSheets } from '../renderer/held-sheet-remap'
 import { XlsxSidecarClient } from './xlsx-sidecar-client'
 
 /**
@@ -2396,6 +2399,45 @@ export function registerSheetsIpc(): void {
   ipcMain.removeHandler('app:get-language')
   ipcMain.handle('app:get-language', () => getUiLang())
 
+  /**
+   * The system clipboard as the pasteboard holds it. The renderer's async Clipboard API returns
+   * sanitized markup (no <style>, no mso-number-format, colors rewritten), so a paste from Excel
+   * through the ribbon button would lose what the keyboard paste event keeps.
+   */
+  ipcMain.handle('sheets:read-system-clipboard', () => ({
+    html: clipboard.readHTML(),
+    text: clipboard.readText(),
+    formats: clipboard.availableFormats(),
+  }))
+
+  /**
+   * Excel's own copy data: an embedded copy of the range (an OLE file around a small .xlsx) and
+   * the address it came from. Electron lists only the formats it knows, so the two pasteboard
+   * types are asked for by name.
+   */
+  ipcMain.handle('sheets:read-excel-clipboard', () => {
+    try {
+      const embed = clipboard.readBuffer('com.microsoft.Embed-Source')
+      const link = clipboard.readBuffer('com.microsoft.Link')
+      if (embed.length === 0 || link.length === 0) return null
+      return { embed: embed.toString('base64'), link: link.toString('latin1') }
+    } catch {
+      return null
+    }
+  })
+
+  /**
+   * A block cut in one workbook window was pasted in another: tell the other sheet windows so the
+   * one that holds the cut block clears it (Excel's cut-and-paste moves the cells).
+   */
+  ipcMain.on('sheets:clipboard-cut-done', (event, info: unknown) => {
+    for (const other of webContents.getAllWebContents()) {
+      if (other.id === event.sender.id || other.isDestroyed()) continue
+      if (!other.getURL().includes('://sheets/')) continue
+      other.send('sheets:clipboard-cut-consumed', info)
+    }
+  })
+
   /** returns true once when shell opened this tab for a new blank workbook */
   ipcMain.handle('sheets:consume-new-blank', () => {
     if (pendingNewBlank) {
@@ -3229,7 +3271,65 @@ export function registerSheetsIpc(): void {
     if (session.automaticRecoveryDisabled) return { ok: false }
     try {
       await mkdir(recoveryDir(), { recursive: true })
-      await writeWorkbookTo(entry.client, session, request, recoveryPathFor(session.path))
+      const recoveryPath = recoveryPathFor(session.path)
+      await writeWorkbookTo(entry.client, session, request, recoveryPath)
+      const hasHeld =
+        (request.heldPivots && request.heldPivots.length > 0) ||
+        (request.heldTables && request.heldTables.length > 0) ||
+        (request.heldNames !== undefined && request.heldNames !== null)
+      if (hasHeld) {
+        const tempSessions = new Map<string, SessionInfo>()
+        const tempFile = await openWorkbookSession(entry.client, recoveryPath, tempSessions)
+        try {
+          const tempSession = tempSessions.get(tempFile.sessionId)
+          if (tempSession) {
+            const addedSheetNamesMap = addedSheetFinalNames(request.sheetOps)
+            const remappedPivots = request.heldPivots?.length
+              ? remapHeldToSavedSheets(request.heldPivots, addedSheetNamesMap, tempFile.sheets)
+              : []
+            const remappedTables = request.heldTables?.length
+              ? remapHeldToSavedSheets(request.heldTables, addedSheetNamesMap, tempFile.sheets)
+              : []
+            const secondRequest: WorkbookSaveRequest = {
+              sessionId: tempFile.sessionId,
+              mode: 'save',
+              edits: [],
+              structuralOps: [],
+              chartEdits: [],
+              visualEdits: [],
+              visualAdditions: [],
+              tableAdditions: remappedTables,
+              pivotAdditions: remappedPivots,
+              sheetOps: [],
+              sheetOrder: [],
+              filterStates: [],
+              hyperlinkEdits: [],
+              cfStates: [],
+              dvStates: [],
+              pageSetupStates: [],
+              noteStates: [],
+              pivotCacheRefreshPaths: [],
+              pivotRefreshUpdates: [],
+              sheetProtections: [],
+              sparklineAdditions: [],
+              formulaValues: [],
+              definedNamesState: request.heldNames ?? null,
+              themeState: null,
+              workbookProtectionState: null,
+              protectedRangeStates: [],
+            }
+            await writeWorkbookTo(entry.client, tempSession, secondRequest, recoveryPath)
+          }
+        } finally {
+          const s = tempSessions.get(tempFile.sessionId)
+          tempSessions.delete(tempFile.sessionId)
+          await cleanupSessionResources({
+            tempRoot: app.getPath('temp'),
+            snapshotPath: s?.snapshotPath ?? '',
+            closeSidecar: () => entry.client.close(tempFile.sessionId),
+          })
+        }
+      }
       return { ok: true }
     } catch (error) {
       console.warn('[sheets] recovery copy failed:', error)

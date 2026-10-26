@@ -42,7 +42,7 @@ function PortalPop({
     el.style.top = `${top}px`
   }, [anchor, popRef])
   return createPortal(
-    <div ref={popRef} className="sheets-color-pop-portal">
+    <div ref={popRef} className="sheets-color-pop-portal" data-keep-edit="">
       {children}
     </div>,
     document.body,

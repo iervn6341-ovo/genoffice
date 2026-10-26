@@ -20,6 +20,8 @@ export function installContextSubmenuReopenFix(root: HTMLElement = document.body
   const check = () => {
     frame = 0
     for (const submenu of root.querySelectorAll<HTMLElement>(SUBMENU_SELECTOR)) {
+      // hidden on purpose by the one-submenu-at-a-time rule: leave it closed
+      if (submenu.hasAttribute('data-exclusive-hidden')) continue
       if (submenu.style.visibility !== 'hidden') {
         nudged.delete(submenu)
         continue

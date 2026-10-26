@@ -1441,6 +1441,8 @@ export const id = {
     'Salin sel di buku kerja ini terlebih dahulu, lalu gunakan Tempel Spesial.',
   appPasteSpecialNotAfterCut:
     'Pilihan Tempel Spesial ini berfungsi setelah Salin, bukan setelah Potong.',
+  appCopyMultiSelection: 'Perintah ini tidak dapat digunakan pada beberapa pilihan.',
+  appVisualCannotCopy: 'Objek ini tidak dapat disalin.',
   appPasteSpecialTooLarge: 'Hasil tempel tersebut tidak muat di lembar, atau terlalu besar.',
   appPasteSpecialOverlap:
     'Area salin dan area tempel tumpang-tindih. Keduanya tidak boleh tumpang-tindih kecuali berukuran dan berbentuk sama.',

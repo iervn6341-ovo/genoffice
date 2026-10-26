@@ -1444,6 +1444,8 @@ export const cs = {
     'Nejprve zkopírujte buňky v tomto sešitu a poté použijte možnost Vložit jinak.',
   appPasteSpecialNotAfterCut:
     'Tato možnost příkazu Vložit jinak funguje po kopírování, nikoli po vyjmutí.',
+  appCopyMultiSelection: 'Tento příkaz nelze použít pro více výběrů.',
+  appVisualCannotCopy: 'Tento objekt nelze zkopírovat.',
   appPasteSpecialTooLarge: 'Vkládaný obsah se na list nevejde nebo je příliš velký.',
   appPasteSpecialOverlap:
     'Oblast kopírování a oblast vložení se překrývají. Nesmí se překrývat, pokud nemají stejnou velikost a tvar.',

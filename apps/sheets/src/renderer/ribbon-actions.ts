@@ -4,6 +4,7 @@
  * go stale. Page-layout, export and save flows stay in App and arrive here
  * as callbacks.
  */
+import { PER_CELL_STEP_LIMIT, planFontSizeStep, stepFontSize } from './font-size-step'
 import {
   BooleanNumber,
   BorderStyleTypes,
@@ -1431,11 +1432,176 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     sheet.scrollToCell(viewRow, viewColumn)
     return
   }
+  // While a cell is open for editing the character formats belong to the SELECTED TEXT (Excel keeps
+  // the selection through ribbon presses and formats just those characters), not to the cell.
+  const inCell = inCellEditPlan(command)
+  if (
+    inCell &&
+    (
+      runtime.univerAPI.getActiveWorkbook() as { isCellEditing?(): boolean } | null
+    )?.isCellEditing?.()
+  ) {
+    void runtime.univerAPI.executeCommand(inCell.id, inCell.params)
+    return
+  }
   const range = runtime.univerAPI.getActiveWorkbook()?.getActiveRange()
   if (!range) {
     ctx.setMessage(t('appSelectRangeFirst'))
     return
   }
+  const { name } = parseStyleCommand(command)
+  if (name === 'font-size-step') {
+    stepFontSizeAcrossSelection(ctx, runtime, worksheet, range, command.endsWith(':-1') ? -1 : 1)
+    return
+  }
+  // Excel applies a ribbon format to EVERY range of a multi-range selection. A facade FRange
+  // only carries one range, so run the command once per range as a single undo step. A toggle
+  // (bold...) reads its state from the active range only, so the whole selection ends up the same.
+  const ranges = MULTI_RANGE_STYLE_COMMANDS.has(name) ? activeRangesOf(runtime, range) : [range]
+  if (ranges.length > 1) {
+    runAsOneUndoStep(runtime, () => {
+      for (const each of ranges) applyStyleCommand(ctx, runtime, worksheet, command, each, range)
+    })
+    return
+  }
+  applyStyleCommand(ctx, runtime, worksheet, command, range, range)
+}
+
+/// Increase / Decrease Font Size: every cell of every selected range walks one rung of the ladder
+/// from its OWN size (a 10 pt and a 20 pt cell become 11 and 22), one undo step. A selection too
+/// big to read cell by cell (whole columns) steps once from the active cell's size instead.
+function stepFontSizeAcrossSelection(
+  ctx: RibbonCommandContext,
+  runtime: UniverRuntime,
+  worksheet: ReturnType<ActiveWorkbook['getActiveSheet']> | undefined,
+  active: ActiveRange,
+  direction: 1 | -1,
+): void {
+  if (!worksheet) return
+  const blocks = activeRangesOf(runtime, active).map((each) => each.getRange())
+  const cells = blocks.reduce(
+    (sum, b) => sum + (b.endRow - b.startRow + 1) * (b.endColumn - b.startColumn + 1),
+    0,
+  )
+  const core = worksheet.getSheet()
+  const sizeAt = (row: number, column: number): number =>
+    core.getComposedCellStyle(row, column, true)?.fs ?? 11
+  if (cells > PER_CELL_STEP_LIMIT) {
+    const first = active.getRange()
+    handleRibbonCommand(
+      ctx,
+      `font-size:${stepFontSize(sizeAt(first.startRow, first.startColumn), direction)}`,
+    )
+    return
+  }
+  try {
+    const plan = planFontSizeStep(blocks, sizeAt, direction)
+    runAsOneUndoStep(runtime, () => {
+      for (const block of plan) {
+        worksheet
+          .getRange(
+            block.startRow,
+            block.startColumn,
+            block.endRow - block.startRow + 1,
+            block.endColumn - block.startColumn + 1,
+          )
+          .setFontSize(block.size)
+      }
+    })
+    ctx.setMessage(t('appAppliedToSelection'))
+  } catch (error: unknown) {
+    ctx.setMessage(error instanceof Error ? error.message : t('appCommandFailed'))
+  }
+}
+
+/// The Univer inline-format command that applies a ribbon character format to the selected text of
+/// the open cell editor (sheet.command.set-range-* route to these while the editor is active).
+/// null: this command has no in-cell equivalent (it keeps acting on the cell).
+export function inCellEditPlan(
+  command: string,
+): { id: string; params?: { value: unknown } } | null {
+  const { name, argument } = parseStyleCommand(command)
+  switch (name) {
+    case 'bold':
+      return argument ? null : { id: 'sheet.command.set-range-bold' }
+    case 'italic':
+      return argument ? null : { id: 'sheet.command.set-range-italic' }
+    case 'underline':
+      return argument ? null : { id: 'sheet.command.set-range-underline' }
+    case 'strike':
+      return argument ? null : { id: 'sheet.command.set-range-stroke' }
+    case 'font-family':
+      return argument
+        ? { id: 'sheet.command.set-range-font-family', params: { value: argument } }
+        : null
+    case 'font-size': {
+      const size = Number(argument)
+      return Number.isFinite(size) && size >= 1 && size <= 409
+        ? { id: 'sheet.command.set-range-fontsize', params: { value: size } }
+        : null
+    }
+    case 'font-size-step':
+      return {
+        id:
+          argument === '-1'
+            ? 'sheet.command.set-range-font-decrease'
+            : 'sheet.command.set-range-font-increase',
+      }
+    case 'font-color':
+      return /^#[0-9a-fA-F]{3,8}$/.test(argument)
+        ? { id: 'sheet.command.set-range-text-color', params: { value: argument } }
+        : null
+    default:
+      return null
+  }
+}
+
+/// One facade range, as handed out by the active workbook.
+type ActiveRange = NonNullable<ReturnType<ActiveWorkbook['getActiveRange']>>
+
+/// Commands that format cells and so reach every range of a multi-range selection.
+export const MULTI_RANGE_STYLE_COMMANDS: ReadonlySet<string> = new Set([
+  'bold',
+  'italic',
+  'underline',
+  'strike',
+  'align',
+  'valign',
+  'wrap',
+  'indent',
+  'format',
+  'font-family',
+  'font-size',
+  'font-color',
+  'fill',
+  'fill-pattern',
+  'border',
+])
+
+/// The selection's ranges, the active one included exactly once (falls back to it alone).
+function activeRangesOf(runtime: UniverRuntime, active: ActiveRange): ActiveRange[] {
+  let list: ActiveRange[] = []
+  try {
+    list =
+      runtime.univerAPI
+        .getActiveWorkbook()
+        ?.getActiveSheet()
+        ?.getSelection()
+        ?.getActiveRangeList() ?? []
+  } catch {
+    /* no selection service (still booting): the active range alone */
+  }
+  return list.length > 0 ? list : [active]
+}
+
+function applyStyleCommand(
+  ctx: RibbonCommandContext,
+  runtime: UniverRuntime,
+  worksheet: ReturnType<ActiveWorkbook['getActiveSheet']> | undefined,
+  command: string,
+  range: ActiveRange,
+  toggleRange: ActiveRange,
+): void {
   const { name, argument, extra } = parseStyleCommand(command)
   // Excel persists select-all / full-column formatting as the columns'
   // DEFAULT format: new cells inherit it at any row, forever. Univer only
@@ -1477,7 +1643,7 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     )
   }
   try {
-    const style = selectionStyle(range)
+    const style = selectionStyle(toggleRange)
     switch (name) {
       case 'bold':
         // An explicit :on/:off argument sets absolutely (Format Cells

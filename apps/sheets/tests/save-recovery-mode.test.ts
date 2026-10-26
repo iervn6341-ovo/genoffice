@@ -5,10 +5,19 @@
  */
 import JSZip from 'jszip'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { applyCellEditsToXlsx } from '@genoffice/xlsx-gateway/gateway/xlsx-gateway'
+import {
+  applyCellEditsToXlsx,
+  createBufferEntrySource,
+  planCellEditsToXlsx,
+} from '@genoffice/xlsx-gateway/gateway/xlsx-gateway'
 import { handleSave, type SaveContext } from '../src/renderer/save-actions'
 import { t } from '../src/renderer/i18n/locale'
-import { createEditJournal, recordSetRangeValues } from '../src/renderer/edit-journal'
+import {
+  createEditJournal,
+  recordSetRangeValues,
+  recordSheetInsert,
+  recordSheetRename,
+} from '../src/renderer/edit-journal'
 import { buildEditFixture } from './fixture-builder'
 import { setToastEmitter, type ToastData } from '../src/renderer/toast-bus'
 
@@ -385,5 +394,182 @@ describe('recovery copy failure is visible', () => {
     const { ctx } = ctxWith({ dirty: true })
     await handleSave(ctx, 'recovery')
     expect(toasts).toHaveLength(0)
+  })
+})
+
+describe('recovery copy with a new pivot plus sheet management', () => {
+  beforeEach(() => {
+    vi.useRealTimers()
+  })
+
+  const pivotFor = (sheetId: string): never =>
+    ({
+      sheetId,
+      sheetName: 'Data',
+      sourceSheetId: 'sheet-1',
+      sourceSheetName: 'Data',
+      sourceArea: { startRow: 0, startColumn: 0, endRow: 2, endColumn: 2 },
+      location: { startRow: 0, startColumn: 5, endRow: 4, endColumn: 6 },
+      name: 'Pivot1',
+      fieldNames: ['A', 'B', 'C'],
+      rowFieldIndices: [0],
+      rowItems: ['x'],
+      values: [{ fieldIndex: 2, agg: 'sum' }],
+    }) as never
+
+  const order = [{ getSheetId: () => 'sheet-1' }]
+  const withUniver = (ctx: SaveContext): void => {
+    Object.assign(ctx.univerRef, {
+      current: {
+        univerAPI: {
+          getActiveWorkbook: () => ({ getSheets: () => order, getActiveSheet: () => null }),
+        },
+      },
+    })
+  }
+
+  it('leaves the pivot out of the single-write copy (the gateway rejects it with sheet ops)', async () => {
+    const { ctx, journal } = ctxWith({ dirty: true })
+    withUniver(ctx)
+    journal.pivotAdds.push(pivotFor('sheet-1'))
+    recordSheetRename(journal, 'sheet-1', 'Renamed', 'Data')
+    await handleSave(ctx, 'recovery')
+    expect(writeWorkbookRecovery).toHaveBeenCalledTimes(1)
+    const payload = writeWorkbookRecovery.mock.calls[0]![0] as {
+      pivotAdditions: unknown[]
+      sheetOps: unknown[]
+    }
+    expect(payload.pivotAdditions).toEqual([])
+    expect(payload.sheetOps.length).toBeGreaterThan(0)
+    expect((payload as { heldPivots?: unknown[] }).heldPivots).toHaveLength(1)
+  })
+
+  it('still writes a copy when the pivot sits on a sheet added this session', async () => {
+    const { ctx, journal } = ctxWith({ dirty: true })
+    withUniver(ctx)
+    recordSheetInsert(journal, 'sheet-new', 'Pivots')
+    journal.pivotAdds.push(pivotFor('sheet-new'))
+    await handleSave(ctx, 'recovery')
+    expect(writeWorkbookRecovery).toHaveBeenCalledTimes(1)
+    const payload = writeWorkbookRecovery.mock.calls[0]![0] as { pivotAdditions: unknown[] }
+    expect(payload.pivotAdditions).toEqual([])
+  })
+
+  it('keeps the pivot when the save carries no sheet or structural changes', async () => {
+    const { ctx, journal } = ctxWith({ dirty: true })
+    journal.pivotAdds.push(pivotFor('sheet-1'))
+    await handleSave(ctx, 'recovery')
+    const payload = writeWorkbookRecovery.mock.calls[0]![0] as { pivotAdditions: unknown[] }
+    expect(payload.pivotAdditions).toHaveLength(1)
+  })
+
+  it('the gateway still refuses the combination in one write (fail-closed stays)', async () => {
+    const source = await createBufferEntrySource(await buildEditFixture())
+    await expect(
+      planCellEditsToXlsx(
+        source,
+        [],
+        [],
+        [],
+        { additions: [], removals: [], renames: [{ from: 'Data', to: 'X' }], hidden: [] } as never,
+        [],
+        [],
+        [],
+        [],
+        [],
+        null,
+        [],
+        [],
+        [],
+        [],
+        [pivotFor('sheet-1') as never],
+      ),
+    ).rejects.toThrow(/sheet management/)
+  }, 30000)
+})
+
+describe('formal save of a new pivot on a sheet created in the same save', () => {
+  const withUniver = (ctx: SaveContext): void => {
+    Object.assign(ctx.univerRef, {
+      current: {
+        univerAPI: {
+          getActiveWorkbook: () => ({
+            getSheets: () => [{ getSheetId: () => 'sheet-1' }, { getSheetId: () => 'added-sheet-tmp' }],
+            getActiveSheet: () => null,
+          }),
+        },
+      },
+    })
+  }
+  const pivot = (sheetId: string, sourceSheetId = 'sheet-1'): never =>
+    ({
+      sheetId,
+      sheetName: 'Pivots',
+      sourceSheetId,
+      sourceSheetName: 'Data',
+      sourceArea: { startRow: 0, startColumn: 0, endRow: 2, endColumn: 2 },
+      location: { startRow: 0, startColumn: 0, endRow: 4, endColumn: 1 },
+      name: 'Pivot1',
+      fieldNames: ['A', 'B', 'C'],
+      rowFieldIndices: [0],
+      rowItems: ['x'],
+      values: [{ fieldIndex: 2, agg: 'sum' }],
+    }) as never
+
+  const savedFile = (sheets: { id: string; name: string }[]) => ({
+    sessionId: '22222222-2222-4222-8222-222222222222',
+    name: 'book.xlsx',
+    path: '/tmp/book.xlsx',
+    sha256: 'a'.repeat(64),
+    sheets,
+  })
+
+  it('writes the structure first, then the pivot addressed by the new sheet real id', async () => {
+    const { ctx, journal, messages } = ctxWith({ dirty: true })
+    withUniver(ctx)
+    recordSheetInsert(journal, 'added-sheet-tmp', 'Pivots')
+    journal.pivotAdds.push(pivot('added-sheet-tmp'))
+    const opened = vi.fn()
+    ;(ctx as { openLazyWorkbook: unknown }).openLazyWorkbook = opened
+    const first = savedFile([
+      { id: 'sheet-1', name: 'Data' },
+      { id: 'sheet-7', name: 'Pivots' },
+    ])
+    saveWorkbookEdits
+      .mockResolvedValueOnce({ canceled: false, file: first })
+      .mockResolvedValueOnce({ canceled: false, file: first })
+
+    const outcome = await handleSave(ctx, 'save')
+    expect(messages.at(-1)).toBe(t('appSavedTwoPhase'))
+    expect(outcome).toMatchObject({ ok: true })
+
+    expect(saveWorkbookEdits).toHaveBeenCalledTimes(2)
+    const phase1 = saveWorkbookEdits.mock.calls[0]![0] as { pivotAdditions: unknown[]; sheetOps: unknown[] }
+    expect(phase1.pivotAdditions).toEqual([])
+    expect(phase1.sheetOps.length).toBeGreaterThan(0)
+    const phase2 = saveWorkbookEdits.mock.calls[1]![0] as {
+      sessionId: string
+      pivotAdditions: Array<{ sheetId: string; sourceSheetId: string }>
+    }
+    expect(phase2.sessionId).toBe(first.sessionId)
+    expect(phase2.pivotAdditions).toHaveLength(1)
+    expect(phase2.pivotAdditions[0]).toMatchObject({ sheetId: 'sheet-7', sourceSheetId: 'sheet-1' })
+    expect(opened).toHaveBeenCalled()
+  })
+
+  it('keeps the first phase and reports a failed second phase when the new sheet is missing from the saved file', async () => {
+    const { ctx, journal, messages } = ctxWith({ dirty: true })
+    withUniver(ctx)
+    recordSheetInsert(journal, 'added-sheet-tmp', 'Pivots')
+    journal.pivotAdds.push(pivot('added-sheet-tmp'))
+    ;(ctx as { openLazyWorkbook: unknown }).openLazyWorkbook = vi.fn()
+    saveWorkbookEdits.mockResolvedValueOnce({
+      canceled: false,
+      file: savedFile([{ id: 'sheet-1', name: 'Data' }]),
+    })
+    const result = await handleSave(ctx, 'save', true)
+    expect(result).toMatchObject({ ok: false })
+    expect(saveWorkbookEdits).toHaveBeenCalledTimes(1)
+    expect(messages.at(-1)).toContain('Pivots')
   })
 })

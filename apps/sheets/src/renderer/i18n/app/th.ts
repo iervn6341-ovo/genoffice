@@ -1403,6 +1403,8 @@ export const th = {
   appPasteSpecialDialog: 'วางแบบพิเศษ…',
   appPasteSpecialNeedsCopy: 'คัดลอกเซลล์ในเวิร์กบุ๊กนี้ก่อน แล้วจึงใช้วางแบบพิเศษ',
   appPasteSpecialNotAfterCut: 'ตัวเลือกวางแบบพิเศษนี้ใช้ได้หลังการคัดลอก ไม่ใช่หลังการตัด',
+  appCopyMultiSelection: 'ไม่สามารถใช้คำสั่งนี้กับการเลือกหลายรายการได้',
+  appVisualCannotCopy: 'ไม่สามารถคัดลอกวัตถุนี้ได้',
   appPasteSpecialTooLarge: 'เนื้อหาที่วางนี้ไม่พอดีกับแผ่นงานหรือมีขนาดใหญ่เกินไป',
   appPasteSpecialOverlap:
     'พื้นที่ที่คัดลอกและพื้นที่ที่วางทับซ้อนกัน ต้องไม่ทับซ้อนกันเว้นแต่จะมีขนาดและรูปร่างเดียวกัน',

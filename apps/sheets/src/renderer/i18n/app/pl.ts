@@ -1469,6 +1469,8 @@ export const pl = {
     'Najpierw skopiuj komórki w tym skoroszycie, a następnie użyj opcji Wklej specjalnie.',
   appPasteSpecialNotAfterCut:
     'Ta opcja funkcji Wklej specjalnie działa po skopiowaniu, a nie po wycięciu.',
+  appCopyMultiSelection: 'Tego polecenia nie można użyć dla wielu zaznaczeń.',
+  appVisualCannotCopy: 'Tego obiektu nie można skopiować.',
   appPasteSpecialTooLarge: 'Wklejana zawartość nie mieści się w arkuszu lub jest zbyt duża.',
   appPasteSpecialOverlap:
     'Obszar kopiowania i obszar wklejania nakładają się. Nie mogą się nakładać, chyba że mają ten sam rozmiar i kształt.',

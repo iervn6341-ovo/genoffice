@@ -1377,6 +1377,8 @@ export const zh = {
   appPasteSpecialDialog: '选择性粘贴…',
   appPasteSpecialNeedsCopy: '请先在此工作簿中复制单元格，再使用选择性粘贴。',
   appPasteSpecialNotAfterCut: '此选择性粘贴选项在复制后可用，剪切后不可用。',
+  appCopyMultiSelection: '无法对多重选择区域使用此命令。',
+  appVisualCannotCopy: '无法复制此对象。',
   appPasteSpecialTooLarge: '该粘贴内容无法放入工作表，或过大。',
   appPasteSpecialOverlap: '复制区域与粘贴区域重叠。除非大小和形状相同，否则两者不能重叠。',
   appTableStyleGroupLight: '浅色',

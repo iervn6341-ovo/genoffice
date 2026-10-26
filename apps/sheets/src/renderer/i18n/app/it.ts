@@ -1480,6 +1480,8 @@ export const it = {
     'Copia prima le celle in questa cartella di lavoro, quindi usa Incolla speciale.',
   appPasteSpecialNotAfterCut:
     'Questa opzione di Incolla speciale funziona dopo Copia, non dopo Taglia.',
+  appCopyMultiSelection: 'Impossibile utilizzare questo comando con selezioni multiple.',
+  appVisualCannotCopy: 'Impossibile copiare questo oggetto.',
   appPasteSpecialTooLarge: 'Questo incolla non entra nel foglio oppure è troppo grande.',
   appPasteSpecialOverlap:
     "L'area di copia e l'area di incollamento si sovrappongono. Non devono sovrapporsi a meno che non abbiano le stesse dimensioni e la stessa forma.",

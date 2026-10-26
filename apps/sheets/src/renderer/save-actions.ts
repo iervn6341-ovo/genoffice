@@ -36,6 +36,7 @@ import { abortStagedEditsTransfer, stageEditsForSave, type StagedEdits } from '.
 import { showToast } from './toast-bus'
 import { captureUndoCarry, hasPendingUndoCarry, stashUndoCarry } from './undo-carry'
 import { customStylesUsedBy, saveCustomTableStylesTo, toWireStyle } from './custom-table-styles'
+import { addedSheetFinalNames, remapHeldToSavedSheets } from './held-sheet-remap'
 import {
   collectCfStates,
   getScrollAnchor,
@@ -310,27 +311,16 @@ export async function handleSave(
   // user, hold them back and save in two sequential phases: structure
   // first, then the additions against the reopened session. Pre-existing
   // sheet ids are stable across saves (`sheet-<sheetId attr>`), so the
-  // held ops stay addressable — ops on sheets created this session are
-  // the exception and keep the explicit error.
+  // held ops stay addressable. Sheets created this session get their real
+  // ids from the first phase, so held items on them are re-addressed by the
+  // sheet's final name before the second phase (held-sheet-remap.ts).
   const hasShifts = structuralOps.length > 0 || sheetOps.length > 0
   const heldPivots = hasShifts ? pivotAdditions : []
   const heldTables = structuralOps.length > 0 ? tableAdditions : []
   const heldNames = hasShifts ? definedNamesState : null
   const splitSave = heldPivots.length > 0 || heldTables.length > 0 || heldNames !== null
-  if (splitSave) {
-    const addedSheetIds = state.editJournal.sheets.added
-    const strandedHeld = [
-      ...heldPivots.flatMap((pivot) => [pivot.sheetId, pivot.sourceSheetId]),
-      ...heldTables.map((table) => table.sheetId),
-    ].some((sheetId) => addedSheetIds.has(sheetId))
-    if (strandedHeld) {
-      if (mode !== 'recovery') {
-        ctx.setMessage(t('appSaveHeldStranded'))
-        if (!quiet) showToast(t('appSaveHeldStranded'), 'error')
-      }
-      return { ok: false }
-    }
-  }
+  // temporary id -> final name of the sheets this save creates (for the re-addressing above)
+  const addedSheetNames = addedSheetFinalNames(sheetOps)
   const total =
     edits.length +
     bulkConstantFills.length +
@@ -444,12 +434,17 @@ export async function handleSave(
     chartEdits,
     visualEdits,
     visualAdditions,
-    tableAdditions,
-    ...(tableStyleAdditions.length > 0 || editStyleAdditions.length > 0
-      ? { tableStyleAdditions: [...tableStyleAdditions, ...editStyleAdditions] }
-      : {}),
+    // Recovery is a single write: additions the real save would hold back for
+    // a second phase (they cannot ride with structural/sheet changes — the
+    // gateway rejects that) are left out, so the rest of the work is backed up.
+    tableAdditions: heldTables.length > 0 ? [] : tableAdditions,
+    ...(() => {
+      const styles =
+        heldTables.length > 0 ? editStyleAdditions : [...tableStyleAdditions, ...editStyleAdditions]
+      return styles.length > 0 ? { tableStyleAdditions: styles } : {}
+    })(),
     ...(tableEdits.length > 0 ? { tableEdits } : {}),
-    pivotAdditions,
+    pivotAdditions: heldPivots.length > 0 ? [] : pivotAdditions,
     sheetOps,
     sheetOrder,
     filterStates,
@@ -463,10 +458,13 @@ export async function handleSave(
     sheetProtections,
     sparklineAdditions,
     formulaValues,
-    definedNamesState,
+    definedNamesState: heldNames !== null ? null : definedNamesState,
     themeState,
     workbookProtectionState,
     protectedRangeStates,
+    ...(heldPivots.length > 0 ? { heldPivots } : {}),
+    ...(heldTables.length > 0 ? { heldTables } : {}),
+    ...(heldNames !== null ? { heldNames } : {}),
   }
   if (mode === 'recovery') {
     // Best-effort; a failure only means this tick's copy is skipped — but an
@@ -586,9 +584,9 @@ export async function handleSave(
         chartEdits: [],
         visualEdits: [],
         visualAdditions: [],
-        tableAdditions: heldTables,
+        tableAdditions: remapHeldToSavedSheets(heldTables, addedSheetNames, result.file.sheets),
         ...(tableStyleAdditions.length > 0 && heldTables.length > 0 ? { tableStyleAdditions } : {}),
-        pivotAdditions: heldPivots,
+        pivotAdditions: remapHeldToSavedSheets(heldPivots, addedSheetNames, result.file.sheets),
         sheetOps: [],
         sheetOrder: [],
         filterStates: [],

@@ -1349,6 +1349,8 @@ export const zhTW = {
   appPasteSpecialDialog: '選擇性貼上…',
   appPasteSpecialNeedsCopy: '請先在此活頁簿中複製儲存格，再使用選擇性貼上。',
   appPasteSpecialNotAfterCut: '此選擇性貼上選項在複製後可用，剪下後不可用。',
+  appCopyMultiSelection: '無法對多重選取範圍使用此命令。',
+  appVisualCannotCopy: '無法複製此物件。',
   appPasteSpecialTooLarge: '該貼上內容無法放入工作表，或過大。',
   appPasteSpecialOverlap: '複製區域與貼上區域重疊。除非大小和形狀相同，否則兩者不能重疊。',
   appTableStyleGroupLight: '淺色',

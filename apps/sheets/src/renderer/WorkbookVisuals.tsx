@@ -20,6 +20,7 @@ import { parseAddress } from '@genoffice/xlsx-gateway/domain/cell-address'
 import { ColorDropdown } from './ColorDropdown'
 import { t } from './i18n/locale'
 import { oleCaption, oleFrameStyle, oleRenderKind } from './ole-visual'
+import { scheduleGridFocusReturn } from './grid-focus-return'
 import { VisualDeleteButton } from './VisualDeleteButton'
 import { shouldShowVisualDeleteButton } from './visual-delete-button'
 import type { WorkbookChartEdit, WorkbookFile, WorkbookVisualObject } from '../shared/desktop-api'
@@ -607,6 +608,21 @@ function EquationVisual({ visual }: { readonly visual: WorkbookVisualObject }): 
 /// to the moved visual when its replacement mounts.
 let pendingFocusId: string | null = null
 
+/// Arrow-key nudge of a selected object: unit vector per key, distance in screen pixels.
+export const ARROW_NUDGE: Readonly<Record<string, readonly [number, number]>> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+}
+export const ARROW_NUDGE_PX = 6
+
+/// The visual with this id takes focus - and so becomes the selection - as soon as it mounts
+/// (a just-drawn shape is selected at once, like Excel).
+export function requestVisualFocus(id: string): void {
+  pendingFocusId = id
+}
+
 /// Reinstalls must not run mid-drag: disposing the dragged node kills its
 /// pointer capture and the drag dies silently. Install queues poll this and
 /// wait for the drop.
@@ -701,6 +717,8 @@ function selectVisual(visual: WorkbookVisualObject | null): void {
 export function clearVisualSelection(onlyId?: string): void {
   if (onlyId !== undefined && onlyId !== selectedVisualId) return
   selectVisual(null)
+  // the selected node held focus and is going away: keep the keyboard in the workbook
+  scheduleGridFocusReturn()
 }
 
 /// Selection of an element INSIDE a chart (title, legend, one series, one
@@ -744,6 +762,18 @@ export function setChartDialogListener(
   listener: ((editKey: string, dialog: ChartDialogKind) => void) | null,
 ): void {
   chartDialogListener = listener
+}
+
+/// Copy / cut / paste on a focused floating object bubble to the app through one listener
+/// (the clipboard needs the workbook state, which this module does not hold).
+export type VisualClipboardListener = {
+  copy: (visual: WorkbookVisualObject, cut: boolean) => void
+  paste: (html: string) => boolean
+}
+let visualClipboardListener: VisualClipboardListener | null = null
+
+export function setVisualClipboardListener(listener: VisualClipboardListener | null): void {
+  visualClipboardListener = listener
 }
 
 export function setVisualSelectionListener(listener: VisualSelectionListener | null): void {
@@ -1115,7 +1145,21 @@ function EditableShapeVisual({
         const handleCorner = (event.target as HTMLElement).dataset['corner'] as
           ResizeCorner | undefined
         const mode = handleCorner ? ('resize' as const) : ('move' as const)
-        event.currentTarget.setPointerCapture(event.pointerId)
+        // Capturing at press time re-targets the click that follows to this wrapper, so chart
+        // titles, legends, axes and bars never saw their own click. A resize handle captures at
+        // once; a move captures only when the pointer actually starts dragging (onPointerMove).
+        if (handleCorner) event.currentTarget.setPointerCapture(event.pointerId)
+        else {
+          // without capture a release outside the wrapper never reaches it: end the gesture
+          window.addEventListener(
+            'pointerup',
+            () => {
+              setDrag(null)
+              setDragActive(false)
+            },
+            { once: true },
+          )
+        }
         setDragActive(true)
         moveDeltaRef.current = { dx: 0, dy: 0 }
         setDrag({
@@ -1136,6 +1180,22 @@ function EditableShapeVisual({
         event.currentTarget.focus({ preventScroll: true })
       }}
       onFocus={() => selectVisual(visual)}
+      onCopy={(event) => {
+        if (event.target !== event.currentTarget || !visualClipboardListener) return
+        event.preventDefault()
+        visualClipboardListener.copy(visual, false)
+      }}
+      onCut={(event) => {
+        if (event.target !== event.currentTarget || !visualClipboardListener) return
+        event.preventDefault()
+        visualClipboardListener.copy(visual, true)
+      }}
+      onPaste={(event) => {
+        if (event.target !== event.currentTarget || !visualClipboardListener) return
+        if (visualClipboardListener.paste(event.clipboardData.getData('text/html'))) {
+          event.preventDefault()
+        }
+      }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return
         if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -1150,6 +1210,13 @@ function EditableShapeVisual({
           event.preventDefault()
           event.currentTarget.blur()
           clearVisualSelection(visual.id)
+        } else if (ARROW_NUDGE[event.key] && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+          // Excel: arrow keys nudge the selected object, Option+arrow by a single pixel
+          event.preventDefault()
+          event.stopPropagation()
+          const [ux, uy] = ARROW_NUDGE[event.key]!
+          const step = event.altKey ? 1 : ARROW_NUDGE_PX
+          commitDrag('move', 'se', ux * step, uy * step)
         }
       }}
       onPointerMove={(event) => {
@@ -1163,6 +1230,9 @@ function EditableShapeVisual({
         // Move: drive the body-level ghost directly, no re-render per event.
         moveDeltaRef.current = { dx, dy }
         const host = event.currentTarget
+        if ((Math.abs(dx) > 2 || Math.abs(dy) > 2) && !host.hasPointerCapture(event.pointerId)) {
+          host.setPointerCapture(event.pointerId)
+        }
         if (!ghostRef.current && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
           const rect = host.getBoundingClientRect()
           const container = document.createElement('div')

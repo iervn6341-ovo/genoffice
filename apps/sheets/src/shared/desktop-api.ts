@@ -2136,6 +2136,27 @@ export const workbookSaveRequestSchema = z
       )
       .max(1_000)
       .default([]),
+    /// Held additions for two-phase crash-recovery writes (when structuralOps/sheetOps require staging)
+    heldPivots: z.array(workbookPivotAddSchema).max(20).optional(),
+    heldTables: z.array(workbookTableAddSchema).max(50).optional(),
+    heldNames: z
+      .object({
+        names: z
+          .array(
+            z
+              .object({
+                name: z.string().min(1).max(255),
+                formula: z.string().min(1).max(8_192),
+                sheetIndex: z.number().int().nonnegative().optional(),
+              })
+              .strict(),
+          )
+          .max(2_000),
+        preserveNames: z.array(z.string().min(1).max(255)).max(2_000),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict()
   .refine(
@@ -2827,6 +2848,14 @@ export interface McpCommandResult {
 
 export interface DesktopApi {
   /** current UI language (persisted by the shell in app-settings.json) */
+  /// the system clipboard unsanitized: markup, text and the pasteboard's format names
+  readSystemClipboard(): Promise<{ html: string; text: string; formats: string[] }>
+  /// Excel's embedded copy of the range and its source address, or null
+  readExcelClipboard(): Promise<{ embed: string; link: string } | null>
+  /// a block cut in this window was pasted in another workbook window
+  notifyClipboardCutDone(info: { copyId: string }): void
+  /// another window pasted the block this window cut: it must clear it
+  onClipboardCutConsumed(callback: (info: { copyId: string }) => void): () => void
   getLanguage(): Promise<'zh' | 'en' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'th' | 'id' | 'ru' | 'ar'>
   /** language switched from the shell home page */
   onLanguageChanged(

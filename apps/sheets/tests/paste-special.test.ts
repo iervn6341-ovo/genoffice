@@ -1,4 +1,5 @@
 import { shiftRuleFormulas } from '../src/renderer/paste-extras'
+import { rowBatches } from '../src/renderer/paste-batches'
 import { describe, expect, it } from 'vitest'
 import type { IStyleData } from '@univerjs/core'
 
@@ -593,5 +594,30 @@ describe('a conditional format or validation rule pasted elsewhere moves its for
     expect(shiftRuleFormulas(list, 5, 5)).toEqual(list)
     const same = { value: '=A1>1' }
     expect(shiftRuleFormulas(same, 0, 0)).toBe(same)
+  })
+})
+
+describe('rowBatches (large pastes are written in whole-row batches)', () => {
+  it('keeps small matrices whole and splits big ones by rows', () => {
+    const matrix: Record<number, Record<number, number>> = {}
+    for (let r = 0; r < 5; r += 1) {
+      matrix[r] = {}
+      for (let c = 0; c < 3; c += 1) matrix[r]![c] = r * 3 + c
+    }
+    expect(rowBatches(matrix)).toEqual([matrix])
+    const big: Record<number, Record<number, number>> = {}
+    for (let r = 0; r < 4000; r += 1) {
+      big[r] = {}
+      for (let c = 0; c < 10; c += 1) big[r]![c] = 1
+    }
+    const parts = rowBatches(big)
+    expect(parts.length).toBe(2)
+    expect(
+      parts.every(
+        (part) => Object.values(part).reduce((n, row) => n + Object.keys(row).length, 0) <= 20_000,
+      ),
+    ).toBe(true)
+    expect(parts.flatMap((part) => Object.keys(part)).length).toBe(4000)
+    expect(parts[0]![0]).toBe(big[0])
   })
 })

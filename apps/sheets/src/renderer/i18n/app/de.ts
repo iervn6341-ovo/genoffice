@@ -1492,6 +1492,8 @@ export const de = {
     'Kopieren Sie zuerst Zellen in dieser Arbeitsmappe, und verwenden Sie dann „Inhalte einfügen“.',
   appPasteSpecialNotAfterCut:
     'Diese Option von „Inhalte einfügen“ funktioniert nach Kopieren, nicht nach Ausschneiden.',
+  appCopyMultiSelection: 'Dieser Befehl kann nicht bei Mehrfachauswahl verwendet werden.',
+  appVisualCannotCopy: 'Dieses Objekt kann nicht kopiert werden.',
   appPasteSpecialTooLarge: 'Der eingefügte Inhalt passt nicht auf das Blatt oder ist zu groß.',
   appPasteSpecialOverlap:
     'Der Kopierbereich und der Einfügebereich überschneiden sich. Sie dürfen sich nur überschneiden, wenn sie dieselbe Größe und Form haben.',

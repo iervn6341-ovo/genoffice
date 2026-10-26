@@ -105,6 +105,8 @@ export interface CopiedSourceCell {
   readonly v?: string | number | boolean | null
   readonly t?: number | null
   readonly f?: string | null
+  /// rich-text document of the cell (runs with their own formats); `v` is then its plain text
+  readonly p?: unknown
   readonly style: IStyleData | null
 }
 
@@ -127,6 +129,8 @@ export interface PlannedWrite {
     readonly v: string | number | boolean | null
     readonly t: number | null
     readonly f: string | null
+    /// rich-text document carried over from the source cell
+    readonly p?: unknown
   }
   /// undefined = the cell's format stays as it is
   readonly style?:
@@ -258,7 +262,19 @@ function planValue(
   }
   if (!source || isBlank(source)) return { v: null, t: null, f: null }
   if (keepsFormulas && formula) return { v: null, t: null, f: formula }
-  return { v: source.v ?? null, t: source.t ?? null, f: null }
+  return {
+    v: source.v ?? null,
+    t: source.t ?? null,
+    f: null,
+    // character formatting rides only with the choices that carry formats
+    ...(source.p &&
+    (what === 'all' ||
+      what === 'allExceptBorders' ||
+      what === 'allUsingSourceTheme' ||
+      what === 'allMergingConditionalFormats')
+      ? { p: source.p }
+      : {}),
+  }
 }
 
 /// the rectangle a paste covers: the block (turned for Transpose), repeated over a selection that is a

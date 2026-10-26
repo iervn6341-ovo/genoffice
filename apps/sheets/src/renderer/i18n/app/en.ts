@@ -1418,6 +1418,8 @@ export const en = {
   appPasteSpecialDialog: 'Paste Special…',
   appPasteSpecialNeedsCopy: 'Copy cells in this workbook first, then use Paste Special.',
   appPasteSpecialNotAfterCut: 'This Paste Special choice works after Copy, not after Cut.',
+  appCopyMultiSelection: 'That command cannot be used on multiple selections.',
+  appVisualCannotCopy: 'This object cannot be copied.',
   appPasteSpecialTooLarge: 'That paste does not fit on the sheet, or is too large.',
   appPasteSpecialOverlap:
     'The copy area and the paste area overlap. They must not overlap unless they have the same size and shape.',

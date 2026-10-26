@@ -53,6 +53,19 @@ import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 
 const desktopApi: DesktopApi = {
   getLanguage: () => ipcRenderer.invoke('app:get-language'),
+  readSystemClipboard: () => ipcRenderer.invoke('sheets:read-system-clipboard'),
+  readExcelClipboard: () => ipcRenderer.invoke('sheets:read-excel-clipboard'),
+  notifyClipboardCutDone: (info: { copyId: string }) =>
+    ipcRenderer.send('sheets:clipboard-cut-done', info),
+  onClipboardCutConsumed(callback: (info: { copyId: string }) => void) {
+    const listener = (_event: unknown, info: unknown): void => {
+      if (isRecord(info) && typeof info.copyId === 'string') callback({ copyId: info.copyId })
+    }
+    ipcRenderer.on('sheets:clipboard-cut-consumed', listener)
+    return () => {
+      ipcRenderer.removeListener('sheets:clipboard-cut-consumed', listener)
+    }
+  },
   onLanguageChanged(handler) {
     const listener = (
       _event: Electron.IpcRendererEvent,

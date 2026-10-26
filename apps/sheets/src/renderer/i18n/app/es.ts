@@ -1481,6 +1481,8 @@ export const es = {
   appPasteSpecialNeedsCopy: 'Copie primero celdas de este libro y después use Pegado especial.',
   appPasteSpecialNotAfterCut:
     'Esta opción de Pegado especial funciona después de Copiar, no después de Cortar.',
+  appCopyMultiSelection: 'Este comando no se puede usar en selecciones múltiples.',
+  appVisualCannotCopy: 'No se puede copiar este objeto.',
   appPasteSpecialTooLarge: 'Ese contenido pegado no cabe en la hoja o es demasiado grande.',
   appPasteSpecialOverlap:
     'El área de copia y el área de pegado se superponen. No deben superponerse a menos que tengan el mismo tamaño y forma.',

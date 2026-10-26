@@ -4,6 +4,7 @@ import { platformShortcuts } from '@genoffice/i18n'
 import {
   backstageLabels,
   Dropdown,
+  KEEP_EDIT_ATTR,
   RibbonCollapseButton,
   RibbonFoldGroup,
   useRibbonLabelFit,
@@ -73,6 +74,8 @@ import { type SelectionFormat } from './selection-format'
 import type { SelectionProtection } from './selection-protection'
 import { fontFamilyGroups, useSystemFontFamilies } from './system-fonts'
 import { isGridKeyTarget, shouldInterceptClearSelection } from './clear-selection-keyboard'
+import { undoShortcutAction } from './undo-shortcut'
+import { installKeepGridFocus } from './keep-grid-focus'
 
 import type { ChartSeriesVisualState } from '@genoffice/xlsx-gateway/domain/chart-visual'
 import type { ChangePlan } from '@genoffice/xlsx-gateway/domain/workbook.types'
@@ -171,9 +174,6 @@ const CHART_TEXT_LABELS: Record<ChartTextTarget, { heading: StringKey; command: 
 const IN_TAB = new URLSearchParams(window.location.search).get('mode') === 'tab'
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
 
-/// Excel's grow/shrink font walks its size ladder, not ±1.
-const FONT_SIZE_LADDER = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 26, 28, 36, 48, 72]
-
 /// Review > Translate targets, shown in their native names (never localized).
 const TRANSLATE_LANGUAGES = [
   'English',
@@ -188,15 +188,6 @@ const TRANSLATE_LANGUAGES = [
   'Русский',
   'العربية',
 ] as const
-
-function stepFontSize(current: number, direction: 1 | -1): number {
-  if (direction === 1) {
-    return FONT_SIZE_LADDER.find((size) => size > current) ?? FONT_SIZE_LADDER.at(-1) ?? current
-  }
-  return (
-    [...FONT_SIZE_LADDER].reverse().find((size) => size < current) ?? FONT_SIZE_LADDER[0] ?? current
-  )
-}
 
 /// Glyph icons live in ribbon-icons.tsx, drawn to the shared icon standard
 /// (24×24 canvas, 1.5px strokes, round caps/joins); unmapped glyphs render
@@ -572,6 +563,13 @@ export function ExcelShell({
     const canEditSheet = (event: KeyboardEvent): boolean =>
       !onIsCellEditingRef.current() && isGridKeyTarget(event.target)
     const onKeyDown = (event: KeyboardEvent): void => {
+      // ⌘Z / ⌘⇧Z / Ctrl+Y after a ribbon click (focus is not in the grid)
+      const historyAction = undoShortcutAction(event, onIsCellEditingRef.current())
+      if (historyAction) {
+        event.preventDefault()
+        onCommandRef.current(historyAction)
+        return
+      }
       if ((event.metaKey || event.ctrlKey) && event.key === '1') {
         event.preventDefault()
         openFormatCellsRef.current()
@@ -748,6 +746,9 @@ export function ExcelShell({
       document.querySelector('.goto-in-bar')?.remove()
     }
   }, [])
+  // Excel's ribbon never takes keyboard focus from the workbook (or the in-cell editor): a press on
+  // a plain ribbon control keeps focus where it was, so formatting chains and typing carries on.
+  useEffect(() => installKeepGridFocus({ focusGrid: () => onCommandRef.current('focus-grid') }), [])
   const visibleTabs: readonly RibbonTab[] = [
     ...ribbonTabs,
     ...(selectedChart ? (['Chart Design'] as const) : []),
@@ -757,7 +758,11 @@ export function ExcelShell({
 
   return (
     <main className={`app-shell ${isCopilotOpen ? '' : 'copilot-collapsed'}`}>
-      <header className={`excel-header ${collapse.rootClass}`} ref={collapse.rootRef}>
+      <header
+        className={`excel-header ${collapse.rootClass}`}
+        ref={collapse.rootRef}
+        {...{ [KEEP_EDIT_ATTR]: '' }}
+      >
         <nav
           className={`ribbon-tabs ${IN_TAB ? '' : IS_MAC ? 'ribbon-tabs-mac' : 'ribbon-tabs-win'}`}
           aria-label="Workbook commands"
@@ -3112,6 +3117,7 @@ function Ribbon({
               onOpen={loadSystemFonts}
               onPick={(value) => onCommand(`font-family:${value}`)}
               commit={(text) => onCommand(`font-family:${text}`)}
+              onDone={() => onCommand('focus-grid')}
             />
             <EditableMenuSelect
               className="select-like font-size"
@@ -3126,18 +3132,19 @@ function Ribbon({
                 if (Number.isFinite(size) && size >= 1 && size <= 409)
                   onCommand(`font-size:${size}`)
               }}
+              onDone={() => onCommand('focus-grid')}
             />
             <button
               data-tip={t('appIncreaseFontSize')}
               aria-label={t('appIncreaseFontSize')}
-              onClick={() => onCommand(`font-size:${stepFontSize(echoSize, 1)}`)}
+              onClick={() => onCommand('font-size-step:1')}
             >
               <ToolSymbol symbol="A↑" />
             </button>
             <button
               data-tip={t('appDecreaseFontSize')}
               aria-label={t('appDecreaseFontSize')}
-              onClick={() => onCommand(`font-size:${stepFontSize(echoSize, -1)}`)}
+              onClick={() => onCommand('font-size-step:-1')}
             >
               <ToolSymbol symbol="A↓" />
             </button>
@@ -4230,6 +4237,7 @@ function EditableMenuSelect({
   onOpen,
   onPick,
   commit,
+  onDone,
 }: {
   readonly label: string
   readonly 'data-tip'?: string
@@ -4241,6 +4249,8 @@ function EditableMenuSelect({
   readonly onPick: (value: string) => void
   /// apply typed text (caller validates; invalid input is dropped silently)
   readonly commit: (text: string) => void
+  /// the box is finished (Enter / Esc / a list pick): Excel hands the keyboard back to the grid
+  readonly onDone?: () => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [draft, setDraftState] = useState<string | null>(null)
@@ -4271,9 +4281,11 @@ function EditableMenuSelect({
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.currentTarget.blur() // blur handler commits
+              onDone?.()
             } else if (event.key === 'Escape') {
               setDraft(null)
               event.currentTarget.blur()
+              onDone?.()
             }
           }}
           onBlur={(event) => {
@@ -4309,6 +4321,7 @@ function EditableMenuSelect({
                 setOpen(false)
                 setDraft(null)
                 onPick(option.value)
+                onDone?.()
               }}
             >
               {option.label}

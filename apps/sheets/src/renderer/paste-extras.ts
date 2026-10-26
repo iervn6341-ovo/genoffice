@@ -20,6 +20,9 @@ import {
   type PasteSpecialOptions,
   type PasteTarget,
 } from './paste-special'
+import { hyperlinkTargetAt, setHyperlinksUndoable } from './clear-actions'
+import type { ForeignCopy } from './clipboard-foreign'
+import type { PayloadLink } from './clipboard-payload'
 import type { RibbonCommandContext } from './ribbon-actions'
 import type { UniverRuntime, UniverWorksheet } from './univer-state'
 
@@ -272,4 +275,51 @@ export function mergeConditionalFormats(
     added += 1
   }
   return added
+}
+
+/** Hyperlinks: each pasted cell gets the source cell's link; a cell whose source has none loses
+ * the one it had (the link is part of what the paste replaces). */
+export async function pasteLinks(
+  ctx: RibbonCommandContext,
+  runtime: UniverRuntime,
+  sheet: UniverWorksheet,
+  links: readonly PayloadLink[],
+  cells: readonly PastedCell[],
+): Promise<void> {
+  const state = ctx.lazyWorkbookRef.current
+  if (!state) return
+  const sheetId = sheet.getSheetId()
+  const sourceLinks = new Map<string, string>()
+  for (const link of links) sourceLinks.set(keyOf(link.row, link.column), link.target)
+  const edits: { row: number; column: number; target: string | null }[] = []
+  for (const cell of cells) {
+    const wanted = sourceLinks.get(keyOf(cell.sourceRow, cell.sourceColumn)) ?? null
+    const have = hyperlinkTargetAt(state, sheetId, cell.row, cell.column)
+    if (wanted !== have) edits.push({ row: cell.row, column: cell.column, target: wanted })
+  }
+  await setHyperlinksUndoable(ctx, runtime, sheetId, edits)
+}
+
+/** Column widths: each pasted column takes the width of the source column it came from
+ * (Transpose has no widths to take, as in Excel). */
+export function pasteColumnWidths(
+  sheet: UniverWorksheet,
+  foreign: ForeignCopy,
+  source: { readonly columns: readonly number[] },
+  options: PasteSpecialOptions,
+  target: PasteTarget,
+): void {
+  if (options.transpose) return
+  const origins = tileOrigins({ rows: [0], columns: source.columns }, options, target)
+  const seen = new Set<number>()
+  for (const origin of origins) {
+    source.columns.forEach((_column, j) => {
+      const width = foreign.columnWidths[j]
+      const destination = origin.baseColumn + j
+      if (width && !seen.has(destination)) {
+        seen.add(destination)
+        sheet.setColumnWidth(destination, Math.round(width))
+      }
+    })
+  }
 }

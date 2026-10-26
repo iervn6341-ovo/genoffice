@@ -6621,6 +6621,9 @@ textarea:focus {
   overflow-x: hidden;
   overflow-y: auto;
   align-content: start;
+  /* sections are overflow:hidden grid items: without this the tracks shrink to the fixed
+     height and clip their own rows (Two-sided, Paper size) instead of scrolling */
+  grid-auto-rows: max-content;
 }
 
 .print-preview-pane {
@@ -6775,4 +6778,20 @@ textarea:focus {
  * Univer's own cap on the panel height is replaced by the room above the bar. */
 .univer-popup[data-sheet-tab-menu] > section > div {
   max-height: var(--sheet-tab-menu-max, 80vh) !important;
+}
+
+/* a context-menu submenu superseded by another one (context-submenu-exclusive.ts) */
+[data-u-context-menu-submenu][data-exclusive-hidden] {
+  display: none !important;
+}
+
+/* Cell / header context menu height. Univer caps the panel with
+ * useScrollYOverContainer, which compares the menu's viewport-relative top with
+ * the HEIGHT of the sheet container (ribbon and formula bar excluded), so a menu
+ * opened low in the sheet was cut to a few rows with a scroll bar although the
+ * window had room. The popup itself already pushes the menu back inside the
+ * window; only a menu taller than the window (minus Univer's 8 px margins) may
+ * scroll. */
+.univer-popup:not([data-sheet-tab-menu]) > section > [class~='univer-grid'][class~='univer-min-w-52'] {
+  max-height: calc(100vh - 16px) !important;
 }

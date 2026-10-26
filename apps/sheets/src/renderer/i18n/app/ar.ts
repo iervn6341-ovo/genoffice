@@ -1403,6 +1403,8 @@ export const ar = {
   appPasteSpecialDialog: 'لصق خاص…',
   appPasteSpecialNeedsCopy: 'انسخ الخلايا في هذا المصنف أولاً، ثم استخدم لصق خاص.',
   appPasteSpecialNotAfterCut: 'يعمل خيار اللصق الخاص هذا بعد النسخ وليس بعد القص.',
+  appCopyMultiSelection: 'لا يمكن استخدام هذا الأمر مع تحديدات متعددة.',
+  appVisualCannotCopy: 'لا يمكن نسخ هذا الكائن.',
   appPasteSpecialTooLarge: 'لا يتسع هذا اللصق في الورقة أو أنه كبير جدًا.',
   appPasteSpecialOverlap:
     'تتداخل ناحية النسخ مع ناحية اللصق. يجب ألا تتداخلا ما لم يكن لهما الحجم والشكل نفسه.',

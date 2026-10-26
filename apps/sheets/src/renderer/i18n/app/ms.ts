@@ -1443,6 +1443,8 @@ export const ms = {
     'Salin sel dalam buku kerja ini dahulu, kemudian gunakan Tampal Istimewa.',
   appPasteSpecialNotAfterCut:
     'Pilihan Tampal Istimewa ini berfungsi selepas Salin, bukan selepas Potong.',
+  appCopyMultiSelection: 'Perintah ini tidak boleh digunakan pada berbilang pilihan.',
+  appVisualCannotCopy: 'Objek ini tidak boleh disalin.',
   appPasteSpecialTooLarge: 'Tampalan itu tidak muat pada helaian, atau terlalu besar.',
   appPasteSpecialOverlap:
     'Kawasan salinan dan kawasan tampalan bertindih. Kedua-duanya tidak boleh bertindih kecuali bersaiz dan berbentuk sama.',

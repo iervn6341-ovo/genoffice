@@ -235,6 +235,13 @@ export function startSheetShapeDraw(
     window.addEventListener('mousemove', onWinMove, true)
     window.addEventListener('mouseup', onWinUp, true)
   }
+  // The grid is a canvas driven by POINTER events: swallowing mousedown alone still let the same
+  // press start a cell selection (drawing a shape selected whole rows). Stop it in capture; the
+  // compat mouse events must stay, so do not preventDefault here.
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+  }
   const onWinMove = (e: MouseEvent) => {
     if (!start) return
     cur = { x: e.clientX, y: e.clientY }
@@ -267,6 +274,7 @@ export function startSheetShapeDraw(
     delete cancelStore()[CANCEL_KEY]
     host.classList.remove('sheet-shape-drawing')
     host.removeEventListener('mousedown', onMouseDown, true)
+    host.removeEventListener('pointerdown', onPointerDown, true)
     window.removeEventListener('mousemove', onWinMove, true)
     window.removeEventListener('mouseup', onWinUp, true)
     window.removeEventListener('keydown', onKey, true)
@@ -277,6 +285,7 @@ export function startSheetShapeDraw(
   }
 
   host.addEventListener('mousedown', onMouseDown, true)
+  host.addEventListener('pointerdown', onPointerDown, true)
   window.addEventListener('keydown', onKey, true)
   window.addEventListener('keyup', onKey, true)
   cancelStore()[CANCEL_KEY] = cleanup

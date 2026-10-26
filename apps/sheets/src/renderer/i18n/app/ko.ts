@@ -1462,6 +1462,8 @@ export const ko = {
     '먼저 이 통합 문서에서 셀을 복사한 다음 선택하여 붙여넣기를 사용하십시오.',
   appPasteSpecialNotAfterCut:
     '이 선택하여 붙여넣기 옵션은 잘라내기 후가 아니라 복사 후에 사용할 수 있습니다.',
+  appCopyMultiSelection: '이 명령은 다중 선택 영역에서 사용할 수 없습니다.',
+  appVisualCannotCopy: '이 개체는 복사할 수 없습니다.',
   appPasteSpecialTooLarge: '붙여넣을 내용이 시트에 맞지 않거나 너무 큽니다.',
   appPasteSpecialOverlap:
     '복사 영역과 붙여넣기 영역이 겹칩니다. 크기와 모양이 같은 경우를 제외하고는 두 영역이 겹칠 수 없습니다.',

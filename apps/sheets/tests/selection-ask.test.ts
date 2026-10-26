@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { isSelectionDrag, selectionAskPosition } from '../src/renderer/ai/selection-ask'
+import {
+  FILL_HANDLE_CLEARANCE_PX,
+  isSelectionDrag,
+  selectionAskPosition,
+} from '../src/renderer/ai/selection-ask'
 
 const viewport = { left: 100, top: 50, right: 900, bottom: 650 }
 
@@ -9,11 +13,21 @@ describe('selection Ask AI gesture', () => {
     expect(isSelectionDrag({ x: 20, y: 20 }, { x: 24, y: 20 })).toBe(true)
   })
 
-  it('places the trigger after the drag endpoint when there is room', () => {
+  it('places the trigger above-right of the drag endpoint when there is room', () => {
     expect(selectionAskPosition({ x: 300, y: 200 }, viewport, 92, 32)).toEqual({
       left: 308,
-      top: 208,
+      top: 160,
     })
+  })
+
+  it('never covers the fill handle below the endpoint', () => {
+    const pointer = { x: 300, y: 200 }
+    const trigger = selectionAskPosition(pointer, viewport, 92, 32)
+    // the handle is within one row (<= 24px) below and one column to the right of the endpoint
+    expect(trigger.top + 32).toBeLessThanOrEqual(pointer.y)
+    // no room above: drop below the handle's row, not onto it
+    const nearTop = selectionAskPosition({ x: 300, y: 60 }, viewport, 92, 32)
+    expect(nearTop.top).toBeGreaterThanOrEqual(60 + FILL_HANDLE_CLEARANCE_PX)
   })
 
   it('flips and clamps the trigger at the grid edges', () => {
