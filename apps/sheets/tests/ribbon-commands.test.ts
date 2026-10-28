@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { HorizontalAlign } from '@univerjs/core'
+import { HorizontalAlign, ICommandService } from '@univerjs/core'
+import { SetCellEditVisibleOperation } from '@univerjs/sheets-ui'
 
 import {
   handleRibbonCommand,
@@ -83,11 +84,15 @@ interface DispatchHarness {
   ctx: RibbonCommandContext
   model: { ht?: HorizontalAlign; numberFormat?: string }
   messages: string[]
+  syncCommands: Array<{ id: string; params: unknown }>
+  asyncCommands: Array<{ id: string; params: unknown }>
 }
 
-function makeDispatchHarness(): DispatchHarness {
+function makeDispatchHarness(options?: { isCellEditing?: boolean }): DispatchHarness {
   const model: DispatchHarness['model'] = {}
   const messages: string[] = []
+  const syncCommands: Array<{ id: string; params: unknown }> = []
+  const asyncCommands: Array<{ id: string; params: unknown }> = []
   const range = {
     getCellStyleData: () => ({}),
     setHorizontalAlignment: (value: string) => {
@@ -96,18 +101,42 @@ function makeDispatchHarness(): DispatchHarness {
     setNumberFormat: (pattern: string) => {
       model.numberFormat = pattern
     },
+    getWidth: () => 1,
+    getHeight: () => 1,
   }
   const workbook = {
+    getId: () => 'test-workbook-id',
     getActiveSheet: () => undefined,
     getActiveRange: () => range,
+    isCellEditing: () => Boolean(options?.isCellEditing),
+  }
+  const commandService = {
+    syncExecuteCommand: (id: string, params: unknown) => {
+      syncCommands.push({ id, params })
+      return true
+    },
+  }
+  const injector = {
+    get: (token: unknown) => {
+      if (token === ICommandService) return commandService
+      return undefined
+    },
+  }
+  const univerAPI = {
+    getActiveWorkbook: () => workbook,
+    executeCommand: (id: string, params: unknown) => {
+      asyncCommands.push({ id, params })
+      return Promise.resolve(true)
+    },
+    _injector: injector,
   }
   const ctx = {
-    univerRef: { current: { univerAPI: { getActiveWorkbook: () => workbook } } },
+    univerRef: { current: { univerAPI } },
     setMessage: (message: string) => {
       messages.push(message)
     },
   } as unknown as RibbonCommandContext
-  return { ctx, model, messages }
+  return { ctx, model, messages, syncCommands, asyncCommands }
 }
 
 describe('handleRibbonCommand alignment', () => {
@@ -122,6 +151,37 @@ describe('handleRibbonCommand alignment', () => {
     // The dispatcher reports the applied-style message, not a caught error.
     expect(messages).toHaveLength(1)
     expect(messages[0]).not.toMatch(/Invalid horizontal alignment/)
+  })
+})
+
+describe('handleRibbonCommand while cell editing', () => {
+  it('commits open cell edit before applying cell alignment', () => {
+    const { ctx, model, syncCommands, asyncCommands } = makeDispatchHarness({ isCellEditing: true })
+    handleRibbonCommand(ctx, 'align:center')
+    expect(syncCommands).toContainEqual({
+      id: SetCellEditVisibleOperation.id,
+      params: { visible: false, unitId: 'test-workbook-id' },
+    })
+    expect(model.ht).toBe(HorizontalAlign.CENTER)
+    expect(asyncCommands).toHaveLength(0)
+  })
+
+  it('delegates to in-cell character format without closing cell editor', () => {
+    const { ctx, model, syncCommands, asyncCommands } = makeDispatchHarness({ isCellEditing: true })
+    handleRibbonCommand(ctx, 'bold')
+    expect(syncCommands).toHaveLength(0)
+    expect(asyncCommands).toContainEqual({
+      id: 'sheet.command.set-range-bold',
+      params: undefined,
+    })
+    expect(model.ht).toBeUndefined()
+  })
+
+  it('does not invoke commit operation when cell is not being edited', () => {
+    const { ctx, model, syncCommands } = makeDispatchHarness({ isCellEditing: false })
+    handleRibbonCommand(ctx, 'align:left')
+    expect(syncCommands).toHaveLength(0)
+    expect(model.ht).toBe(HorizontalAlign.LEFT)
   })
 })
 

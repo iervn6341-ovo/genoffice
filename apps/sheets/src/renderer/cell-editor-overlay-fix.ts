@@ -167,9 +167,13 @@ export function computeEditorFit(input: EditorFitInput): EditorFitResult {
   else if (verticalAlign === VerticalAlign.TOP) offsetTop = padding.t
   else offsetTop = (height - actualHeight) / scaleY
   let offsetLeft: number
-  if (horizontalAlign === HorizontalAlign.CENTER) offsetLeft = 0
-  else if (horizontalAlign === HorizontalAlign.RIGHT) offsetLeft = (width - actualWidth) / scaleX
-  else offsetLeft = padding.l
+  if (horizontalAlign === HorizontalAlign.CENTER) {
+    offsetLeft = padding.l
+  } else if (horizontalAlign === HorizontalAlign.RIGHT) {
+    offsetLeft = (width - actualWidth) / scaleX
+  } else {
+    offsetLeft = padding.l
+  }
   return {
     width,
     height,
@@ -275,13 +279,40 @@ export function installCellEditorOverlayFix(): void {
     }
   }
 
+  const originalChangeVisible = (bridge as any).changeVisible
+  if (typeof originalChangeVisible === 'function') {
+    ;(bridge as any).changeVisible = function (
+      this: any,
+      params: { visible: boolean; [key: string]: unknown },
+    ) {
+      const renderMgr = this._renderManagerService
+      const unitId = this._editorUnitId ?? DOCS_NORMAL_EDITOR_UNIT_ID_KEY
+      const renderUnit =
+        renderMgr?.getRenderById?.(unitId) ?? renderMgr?.getRenderUnitById?.(unitId)
+      if (params?.visible) {
+        this._univerInstanceService?.setCurrentUnitForType?.(unitId)
+        renderUnit?.activate?.()
+      } else {
+        renderUnit?.deactivate?.()
+      }
+      return originalChangeVisible.call(this, params)
+    }
+  }
+
   // _editAreaProcessing is the one caller that positions the overlay (scaleX /
   // scaleY are its 6th / 7th arguments); shift exactly the state it publishes.
   let pendingShift: { dx: number; dy: number } | null = null
   const manager = CellEditorManagerService.prototype as unknown as ManagerProto
   const originalSetState = manager.setState
   if (typeof originalSetState === 'function') {
-    manager.setState = function (this: ManagerProto, param: EditorOverlayRect) {
+    manager.setState = function (this: any, param: EditorOverlayRect) {
+      if (param?.show) {
+        const renderMgr = this._renderManagerService
+        const renderUnit =
+          renderMgr?.getRenderById?.(DOCS_NORMAL_EDITOR_UNIT_ID_KEY) ??
+          renderMgr?.getRenderUnitById?.(DOCS_NORMAL_EDITOR_UNIT_ID_KEY)
+        renderUnit?.activate?.()
+      }
       const shift = pendingShift
       pendingShift = null
       return originalSetState.call(
@@ -310,6 +341,12 @@ export function installCellEditorOverlayFix(): void {
 
   if (typeof resize.fitTextSize === 'function') {
     resize.fitTextSize = function (this: ResizeProto, callback?: () => void) {
+      const renderMgr = (this as any)._renderManagerService
+      const renderUnit =
+        renderMgr?.getRenderById?.(DOCS_NORMAL_EDITOR_UNIT_ID_KEY) ??
+        renderMgr?.getRenderUnitById?.(DOCS_NORMAL_EDITOR_UNIT_ID_KEY)
+      renderUnit?.activate?.()
+
       const param = this._editorBridgeService.getEditCellState()
       if (!param) return
       const { position, documentLayoutObject, canvasOffset, scaleX, scaleY } = param
@@ -328,7 +365,7 @@ export function installCellEditorOverlayFix(): void {
         scaleX,
         scaleY,
       )
-      if (!info || info.actualWidth <= 0) return
+      if (!info || info.actualWidth < 0) return
       const fit = computeEditorFit({
         cellWidth: position.endX - position.startX,
         cellHeight: position.endY - position.startY,

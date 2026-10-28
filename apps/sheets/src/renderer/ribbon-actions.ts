@@ -8,10 +8,12 @@ import { PER_CELL_STEP_LIMIT, planFontSizeStep, stepFontSize } from './font-size
 import {
   BooleanNumber,
   BorderStyleTypes,
+  ICommandService,
   WrapStrategy,
   type ICellData,
   type IStyleData,
 } from '@univerjs/core'
+import { SetCellEditVisibleOperation } from '@univerjs/sheets-ui'
 import { IRenderManagerService, SHEET_VIEWPORT_KEY } from '@univerjs/engine-render'
 import { SheetSkeletonManagerService } from '@univerjs/preset-sheets-core'
 import { columnLabel, formatAddress } from '@genoffice/xlsx-gateway/domain/cell-address'
@@ -1435,14 +1437,28 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
   // While a cell is open for editing the character formats belong to the SELECTED TEXT (Excel keeps
   // the selection through ribbon presses and formats just those characters), not to the cell.
   const inCell = inCellEditPlan(command)
-  if (
-    inCell &&
+  const isEditing = Boolean(
     (
       runtime.univerAPI.getActiveWorkbook() as { isCellEditing?(): boolean } | null
     )?.isCellEditing?.()
-  ) {
+  )
+  if (inCell && isEditing) {
     void runtime.univerAPI.executeCommand(inCell.id, inCell.params)
     return
+  }
+  if (isEditing) {
+    // When a cell-level ribbon command is clicked while editing, commit the in-progress
+    // edit first (without moving the active selection) so user input (including multiline Option+Enter
+    // line breaks) is safely saved to the worksheet before the cell style is updated.
+    const workbook = runtime.univerAPI.getActiveWorkbook()
+    const injector = (runtime.univerAPI as unknown as { _injector?: { get<T>(id: unknown): T } })?._injector
+    const commandService = injector?.get?.<ICommandService>(ICommandService)
+    if (workbook && commandService) {
+      commandService.syncExecuteCommand(SetCellEditVisibleOperation.id, {
+        visible: false,
+        unitId: workbook.getId(),
+      })
+    }
   }
   const range = runtime.univerAPI.getActiveWorkbook()?.getActiveRange()
   if (!range) {
@@ -1712,10 +1728,20 @@ function applyStyleCommand(
           range.setValue({
             s: { ht: argument === 'justify' ? 4 : 6 },
           } as unknown as ICellData)
+          if (worksheet && (range.getWidth() > 1 || range.getHeight() > 1)) {
+            worksheet.getRange(range.getRow(), range.getColumn()).setValue({
+              s: { ht: argument === 'justify' ? 4 : 6 },
+            } as unknown as ICellData)
+          }
         } else {
           range.setHorizontalAlignment(
             argument === 'right' ? 'normal' : (argument as 'left' | 'center'),
           )
+          if (worksheet && (range.getWidth() > 1 || range.getHeight() > 1)) {
+            worksheet.getRange(range.getRow(), range.getColumn()).setHorizontalAlignment(
+              argument === 'right' ? 'normal' : (argument as 'left' | 'center'),
+            )
+          }
         }
         break
       case 'valign':
@@ -1785,6 +1811,10 @@ function applyStyleCommand(
               ? [{ op: 'unmerge_cells', sheetId, range: a1 }]
               : [{ op: 'merge_cells', sheetId, range: a1 }]
           if (argument === 'center') {
+            range.setHorizontalAlignment('center')
+            if (worksheet) {
+              worksheet.getRange(range.getRow(), range.getColumn()).setHorizontalAlignment('center')
+            }
             // The merged cell renders its anchor's format; formatting only the
             // anchor also keeps whole-column merges under the range-op cap.
             ops.push({
@@ -1812,7 +1842,12 @@ function applyStyleCommand(
           range.mergeAcross()
         } else {
           range.merge()
-          if (argument === 'center') range.setHorizontalAlignment('center')
+          if (argument === 'center') {
+            range.setHorizontalAlignment('center')
+            if (worksheet) {
+              worksheet.getRange(range.getRow(), range.getColumn()).setHorizontalAlignment('center')
+            }
+          }
         }
         break
       }

@@ -4735,6 +4735,7 @@ export function App(): React.JSX.Element {
     if ((window as unknown as Record<string, unknown>).__genofficeDebugHooks === true) {
       ;(window as unknown as Record<string, unknown>).__genofficeDebug = {
         univerAPI: univerRef.current?.univerAPI,
+        ribbonCommand: handleRibbonCommand,
         undoHistoryDiagnostic: () => {
           const current = univerRef.current
           const activeUnit = current?.univerAPI.getActiveWorkbook()?.getId() ?? null

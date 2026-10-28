@@ -120,6 +120,73 @@ describe('cell-editor-overlay-fix', () => {
       expect(fit.width).toBe(100)
       expect(fit.offsetLeft).toBe(44)
     })
+
+    it('computes symmetric margins for centered text in a normal cell', () => {
+      const fit = computeEditorFit({
+        cellWidth: 100,
+        cellHeight: 25,
+        textWidth: 40,
+        textHeight: 15,
+        padding: { t: 2, b: 2, l: 2, r: 2 },
+        scaleX: 1,
+        scaleY: 1,
+        horizontalAlign: HorizontalAlign.CENTER,
+        verticalAlign: VerticalAlign.MIDDLE,
+      })
+      expect(fit.width).toBe(100)
+      // DocSkeleton centers glyphs within column width: (column.width - textWidth) / 2.
+      // offsetLeft keeps padding.l so the column starts at cell margin and text stays centered.
+      expect(fit.offsetLeft).toBe(2)
+    })
+
+    it('centers caret in an empty cell', () => {
+      const fit = computeEditorFit({
+        cellWidth: 100,
+        cellHeight: 25,
+        textWidth: 0,
+        textHeight: 15,
+        padding: { t: 2, b: 2, l: 2, r: 2 },
+        scaleX: 1,
+        scaleY: 1,
+        horizontalAlign: HorizontalAlign.CENTER,
+        verticalAlign: VerticalAlign.MIDDLE,
+      })
+      expect(fit.width).toBe(100)
+      expect(fit.offsetLeft).toBe(2)
+    })
+
+    it('computes centered margins for merged cells', () => {
+      const fit = computeEditorFit({
+        cellWidth: 300,
+        cellHeight: 50,
+        textWidth: 60,
+        textHeight: 15,
+        padding: { t: 2, b: 2, l: 2, r: 2 },
+        scaleX: 1,
+        scaleY: 1,
+        horizontalAlign: HorizontalAlign.CENTER,
+        verticalAlign: VerticalAlign.MIDDLE,
+      })
+      expect(fit.width).toBe(300)
+      expect(fit.offsetLeft).toBe(2)
+    })
+
+    it('clamps centered text to minimum padding when overflowing cell', () => {
+      const fit = computeEditorFit({
+        cellWidth: 50,
+        cellHeight: 25,
+        textWidth: 100,
+        textHeight: 15,
+        padding: { t: 2, b: 2, l: 4, r: 4 },
+        scaleX: 1,
+        scaleY: 1,
+        horizontalAlign: HorizontalAlign.CENTER,
+        verticalAlign: VerticalAlign.MIDDLE,
+      })
+      // actualWidth = 100 + 8 = 108
+      expect(fit.width).toBe(108)
+      expect(fit.offsetLeft).toBe(4)
+    })
   })
 
   describe('normalizeEditorLayoutObject', () => {
@@ -129,6 +196,8 @@ describe('cell-editor-overlay-fix', () => {
         documentModel: {
           documentStyle: {
             renderConfig: {},
+            marginLeft: 0,
+            marginRight: 0,
           },
         },
       }
