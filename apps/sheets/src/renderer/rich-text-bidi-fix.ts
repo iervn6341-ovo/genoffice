@@ -19,7 +19,11 @@
  * that ended up at an odd (right-to-left) embedding level. Arrow keys still
  * move logically through the stream.
  */
-import { DOCS_FORMULA_BAR_EDITOR_UNIT_ID_KEY, DOCS_NORMAL_EDITOR_UNIT_ID_KEY } from '@univerjs/core'
+import {
+  DOCS_FORMULA_BAR_EDITOR_UNIT_ID_KEY,
+  DOCS_NORMAL_EDITOR_UNIT_ID_KEY,
+  HorizontalAlign,
+} from '@univerjs/core'
 import { DocSelectionRenderService, NodePositionConvertToCursor } from '@univerjs/docs-ui'
 import { DocumentSkeleton, FontCache, GlyphType } from '@univerjs/engine-render'
 
@@ -184,13 +188,23 @@ interface SkeletonGlyphLike {
   content?: string
   width: number
   left: number
+  glyphType?: unknown
+  bBox?: { width?: number }
+  xOffset?: number
 }
 
 interface SkeletonLike {
   getViewModel?: () => {
     getDataModel?: () => {
-      getSnapshot?: () => { id?: string; body?: { dataStream?: string } } | undefined
+      getSnapshot?: () =>
+        | {
+            id?: string
+            body?: { dataStream?: string }
+            documentStyle?: { renderConfig?: { horizontalAlign?: number } }
+          }
+        | undefined
     }
+    getParagraph?: (index: number) => { paragraphStyle?: { horizontalAlign?: number } } | undefined
   }
   getSkeletonData?: () =>
     | {
@@ -199,7 +213,13 @@ interface SkeletonLike {
             columns?: Array<{
               lines?: Array<{
                 paragraphIndex?: number | undefined
-                divides?: Array<{ glyphGroup?: SkeletonGlyphLike[] }>
+                width?: number
+                divides?: Array<{
+                  glyphGroup?: SkeletonGlyphLike[]
+                  glyphGroupWidth?: number
+                  width?: number
+                  paddingLeft?: number
+                }>
               }>
             }>
           }>
@@ -228,6 +248,11 @@ export const REORDERED_EDITOR_IDS: readonly string[] = [
 
 export function isReorderedDocumentId(id: string | undefined): boolean {
   return id === 'rich-cell' || REORDERED_EDITOR_IDS.includes(id ?? '')
+}
+
+function getDocumentModelId(skeleton: SkeletonLike): string | undefined {
+  const dataModel = skeleton.getViewModel?.()?.getDataModel?.() as any
+  return dataModel?.getUnitId?.() ?? dataModel?.getSnapshot?.()?.id
 }
 
 /**
@@ -315,9 +340,100 @@ function eachDivide(
         }
 }
 
+const HAS_CJK = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
+
+/**
+ * Univer's DocumentSkeleton.shaping unconditionally calls addCJKLatinSpacing(),
+ * which expands glyph widths by width / 4 and sets xOffset when a CJK glyph
+ * borders Latin text. Grid canvas plain-cell Text.drawWith does not add this
+ * spacing, causing text to expand horizontally and jump around Latin text
+ * when entering cell edit mode.
+ *
+ * Restoring glyph.width from glyph.bBox.width and resetting xOffset to 0
+ * for CJK glyphs aligns the in-cell editor layout with the grid view mode.
+ */
+export function removeCjkLatinSpacingFromSkeleton(skeleton: SkeletonLike): void {
+  const data = skeleton.getSkeletonData?.()
+  if (!data?.pages) return
+
+  for (const page of data.pages) {
+    for (const section of page.sections ?? []) {
+      for (const column of section.columns ?? []) {
+        for (const line of column.lines ?? []) {
+          for (const divide of line.divides ?? []) {
+            const glyphs = divide.glyphGroup
+            if (!glyphs || glyphs.length === 0) continue
+
+            let changed = false
+            for (const glyph of glyphs) {
+              if (glyph.content === '\r') {
+                if (glyph.width !== 0) {
+                  glyph.width = 0
+                  changed = true
+                }
+                continue
+              }
+              const bBox = (glyph as any).bBox
+              if (
+                bBox &&
+                typeof bBox.width === 'number' &&
+                (glyph.width !== bBox.width || (glyph as any).xOffset !== 0) &&
+                typeof glyph.content === 'string' &&
+                HAS_CJK.test(glyph.content) &&
+                glyph.glyphType !== GlyphType.LIST
+              ) {
+                glyph.width = bBox.width
+                ;(glyph as any).xOffset = 0
+                changed = true
+              }
+            }
+
+            if (changed) {
+              let curLeft = 0
+              for (const glyph of glyphs) {
+                glyph.left = curLeft
+                curLeft += glyph.width
+              }
+              const newGlyphGroupWidth = curLeft
+              divide.glyphGroupWidth = newGlyphGroupWidth
+
+              if (
+                typeof divide.width === 'number' &&
+                divide.width !== Number.POSITIVE_INFINITY &&
+                typeof divide.paddingLeft === 'number'
+              ) {
+                const divideWidth = divide.width
+                const pStyle = skeleton
+                  .getViewModel?.()
+                  ?.getParagraph?.(line.paragraphIndex ?? 0)?.paragraphStyle
+                const hAlign =
+                  pStyle?.horizontalAlign ??
+                  (skeleton.getViewModel?.()?.getDataModel?.()?.getSnapshot?.() as any)
+                    ?.documentStyle?.renderConfig?.horizontalAlign ??
+                  (page as any)?.renderConfig?.horizontalAlign
+
+                if (hAlign === HorizontalAlign.CENTER) {
+                  divide.paddingLeft = Math.max((divideWidth - newGlyphGroupWidth) / 2, 0)
+                } else if (hAlign === HorizontalAlign.RIGHT) {
+                  divide.paddingLeft = Math.max(divideWidth - newGlyphGroupWidth, 0)
+                } else {
+                  divide.paddingLeft = 0
+                }
+              }
+
+              line.width = curLeft
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 export function reorderRichCellSkeleton(skeleton: SkeletonLike): void {
+  const docId = getDocumentModelId(skeleton)
+  if (!isReorderedDocumentId(docId)) return
   const snapshot = skeleton.getViewModel?.()?.getDataModel?.()?.getSnapshot?.()
-  if (!isReorderedDocumentId(snapshot?.id)) return
   const dataStream = snapshot?.body?.dataStream ?? ''
   if (!HAS_RTL.test(dataStream)) {
     // Text edited back to LTR-only: glyphs an incremental relayout kept from
@@ -330,7 +446,7 @@ export function reorderRichCellSkeleton(skeleton: SkeletonLike): void {
     }
     return
   }
-  const editor = snapshot?.id !== 'rich-cell'
+  const editor = docId !== 'rich-cell'
   eachDivide(skeleton, (glyphs, line, lineState) => {
     const memo = processedDivides.get(glyphs)
     if (memo && memo.first === glyphs[0] && memo.count === glyphs.length) return
@@ -544,14 +660,20 @@ export function installRichTextBidiFix(): void {
   const previousCalculate = proto.calculate
   if (typeof previousCalculate !== 'function') return
   proto.calculate = function (this: SkeletonLike, bounds?: unknown): void {
-    const reordered = isReorderedDocumentId(
-      this.getViewModel?.()?.getDataModel?.()?.getSnapshot?.()?.id,
-    )
+    const docId = getDocumentModelId(this)
+    const reordered = isReorderedDocumentId(docId)
     if (reordered) measureLogicalDepth += 1
     try {
       previousCalculate.call(this, bounds)
     } finally {
       if (reordered) measureLogicalDepth -= 1
+    }
+    if (reordered) {
+      try {
+        removeCjkLatinSpacingFromSkeleton(this)
+      } catch {
+        // Spacing removal error must never break skeleton calculation.
+      }
     }
     try {
       reorderRichCellSkeleton(this)

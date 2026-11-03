@@ -1,3 +1,4 @@
+import { HorizontalAlign } from '@univerjs/core'
 import { DocumentSkeleton, FontCache } from '@univerjs/engine-render'
 import { describe, expect, it } from 'vitest'
 
@@ -11,6 +12,7 @@ import {
   paragraphIsRtl,
   REORDERED_EDITOR_IDS,
   reorderRichCellSkeleton,
+  removeCjkLatinSpacingFromSkeleton,
   resolveBidiLevels,
 } from '../src/renderer/rich-text-bidi-fix'
 
@@ -376,3 +378,159 @@ describe('Arabic chunk measurement during layout', () => {
     ])
   })
 })
+
+describe('removeCjkLatinSpacingFromSkeleton', () => {
+  it('restores font advance and eliminates extra CJK-Latin spacing in editor', () => {
+    // Simulate mixed CJK-Latin string where CJK preceding Latin has inflated width,
+    // and CJK following Latin has inflated width and xOffset.
+    const glyphs = [
+      { content: '課', width: 14, left: 0, bBox: { width: 14 } },
+      { content: '綱', width: 14, left: 14, bBox: { width: 14 } },
+      { content: '導', width: 14, left: 28, bBox: { width: 14 } },
+      { content: '入', width: 17.5, left: 42, bBox: { width: 14 } }, // width inflated by width/4
+      { content: 'A', width: 9, left: 59.5, bBox: { width: 9 } },
+      { content: 'I', width: 4, left: 68.5, bBox: { width: 4 } },
+      { content: '數', width: 17.5, left: 72.5, xOffset: 3.5, bBox: { width: 14 } }, // inflated width & xOffset
+      { content: '量', width: 14, left: 90, bBox: { width: 14 } },
+    ]
+
+    const divide = {
+      glyphGroup: glyphs,
+      glyphGroupWidth: 104,
+      width: 200,
+      paddingLeft: 0,
+    }
+    const line = { divides: [divide], width: 104, paragraphIndex: 0 }
+    const skeleton = {
+      getSkeletonData: () => ({
+        pages: [{ sections: [{ columns: [{ lines: [line] }] }] }],
+      }),
+    }
+
+    removeCjkLatinSpacingFromSkeleton(skeleton as any)
+
+    // Check that inflated widths and xOffsets are restored
+    expect(glyphs[3]!.width).toBe(14)
+    expect((glyphs[3] as any).xOffset).toBe(0)
+    expect(glyphs[6]!.width).toBe(14)
+    expect((glyphs[6] as any).xOffset).toBe(0)
+
+    // Check that left positions are recalculated continuously
+    expect(glyphs[0]!.left).toBe(0)
+    expect(glyphs[1]!.left).toBe(14)
+    expect(glyphs[2]!.left).toBe(28)
+    expect(glyphs[3]!.left).toBe(42)
+    expect(glyphs[4]!.left).toBe(56) // 42 + 14 = 56 (was 59.5!)
+    expect(glyphs[5]!.left).toBe(65) // 56 + 9 = 65 (was 68.5!)
+    expect(glyphs[6]!.left).toBe(69) // 65 + 4 = 69 (was 72.5!)
+    expect(glyphs[7]!.left).toBe(83) // 69 + 14 = 83 (was 90!)
+
+    // Total width is restored to 83 + 14 = 97 (was 104)
+    expect(divide.glyphGroupWidth).toBe(97)
+    expect(line.width).toBe(97)
+  })
+
+  it('keeps divide.paddingLeft at 0 for left-aligned lines nearly filling the divide', () => {
+    // When a wrapped line almost fills the divide (e.g. divide.width = 100,
+    // divide.glyphGroupWidth was 99), divide.paddingLeft was 0 before fix.
+    // The previous heuristic Math.abs(divide.paddingLeft - (width - glyphGroupWidth) / 2) < 1
+    // falsely treated this left-aligned line as center-aligned, causing a ~3px indentation jump.
+    const glyphs = [
+      { content: 'A', width: 9, left: 0, bBox: { width: 9 } },
+      { content: 'I', width: 4, left: 9, bBox: { width: 4 } },
+      { content: '驅', width: 17.5, left: 13, xOffset: 3.5, bBox: { width: 14 } },
+      { content: '動', width: 14, left: 30.5, bBox: { width: 14 } },
+      { content: '金', width: 14, left: 44.5, bBox: { width: 14 } },
+      { content: '融', width: 14, left: 58.5, bBox: { width: 14 } },
+      { content: '商', width: 14, left: 72.5, bBox: { width: 14 } },
+      { content: '管', width: 14, left: 86.5, bBox: { width: 14 } },
+    ]
+    const divide = {
+      glyphGroup: glyphs,
+      glyphGroupWidth: 100.5,
+      width: 101, // divide width is only 0.5px wider than glyphGroupWidth
+      paddingLeft: 0,
+    }
+    const line = { divides: [divide], width: 100.5, paragraphIndex: 0 }
+    const skeleton = {
+      getSkeletonData: () => ({
+        pages: [{ sections: [{ columns: [{ lines: [line] }] }] }],
+      }),
+      getViewModel: () => ({
+        getParagraph: () => ({ paragraphStyle: { horizontalAlign: HorizontalAlign.LEFT } }),
+        getDataModel: () => ({ getSnapshot: () => ({ id: 'rich-cell' }) }),
+      }),
+    }
+
+    removeCjkLatinSpacingFromSkeleton(skeleton as any)
+
+    // Left alignment must be strictly preserved: paddingLeft must remain 0
+    expect(divide.paddingLeft).toBe(0)
+    expect(glyphs[0]!.left).toBe(0)
+  })
+
+  it('correctly updates divide.paddingLeft for center and right aligned text', () => {
+    const makeLine = (hAlign: HorizontalAlign) => {
+      const glyphs = [
+        { content: 'A', width: 9, left: 0, bBox: { width: 9 } },
+        { content: '文', width: 17.5, left: 9, xOffset: 3.5, bBox: { width: 14 } },
+      ]
+      const divide = {
+        glyphGroup: glyphs,
+        glyphGroupWidth: 26.5,
+        width: 100,
+        paddingLeft: hAlign === HorizontalAlign.CENTER ? (100 - 26.5) / 2 : 100 - 26.5,
+      }
+      const line = { divides: [divide], width: 26.5, paragraphIndex: 0 }
+      const skeleton = {
+        getSkeletonData: () => ({
+          pages: [{ sections: [{ columns: [{ lines: [line] }] }] }],
+        }),
+        getViewModel: () => ({
+          getParagraph: () => ({ paragraphStyle: { horizontalAlign: hAlign } }),
+          getDataModel: () => ({ getSnapshot: () => ({ id: 'rich-cell' }) }),
+        }),
+      }
+      removeCjkLatinSpacingFromSkeleton(skeleton as any)
+      return { glyphs, divide }
+    }
+
+    // New glyphGroupWidth = 9 + 14 = 23
+    const centerResult = makeLine(HorizontalAlign.CENTER)
+    expect(centerResult.divide.glyphGroupWidth).toBe(23)
+    expect(centerResult.divide.paddingLeft).toBe((100 - 23) / 2) // 38.5
+
+    const rightResult = makeLine(HorizontalAlign.RIGHT)
+    expect(rightResult.divide.glyphGroupWidth).toBe(23)
+    expect(rightResult.divide.paddingLeft).toBe(100 - 23) // 77
+  })
+
+  it('resets xOffset and scales glyph back to bBox even when adjustGlyphsInDivide shrank width', () => {
+    // When a line wraps, adjustGlyphsInDivide may shrink glyph.width down to <= bBox.width,
+    // but xOffset remains non-zero.
+    const glyphs = [
+      { content: 'A', width: 9, left: 0, bBox: { width: 9 } },
+      { content: '字', width: 13.8, left: 9, xOffset: 3.2, bBox: { width: 14 } },
+    ]
+    const divide = {
+      glyphGroup: glyphs,
+      glyphGroupWidth: 22.8,
+      width: 50,
+      paddingLeft: 0,
+    }
+    const line = { divides: [divide], width: 22.8, paragraphIndex: 0 }
+    const skeleton = {
+      getSkeletonData: () => ({
+        pages: [{ sections: [{ columns: [{ lines: [line] }] }] }],
+      }),
+    }
+
+    removeCjkLatinSpacingFromSkeleton(skeleton as any)
+
+    expect(glyphs[1]!.width).toBe(14)
+    expect((glyphs[1] as any).xOffset).toBe(0)
+    expect(glyphs[1]!.left).toBe(9)
+    expect(divide.glyphGroupWidth).toBe(23)
+  })
+})
+

@@ -50,8 +50,14 @@ import {
 } from './univer-sync'
 import type { LazyWorkbookState, UniverRuntime } from './univer-state'
 import {
+  clearCellImageSelection,
   clearVisualSelection,
   requestVisualFocus,
+  selectCellImage,
+  selectVisual,
+  walkMarker,
+  EMU_PER_PIXEL,
+  type CellImageState,
   type ChartEditData,
   type ChartVectorRead,
   type ShapeEditChanges,
@@ -545,13 +551,18 @@ export function insertAiImageVisual(
   image: { dataUrl: string; mediaType: string; width: number; height: number },
 ): void {
   const workbook = runtime.univerAPI.getActiveWorkbook()
-  if (!workbook?.getSheetBySheetId(op.sheetId)) throw new Error(`Unknown sheet: ${op.sheetId}`)
-  // ~80px per column, ~22px per row; scale down to a ≤480px-wide frame
-  // (same sizing as the picker-based insert).
+  const target = workbook?.getSheetBySheetId(op.sheetId)
+  if (!workbook || !target) throw new Error(`Unknown sheet: ${op.sheetId}`)
   const scale = Math.min(1, 480 / Math.max(1, image.width))
-  const columns = Math.min(16, Math.max(2, Math.round((image.width * scale) / 80)))
-  const rows = Math.min(40, Math.max(2, Math.round((image.height * scale) / 22)))
+  const targetWidth = Math.max(24, Math.round(image.width * scale))
+  const targetHeight = Math.max(24, Math.round(image.height * scale))
+  const columnWidth = (index: number): number => Math.max(target.getColumnWidth(index), 1)
+  const rowHeight = (index: number): number => Math.max(target.getRowHeight(index), 1)
+  const maxColumns = target.getMaxColumns()
+  const maxRows = target.getMaxRows()
   const base = parseAddress(op.anchorCell)
+  const toX = walkMarker({ index: base.column, offset: 0 }, targetWidth, columnWidth, maxColumns - 1)
+  const toY = walkMarker({ index: base.row, offset: 0 }, targetHeight, rowHeight, maxRows - 1)
   const visual: WorkbookVisualObject = {
     id: `added-image-${Date.now().toString(36)}-${state.editJournal.visualAdds.length + 1}`,
     sheetId: op.sheetId,
@@ -561,17 +572,28 @@ export function insertAiImageVisual(
       fromColumn: base.column,
       fromRowOffset: 0,
       fromColumnOffset: 0,
-      toRow: base.row + rows,
-      toColumn: base.column + columns,
-      toRowOffset: 0,
-      toColumnOffset: 0,
+      toRow: toY.index,
+      toColumn: toX.index,
+      toRowOffset: Math.round(toY.offset * EMU_PER_PIXEL),
+      toColumnOffset: Math.round(toX.offset * EMU_PER_PIXEL),
     },
+    frameWidth: Math.round(targetWidth * EMU_PER_PIXEL),
+    frameHeight: Math.round(targetHeight * EMU_PER_PIXEL),
     mediaType: image.mediaType,
     mediaDataUrl: image.dataUrl,
     name: op.path.split('/').pop() ?? 'image',
   }
   pushVisualAddUndo(ctx, runtime, state, visual)
+  requestVisualFocus(visual.id)
   queueCtxVisualInstall(ctx, runtime)
+  console.log('[Sheets/Visual] AI Image inserted:', {
+    id: visual.id,
+    name: visual.name,
+    sheetId: visual.sheetId,
+    anchor: visual.anchor,
+    targetWidth,
+    targetHeight,
+  })
 }
 
 /// AI edit_shape: in-place journal update of a session-added shape,
@@ -678,6 +700,185 @@ export function handleInsertPicture(ctx: VisualActionContext): void {
     if (file) handleInsertPictureFile(ctx, file)
   }
   input.click()
+}
+
+export function handleInsertPictureInCell(ctx: VisualActionContext): void {
+  if (!pictureTargetReady(ctx)) return
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/png,image/jpeg,image/gif'
+  input.onchange = () => {
+    const file = input.files?.[0]
+    if (file) handleInsertPictureInCellFile(ctx, file)
+  }
+  input.click()
+}
+
+export function handleInsertPictureInCellFile(
+  ctx: VisualActionContext,
+  file: File,
+): void {
+  if (!pictureTargetReady(ctx)) return
+  const problem = pictureFileProblem(file)
+  if (problem) {
+    ctx.setMessage(t(problem === 'too-large' ? 'appPictureTooLarge' : 'appPictureBadType'))
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    const dataUrl = typeof reader.result === 'string' ? reader.result : null
+    if (!dataUrl) return
+    insertInCellPicture(ctx, dataUrl, file.name)
+  }
+  reader.readAsDataURL(file)
+}
+
+function insertInCellPicture(
+  ctx: VisualActionContext,
+  dataUrl: string,
+  fileName: string,
+): void {
+  const runtime = ctx.univerRef.current
+  const state = ctx.lazyWorkbookRef.current
+  if (!runtime || !state) return
+  const workbook = runtime.univerAPI.getActiveWorkbook()
+  const worksheet = workbook?.getActiveSheet()
+  const range = workbook?.getActiveRange()
+  if (!workbook || !worksheet || !range) {
+    ctx.setMessage(t('appSelectCellFirst'))
+    return
+  }
+  const sheetId = worksheet.getSheetId()
+  const row = range.getRow()
+  const column = range.getColumn()
+
+  const targetSheetMeta = state.file.sheets.find((s) => s.id === sheetId)
+  if (!targetSheetMeta) return
+
+  const cellImage: CellImageState = {
+    id: `cell-image-added-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    row,
+    column,
+    mediaDataUrl: dataUrl,
+  }
+
+  targetSheetMeta.cellImages = targetSheetMeta.cellImages.filter(
+    (ci) => !(ci.row === row && ci.column === column),
+  )
+  targetSheetMeta.cellImages.push(cellImage)
+
+  selectCellImage(cellImage.id)
+  ctx.setPendingEdits(journalSize(state.editJournal) + 1)
+  ctx.refreshLazyVisuals(state)
+  ctx.setMessage(t('appPictureInserted'))
+  console.log('[Sheets/Visual] In-cell picture inserted:', {
+    id: cellImage.id,
+    sheetId,
+    row,
+    column,
+    fileName,
+  })
+}
+
+export function handleConvertInCellPictureToFloating(
+  ctx: VisualActionContext,
+  image: CellImageState,
+  dataUrl: string,
+): void {
+  const runtime = ctx.univerRef.current
+  const state = ctx.lazyWorkbookRef.current
+  if (!runtime || !state) return
+  const workbook = runtime.univerAPI.getActiveWorkbook()
+  const worksheet = workbook?.getActiveSheet()
+  if (!workbook || !worksheet) return
+  const sheetId = worksheet.getSheetId()
+
+  const targetSheetMeta = state.file.sheets.find((s) => s.id === sheetId)
+  if (targetSheetMeta) {
+    targetSheetMeta.cellImages = targetSheetMeta.cellImages.filter((ci) => ci.id !== image.id)
+  }
+
+  const columnWidth = (index: number): number => Math.max(worksheet.getColumnWidth(index), 1)
+  const rowHeight = (index: number): number => Math.max(worksheet.getRowHeight(index), 1)
+  const cellW = columnWidth(image.column)
+  const cellH = rowHeight(image.row)
+
+  const img = new Image()
+  img.onload = () => {
+    doInsert(img.naturalWidth || cellW * 2, img.naturalHeight || cellH * 2)
+  }
+  img.onerror = () => {
+    doInsert(cellW * 2, cellH * 2)
+  }
+  img.src = dataUrl
+
+  function doInsert(nw: number, nh: number) {
+    if (!runtime || !state || !worksheet) return
+    const row = image.row
+    const column = image.column
+
+    const scale = Math.min(1, 480 / Math.max(1, nw))
+    const targetWidth = Math.max(24, Math.round(nw * scale))
+    const targetHeight = Math.max(24, Math.round(nh * scale))
+    const maxColumns = worksheet.getMaxColumns()
+    const maxRows = worksheet.getMaxRows()
+    const toX = walkMarker({ index: column, offset: 0 }, targetWidth, columnWidth, maxColumns - 1)
+    const toY = walkMarker({ index: row, offset: 0 }, targetHeight, rowHeight, maxRows - 1)
+
+    const visual: WorkbookVisualObject = {
+      id: `added-image-${Date.now().toString(36)}-${state.editJournal.visualAdds.length + 1}`,
+      sheetId,
+      kind: 'image',
+      anchor: {
+        fromRow: row,
+        fromColumn: column,
+        fromRowOffset: 0,
+        fromColumnOffset: 0,
+        toRow: toY.index,
+        toColumn: toX.index,
+        toRowOffset: Math.round(toY.offset * EMU_PER_PIXEL),
+        toColumnOffset: Math.round(toX.offset * EMU_PER_PIXEL),
+      },
+      frameWidth: Math.round(targetWidth * EMU_PER_PIXEL),
+      frameHeight: Math.round(targetHeight * EMU_PER_PIXEL),
+      mediaType: 'image/png',
+      mediaDataUrl: dataUrl,
+      name: 'Picture',
+    }
+    pushVisualAddUndo(ctx, runtime, state, visual)
+    clearCellImageSelection()
+    requestVisualFocus(visual.id)
+    selectVisual(visual)
+    ctx.setPendingEdits(journalSize(state.editJournal))
+    queueCtxVisualInstall(ctx, runtime)
+    ctx.refreshLazyVisuals(state)
+    console.log('[Sheets/Visual] In-cell picture converted to floating:', {
+      id: visual.id,
+      fromCellImageId: image.id,
+      sheetId,
+    })
+  }
+}
+
+export function handleDeleteInCellPicture(
+  ctx: VisualActionContext,
+  image: CellImageState,
+): void {
+  const runtime = ctx.univerRef.current
+  const state = ctx.lazyWorkbookRef.current
+  if (!state) return
+  const workbook = runtime?.univerAPI.getActiveWorkbook()
+  const worksheet = workbook?.getActiveSheet()
+  const sheetId = worksheet?.getSheetId()
+  for (const sheet of state.file.sheets) {
+    if (!sheetId || sheet.id === sheetId) {
+      sheet.cellImages = sheet.cellImages.filter((ci) => ci.id !== image.id)
+    }
+  }
+  clearCellImageSelection()
+  ctx.setPendingEdits(journalSize(state.editJournal) + 1)
+  ctx.refreshLazyVisuals(state)
+  console.log('[Sheets/Visual] In-cell picture deleted:', { id: image.id })
 }
 
 function pictureTargetReady(ctx: VisualActionContext): boolean {
@@ -880,9 +1081,20 @@ function insertPictureVisual(
   }
   const sheetId = worksheet.getSheetId()
   if (isSheetRemoved(state.editJournal, sheetId)) return
-  const { columns, rows } = fitPictureFrame(naturalWidth, naturalHeight)
   const row = anchor?.row ?? range.getRow()
   const column = anchor?.column ?? range.getColumn()
+
+  // Sizing: preserve natural aspect ratio, scale down to <= 480px width
+  const scale = Math.min(1, 480 / Math.max(1, naturalWidth))
+  const targetWidth = Math.max(24, Math.round(naturalWidth * scale))
+  const targetHeight = Math.max(24, Math.round(naturalHeight * scale))
+  const columnWidth = (index: number): number => Math.max(worksheet.getColumnWidth(index), 1)
+  const rowHeight = (index: number): number => Math.max(worksheet.getRowHeight(index), 1)
+  const maxColumns = worksheet.getMaxColumns()
+  const maxRows = worksheet.getMaxRows()
+  const toX = walkMarker({ index: column, offset: 0 }, targetWidth, columnWidth, maxColumns - 1)
+  const toY = walkMarker({ index: row, offset: 0 }, targetHeight, rowHeight, maxRows - 1)
+
   const visual: WorkbookVisualObject = {
     id: `added-image-${Date.now().toString(36)}-${state.editJournal.visualAdds.length + 1}`,
     sheetId,
@@ -892,17 +1104,28 @@ function insertPictureVisual(
       fromColumn: column,
       fromRowOffset: 0,
       fromColumnOffset: 0,
-      toRow: row + rows,
-      toColumn: column + columns,
-      toRowOffset: 0,
-      toColumnOffset: 0,
+      toRow: toY.index,
+      toColumn: toX.index,
+      toRowOffset: Math.round(toY.offset * EMU_PER_PIXEL),
+      toColumnOffset: Math.round(toX.offset * EMU_PER_PIXEL),
     },
+    frameWidth: Math.round(targetWidth * EMU_PER_PIXEL),
+    frameHeight: Math.round(targetHeight * EMU_PER_PIXEL),
     mediaType,
     mediaDataUrl: dataUrl,
     name: fileName,
   }
   pushVisualAddUndo(ctx, runtime, state, visual)
+  requestVisualFocus(visual.id)
   ctx.setPendingEdits(journalSize(state.editJournal))
   queueCtxVisualInstall(ctx, runtime)
+  console.log('[Sheets/Visual] Picture inserted:', {
+    id: visual.id,
+    name: visual.name,
+    sheetId: visual.sheetId,
+    anchor: visual.anchor,
+    targetWidth,
+    targetHeight,
+  })
   ctx.setMessage(t('appPictureInserted'))
 }

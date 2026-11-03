@@ -1,13 +1,8 @@
 import { useCallback, useState } from 'react'
+import type { Lang } from '@genoffice/i18n'
+import { BUILTIN_FONT_FAMILIES, fontFamiliesFor } from '@genoffice/ui'
 
-export const DEFAULT_FONT_FAMILIES: readonly string[] = [
-  'Aptos',
-  'Arial',
-  'Calibri',
-  'Times New Roman',
-  '微软雅黑',
-  '宋体',
-]
+export const DEFAULT_FONT_FAMILIES: readonly string[] = BUILTIN_FONT_FAMILIES
 
 let cached: readonly string[] | null = null
 let pending: Promise<readonly string[]> | null = null
@@ -55,11 +50,13 @@ export function useSystemFontFamilies(): {
 export function fontFamilyGroups(
   systemFamilies: readonly string[],
   echoFamily: string | null | undefined,
+  lang?: Lang,
 ): { readonly common: readonly string[]; readonly system: readonly string[] } {
+  const common = fontFamiliesFor(lang ?? 'en')
   const known =
-    !echoFamily || DEFAULT_FONT_FAMILIES.includes(echoFamily) || systemFamilies.includes(echoFamily)
+    !echoFamily || common.includes(echoFamily) || systemFamilies.includes(echoFamily)
   return {
-    common: known ? DEFAULT_FONT_FAMILIES : [echoFamily, ...DEFAULT_FONT_FAMILIES],
+    common: known ? common : [echoFamily, ...common],
     system: systemFamilies,
   }
 }

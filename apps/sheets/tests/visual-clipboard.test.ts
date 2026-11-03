@@ -118,4 +118,60 @@ describe('visual clipboard payload', () => {
     })
     expect(placed.chart?.series[0]?.values).toEqual([1, 2])
   })
+
+  it('preserves exact pixel width and height when pasted with target sheet geometry', () => {
+    // 350px wide x 220px high picture
+    const pixelWidth = 350
+    const pixelHeight = 220
+    const payload = visualToPayload(
+      image,
+      'Sheet1',
+      'book-1',
+      'data:image/png;base64,AAAA',
+      pixelWidth,
+      pixelHeight,
+    )!
+    expect(payload.pixelWidth).toBe(350)
+    expect(payload.pixelHeight).toBe(220)
+
+    // Destination sheet has column width 100px and row height 50px
+    const geometry = {
+      columnWidth: () => 100,
+      rowHeight: () => 50,
+      maxColumns: 100,
+      maxRows: 100,
+    }
+
+    const placed = visualFromPayload(
+      payload,
+      {
+        id: 'added-picture-9',
+        sheetId: 'sheet-2',
+        row: 5,
+        column: 2,
+      },
+      geometry,
+    )
+
+    // With 350px starting at column 2 (index 2):
+    // col 2: 100px (remaining 250px)
+    // col 3: 100px (remaining 150px)
+    // col 4: 100px (remaining 50px)
+    // col 5: 50px offset -> toColumn: 5, toColumnOffset: 50 * EMU_PER_PIXEL (50 * 9525 = 476250)
+    // With 220px starting at row 5 (index 5):
+    // row 5: 50px (remaining 170px)
+    // row 6: 50px (remaining 120px)
+    // row 7: 50px (remaining 70px)
+    // row 8: 50px (remaining 20px)
+    // row 9: 20px offset -> toRow: 9, toRowOffset: 20 * EMU_PER_PIXEL (20 * 9525 = 190500)
+    expect(placed.anchor.fromRow).toBe(5)
+    expect(placed.anchor.fromColumn).toBe(2)
+    expect(placed.anchor.toColumn).toBe(5)
+    expect(placed.anchor.toColumnOffset).toBe(50 * 9525)
+    expect(placed.anchor.toRow).toBe(9)
+    expect(placed.anchor.toRowOffset).toBe(20 * 9525)
+    expect(placed.frameWidth).toBe(350 * 9525)
+    expect(placed.frameHeight).toBe(220 * 9525)
+  })
 })
+

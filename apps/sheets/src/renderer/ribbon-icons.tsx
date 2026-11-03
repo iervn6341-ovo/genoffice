@@ -26,15 +26,14 @@ function Icon({ children }: { readonly children: ReactNode }): ReactElement {
   )
 }
 
-/// Thin dropdown chevron, copied from the slides ribbon's
-/// RbCaret (replaces the ▾ text glyph).
+/// Dropdown chevron, matching ribbon caret standard (crisp at 10-12px)
 export function CaretIcon(): ReactElement {
   return (
     <svg className="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M5.5 9.25 12 15.75l6.5-6.5"
         stroke="currentColor"
-        strokeWidth="1.5"
+        strokeWidth="2.2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

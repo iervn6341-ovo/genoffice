@@ -241,3 +241,77 @@ describe('use-in-formula cell guard', () => {
     expect(writes).toEqual([{ f: '=Revenue' }])
   })
 })
+
+describe('handleRibbonCommand merge', () => {
+  function makeMergeHarness(options?: { isMerged?: boolean }) {
+    const mergeCalls: string[] = []
+    const range = {
+      getRow: () => 0,
+      getColumn: () => 0,
+      getWidth: () => 2,
+      getHeight: () => 2,
+      getCellStyleData: () => ({}),
+      setHorizontalAlignment: (val: string) => {
+        mergeCalls.push(`align:${val}`)
+      },
+      merge: () => {
+        mergeCalls.push('merge')
+      },
+      mergeAcross: () => {
+        mergeCalls.push('mergeAcross')
+      },
+    }
+    const mergedRange = {
+      getRow: () => 0,
+      getColumn: () => 0,
+      getWidth: () => 2,
+      getHeight: () => 2,
+    }
+    const sheet = {
+      getSheetId: () => 'sheet-1',
+      getRange: () => range,
+      getMergedRanges: () => (options?.isMerged ? [mergedRange] : []),
+      getMergeData: () => [],
+    }
+    const workbook = {
+      getActiveSheet: () => sheet,
+      getActiveRange: () => range,
+    }
+    const runtime = { univerAPI: { getActiveWorkbook: () => workbook } }
+    const messages: string[] = []
+    const ctx = {
+      univerRef: { current: runtime },
+      setMessage: (msg: string) => {
+        messages.push(msg)
+      },
+      lazyWorkbookRef: { current: null },
+    } as unknown as RibbonCommandContext
+    return { ctx, mergeCalls, messages }
+  }
+
+  it('merge:default merges and centers when unmerged', () => {
+    const { ctx, mergeCalls } = makeMergeHarness({ isMerged: false })
+    handleRibbonCommand(ctx, 'merge:default')
+    expect(mergeCalls).toContain('merge')
+    expect(mergeCalls).toContain('align:center')
+  })
+
+  it('merge:default unmerges when already merged', () => {
+    const { ctx, mergeCalls } = makeMergeHarness({ isMerged: true })
+    handleRibbonCommand(ctx, 'merge:default')
+    expect(mergeCalls).not.toContain('merge')
+  })
+
+  it('merge:across calls mergeAcross', () => {
+    const { ctx, mergeCalls } = makeMergeHarness()
+    handleRibbonCommand(ctx, 'merge:across')
+    expect(mergeCalls).toEqual(['mergeAcross'])
+  })
+
+  it('merge:cells calls merge without centering', () => {
+    const { ctx, mergeCalls } = makeMergeHarness()
+    handleRibbonCommand(ctx, 'merge:cells')
+    expect(mergeCalls).toEqual(['merge'])
+  })
+})
+

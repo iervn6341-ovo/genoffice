@@ -1149,7 +1149,7 @@ export function swapPosition(position: number, swap: SwapSpans): number {
   return position
 }
 
-function toRowColumnShift(op: {
+export function toRowColumnShift(op: {
   kind: string
   index: number
   count: number
@@ -1171,12 +1171,26 @@ function toRowColumnShift(op: {
 function moveAnchorMark(
   position: number,
   shift: RowColumnShift,
+  isEnd = false,
+  offset = 0,
 ): { position: number; clamped: boolean } {
   if (shift.removing) {
     if (position >= shift.index + shift.count) {
       return { position: position - shift.count, clamped: false }
     }
-    if (position >= shift.index) return { position: shift.index, clamped: true }
+    if (position >= shift.index) {
+      // If this is an end marker with 0 offset at the start of the removed span,
+      // the removed columns/rows are strictly to the right/below the visual.
+      if (isEnd && offset === 0 && position === shift.index) {
+        return { position, clamped: false }
+      }
+      return { position: shift.index, clamped: true }
+    }
+    return { position, clamped: false }
+  }
+  // When inserting: if an end marker lands exactly on shift.index with offset 0,
+  // the visual ends before the inserted columns/rows. Do not shift it.
+  if (isEnd && offset === 0 && position === shift.index) {
     return { position, clamped: false }
   }
   return {
@@ -1185,7 +1199,7 @@ function moveAnchorMark(
   }
 }
 
-function shiftVisualAnchor(
+export function shiftVisualAnchor(
   anchor: WorkbookVisualObject['anchor'],
   shift: RowColumnShift,
 ): WorkbookVisualObject['anchor'] {
@@ -1202,8 +1216,18 @@ function shiftVisualAnchor(
     const mappedFrom = swapPosition(fromRow, shift.swap)
     return { ...anchor, fromRow: mappedFrom, toRow: mappedFrom + (toRow - fromRow) }
   }
-  const from = moveAnchorMark(shift.axis === 'row' ? anchor.fromRow : anchor.fromColumn, shift)
-  const to = moveAnchorMark(shift.axis === 'row' ? anchor.toRow : anchor.toColumn, shift)
+  const from = moveAnchorMark(
+    shift.axis === 'row' ? anchor.fromRow : anchor.fromColumn,
+    shift,
+    false,
+    shift.axis === 'row' ? anchor.fromRowOffset : anchor.fromColumnOffset,
+  )
+  const to = moveAnchorMark(
+    shift.axis === 'row' ? anchor.toRow : anchor.toColumn,
+    shift,
+    true,
+    shift.axis === 'row' ? anchor.toRowOffset : anchor.toColumnOffset,
+  )
   return shift.axis === 'row'
     ? {
         ...anchor,
@@ -1298,6 +1322,18 @@ export function shiftVisualForStructuralOp(
   const shift = toRowColumnShift(op)
   const anchor =
     visual.sheetId === sheetId ? shiftVisualAnchor(visual.anchor, shift) : visual.anchor
+  if (visual.sheetId === sheetId && anchor !== visual.anchor) {
+    console.log('[Sheets/Visual] Shifted visual anchor for structural op:', {
+      visualId: visual.id,
+      kind: visual.kind,
+      op: op.kind,
+      axis: shift.axis,
+      index: shift.index,
+      count: shift.count,
+      before: visual.anchor,
+      after: anchor,
+    })
+  }
   const chart =
     visual.chart === undefined || sheetName === undefined
       ? visual.chart
@@ -1306,6 +1342,43 @@ export function shiftVisualForStructuralOp(
           series: visual.chart.series.map((series) => shiftSeriesEntry(series, sheetName, shift)),
         }
   return { ...visual, anchor, ...(chart === undefined ? {} : { chart }) }
+}
+
+/// Computes the moved position along an axis for a cell under a structural op,
+/// returning null if the cell's row/column was deleted.
+export function shiftCellPositionForStructuralOp(
+  position: number,
+  op: StructuralJournalOp,
+): number | null {
+  if (!('index' in op)) return position
+  const rowColumnOp = op
+  const removing = op.kind === 'remove-rows' || op.kind === 'remove-cols'
+  const swap = rowColumnOp.kind === 'move-rows' ? toSwapSpans(rowColumnOp) : null
+  const { index, count } = rowColumnOp
+  if (swap) return swapPosition(position, swap)
+  if (removing) {
+    if (position >= index && position < index + count) return null
+    return position >= index + count ? position - count : position
+  }
+  return position >= index ? position + count : position
+}
+
+/// Shifts in-cell images coordinates for a structural row/column op.
+export function shiftCellImagesForStructuralOp<T extends { row: number; column: number }>(
+  images: readonly T[],
+  op: StructuralJournalOp,
+): T[] {
+  if (!('index' in op)) return [...images]
+  const axis = op.kind === 'insert-cols' || op.kind === 'remove-cols' ? 'column' : 'row'
+  const shifted: T[] = []
+  for (const image of images) {
+    const pos = axis === 'row' ? image.row : image.column
+    const moved = shiftCellPositionForStructuralOp(pos, op)
+    if (moved !== null) {
+      shifted.push(axis === 'row' ? { ...image, row: moved } : { ...image, column: moved })
+    }
+  }
+  return shifted
 }
 
 /// Records a row/column insert/removal and shifts existing cell entries into

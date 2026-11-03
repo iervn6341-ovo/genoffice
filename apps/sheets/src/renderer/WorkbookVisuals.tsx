@@ -101,7 +101,13 @@ export function isEditableShape(visual: WorkbookVisualObject): boolean {
 /// Pictures pasted or inserted this session move/resize/delete the same way
 /// (no text editing).
 export function isEditableAddedImage(visual: WorkbookVisualObject): boolean {
-  return visual.kind === 'image' && visual.id.startsWith('added-image-')
+  return (
+    visual.kind === 'image' &&
+    (visual.id.startsWith('added-image-') ||
+      visual.id.startsWith('ai-image-') ||
+      visual.id.startsWith('pasted-image-') ||
+      visual.id.startsWith('added-'))
+  )
 }
 
 export function isEditableAddedEquation(visual: WorkbookVisualObject): boolean {
@@ -208,7 +214,8 @@ export function installWorkbookVisuals(
       isEditableAddedImage(visual) ||
       isEditableAddedEquation(visual) ||
       isEditableFileVisual(visual) ||
-      isEditableChart(visual)
+      isEditableChart(visual) ||
+      visual.kind === 'image'
     // Lazy grids are sized to the data, but session-added visuals anchor
     // beyond it (default: two columns right of the data) — grow the grid so
     // the float keeps its frame instead of being clamped into a sliver.
@@ -437,11 +444,52 @@ export interface CellImageState {
   readonly id: string
   readonly row: number
   readonly column: number
+  readonly mediaDataUrl?: string
 }
 
-/// In-cell rich-value pictures ("place picture in cell"): one pass-through
-/// float DOM per host cell, bytes fetched through the same media IPC as
-/// floating images.
+export interface CellImageActions {
+  readonly onSelect?: (image: CellImageState) => void
+  readonly onConvertToFloating?: (image: CellImageState, url: string) => void
+  readonly onDelete?: (image: CellImageState) => void
+}
+
+let activeCellImageActions: CellImageActions | null = null
+
+export function setCellImageActions(actions: CellImageActions | null): void {
+  activeCellImageActions = actions
+}
+
+let selectedCellImageId: string | null = null
+const cellImageSelectionSubscribers = new Set<() => void>()
+let selectingCellImageTimestamp = 0
+
+export function selectCellImage(id: string | null): void {
+  if (id) {
+    selectingCellImageTimestamp = Date.now()
+  }
+  if (id !== selectedCellImageId) {
+    selectedCellImageId = id
+    for (const notify of cellImageSelectionSubscribers) notify()
+  }
+}
+
+export function clearCellImageSelection(): void {
+  if (Date.now() - selectingCellImageTimestamp < 200) return
+  selectCellImage(null)
+}
+
+function useIsCellImageSelected(id: string): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      cellImageSelectionSubscribers.add(notify)
+      return () => cellImageSelectionSubscribers.delete(notify)
+    },
+    () => selectedCellImageId === id,
+  )
+}
+
+/// In-cell rich-value pictures ("place picture in cell"): one float DOM per host
+/// cell, with selection, host cell activation, and convert-to-floating actions.
 export function installCellImages(
   runtime: UniverRuntime,
   sessionId: string,
@@ -457,13 +505,19 @@ export function installCellImages(
     const componentKey = `cell-image-${sessionId}-${sheetId}-${image.id}`
     disposables.push(
       runtime.univerAPI.registerComponent(componentKey, () => (
-        <CellImage sessionId={sessionId} imageId={image.id} />
+        <CellImage
+          sessionId={sessionId}
+          imageId={image.id}
+          image={image}
+          worksheet={worksheet}
+          actions={activeCellImageActions}
+        />
       )),
     )
     const range = worksheet.getRange(image.row, image.column, 1, 1)
     const floating = worksheet.addFloatDomToRange(
       range,
-      { componentKey, allowTransform: false, eventPassThrough: true },
+      { componentKey, allowTransform: false, eventPassThrough: false },
       {},
       componentKey,
     )
@@ -473,19 +527,90 @@ export function installCellImages(
 }
 
 /// Excel fits the picture inside the cell box, preserving its aspect ratio;
-/// while the bytes load the cell just stays blank.
+/// clicking selects the image element and activates the host cell.
 function CellImage({
   sessionId,
   imageId,
+  image,
+  worksheet,
+  actions,
 }: {
   readonly sessionId: string
   readonly imageId: string
+  readonly image: CellImageState
+  readonly worksheet: any
+  readonly actions?: CellImageActions | null
 }): React.JSX.Element | null {
-  const { url, unavailable } = useWorkbookMediaUrl(sessionId, imageId)
-  if (unavailable || !url) return null
+  const { url, unavailable } = useWorkbookMediaUrl(
+    image.mediaDataUrl ? undefined : sessionId,
+    imageId,
+  )
+  const source = image.mediaDataUrl ?? url
+  const isSelected = useIsCellImageSelected(image.id)
+  const currentActions = actions ?? activeCellImageActions
+
+  if (unavailable || !source) return null
+
+  const handlePointerDown = (event: React.PointerEvent) => {
+    event.stopPropagation()
+    selectCellImage(image.id)
+    try {
+      worksheet.getRange(image.row, image.column, 1, 1).activate()
+    } catch {
+      // Ignore
+    }
+    currentActions?.onSelect?.(image)
+  }
+
   return (
-    <div className="xlsx-cell-image">
-      <img src={url} alt="" />
+    <div
+      className={`xlsx-cell-image ${isSelected ? 'selected' : ''}`}
+      tabIndex={0}
+      onPointerDown={handlePointerDown}
+      onClick={(e) => {
+        e.stopPropagation()
+        selectCellImage(image.id)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          event.preventDefault()
+          event.stopPropagation()
+          currentActions?.onDelete?.(image)
+        }
+      }}
+    >
+      <img src={source} alt="" draggable={false} />
+      {isSelected && (
+        <div className={`xlsx-cell-image-toolbar ${image.row === 0 ? 'bottom' : ''}`}>
+          <button
+            type="button"
+            className="xlsx-cell-image-action-btn"
+            title="放置於儲存格上 (轉換為浮動圖片)"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              currentActions?.onConvertToFloating?.(image, source)
+            }}
+          >
+            <span className="btn-icon">🖼</span>
+            <span>放置於儲存格上</span>
+          </button>
+          {currentActions?.onDelete && (
+            <button
+              type="button"
+              className="xlsx-cell-image-action-btn delete"
+              title="刪除圖片"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                currentActions.onDelete?.(image)
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -697,9 +822,14 @@ let selectedVisualId: string | null = null
 const selectionSubscribers = new Set<() => void>()
 let selectionListener: VisualSelectionListener | null = null
 
-function selectVisual(visual: WorkbookVisualObject | null): void {
+export function selectVisual(visual: WorkbookVisualObject | null): void {
   const nextId = visual?.id ?? null
   if (nextId !== selectedVisualId) {
+    console.log('[Sheets/Visual] Visual selection changed:', {
+      from: selectedVisualId,
+      to: nextId,
+      kind: visual?.kind ?? null,
+    })
     selectedVisualId = nextId
     for (const notify of selectionSubscribers) notify()
     // Element selection never outlives its chart's selection.
@@ -716,7 +846,9 @@ function selectVisual(visual: WorkbookVisualObject | null): void {
 /// (deleting one visual must not deselect another).
 export function clearVisualSelection(onlyId?: string): void {
   if (onlyId !== undefined && onlyId !== selectedVisualId) return
+  console.log('[Sheets/Visual] Clear visual selection:', { onlyId, currentSelected: selectedVisualId })
   selectVisual(null)
+  clearCellImageSelection()
   // the selected node held focus and is going away: keep the keyboard in the workbook
   scheduleGridFocusReturn()
 }
@@ -890,7 +1022,7 @@ export function clampExplicitTo(
 }
 
 /// Pixel distance between two markers (negative when `to` sits before `from`).
-function markerSpan(
+export function markerSpan(
   from: AnchorMarker,
   to: AnchorMarker,
   sizeOf: (index: number) => number,
@@ -1142,6 +1274,8 @@ function EditableShapeVisual({
         if (textEditing || event.button !== 0) return
         // Chart editor buttons/inputs keep their own interactions.
         if ((event.target as HTMLElement).closest('button, .chart-editor')) return
+        selectVisual(visual)
+        console.log('[Sheets/Visual] Pointer down on visual:', { id: visual.id, kind: visual.kind })
         const handleCorner = (event.target as HTMLElement).dataset['corner'] as
           ResizeCorner | undefined
         const mode = handleCorner ? ('resize' as const) : ('move' as const)
@@ -1203,6 +1337,18 @@ function EditableShapeVisual({
           event.stopPropagation()
           onEdit(visual.id, { remove: true })
           clearVisualSelection(visual.id)
+        } else if ((event.metaKey || event.ctrlKey) && (event.key === 'c' || event.key === 'C')) {
+          if (visualClipboardListener) {
+            event.preventDefault()
+            event.stopPropagation()
+            visualClipboardListener.copy(visual, false)
+          }
+        } else if ((event.metaKey || event.ctrlKey) && (event.key === 'x' || event.key === 'X')) {
+          if (visualClipboardListener) {
+            event.preventDefault()
+            event.stopPropagation()
+            visualClipboardListener.copy(visual, true)
+          }
         } else if ((event.key === 'Enter' || event.key === 'F2') && visual.kind === 'equation') {
           event.preventDefault()
           equationEditListener?.(visual)
@@ -1276,19 +1422,22 @@ function EditableShapeVisual({
         setDrag(null)
         setDragActive(false)
       }}
-      onClick={
-        visual.kind === 'equation'
-          ? (event) => {
-              if (
-                event.detail !== 2 ||
-                (event.target as HTMLElement).closest('button, .shape-handle')
-              )
-                return
-              event.stopPropagation()
-              equationEditListener?.(visual)
-            }
-          : undefined
-      }
+      onClick={(event) => {
+        if (textEditing) return
+        const dx = moveDeltaRef.current.dx
+        const dy = moveDeltaRef.current.dy
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) return
+        selectVisual(visual)
+        if (visual.kind === 'equation') {
+          if (
+            event.detail !== 2 ||
+            (event.target as HTMLElement).closest('button, .shape-handle')
+          )
+            return
+          event.stopPropagation()
+          equationEditListener?.(visual)
+        }
+      }}
       onDoubleClick={
         allowText
           ? () => setTextEditing(true)
@@ -1791,6 +1940,7 @@ function ImageVisual({
         <img
           src={source}
           alt={visual.name ?? t('appWorkbookImageAlt')}
+          draggable={false}
           style={{
             width: `${100 / visibleWidth}%`,
             height: `${100 / visibleHeight}%`,
@@ -1808,6 +1958,7 @@ function ImageVisual({
       src={source}
       alt={visual.name ?? t('appWorkbookImageAlt')}
       style={opacity}
+      draggable={false}
     />
   )
 }

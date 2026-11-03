@@ -23,7 +23,13 @@ import {
   type VisualActionContext,
 } from './visual-actions'
 import type { LazyWorkbookState } from './univer-state'
-import { requestVisualFocus } from './WorkbookVisuals'
+import {
+  clampExplicitTo,
+  markerFrom,
+  markerSpan,
+  requestVisualFocus,
+  EMU_PER_PIXEL,
+} from './WorkbookVisuals'
 
 /// The object as the save would write it now: the file's own visual with this session's anchor
 /// and chart edits applied, or the session-added one.
@@ -76,7 +82,13 @@ async function mediaDataUrlOf(
 
 async function pngBlobOf(dataUrl: string): Promise<Blob | null> {
   try {
-    const blob = await (await fetch(dataUrl)).blob()
+    const comma = dataUrl.indexOf(',')
+    if (comma === -1) return null
+    const mimeMatch = /^data:([^;]+)/.exec(dataUrl)
+    const mime = (mimeMatch && mimeMatch[1]) ? mimeMatch[1] : 'application/octet-stream'
+    const bytes = base64ToBytes(dataUrl.slice(comma + 1))
+    const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    const blob = new Blob([arrayBuffer as ArrayBuffer], { type: mime })
     if (blob.type === 'image/png') return blob
     const bitmap = await createImageBitmap(blob)
     const canvas = document.createElement('canvas')
@@ -99,11 +111,47 @@ export async function copyVisualObject(
   const runtime = ctx.univerRef.current
   if (!state || !runtime) return false
   const effective = effectiveVisual(state, visual)
-  const sheetName =
-    runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(effective.sheetId)?.getSheetName() ??
-    ''
+  const workbook = runtime.univerAPI.getActiveWorkbook()
+  const worksheet = workbook?.getSheetBySheetId(effective.sheetId)
+  const sheetName = worksheet?.getSheetName() ?? ''
   const dataUrl = await mediaDataUrlOf(state, effective)
-  const payload = visualToPayload(effective, sheetName, state.file.sessionId, dataUrl)
+
+  const columnWidth = (index: number): number => Math.max(worksheet?.getColumnWidth(index) ?? 72, 1)
+  const rowHeight = (index: number): number => Math.max(worksheet?.getRowHeight(index) ?? 20, 1)
+  const marginX = Math.max(0, effective.anchor.fromColumnOffset / EMU_PER_PIXEL)
+  const marginY = Math.max(0, effective.anchor.fromRowOffset / EMU_PER_PIXEL)
+  const explicitTo = effective.anchor.explicitTo === true
+  const pixelWidth = effective.frameWidth
+    ? Math.round(effective.frameWidth / EMU_PER_PIXEL)
+    : markerSpan(
+        { index: effective.anchor.fromColumn, offset: marginX },
+        clampExplicitTo(
+          markerFrom(effective.anchor.toColumn, effective.anchor.toColumnOffset),
+          explicitTo,
+          columnWidth,
+        ),
+        columnWidth,
+      )
+  const pixelHeight = effective.frameHeight
+    ? Math.round(effective.frameHeight / EMU_PER_PIXEL)
+    : markerSpan(
+        { index: effective.anchor.fromRow, offset: marginY },
+        clampExplicitTo(
+          markerFrom(effective.anchor.toRow, effective.anchor.toRowOffset),
+          explicitTo,
+          rowHeight,
+        ),
+        rowHeight,
+      )
+
+  const payload = visualToPayload(
+    effective,
+    sheetName,
+    state.file.sessionId,
+    dataUrl,
+    pixelWidth > 0 ? pixelWidth : undefined,
+    pixelHeight > 0 ? pixelHeight : undefined,
+  )
   if (!payload) {
     ctx.setMessage(t('appVisualCannotCopy'))
     return false
@@ -119,9 +167,21 @@ export async function copyVisualObject(
   }
   try {
     await navigator.clipboard.write([new ClipboardItem(items)])
-  } catch {
-    ctx.setMessage(t('appVisualCannotCopy'))
-    return false
+  } catch (err) {
+    if (items['image/png']) {
+      try {
+        delete items['image/png']
+        await navigator.clipboard.write([new ClipboardItem(items)])
+      } catch (retryErr) {
+        console.error('[Sheets/Visual] Clipboard write retry failed:', retryErr)
+        ctx.setMessage(t('appVisualCannotCopy'))
+        return false
+      }
+    } else {
+      console.error('[Sheets/Visual] Clipboard write failed:', err)
+      ctx.setMessage(t('appVisualCannotCopy'))
+      return false
+    }
   }
   if (cut) ctx.shapeEditRef.current(visual.id, { remove: true })
   return true
@@ -139,6 +199,12 @@ export function pasteVisualPayload(ctx: VisualActionContext, payload: VisualPayl
   const sheet = workbook?.getActiveSheet()
   if (!workbook || !sheet) return false
   const active = workbook.getActiveRange()
+
+  const columnWidth = (index: number): number => Math.max(sheet.getColumnWidth(index), 1)
+  const rowHeight = (index: number): number => Math.max(sheet.getRowHeight(index), 1)
+  const maxColumns = sheet.getMaxColumns()
+  const maxRows = sheet.getMaxRows()
+
   const visual = visualFromPayload(
     // a chart's cell references name a sheet of the workbook it was copied from
     {
@@ -151,6 +217,7 @@ export function pasteVisualPayload(ctx: VisualActionContext, payload: VisualPayl
       row: active?.getRow() ?? 0,
       column: active?.getColumn() ?? 0,
     },
+    { columnWidth, rowHeight, maxColumns, maxRows },
   )
   pushVisualAddUndo(ctx, runtime, state, visual)
   requestVisualFocus(visual.id)

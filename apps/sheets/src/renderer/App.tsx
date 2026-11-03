@@ -273,6 +273,8 @@ import {
 import type { ChartRecommendations } from '@genoffice/xlsx-gateway/domain/chart-recommend'
 import {
   cellAtClientPoint,
+  handleConvertInCellPictureToFloating,
+  handleDeleteInCellPicture,
   handleInsertChart as handleInsertChartImpl,
   handleInsertEquation as handleInsertEquationImpl,
   handleInsertIcon as handleInsertIconImpl,
@@ -332,7 +334,11 @@ import { installSheetRenameFix } from './sheet-rename-fix'
 import { installArrowCollapse } from './arrow-collapse-fix'
 import { installSheetTabContextMenu } from './sheet-tab-context-menu'
 import { IContextMenuService } from '@univerjs/ui'
-import { ISheetSelectionRenderService } from '@univerjs/sheets-ui'
+import {
+  IEditorBridgeService,
+  ISheetSelectionRenderService,
+  SheetCellEditorResizeService,
+} from '@univerjs/sheets-ui'
 import { installContextMenuResizeClose } from './context-menu-resize-close'
 import { installSelectionGrabGuard } from './selection-grab-guard'
 import { installMacCommandMultiSelect } from './mac-command-multiselect'
@@ -344,6 +350,7 @@ import { installSelectionWrapGuard } from './selection-wrap-fix'
 import { sharedFormulaResolverFor } from './shared-formula-journal'
 import { installCellClipAnchorFix } from './cell-clip-anchor-fix'
 import { installCellEditorOverlayFix } from './cell-editor-overlay-fix'
+import { installCellEditorScrollFollow } from './cell-editor-scroll-follow'
 import { installHeaderLabelClip } from './header-label-clip'
 import { installBorderOverflowExclusionFix } from './border-overflow-exclusion'
 import { installCfEmptySheetFastPath } from './cf-empty-fast-path'
@@ -374,6 +381,7 @@ import { installForceStringMarkGate, installLongTextRender } from './long-text-r
 import { installAutofitWrapBudget } from './autofit-wrap-budget'
 import { installAutofitLinePitch } from './autofit-line-pitch'
 import { installHeaderUnhideDebounce } from './load-perf-patches'
+import { installHeaderResizeTooltip } from './header-resize-tooltip'
 import { installCopyAnimationIdle } from './copy-animation-idle'
 import { installNumberAsTextAlertSeverity } from './number-as-text-alert'
 import { installFormulaStreamHold } from './formula-stream-hold'
@@ -467,6 +475,7 @@ import {
   recordSheetRemove,
   recordSheetRename,
   recordStructuralOp,
+  shiftCellImagesForStructuralOp,
   shiftVisualForStructuralOp,
   toSaveEdits,
 } from './edit-journal'
@@ -530,16 +539,25 @@ import { WatchWindowPanel, watchKey, type WatchCell, type WatchRowValue } from '
 import { TimelineFieldPicker, TimelinePanels, type TimelineUiState } from './TimelinePanel'
 import type { DefinedNameAction, DefinedNameRow } from './NameManagerDialog'
 import {
+  clearCellImageSelection,
   clearVisualSelection,
   convertibleType,
   getChartElementSelection,
   installWorkbookVisuals,
   isVisualDragActive,
+  requestVisualFocus,
+  selectCellImage,
+  selectVisual,
+  setCellImageActions,
   setChartDialogListener,
   setEquationEditListener,
   setVisualClipboardListener,
   setVisualSelectionListener,
   subscribeChartElementSelection,
+  walkMarker,
+  EMU_PER_PIXEL,
+  type CellImageActions,
+  type CellImageState,
   type ChartDialogKind,
   type ChartEditData,
   type ChartVectorRead,
@@ -1105,12 +1123,22 @@ export function App(): React.JSX.Element {
       setSelectedVisual(visual)
       setEquationDialogOpen(true)
     })
+    setCellImageActions({
+      onSelect: () => setSelectedVisual(null),
+      onConvertToFloating: (image, url) => {
+        handleConvertInCellPictureToFloating(visualContext(), image, url)
+      },
+      onDelete: (image) => {
+        handleDeleteInCellPicture(visualContext(), image)
+      },
+    })
     return () => {
       setVisualSelectionListener(null)
       setGridFocusHandler(null)
       setVisualClipboardListener(null)
       setChartDialogListener(null)
       setEquationEditListener(null)
+      setCellImageActions(null)
     }
   }, [])
 
@@ -1778,6 +1806,7 @@ export function App(): React.JSX.Element {
     // canvas line box (Calibri 10: 12.75 pt per line, not ~10 pt).
     installAutofitLinePitch()
     installHeaderUnhideDebounce()
+    installHeaderResizeTooltip()
     // The dashed border on a copied range is a per-frame animation. It must
     // not keep repainting the scene while nobody is looking at it.
     installCopyAnimationIdle()
@@ -1899,7 +1928,10 @@ export function App(): React.JSX.Element {
         try {
           const unitId = runtime.univerAPI.getActiveWorkbook()?.getId()
           if (!unitId) return []
-          const render = runtime.univer.__getInjector().get(IRenderManagerService).getRenderById(unitId)
+          const render = runtime.univer
+            .__getInjector()
+            .get(IRenderManagerService)
+            .getRenderById(unitId)
           return render?.with(ISheetSelectionRenderService).getSelectionControls() ?? []
         } catch {
           return []
@@ -1980,6 +2012,15 @@ export function App(): React.JSX.Element {
     crossHighlightRef.current = installCrossHighlight(runtime, {
       theme: () => (contentDarkRef.current ? 'dark' : 'light'),
     })
+    // The in-cell editor scrolls away with its cell like Excel (Univer leaves it where it opened)
+    const editorScrollFollowDispose = installCellEditorScrollFollow({
+      bridge: runtime.univer.__getInjector().get(IEditorBridgeService),
+      resize: runtime.univer.__getInjector().get(SheetCellEditorResizeService),
+      onScroll: (handler) => {
+        const sub = runtime.univerAPI.addEvent(runtime.univerAPI.Event.Scroll, handler)
+        return () => sub.dispose()
+      },
+    })
     const scrollDisposable = runtime.univerAPI.addEvent(
       runtime.univerAPI.Event.Scroll,
       (params) => {
@@ -2000,29 +2041,6 @@ export function App(): React.JSX.Element {
               : undefined,
           ),
         )
-        let visible: ReturnType<typeof worksheet.getVisibleRange>
-        try {
-          visible = worksheet.getVisibleRange()
-        } catch {
-          // The lazy loader falls back to the top-left viewport while Univer
-          // replaces its scroll controller; visual installation can wait.
-          return
-        }
-        const viewportKey = visible
-          ? `${worksheet.getSheetId()}:${visible.startRow}:${visible.endRow}:${visible.startColumn}:${visible.endColumn}`
-          : worksheet.getSheetId()
-        if (visualViewportKeyRef.current === viewportKey) return
-        visualViewportKeyRef.current = viewportKey
-        queueVisualInstall(
-          runtime,
-          lazyWorkbookRef,
-          visualDisposablesRef,
-          visualInstallTimerRef,
-          chartEditRef,
-          chartVectorRef,
-          shapeEditRef,
-        )
-        queueSparklineInstall(runtime, lazyWorkbookRef, sparklineDisposablesRef, sparklineTimerRef)
       },
     )
     const zoomDisposable = runtime.univerAPI.addEvent(
@@ -2609,6 +2627,13 @@ export function App(): React.JSX.Element {
               structuralOp,
             )
           })
+          const targetSheetMeta = state.file.sheets.find((sheet) => sheet.id === structuralSheetId)
+          if (targetSheetMeta && 'index' in structuralOp && targetSheetMeta.cellImages.length > 0) {
+            targetSheetMeta.cellImages = shiftCellImagesForStructuralOp(
+              targetSheetMeta.cellImages,
+              structuralOp,
+            )
+          }
           refreshLazyVisuals(state)
           // Threaded comments sit at cells too: follow the row/column edit (Undo of a delete
           // brings the removed ones back)
@@ -3073,6 +3098,10 @@ export function App(): React.JSX.Element {
           isCellEditing: () => editingCellRef.current,
           cellAtPoint: (x, y) => cellAtClientPoint(runtime, x, y),
           insert: (file, anchor) => handleInsertPictureFile(visualContext(), file, anchor),
+          pasteVisual: (html) => {
+            const payload = extractVisualPayload(html)
+            return payload ? pasteVisualPayload(visualContext(), payload) : false
+          },
         })
       : () => undefined
     let selectionAskRaf: number | null = null
@@ -3318,6 +3347,7 @@ export function App(): React.JSX.Element {
       crossHighlightRef.current?.dispose()
       crossHighlightRef.current = null
       scrollDisposable.dispose()
+      editorScrollFollowDispose()
       columnAutoExtendDisposable()
       setColumnDataSource(null)
       zoomDisposable.dispose()
@@ -5241,6 +5271,7 @@ export function App(): React.JSX.Element {
       chartVectorRef,
       shapeEditRef,
     )
+    queueSparklineInstall(runtime, lazyWorkbookRef, sparklineDisposablesRef, sparklineTimerRef)
   }
 
   function refreshDemoVisuals(): void {

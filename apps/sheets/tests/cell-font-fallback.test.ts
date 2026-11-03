@@ -31,9 +31,30 @@ describe('withSansSerifFallback', () => {
     expect(withSansSerifFallback('12px Arial, sans-serif')).toBe(`12px Arial, sans-serif, ${EMOJI}`)
     expect(withSansSerifFallback('12px serif')).toBe(`12px serif, ${EMOJI}`)
     expect(withSansSerifFallback('10px monospace')).toBe(`10px monospace, ${EMOJI}`)
+    expect(withSansSerifFallback('12px "PingFang TC", sans-serif')).toBe(
+      `12px "PingFang TC", sans-serif, ${EMOJI}`,
+    )
+  })
+
+  it('prepends Traditional Chinese faces before PingFang SC in fallback chains', () => {
     const univerPlane =
       '11pt Arial, "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif '
-    expect(withSansSerifFallback(univerPlane)).toBe(`${univerPlane.trimEnd()}, ${EMOJI}`)
+    expect(withSansSerifFallback(univerPlane)).toBe(
+      `11pt Arial, "Helvetica Neue", Helvetica, Arial, "PingFang TC", "Microsoft JhengHei", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif, ${EMOJI}`,
+    )
+  })
+
+  it('unifies Microsoft JhengHei fallback stack between view mode and editor mode', () => {
+    const viewFont = 'normal 10pt 微軟正黑體'
+    expect(withSansSerifFallback(viewFont)).toBe(
+      `normal 10pt "微軟正黑體", "Microsoft JhengHei", "PingFang TC", Arial, sans-serif, ${EMOJI}`,
+    )
+
+    const editorFont =
+      'normal 10pt 微軟正黑體, "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif '
+    expect(withSansSerifFallback(editorFont)).toBe(
+      `normal 10pt "微軟正黑體", "Microsoft JhengHei", "PingFang TC", Arial, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif, ${EMOJI}`,
+    )
   })
 
   it('is idempotent: never re-appends to an already-expanded chain', () => {
@@ -521,5 +542,25 @@ describe('CELL_FONT_ALIASES', () => {
         family,
       ).toBe(true)
     }
+  })
+
+  it('maps Traditional Chinese sans-serif fonts to local TC faces', () => {
+    for (const family of ['微軟正黑體', 'Microsoft JhengHei', 'PingFang TC']) {
+      const alias = CELL_FONT_ALIASES.find((a) => a.family === family)
+      expect(alias, family).toBeDefined()
+      expect(alias!.regular.some((f) => f.includes('PingFang TC') || f.includes('Microsoft JhengHei'))).toBe(true)
+    }
+  })
+
+  it('maps Calibri and Calibri Light to bundled Carlito with genuine local font bypass', () => {
+    const calibri = CELL_FONT_ALIASES.find((a) => a.family === 'Calibri')
+    expect(calibri).toBeDefined()
+    expect(calibri!.regular.some((f) => f.includes('Carlito'))).toBe(true)
+    expect(calibri!.skipIfLocal).toContain('Calibri')
+
+    const calibriLight = CELL_FONT_ALIASES.find((a) => a.family === 'Calibri Light')
+    expect(calibriLight).toBeDefined()
+    expect(calibriLight!.regular.some((f) => f.includes('Carlito'))).toBe(true)
+    expect(calibriLight!.skipIfLocal).toContain('Calibri Light')
   })
 })

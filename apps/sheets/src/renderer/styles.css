@@ -509,6 +509,7 @@ html.genoffice-popover-open .ribbon-tabs {
   border-bottom: 2.5px solid transparent;
   border-radius: 4px 4px 0 0;
   white-space: nowrap;
+  transition: color 150ms ease-out;
 }
 
 .ribbon-tabs-spacer {
@@ -633,7 +634,7 @@ html.genoffice-popover-open .ribbon-tabs {
 
 /* active underline: about the label's width (insets past the tab padding),
  * ends slightly rounded — same as the slides ribbon */
-.ribbon-tabs > button:not(.qa-btn).active::after {
+.ribbon-tabs > button:not(.qa-btn):not(.ribbon-tab-file)::after {
   position: absolute;
   right: 13px;
   bottom: -2.5px;
@@ -642,6 +643,16 @@ html.genoffice-popover-open .ribbon-tabs {
   border-radius: 1px;
   background: var(--accent);
   content: '';
+  opacity: 0;
+  transform: scaleX(0.4);
+  transform-origin: center;
+  transition: opacity 180ms ease-out, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.ribbon-tabs > button:not(.qa-btn):not(.ribbon-tab-file).active::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 
 /* File: a filled accent pill, like the Docs and Slides ribbons */
@@ -701,6 +712,36 @@ html.genoffice-popover-open .ribbon-tabs {
 .ribbon::-webkit-scrollbar-thumb {
   border-radius: 2.5px;
   background: var(--sheets-scroll-thumb);
+}
+
+/* Ribbon tab pane animation when switching tabs */
+.ribbon .ribbon-tab-pane {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 100%;
+  flex: 1 1 auto;
+  min-width: max-content;
+  animation: ribbonTabPaneFadeIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ribbonTabPaneFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-2.5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-tabs > button:not(.qa-btn)::after,
+  .ribbon .ribbon-tab-pane {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .ribbon-group {
@@ -1232,13 +1273,17 @@ html.genoffice-popover-open .ribbon-tabs {
   white-space: nowrap;
 }
 
-/* row icons keep a compact box so labels stay close, with the slides
-   ribbon's .rb-small 14px svg size; letterform fallbacks match at 13px */
+/* row icons keep a clear visual proportion alongside ribbon text */
 .styles-row .tool-symbol {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  font-size: 13px;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+}
+
+.styles-row .tool-symbol svg {
+  width: 18px;
+  height: 18px;
 }
 
 .styles-row b {
@@ -3012,6 +3057,9 @@ textarea:focus {
 .xlsx-image {
   display: block;
   object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: auto;
 }
 
 /* a:srcRect crop: the frame clips an oversized img offset by the crop. */
@@ -3027,6 +3075,9 @@ textarea:focus {
   position: absolute;
   display: block;
   max-width: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: auto;
 }
 
 /* Embedded OLE object without a cached preview: Excel's bordered box with a
@@ -3097,21 +3148,96 @@ textarea:focus {
   white-space: nowrap;
 }
 
+/* Allow in-cell image toolbar and frame to overflow Univer's FloatDom containers */
+div:has(> [id*="cell-image-"]) {
+  overflow: visible !important;
+  z-index: 50 !important;
+}
+
+div:has(> .xlsx-cell-image) {
+  overflow: visible !important;
+}
+
+[id*="cell-image-"] {
+  overflow: visible !important;
+}
+
 /* In-cell rich-value picture: fits the cell box, aspect preserved (Excel). */
 .xlsx-cell-image {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  pointer-events: none;
+  overflow: visible;
+  pointer-events: auto;
+  cursor: pointer;
+  box-sizing: border-box;
 }
 
 .xlsx-cell-image img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.xlsx-cell-image.selected {
+  outline: 2px solid var(--sheets-select-frame, #107c41);
+  outline-offset: -1px;
+  background: rgba(16, 124, 65, 0.08);
+}
+
+.xlsx-cell-image-toolbar {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-strong, #ccc);
+  border-radius: 4px;
+  padding: 2px 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  z-index: 100;
+  white-space: nowrap;
+}
+
+.xlsx-cell-image-toolbar.bottom {
+  top: auto;
+  bottom: -28px;
+}
+
+.xlsx-cell-image-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text, #333);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.xlsx-cell-image-action-btn:hover {
+  background: var(--hover, #f0f0f0);
+  border-color: var(--border, #ddd);
+}
+
+.xlsx-cell-image-action-btn.delete {
+  color: var(--text-muted, #666);
+  padding: 2px 5px;
+}
+
+.xlsx-cell-image-action-btn.delete:hover {
+  color: #d00000;
+  background: #ffebeb;
 }
 
 .xlsx-shape,
@@ -5763,6 +5889,126 @@ textarea:focus {
   background: var(--ribbon-active, var(--ribbon-hover));
 }
 
+/* Split ribbon buttons: left part triggers default command, right caret opens dropdown */
+.inline-tools .menu-select.menu-split,
+.menu-select.menu-split {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  box-sizing: border-box;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.menu-select.menu-split.select-like {
+  padding: 0;
+}
+
+.inline-tools .menu-split .menu-split-main,
+.menu-split .menu-split-main {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-small) 0 0 var(--radius-small);
+  cursor: pointer;
+  font-size: 12px;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.inline-tools .menu-split .menu-split-main .menu-select-value,
+.menu-split .menu-split-main .menu-select-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.inline-tools .menu-split .menu-split-caret,
+.menu-split .menu-split-caret {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  width: 16px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  border-radius: 0 var(--radius-small) var(--radius-small) 0;
+  cursor: pointer;
+  color: inherit;
+}
+
+.menu-split .menu-split-main:hover:not(:disabled),
+.menu-split .menu-split-caret:hover:not(:disabled) {
+  background: var(--ribbon-hover);
+}
+
+.menu-split .menu-split-caret.is-active {
+  background: var(--ribbon-active);
+}
+
+/* Editing group layout: 2x2 grid of data/formula tools on the left,
+   thin separator, and vertically stacked find/replace/goto on the right */
+.editing-group-layout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editing-stack-sep {
+  width: 1px;
+  height: 52px;
+  background: var(--border-subtle, rgba(128, 128, 128, 0.25));
+  align-self: center;
+}
+
+.find-replace-stack {
+  display: grid;
+  grid-template-rows: repeat(3, 1fr);
+  gap: 2px;
+  align-content: center;
+}
+
+.find-stack-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+  font-size: 12px;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.find-stack-button:hover {
+  background: var(--ribbon-hover);
+}
+
+.find-stack-button .tool-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.find-stack-button .tool-symbol svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Border dropdown entries: glyph + label, Excel-style; the drop sits inside
    .inline-tools, so the span sheds the 28×30 toggle box and its hover */
 .menu-select-drop .menu-option-icon {
@@ -6795,3 +7041,54 @@ textarea:focus {
 .univer-popup:not([data-sheet-tab-menu]) > section > [class~='univer-grid'][class~='univer-min-w-52'] {
   max-height: calc(100vh - 16px) !important;
 }
+
+/* In-cell editor focus ring. Univer renders an outset 1px box-shadow via univer-ring-1,
+ * which protrudes 1px outside the cell boundary into neighbor rows and columns.
+ * Replacing it with an inset border overlay aligns the green focus border flush with the cell
+ * gridlines, matching view-mode cell selection exactly without upward or outward bulging. */
+.univer-ring-primary-500 {
+  box-shadow: none !important;
+}
+.univer-ring-primary-500::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgb(13, 164, 113);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.univer-ring-red-500 {
+  box-shadow: none !important;
+}
+.univer-ring-red-500::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgb(239, 68, 68);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Excel-style row/column resize tooltip (e.g. "Width: 14.00 (89 pixels)") */
+.sheets-header-resize-tooltip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  user-select: none;
+  background: rgba(31, 31, 31, 0.96);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 14px;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  box-sizing: border-box;
+  display: none;
+}
+

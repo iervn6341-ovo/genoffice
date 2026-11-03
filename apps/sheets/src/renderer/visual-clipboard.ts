@@ -7,6 +7,7 @@
  * media path, ids) is dropped: the copy is a new object of the pasting workbook.
  */
 import type { WorkbookVisualObject } from '../shared/desktop-api'
+import { walkMarker, EMU_PER_PIXEL } from './WorkbookVisuals'
 
 export const VISUAL_ATTR = 'data-genoffice-visual'
 export const VISUAL_PAYLOAD_VERSION = 1
@@ -28,6 +29,9 @@ export interface VisualPayload {
   readonly sheetName: string
   /// the workbook session it was copied from (references only stay valid inside it)
   readonly bookId: string
+  /// pixel dimensions to preserve exact size on paste regardless of destination cell dimensions
+  readonly pixelWidth?: number
+  readonly pixelHeight?: number
 }
 
 /// Kinds a pasted copy can stand for: a read-only embed has no data to carry
@@ -44,6 +48,8 @@ export function visualToPayload(
   sheetName: string,
   bookId: string,
   mediaDataUrl?: string,
+  pixelWidth?: number,
+  pixelHeight?: number,
 ): VisualPayload | null {
   if (!isCopyableVisual(visual)) return null
   const {
@@ -66,8 +72,8 @@ export function visualToPayload(
   return {
     version: VISUAL_PAYLOAD_VERSION,
     visual: carried,
-    spanRows: Math.max(1, anchor.toRow - anchor.fromRow),
-    spanColumns: Math.max(1, anchor.toColumn - anchor.fromColumn),
+    spanRows: Math.max(0, anchor.toRow - anchor.fromRow),
+    spanColumns: Math.max(0, anchor.toColumn - anchor.fromColumn),
     anchor: {
       fromRowOffset: anchor.fromRowOffset,
       fromColumnOffset: anchor.fromColumnOffset,
@@ -77,14 +83,64 @@ export function visualToPayload(
     },
     sheetName,
     bookId,
+    ...(pixelWidth !== undefined ? { pixelWidth } : {}),
+    ...(pixelHeight !== undefined ? { pixelHeight } : {}),
   }
+}
+
+export interface SheetGeometry {
+  columnWidth: (index: number) => number
+  rowHeight: (index: number) => number
+  maxColumns: number
+  maxRows: number
 }
 
 /// A pasted copy at `row` / `column` of `sheetId`, as a session-added object.
 export function visualFromPayload(
   payload: VisualPayload,
   place: { id: string; sheetId: string; row: number; column: number },
+  geometry?: SheetGeometry,
 ): WorkbookVisualObject {
+  const targetWidth =
+    payload.pixelWidth ??
+    (payload.visual.frameWidth ? Math.round(payload.visual.frameWidth / EMU_PER_PIXEL) : null)
+  const targetHeight =
+    payload.pixelHeight ??
+    (payload.visual.frameHeight ? Math.round(payload.visual.frameHeight / EMU_PER_PIXEL) : null)
+
+  if (targetWidth !== null && targetHeight !== null && geometry) {
+    const toX = walkMarker(
+      { index: place.column, offset: 0 },
+      targetWidth,
+      geometry.columnWidth,
+      geometry.maxColumns - 1,
+    )
+    const toY = walkMarker(
+      { index: place.row, offset: 0 },
+      targetHeight,
+      geometry.rowHeight,
+      geometry.maxRows - 1,
+    )
+    return {
+      ...payload.visual,
+      id: place.id,
+      sheetId: place.sheetId,
+      anchor: {
+        fromRow: place.row,
+        fromColumn: place.column,
+        fromRowOffset: 0,
+        fromColumnOffset: 0,
+        toRow: toY.index,
+        toColumn: toX.index,
+        toRowOffset: Math.round(toY.offset * EMU_PER_PIXEL),
+        toColumnOffset: Math.round(toX.offset * EMU_PER_PIXEL),
+        explicitTo: true,
+      },
+      frameWidth: Math.round(targetWidth * EMU_PER_PIXEL),
+      frameHeight: Math.round(targetHeight * EMU_PER_PIXEL),
+    } as WorkbookVisualObject
+  }
+
   const a = payload.anchor
   return {
     ...payload.visual,

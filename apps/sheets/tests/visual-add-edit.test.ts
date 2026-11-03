@@ -12,6 +12,9 @@ import {
   toSaveVisualEdits,
   updateVisualAdd,
   toSaveVisualAdds,
+  shiftCellImagesForStructuralOp,
+  shiftVisualAnchor,
+  shiftVisualForStructuralOp,
 } from '../src/renderer/edit-journal'
 import {
   workbookChartEditSchema,
@@ -198,3 +201,120 @@ describe('recordVisualEdit', () => {
     expect(toSaveVisualEdits(journal)).toEqual([])
   })
 })
+
+describe('shiftVisualAnchor with structural ops', () => {
+  const baseAnchor = {
+    fromRow: 2,
+    fromColumn: 2,
+    fromRowOffset: 0,
+    fromColumnOffset: 0,
+    toRow: 6,
+    toColumn: 6,
+    toRowOffset: 0,
+    toColumnOffset: 0,
+  }
+
+  it('shifts image right when inserting columns to the left', () => {
+    const shifted = shiftVisualAnchor(baseAnchor, {
+      axis: 'column',
+      removing: false,
+      index: 1,
+      count: 2,
+    })
+    expect(shifted.fromColumn).toBe(4)
+    expect(shifted.toColumn).toBe(8)
+  })
+
+  it('does NOT expand image when inserting columns directly at right edge with zero offset', () => {
+    const shifted = shiftVisualAnchor(baseAnchor, {
+      axis: 'column',
+      removing: false,
+      index: 6,
+      count: 1,
+    })
+    expect(shifted.fromColumn).toBe(2)
+    expect(shifted.toColumn).toBe(6)
+  })
+
+  it('does NOT expand image when inserting columns to the right of image', () => {
+    const shifted = shiftVisualAnchor(baseAnchor, {
+      axis: 'column',
+      removing: false,
+      index: 7,
+      count: 2,
+    })
+    expect(shifted.fromColumn).toBe(2)
+    expect(shifted.toColumn).toBe(6)
+  })
+
+  it('expands image when inserting columns inside the image', () => {
+    const shifted = shiftVisualAnchor(baseAnchor, {
+      axis: 'column',
+      removing: false,
+      index: 4,
+      count: 2,
+    })
+    expect(shifted.fromColumn).toBe(2)
+    expect(shifted.toColumn).toBe(8)
+  })
+
+  it('shifts image left when deleting columns to the left', () => {
+    const shifted = shiftVisualAnchor(baseAnchor, {
+      axis: 'column',
+      removing: true,
+      index: 0,
+      count: 1,
+    })
+    expect(shifted.fromColumn).toBe(1)
+    expect(shifted.toColumn).toBe(5)
+  })
+
+  it('shifts rows appropriately when inserting rows above', () => {
+    const shifted = shiftVisualAnchor(baseAnchor, {
+      axis: 'row',
+      removing: false,
+      index: 1,
+      count: 3,
+    })
+    expect(shifted.fromRow).toBe(5)
+    expect(shifted.toRow).toBe(9)
+  })
+})
+
+describe('shiftCellImagesForStructuralOp', () => {
+  const images = [
+    { id: 'img-1', row: 2, column: 2 },
+    { id: 'img-2', row: 5, column: 5 },
+  ]
+
+  it('shifts image column when inserting column to the left', () => {
+    const shifted = shiftCellImagesForStructuralOp(images, {
+      kind: 'insert-cols',
+      index: 1,
+      count: 2,
+    })
+    expect(shifted).toEqual([
+      { id: 'img-1', row: 2, column: 4 },
+      { id: 'img-2', row: 5, column: 7 },
+    ])
+  })
+
+  it('leaves column unchanged when inserting column to the right', () => {
+    const shifted = shiftCellImagesForStructuralOp(images, {
+      kind: 'insert-cols',
+      index: 6,
+      count: 2,
+    })
+    expect(shifted).toEqual(images)
+  })
+
+  it('drops image if its row is removed', () => {
+    const shifted = shiftCellImagesForStructuralOp(images, {
+      kind: 'remove-rows',
+      index: 2,
+      count: 1,
+    })
+    expect(shifted).toEqual([{ id: 'img-2', row: 4, column: 5 }])
+  })
+})
+

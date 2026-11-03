@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { HorizontalAlign, VerticalAlign } from '@univerjs/core'
 import {
   computeEditorFit,
+  computeSkeletonVerticalOffset,
   editorOverlayShift,
   editorPageWidth,
   fullPadding,
   normalizeEditorLayoutObject,
+  normalizeEditorSkeletonGlyphs,
   shiftEditorOverlay,
   EDITOR_CARET_ROOM,
 } from '../src/renderer/cell-editor-overlay-fix'
@@ -51,23 +53,37 @@ describe('cell-editor-overlay-fix', () => {
   })
 
   describe('editorOverlayShift', () => {
-    it('shifts half-pixel for non-middle vertical align', () => {
-      const shift = editorOverlayShift(1, 1, VerticalAlign.TOP)
-      expect(shift.dx).toBe(0.5)
-      expect(shift.dy).toBe(0.5)
+    it('anchors container vertically flush with row line (dy = 0) to prevent top protrusion', () => {
+      const topShift = editorOverlayShift(1, 1, VerticalAlign.TOP)
+      expect(topShift.dx).toBe(0.5)
+      expect(topShift.dy).toBe(0)
+
+      const middleShift = editorOverlayShift(1, 1, VerticalAlign.MIDDLE)
+      expect(middleShift.dx).toBe(0.5)
+      expect(middleShift.dy).toBe(0)
     })
 
-    it('compensates for MIDDLE_CELL_POS_MAGIC_NUMBER (1 unit) when middle aligned', () => {
-      const shift = editorOverlayShift(1, 1, VerticalAlign.MIDDLE)
-      expect(shift.dx).toBe(0.5)
-      // (0.5 - 1) * 1 = -0.5
-      expect(shift.dy).toBe(-0.5)
-    })
-
-    it('scales with zoom (scaleX and scaleY)', () => {
+    it('scales dx with zoom (scaleX)', () => {
       const shift = editorOverlayShift(2, 2, VerticalAlign.TOP)
       expect(shift.dx).toBe(1.0)
-      expect(shift.dy).toBe(1.0)
+      expect(shift.dy).toBe(0)
+    })
+  })
+
+  describe('computeSkeletonVerticalOffset', () => {
+    it('returns half-pixel blur offset for non-middle vertical align', () => {
+      expect(computeSkeletonVerticalOffset(VerticalAlign.TOP)).toBe(0.5)
+    })
+
+    it('compensates for asymmetric vertical padding when middle aligned', () => {
+      // Default padding (t: 0, b: 2): (0 - 2) / 2 + 0.5 = -0.5
+      expect(computeSkeletonVerticalOffset(VerticalAlign.MIDDLE)).toBe(-0.5)
+
+      // Symmetric padding (t: 2, b: 2): (2 - 2) / 2 + 0.5 = 0.5
+      expect(computeSkeletonVerticalOffset(VerticalAlign.MIDDLE, { t: 2, b: 2 })).toBe(0.5)
+
+      // Custom asymmetric padding (t: 1, b: 3): (1 - 3) / 2 + 0.5 = -0.5
+      expect(computeSkeletonVerticalOffset(VerticalAlign.MIDDLE, { t: 1, b: 3 })).toBe(-0.5)
     })
   })
 
@@ -116,9 +132,9 @@ describe('cell-editor-overlay-fix', () => {
       })
       // actualWidth = 50 + 6 = 56
       // width = 100
-      // offsetLeft = (100 - 56) = 44
+      // offsetLeft keeps padding.l so the column spans the cell and DocumentSkeleton positions right-aligned text
       expect(fit.width).toBe(100)
-      expect(fit.offsetLeft).toBe(44)
+      expect(fit.offsetLeft).toBe(3)
     })
 
     it('computes symmetric margins for centered text in a normal cell', () => {
@@ -137,6 +153,39 @@ describe('cell-editor-overlay-fix', () => {
       // DocSkeleton centers glyphs within column width: (column.width - textWidth) / 2.
       // offsetLeft keeps padding.l so the column starts at cell margin and text stays centered.
       expect(fit.offsetLeft).toBe(2)
+      // (cellHeight - textHeight) / 2 = (25 - 15) / 2 = 5
+      expect(fit.offsetTop).toBe(5)
+    })
+
+    it('adjusts offsetTop for asymmetric padding when vertically centered', () => {
+      const fit = computeEditorFit({
+        cellWidth: 100,
+        cellHeight: 25,
+        textWidth: 40,
+        textHeight: 15,
+        padding: { t: 0, b: 2, l: 2, r: 2 },
+        scaleX: 1,
+        scaleY: 1,
+        horizontalAlign: HorizontalAlign.CENTER,
+        verticalAlign: VerticalAlign.MIDDLE,
+      })
+      // (cellHeight - textHeight) / 2 + (0 - 2) / 2 = 5 - 1 = 4
+      expect(fit.offsetTop).toBe(4)
+    })
+
+    it('clamps offsetTop to top padding when text overflows cell height', () => {
+      const fit = computeEditorFit({
+        cellWidth: 100,
+        cellHeight: 25,
+        textWidth: 40,
+        textHeight: 35,
+        padding: { t: 2, b: 2, l: 2, r: 2 },
+        scaleX: 1,
+        scaleY: 1,
+        horizontalAlign: HorizontalAlign.CENTER,
+        verticalAlign: VerticalAlign.MIDDLE,
+      })
+      expect(fit.offsetTop).toBe(2)
     })
 
     it('centers caret in an empty cell', () => {
@@ -208,6 +257,146 @@ describe('cell-editor-overlay-fix', () => {
       })
       expect(layout.documentModel.documentStyle.marginLeft).toBe(4)
       expect(layout.documentModel.documentStyle.marginRight).toBe(2)
+    })
+  })
+
+  describe('normalizeEditorSkeletonGlyphs', () => {
+    it('zeros trailing \\r paragraph terminator glyph width', () => {
+      const skeletonData: any = {
+        pages: [
+          {
+            renderConfig: { horizontalAlign: HorizontalAlign.LEFT },
+            sections: [
+              {
+                columns: [
+                  {
+                    lines: [
+                      {
+                        paragraphIndex: 0,
+                        divides: [
+                          {
+                            width: 100,
+                            paddingLeft: 0,
+                            glyphGroupWidth: 24,
+                            glyphGroup: [
+                              { content: 'A', width: 10, left: 0, xOffset: 0, bBox: { width: 10 } },
+                              { content: 'B', width: 10, left: 10, xOffset: 0, bBox: { width: 10 } },
+                              { content: '\r', width: 4, left: 20, xOffset: 0, bBox: { width: 4 } },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+      normalizeEditorSkeletonGlyphs(skeletonData)
+      const divide = skeletonData.pages[0].sections[0].columns[0].lines[0].divides[0]
+      expect(divide.glyphGroup[2].width).toBe(0)
+      expect(divide.glyphGroupWidth).toBe(20)
+      expect(skeletonData.pages[0].sections[0].columns[0].lines[0].width).toBe(20)
+    })
+
+    it('normalizes CJK glyphs adjacent to Latin characters by removing artificial spacing', () => {
+      const skeletonData: any = {
+        pages: [
+          {
+            renderConfig: { horizontalAlign: HorizontalAlign.CENTER },
+            sections: [
+              {
+                columns: [
+                  {
+                    lines: [
+                      {
+                        paragraphIndex: 0,
+                        divides: [
+                          {
+                            width: 200,
+                            paddingLeft: 0,
+                            glyphGroupWidth: 40,
+                            glyphGroup: [
+                              { content: 'A', width: 10, left: 0, xOffset: 0, bBox: { width: 10 } },
+                              { content: 'I', width: 6, left: 10, xOffset: 0, bBox: { width: 6 } },
+                              // Univer addCJKLatinSpacing inflated width from 16 to 20 and added xOffset: 4
+                              { content: '驅', width: 20, left: 16, xOffset: 4, bBox: { width: 16 } },
+                              { content: '\r', width: 4, left: 36, xOffset: 0, bBox: { width: 4 } },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+      normalizeEditorSkeletonGlyphs(skeletonData)
+      const divide = skeletonData.pages[0].sections[0].columns[0].lines[0].divides[0]
+      const quGlyph = divide.glyphGroup[2]
+      expect(quGlyph.width).toBe(16)
+      expect(quGlyph.xOffset).toBe(0)
+      expect(quGlyph.left).toBe(16) // 10 + 6
+      expect(divide.glyphGroup[3].width).toBe(0)
+      expect(divide.glyphGroupWidth).toBe(32) // 10 + 6 + 16
+      // Centered in width 200: (200 - 32) / 2 = 84
+      expect(divide.paddingLeft).toBe(84)
+    })
+
+    it('normalizes line heights, ascents, and page height across lines', () => {
+      const skeletonData: any = {
+        pages: [
+          {
+            height: 36,
+            sections: [
+              {
+                columns: [
+                  {
+                    lines: [
+                      {
+                        top: 0,
+                        asc: 14,
+                        lineHeight: 19,
+                        divides: [
+                          {
+                            glyphGroup: [
+                              { content: '執', width: 14, left: 0, fontStyle: '10pt sans-serif' },
+                            ],
+                          },
+                        ],
+                      },
+                      {
+                        top: 19,
+                        asc: 13,
+                        lineHeight: 17,
+                        divides: [
+                          {
+                            glyphGroup: [
+                              { content: '(', width: 7, left: 0, fontStyle: '10pt sans-serif' },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+      normalizeEditorSkeletonGlyphs(skeletonData)
+      const column = skeletonData.pages[0].sections[0].columns[0]
+      // In a DOM environment FontCache measures font bounding box; even without DOM,
+      // lines top positions accumulate monotonically.
+      expect(column.lines[0].top).toBe(0)
+      expect(column.lines[1].top).toBe(column.lines[0].lineHeight)
+      expect(skeletonData.pages[0].height).toBe(column.lines[0].lineHeight + column.lines[1].lineHeight)
     })
   })
 })

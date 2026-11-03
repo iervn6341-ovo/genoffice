@@ -119,6 +119,7 @@ import {
 import {
   handleInsertChart,
   handleInsertPicture,
+  handleInsertPictureInCell,
   handleInsertPivotChart,
   handleInsertShape,
   startShapeDraw,
@@ -182,7 +183,7 @@ export interface RibbonCommandContext {
 function selectionStyle(
   range: NonNullable<ReturnType<ActiveWorkbook['getActiveRange']>>,
 ): IStyleData {
-  return range.getCellStyleData() ?? {}
+  return range.getCellStyleData?.() ?? {}
 }
 
 /// The in-cell editor holds a text edit (not a formula, and not the formula
@@ -1350,8 +1351,12 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     handleInsertShape(ctx.visualContext(), 'rect', true)
     return
   }
-  if (command === 'insert-picture') {
+  if (command === 'insert-picture' || command === 'insert-picture-floating') {
     handleInsertPicture(ctx.visualContext())
+    return
+  }
+  if (command === 'insert-picture-in-cell') {
+    handleInsertPictureInCell(ctx.visualContext())
     return
   }
   if (command === 'format-as-table') {
@@ -1846,10 +1851,31 @@ function applyStyleCommand(
       }
       case 'merge': {
         const sheet = runtime.univerAPI.getActiveWorkbook()?.getActiveSheet()
+        const merges = sheet?.getMergedRanges?.() ?? []
+        const selRow = range.getRow()
+        const selCol = range.getColumn()
+        const selEndRow = selRow + range.getHeight() - 1
+        const selEndCol = selCol + range.getWidth() - 1
+        const isAlreadyMerged = merges.some((m) => {
+          const mRow = m.getRow()
+          const mCol = m.getColumn()
+          const mEndRow = mRow + m.getHeight() - 1
+          const mEndCol = mCol + m.getWidth() - 1
+          return !(
+            selEndRow < mRow ||
+            selRow > mEndRow ||
+            selEndCol < mCol ||
+            selCol > mEndCol
+          )
+        })
+        const effectiveArg =
+          argument === 'default'
+            ? (isAlreadyMerged ? 'unmerge' : 'center')
+            : argument
         // Merge Across stays on Univer's command: there is no merge_across op
         // yet, and one merge_cells per row would fan a whole-column selection
         // out into a million ops.
-        if (ctx.lazyWorkbookRef.current && sheet && argument !== 'across') {
+        if (ctx.lazyWorkbookRef.current && sheet && effectiveArg !== 'across') {
           const sheetId = sheet.getSheetId()
           const top = range.getRow()
           const left = range.getColumn()
@@ -1857,10 +1883,10 @@ function applyStyleCommand(
           const right = left + range.getWidth() - 1
           const a1 = `${columnLabel(left)}${top + 1}:${columnLabel(right)}${bottom + 1}`
           const ops: WorkbookOperation[] =
-            argument === 'unmerge'
+            effectiveArg === 'unmerge'
               ? [{ op: 'unmerge_cells', sheetId, range: a1 }]
               : [{ op: 'merge_cells', sheetId, range: a1 }]
-          if (argument === 'center') {
+          if (effectiveArg === 'center') {
             range.setHorizontalAlignment('center')
             if (worksheet) {
               worksheet.getRange(range.getRow(), range.getColumn()).setHorizontalAlignment('center')
@@ -1879,7 +1905,7 @@ function applyStyleCommand(
           void ctx.runOps(ops, t('appAppliedToSelection'))
           return
         }
-        if (argument === 'unmerge') {
+        if (effectiveArg === 'unmerge') {
           if (sheet) {
             unmergePreservingCellStyles(runtime, sheet, {
               startRow: range.getRow(),
@@ -1888,11 +1914,11 @@ function applyStyleCommand(
               endColumn: range.getColumn() + range.getWidth() - 1,
             })
           }
-        } else if (argument === 'across') {
+        } else if (effectiveArg === 'across') {
           range.mergeAcross()
         } else {
           range.merge()
-          if (argument === 'center') {
+          if (effectiveArg === 'center') {
             range.setHorizontalAlignment('center')
             if (worksheet) {
               worksheet.getRange(range.getRow(), range.getColumn()).setHorizontalAlignment('center')

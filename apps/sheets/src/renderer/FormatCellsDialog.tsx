@@ -193,7 +193,7 @@ export function FormatCellsDialog({
   readonly onCommand: (command: string) => void
   readonly onClose: () => void
 }): React.JSX.Element {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [tab, setTab] = useState<Tab>('Number')
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -249,7 +249,7 @@ export function FormatCellsDialog({
   const { families: systemFontFamilies, load: loadSystemFonts } = useSystemFontFamilies()
   // the dialog opens from a click, so activation is still live here
   useEffect(() => loadSystemFonts(), [loadSystemFonts])
-  const fontGroups = fontFamilyGroups(systemFontFamilies, draft.family)
+  const fontGroups = fontFamilyGroups(systemFontFamilies, draft.family, lang)
   const sizeOptions =
     !draft.size || FONT_SIZES.includes(draft.size)
       ? FONT_SIZES

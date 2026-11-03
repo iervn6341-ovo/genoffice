@@ -42,6 +42,8 @@ import {
 import {
   DEFAULT_PADDING_DATA,
   FIX_ONE_PIXEL_BLUR_OFFSET,
+  FontCache,
+  GlyphType,
   MIDDLE_CELL_POS_MAGIC_NUMBER,
   convertTextRotation,
 } from '@univerjs/engine-render'
@@ -103,18 +105,15 @@ export interface EditorOverlayRect {
 /**
  * How far (css px) the editor overlay must move to land on the text the grid
  * painted: the grid's half-pixel content translation in the current zoom, and
- * for vertically centered cells Univer's one-unit centering constant.
+ * for vertically centered cells the centering compensation based on vertical padding.
  */
 export function editorOverlayShift(
   scaleX: number,
   scaleY: number,
   verticalAlign: number | undefined,
+  paddingData?: PaddingData,
 ): { dx: number; dy: number } {
-  const dy =
-    verticalAlign === VerticalAlign.MIDDLE
-      ? (FIX_ONE_PIXEL_BLUR_OFFSET - MIDDLE_CELL_POS_MAGIC_NUMBER) * scaleY
-      : FIX_ONE_PIXEL_BLUR_OFFSET * scaleY
-  return { dx: FIX_ONE_PIXEL_BLUR_OFFSET * scaleX, dy }
+  return { dx: FIX_ONE_PIXEL_BLUR_OFFSET * scaleX, dy: 0 }
 }
 
 export function shiftEditorOverlay<T extends EditorOverlayRect>(
@@ -157,29 +156,48 @@ export interface EditorFitResult {
  * width kept exact (see header, point 4).
  */
 export function computeEditorFit(input: EditorFitInput): EditorFitResult {
-  const { padding, scaleX, scaleY, horizontalAlign, verticalAlign } = input
+  const { padding, scaleX, scaleY, verticalAlign } = input
   const actualWidth = input.textWidth + (padding.l + padding.r) * scaleX
   const actualHeight = input.textHeight + (padding.t + padding.b) * scaleY
   const width = Math.max(input.cellWidth, actualWidth)
   const height = input.cellHeight < actualHeight ? Math.ceil(actualHeight) : input.cellHeight
   let offsetTop: number
-  if (verticalAlign === VerticalAlign.MIDDLE) offsetTop = (height - actualHeight) / 2 / scaleY
-  else if (verticalAlign === VerticalAlign.TOP) offsetTop = padding.t
-  else offsetTop = (height - actualHeight) / scaleY
-  let offsetLeft: number
-  if (horizontalAlign === HorizontalAlign.CENTER) {
-    offsetLeft = padding.l
-  } else if (horizontalAlign === HorizontalAlign.RIGHT) {
-    offsetLeft = (width - actualWidth) / scaleX
+  if (verticalAlign === VerticalAlign.MIDDLE) {
+    if (input.cellHeight < actualHeight) {
+      offsetTop = padding.t
+    } else {
+      offsetTop =
+        (input.cellHeight - input.textHeight) / 2 / scaleY +
+        (padding.t - padding.b) / 2
+    }
+  } else if (verticalAlign === VerticalAlign.TOP) {
+    offsetTop = padding.t
   } else {
-    offsetLeft = padding.l
+    offsetTop = (input.cellHeight - input.textHeight) / scaleY - padding.b
   }
   return {
     width,
     height,
     offsetTop: Math.max(offsetTop, padding.t),
-    offsetLeft: Math.max(offsetLeft, padding.l),
+    offsetLeft: padding.l,
   }
+}
+
+/**
+ * Compute the vertical line baseline compensation (in document unscaled units)
+ * so that editor canvas lines align with the grid canvas's DocSimpleSkeleton baseline.
+ * Grid paints translated by FIX_ONE_PIXEL_BLUR_OFFSET, and middle-aligned cells
+ * center text relative to cell height including vertical padding.
+ */
+export function computeSkeletonVerticalOffset(
+  verticalAlign: number | undefined,
+  paddingData?: PaddingData,
+): number {
+  const pad = fullPadding(paddingData)
+  if (verticalAlign === VerticalAlign.MIDDLE) {
+    return (pad.t - pad.b) / 2 + FIX_ONE_PIXEL_BLUR_OFFSET
+  }
+  return FIX_ONE_PIXEL_BLUR_OFFSET
 }
 
 interface DocStyleLike {
@@ -207,6 +225,125 @@ export function normalizeEditorLayoutObject(layout: LayoutObjectLike | null | un
   style.marginLeft = padding.l
   style.marginRight = padding.r
   style.renderConfig = { ...style.renderConfig, zeroWidthParagraphBreak: 1 }
+}
+
+const HAS_CJK = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
+
+/**
+ * Normalise editor skeleton glyphs:
+ * 1. Zero trailing \r paragraph terminator glyph width to prevent line shifts.
+ * 2. Remove Univer's artificial addCJKLatinSpacing (25% em) added to CJK glyphs adjacent to Latin characters.
+ * 3. Normalize line heights and ascents to match Canvas DocSimpleSkeleton's font bounding box metrics,
+ *    ensuring multiline and mixed-script text vertical positioning matches the grid view canvas exactly.
+ */
+export function normalizeEditorSkeletonGlyphs(skeletonData: any, verticalOffset = 0): void {
+  const data = typeof skeletonData?.getSkeletonData === 'function' ? skeletonData.getSkeletonData() : skeletonData
+  if (!data?.pages) return
+
+  for (const page of data.pages) {
+    for (const section of page.sections ?? []) {
+      for (const column of section.columns ?? []) {
+        for (const line of column.lines ?? []) {
+          for (const divide of line.divides ?? []) {
+            const glyphs = divide.glyphGroup
+            if (!glyphs || glyphs.length === 0) continue
+
+            let changed = false
+            for (const glyph of glyphs) {
+              if (glyph.content === '\r') {
+                if (glyph.width !== 0) {
+                  glyph.width = 0
+                  changed = true
+                }
+                continue
+              }
+              const bBox = (glyph as any).bBox
+              if (
+                bBox &&
+                typeof bBox.width === 'number' &&
+                (glyph.width !== bBox.width || (glyph as any).xOffset !== 0) &&
+                typeof glyph.content === 'string' &&
+                HAS_CJK.test(glyph.content) &&
+                glyph.glyphType !== GlyphType.LIST
+              ) {
+                glyph.width = bBox.width
+                ;(glyph as any).xOffset = 0
+                changed = true
+              }
+            }
+
+            if (changed) {
+              let curLeft = 0
+              for (const glyph of glyphs) {
+                glyph.left = curLeft
+                curLeft += glyph.width
+              }
+              divide.glyphGroupWidth = curLeft
+
+              if (
+                typeof divide.width === 'number' &&
+                divide.width !== Number.POSITIVE_INFINITY &&
+                typeof divide.paddingLeft === 'number'
+              ) {
+                const divideWidth = divide.width
+                const hAlign =
+                  (page as any)?.renderConfig?.horizontalAlign ??
+                  (data as any)?.documentStyle?.renderConfig?.horizontalAlign
+
+                if (hAlign === HorizontalAlign.CENTER) {
+                  divide.paddingLeft = Math.max((divideWidth - curLeft) / 2, 0)
+                } else if (hAlign === HorizontalAlign.RIGHT) {
+                  divide.paddingLeft = Math.max(divideWidth - curLeft, 0)
+                } else {
+                  divide.paddingLeft = 0
+                }
+              }
+
+              line.width = curLeft
+            }
+          }
+
+          let maxAsc = line.asc ?? 0
+          let maxDescent = 0
+          for (const divide of line.divides ?? []) {
+            for (const glyph of divide.glyphGroup ?? []) {
+              const fontStyle = glyph.fontStyle
+              if (
+                typeof document !== 'undefined' &&
+                fontStyle &&
+                typeof FontCache?.getMeasureText === 'function'
+              ) {
+                try {
+                  const metrics = FontCache.getMeasureText(glyph.content || 'M', fontStyle)
+                  if (metrics.fontBoundingBoxAscent > maxAsc) {
+                    maxAsc = metrics.fontBoundingBoxAscent
+                  }
+                  if (metrics.fontBoundingBoxDescent > maxDescent) {
+                    maxDescent = metrics.fontBoundingBoxDescent
+                  }
+                } catch {
+                  // Fall back to line ascent and height if FontCache cannot measure in this environment.
+                }
+              }
+            }
+          }
+          if (maxAsc > 0 && maxDescent > 0) {
+            line.asc = maxAsc
+            line.lineHeight = maxAsc + maxDescent
+          }
+        }
+
+        let curTop = verticalOffset
+        for (const line of column.lines ?? []) {
+          line.top = curTop
+          curTop += line.lineHeight
+        }
+        if (curTop !== verticalOffset) {
+          page.height = curTop - verticalOffset
+        }
+      }
+    }
+  }
 }
 
 interface BridgeProto {
@@ -245,6 +382,8 @@ interface ResizeProto {
       textRotation?: unknown
       wrapStrategy?: number
       paddingData?: PaddingData
+      verticalAlign?: number
+      horizontalAlign?: number
     },
     scaleX?: number,
     scaleY?: number,
@@ -326,10 +465,12 @@ export function installCellEditorOverlayFix(): void {
   const originalEditArea = resize._editAreaProcessing
   if (typeof originalEditArea === 'function' && typeof originalSetState === 'function') {
     resize._editAreaProcessing = function (this: ResizeProto, ...args: unknown[]) {
+      const editState = this._editorBridgeService.getEditCellState()
       pendingShift = editorOverlayShift(
         (args[5] as number) ?? 1,
         (args[6] as number) ?? 1,
-        this._editorBridgeService.getEditCellState()?.documentLayoutObject.verticalAlign,
+        editState?.documentLayoutObject.verticalAlign,
+        editState?.documentLayoutObject.paddingData,
       )
       try {
         return originalEditArea.apply(this, args)
@@ -377,8 +518,13 @@ export function installCellEditorOverlayFix(): void {
         horizontalAlign: documentLayoutObject.horizontalAlign,
         verticalAlign: documentLayoutObject.verticalAlign,
       })
+      const vOffset = computeSkeletonVerticalOffset(
+        documentLayoutObject.verticalAlign,
+        documentLayoutObject.paddingData,
+      )
       doc.updateDocumentDataMargin({ t: fit.offsetTop, l: fit.offsetLeft })
       skeleton.calculate()
+      normalizeEditorSkeletonGlyphs(skeleton, vOffset)
       this._editAreaProcessing(
         fit.width,
         fit.height,
@@ -414,6 +560,17 @@ export function installCellEditorOverlayFix(): void {
         scaleY,
       )
       if (!info) return info
+      if (documentSkeleton) {
+        const vOffset = computeSkeletonVerticalOffset(
+          documentLayoutObject.verticalAlign,
+          documentLayoutObject.paddingData,
+        )
+        normalizeEditorSkeletonGlyphs(documentSkeleton, vOffset)
+        const size = (documentSkeleton as any).getActualSize?.()
+        if (size && typeof size.actualHeight === 'number') {
+          info.actualHeight = size.actualHeight * scaleY
+        }
+      }
       const { vertexAngle } = convertTextRotation(
         documentLayoutObject.textRotation as Parameters<typeof convertTextRotation>[0],
       )

@@ -69,9 +69,24 @@ function serifIntent(trimmed: string): boolean {
 }
 
 export function withSansSerifFallback(font: string): string {
-  const trimmed = font.trimEnd()
+  let trimmed = font.trimEnd()
   if (!trimmed) return font
-  if (trimmed.endsWith(EMOJI_FALLBACK)) return font
+  if (/(['"]?)(?:微軟正黑體|Microsoft JhengHei)\1/i.test(trimmed)) {
+    if (!/(['"]?)PingFang TC\1/i.test(trimmed)) {
+      trimmed = trimmed.replace(
+        /(['"]?)(?:微軟正黑體|Microsoft JhengHei)\1/gi,
+        '"微軟正黑體", "Microsoft JhengHei", "PingFang TC", Arial',
+      )
+    }
+    trimmed = trimmed.replace(/(['"]?)Helvetica Neue\1\s*,\s*/gi, '')
+  }
+  if (/(['"]?)PingFang SC\1/.test(trimmed) && !/(['"]?)PingFang TC\1/.test(trimmed)) {
+    trimmed = trimmed.replace(
+      /(['"]?)PingFang SC\1/g,
+      '"PingFang TC", "Microsoft JhengHei", "PingFang SC"',
+    )
+  }
+  if (trimmed.endsWith(EMOJI_FALLBACK)) return trimmed
   if (GENERIC_FAMILY.test(trimmed)) return `${trimmed}, ${EMOJI_FALLBACK}`
   return `${trimmed}, ${serifIntent(trimmed) ? 'serif' : 'sans-serif'}, ${EMOJI_FALLBACK}`
 }
@@ -493,6 +508,36 @@ export const CELL_FONT_ALIASES: readonly CellFontAlias[] = [
   { family: 'MingLiU', regular: ['MingLiU', ...MING_TC] },
   { family: '標楷體', regular: ['DFKai-SB', 'BiauKai', 'Kaiti TC', 'Kaiti SC'] },
   { family: 'DFKai-SB', regular: ['DFKai-SB', 'BiauKai', 'Kaiti TC', 'Kaiti SC'] },
+  {
+    family: '微軟正黑體',
+    regular: ['Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'Noto Sans TC'],
+    bold: [
+      'Microsoft JhengHei Bold',
+      'MicrosoftJhengHeiBold',
+      'PingFang TC Semibold',
+      'Heiti TC Medium',
+    ],
+    skipIfLocal: ['Microsoft JhengHei', 'MicrosoftJhengHeiRegular'],
+    whenGenuine: {
+      regular: ['Microsoft JhengHei'],
+      bold: ['Microsoft JhengHei Bold', 'MicrosoftJhengHeiBold'],
+    },
+  },
+  {
+    family: 'Microsoft JhengHei',
+    regular: ['Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'Noto Sans TC'],
+    bold: [
+      'Microsoft JhengHei Bold',
+      'MicrosoftJhengHeiBold',
+      'PingFang TC Semibold',
+      'Heiti TC Medium',
+    ],
+  },
+  {
+    family: 'PingFang TC',
+    regular: ['PingFang TC', 'Microsoft JhengHei', 'Heiti TC', 'Noto Sans TC'],
+    bold: ['PingFang TC Semibold', 'Microsoft JhengHei Bold', 'Heiti TC Medium'],
+  },
   // Korean
   { family: 'Malgun Gothic', ...MALGUN_ALIAS },
   {
@@ -620,6 +665,18 @@ export const CELL_FONT_ALIASES: readonly CellFontAlias[] = [
     bold: CARLITO_BOLD_SRC,
     boldSizeAdjust: '96%',
     skipIfLocal: ['Aptos Narrow', 'AptosNarrow'],
+  },
+  {
+    family: 'Calibri',
+    regular: ['Calibri', ...CARLITO_SRC, 'Arial'],
+    bold: ['Calibri Bold', ...CARLITO_BOLD_SRC, 'Arial Bold'],
+    skipIfLocal: ['Calibri', 'Calibri-Regular'],
+    whenGenuine: { regular: ['Calibri'], bold: ['Calibri Bold', 'Calibri-Bold'] },
+  },
+  {
+    family: 'Calibri Light',
+    regular: ['Calibri Light', 'Calibri', ...CARLITO_SRC, 'Arial'],
+    skipIfLocal: ['Calibri Light', 'Calibri-Light'],
   },
   // Excel maps the Demi/Light family names onto the base family's bold and
   // regular when they are missing, so the substitutes mirror that weight

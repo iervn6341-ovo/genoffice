@@ -87,6 +87,7 @@ export interface PictureTransferHost {
   isCellEditing(): boolean
   cellAtPoint(clientX: number, clientY: number): PictureAnchor | null
   insert(file: File, anchor: PictureAnchor | null): void
+  pasteVisual?(html: string): boolean
 }
 
 export function installPictureTransfer(
@@ -96,6 +97,12 @@ export function installPictureTransfer(
   const onPaste = (event: ClipboardEvent): void => {
     if (event.defaultPrevented || !event.clipboardData) return
     if (host.isCellEditing() || !isGridKeyTarget(event.target)) return
+    const html = event.clipboardData.getData('text/html')
+    if (html && host.pasteVisual?.(html)) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      return
+    }
     const file = pickTransferImage(event.clipboardData)
     if (!file) return
     event.preventDefault()

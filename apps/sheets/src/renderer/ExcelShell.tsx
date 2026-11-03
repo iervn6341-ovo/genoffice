@@ -1572,6 +1572,24 @@ function LinkDialog({
   )
 }
 
+function RibbonWrap({
+  activeTab,
+  ribbonBodyRef,
+  children,
+}: {
+  readonly activeTab: string
+  readonly ribbonBodyRef: React.RefObject<HTMLDivElement | null>
+  readonly children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <div key={activeTab} className="ribbon-tab-pane">
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function Ribbon({
   themeColors,
   activeTab,
@@ -1623,7 +1641,12 @@ function Ribbon({
   // labels and fold groups follow the width (every tab renders into the same ribbon node)
   const ribbonBodyRef = useRef<HTMLDivElement | null>(null)
   useRibbonLabelFit(ribbonBodyRef)
-  const { t } = useI18n()
+  useEffect(() => {
+    if (ribbonBodyRef.current) {
+      ribbonBodyRef.current.scrollLeft = 0
+    }
+  }, [activeTab])
+  const { t, lang } = useI18n()
   const [fontColor, setFontColor] = useState('#C00000')
   const [fillColor, setFillColor] = useState('#FFF2CC')
   const [borderColor, setBorderColor] = useState('#000000')
@@ -1669,7 +1692,7 @@ function Ribbon({
       </button>
     )
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupTableProperties')}>
           <TableNameField
             name={activeTable.name}
@@ -1732,7 +1755,7 @@ function Ribbon({
             />
           </div>
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
   if (activeTab === 'Chart Design') {
@@ -1841,7 +1864,7 @@ function Ribbon({
       },
     ]
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup label={t('appGroupChartLayouts')}>
           {canEditChart ? (
             largeMenu(t('appAddChartElement'), '📊', t('appAddChartElementTitle'), elementOptions)
@@ -1954,13 +1977,13 @@ function Ribbon({
             onClick={() => onCommand('chart-delete')}
           />
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
 
   if (activeTab === 'Insert') {
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup
           label={t('appGroupTables')}
           fold={{ priority: 9, icon: <ToolSymbol symbol="⊞" /> }}
@@ -1991,13 +2014,41 @@ function Ribbon({
           label={t('appGroupIllustrations')}
           fold={{ priority: 8, icon: <ToolSymbol symbol="🖼" /> }}
         >
-          <RibbonButton
-            large
-            label={t('appPictures')}
-            detail={t('appPictureTypes')}
-            symbol="🖼"
-            onClick={() => onCommand('insert-picture')}
-          />
+          <div style={{ position: 'relative' }}>
+            <RibbonButton
+              large
+              menu
+              label={t('appPictures')}
+              detail={t('appPictureTypes')}
+              symbol="🖼"
+              onClick={() => onCommand('insert-picture')}
+            />
+            <MenuSelect
+              cover
+              label={t('appPictures')}
+              options={[
+                {
+                  value: 'insert-picture-floating',
+                  label:
+                    lang === 'zh-TW'
+                      ? '放置於儲存格上 (浮動圖片)'
+                      : lang === 'zh'
+                        ? '放置于单元格上方 (浮动图片)'
+                        : 'Place over Cells',
+                },
+                {
+                  value: 'insert-picture-in-cell',
+                  label:
+                    lang === 'zh-TW'
+                      ? '放置於儲存格中 (儲存格圖片)'
+                      : lang === 'zh'
+                        ? '放置于单元格中 (单元格图片)'
+                        : 'Place in Cell',
+                },
+              ]}
+              onPick={(val) => onCommand(val)}
+            />
+          </div>
           <div className="row-stack">
             <span className="styles-row" data-tip={t('appInsertShapeTitle')}>
               <ToolSymbol symbol="◇" />
@@ -2225,7 +2276,7 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
 
@@ -2259,7 +2310,7 @@ function Ribbon({
       narrow: t('appMarginNarrow'),
     } as const
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup
           label={t('appGroupThemes')}
           fold={{ priority: 3, icon: <ToolSymbol symbol="▤" /> }}
@@ -2418,7 +2469,7 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
 
@@ -2439,7 +2490,7 @@ function Ribbon({
       />
     )
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup
           label={t('appGroupFunctionLibrary')}
           fold={{ priority: 4, icon: <ToolSymbol symbol="ƒx" /> }}
@@ -2606,13 +2657,13 @@ function Ribbon({
             </button>
           </div>
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
 
   if (activeTab === 'Data') {
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup
           label={t('appPivotTable')}
           fold={{ priority: 5, icon: <ToolSymbol symbol="⊞" /> }}
@@ -2782,13 +2833,13 @@ function Ribbon({
             onClick={() => onCommand('subtotal-open')}
           />
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
 
   if (activeTab === 'View') {
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup
           label={t('appGroupWorkbookViews')}
           fold={{ priority: 4, icon: <ToolSymbol symbol="▦" /> }}
@@ -2899,13 +2950,13 @@ function Ribbon({
             { value: 'unfreeze', label: t('appUnfreeze') },
           ])}
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
 
   if (activeTab === 'Review') {
     return (
-      <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+      <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
         <RibbonGroup
           label={t('appGroupProofing')}
           fold={{ priority: 1, icon: <ToolSymbol symbol="🧮" /> }}
@@ -3032,7 +3083,7 @@ function Ribbon({
             onClick={() => onCommand('allow-edit-ranges-open')}
           />
         </RibbonGroup>
-      </div>
+      </RibbonWrap>
     )
   }
 
@@ -3040,7 +3091,7 @@ function Ribbon({
   const fontSizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72]
   const echoFamily = selectionFormat?.fontFamily ?? 'Calibri'
   const echoSize = selectionFormat?.fontSize ?? 11
-  const fontGroups = fontFamilyGroups(systemFontFamilies, echoFamily)
+  const fontGroups = fontFamilyGroups(systemFontFamilies, echoFamily, lang)
   const familyOptions = [
     ...fontGroups.common.map((family) => ({ value: family, label: family })),
     ...fontGroups.system.map((family, index) => ({
@@ -3053,7 +3104,7 @@ function Ribbon({
     ? fontSizes
     : [...fontSizes, echoSize].sort((a, b) => a - b)
   return (
-    <div className="ribbon" data-ribbon-body="" ref={ribbonBodyRef}>
+    <RibbonWrap activeTab={activeTab} ribbonBodyRef={ribbonBodyRef}>
       <RibbonGroup
         label={t('appGroupClipboard')}
         fold={{ priority: 7, icon: <ToolSymbol symbol="📋" /> }}
@@ -3218,6 +3269,7 @@ function Ribbon({
               }}
             />
             <MenuSelect
+              split
               className="select-like compact"
               label="Borders"
               data-tip={t('appBorders')}
@@ -3226,6 +3278,7 @@ function Ribbon({
                   <ToolSymbol symbol="⊡" /> {t('appBorders')}
                 </>
               }
+              defaultOption="all"
               options={[
                 { value: 'all', label: t('appBorderAll'), icon: <BorderAllIcon /> },
                 { value: 'outer', label: t('appBorderOuter'), icon: <BorderOuterIcon /> },
@@ -3369,6 +3422,7 @@ function Ribbon({
               <ToolSymbol symbol="☰" />
             </button>
             <MenuSelect
+              split
               className="select-like compact"
               label="Merge cells"
               data-tip={t('appMergeCells')}
@@ -3377,6 +3431,7 @@ function Ribbon({
                   <ToolSymbol symbol="⇔" /> {t('appMerge')}
                 </>
               }
+              defaultOption="default"
               options={[
                 { value: 'center', label: t('appMergeCenter') },
                 { value: 'across', label: t('appMergeAcross') },
@@ -3517,6 +3572,7 @@ function Ribbon({
           </button>
           <div className="inline-tools cell-tools">
             <MenuSelect
+              split
               className="select-like compact"
               label="Insert cells"
               data-tip={t('appInsertMenuTip')}
@@ -3525,6 +3581,7 @@ function Ribbon({
                   <ToolSymbol symbol="⤒" /> {t('appInsertMenu')}
                 </>
               }
+              defaultOption="insert-cells-open"
               options={[
                 { value: 'insert-cells-open', label: t('appInsertCells') },
                 { value: 'cells-shift:insert:row', label: t('appInsertSheetRows') },
@@ -3534,6 +3591,7 @@ function Ribbon({
               onPick={(value) => onCommand(value)}
             />
             <MenuSelect
+              split
               className="select-like compact"
               label="Delete cells"
               data-tip={t('appDeleteMenuTip')}
@@ -3542,6 +3600,7 @@ function Ribbon({
                   <ToolSymbol symbol="⤓" /> {t('appDeleteMenu')}
                 </>
               }
+              defaultOption="delete-cells-open"
               options={[
                 { value: 'delete-cells-open', label: t('appDeleteCells') },
                 { value: 'cells-shift:delete:row', label: t('appDeleteSheetRows') },
@@ -3574,100 +3633,110 @@ function Ribbon({
         label={t('appGroupEditing')}
         fold={{ priority: 2, icon: <ToolSymbol symbol="Σ" /> }}
       >
-        <div className="ribbon-rows">
-          <div className="inline-tools">
-            <MenuSelect
-              className="select-like compact"
-              label="AutoSum"
-              data-tip={t('appAutoSumTitle')}
-              display={
-                <>
-                  <ToolSymbol symbol="Σ" /> {t('appAutoSum')}
-                </>
-              }
-              options={autoSumOptions(t)}
-              onPick={(value) => onCommand(`autofn:${value}`)}
-            />
-            <MenuSelect
-              className="select-like compact"
-              label="Sort & Filter"
-              data-tip={t('appGroupSortFilter')}
-              display={
-                <>
-                  <ToolSymbol symbol="⇅" /> {t('appGroupSortFilter')}
-                </>
-              }
-              options={[
-                { value: 'sort:asc', label: t('appSortAToZ') },
-                { value: 'sort:desc', label: t('appSortZToA') },
-                { value: 'sort-custom-open', label: t('appCustomSort') },
-                { value: 'filter-toggle', label: t('appFilter') },
-                { value: 'filter-clear', label: t('appClearFilterTitle') },
-                { value: 'filter-reapply', label: t('appReapplyTitle') },
-              ]}
-              onPick={(value) => onCommand(value)}
-            />
-            <MenuSelect
-              className="select-like compact"
-              label="Fill"
-              data-tip={t('appFillMenu')}
-              display={
-                <>
-                  <ToolSymbol symbol="↓" /> {t('appFillMenu')}
-                </>
-              }
-              options={[
-                { value: 'down', label: t('appFillDown') },
-                { value: 'right', label: t('appFillRight') },
-                { value: 'up', label: t('appFillUp') },
-                { value: 'left', label: t('appFillLeft') },
-                { value: 'series-open', label: t('appFillSeries') },
-                { value: 'justify', label: t('appFillJustify') },
-                { value: 'across-open', label: t('appFillAcross') },
-              ]}
-              onPick={(value) => onCommand(`fill-${value}`)}
-            />
-            <MenuSelect
-              className="select-like compact"
-              label="Clear"
-              data-tip={t('appClear')}
-              display={
-                <>
-                  <ToolSymbol symbol="⌫" /> {t('appClear')}
-                </>
-              }
-              options={[
-                { value: 'all', label: t('appClearAll') },
-                { value: 'formats', label: t('appClearFormats') },
-                { value: 'contents', label: t('appClearContents') },
-                { value: 'comments', label: t('appClearComments') },
-                { value: 'hyperlinks', label: t('appClearHyperlinks') },
-                { value: 'remove-hyperlinks', label: t('appRemoveHyperlinks') },
-              ]}
-              onPick={(value) => onCommand(`clear-${value}`)}
-            />
+        <div className="editing-group-layout">
+          <div className="ribbon-rows">
+            <div className="inline-tools">
+              <MenuSelect
+                split
+                className="select-like compact"
+                label="AutoSum"
+                data-tip={t('appAutoSumTitle')}
+                display={
+                  <>
+                    <ToolSymbol symbol="Σ" /> {t('appAutoSum')}
+                  </>
+                }
+                defaultOption="sum"
+                options={autoSumOptions(t)}
+                onPick={(value) => onCommand(`autofn:${value}`)}
+              />
+              <MenuSelect
+                className="select-like compact"
+                label="Sort & Filter"
+                data-tip={t('appGroupSortFilter')}
+                display={
+                  <>
+                    <ToolSymbol symbol="⇅" /> {t('appGroupSortFilter')}
+                  </>
+                }
+                options={[
+                  { value: 'sort:asc', label: t('appSortAToZ') },
+                  { value: 'sort:desc', label: t('appSortZToA') },
+                  { value: 'sort-custom-open', label: t('appCustomSort') },
+                  { value: 'filter-toggle', label: t('appFilter') },
+                  { value: 'filter-clear', label: t('appClearFilterTitle') },
+                  { value: 'filter-reapply', label: t('appReapplyTitle') },
+                ]}
+                onPick={(value) => onCommand(value)}
+              />
+            </div>
+            <div className="inline-tools">
+              <MenuSelect
+                className="select-like compact"
+                label="Fill"
+                data-tip={t('appFillMenu')}
+                display={
+                  <>
+                    <ToolSymbol symbol="↓" /> {t('appFillMenu')}
+                  </>
+                }
+                options={[
+                  { value: 'down', label: t('appFillDown') },
+                  { value: 'right', label: t('appFillRight') },
+                  { value: 'up', label: t('appFillUp') },
+                  { value: 'left', label: t('appFillLeft') },
+                  { value: 'series-open', label: t('appFillSeries') },
+                  { value: 'justify', label: t('appFillJustify') },
+                  { value: 'across-open', label: t('appFillAcross') },
+                ]}
+                onPick={(value) => onCommand(`fill-${value}`)}
+              />
+              <MenuSelect
+                className="select-like compact"
+                label="Clear"
+                data-tip={t('appClear')}
+                display={
+                  <>
+                    <ToolSymbol symbol="⌫" /> {t('appClear')}
+                  </>
+                }
+                options={[
+                  { value: 'all', label: t('appClearAll') },
+                  { value: 'formats', label: t('appClearFormats') },
+                  { value: 'contents', label: t('appClearContents') },
+                  { value: 'comments', label: t('appClearComments') },
+                  { value: 'hyperlinks', label: t('appClearHyperlinks') },
+                  { value: 'remove-hyperlinks', label: t('appRemoveHyperlinks') },
+                ]}
+                onPick={(value) => onCommand(`clear-${value}`)}
+              />
+            </div>
           </div>
-          <div className="inline-tools">
+          <div className="editing-stack-sep" />
+          <div className="find-replace-stack">
             <button
-              className="labeled"
+              className="styles-row as-button find-stack-button"
               data-tip={t('appFindTitle')}
               onClick={() => onCommand('find')}
             >
-              <ToolSymbol symbol="🔍" /> {t('appFind')}
+              <ToolSymbol symbol="🔍" />
+              <span>{t('appFind')}</span>
             </button>
             <button
-              className="labeled"
+              className="styles-row as-button find-stack-button"
               data-tip={t('appReplace')}
               onClick={() => onCommand('replace')}
             >
-              <ToolSymbol symbol="⇄" /> {t('appReplace')}
+              <ToolSymbol symbol="⇄" />
+              <span>{t('appReplace')}</span>
             </button>
             <button
-              className="labeled"
+              className="styles-row as-button find-stack-button"
               data-tip={`${t('appGoTo')} ${platformShortcuts('⌘G')}`}
               onClick={() => onCommand('goto-open')}
             >
-              <ToolSymbol symbol="⌖" /> {t('appGoTo')}
+              <ToolSymbol symbol="⌖" />
+              <span>{t('appGoTo')}</span>
             </button>
           </div>
         </div>
@@ -3748,7 +3817,7 @@ function Ribbon({
           </span>
         </button>
       </RibbonGroup>
-    </div>
+    </RibbonWrap>
   )
 }
 
@@ -3795,6 +3864,9 @@ function MenuSelect({
   'data-tip': tip,
   className,
   cover = false,
+  split = false,
+  onMainClick,
+  defaultOption,
   display,
   value = '',
   options,
@@ -3807,6 +3879,10 @@ function MenuSelect({
   readonly className?: string
   /// invisible trigger stretched over the host tool (old .cover-select)
   readonly cover?: boolean
+  /// split button: main action executes default action, caret toggles dropdown
+  readonly split?: boolean
+  readonly onMainClick?: () => void
+  readonly defaultOption?: string
   /// content shown in the trigger (combobox variants)
   readonly display?: React.ReactNode
   /// currently applied value, highlighted in the open panel ('' = none)
@@ -3819,6 +3895,65 @@ function MenuSelect({
   // outside press / window blur / shell chrome press — the shared hook
   useDismissablePopover(open, () => setOpen(false), { inside: () => [wrapRef.current] })
   useEscapeClose(open, () => setOpen(false))
+
+  const handleMainClick = (): void => {
+    if (onMainClick) {
+      onMainClick()
+    } else {
+      const target = defaultOption ?? options[0]?.value
+      if (target !== undefined) onPick(target)
+    }
+  }
+
+  if (split) {
+    return (
+      <div
+        ref={wrapRef}
+        className={`menu-select menu-split${className ? ` ${className}` : ''}`}
+        data-tip={tip}
+      >
+        <button
+          type="button"
+          className="menu-split-main"
+          aria-label={label}
+          onClick={handleMainClick}
+        >
+          <span className="menu-select-value">{display}</span>
+        </button>
+        <button
+          type="button"
+          className={`menu-split-caret${open ? ' is-active' : ''}`}
+          aria-label={`${label} options`}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <CaretIcon />
+        </button>
+        {open && (
+          <div className="menu-select-drop" role="listbox" aria-label={label}>
+            {options.map((option) => (
+              <button
+                type="button"
+                key={option.value}
+                role="option"
+                aria-selected={value !== '' && option.value === value}
+                className={value !== '' && option.value === value ? 'on' : ''}
+                onClick={() => {
+                  setOpen(false)
+                  onPick(option.value)
+                }}
+              >
+                {option.icon && <span className="menu-option-icon">{option.icon}</span>}
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div ref={wrapRef} className={`menu-select${cover ? ' menu-select-cover' : ''}`}>
       <button
