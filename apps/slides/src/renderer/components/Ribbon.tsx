@@ -1393,6 +1393,11 @@ export function Ribbon({
   useRibbonLabelFit(bodyRef)
   const inlineWidthsRef = useRef(new Map<string, number>())
   const collapsedWidthsRef = useRef(new Map<string, number>())
+  useEffect(() => {
+    if (bodyRef.current) {
+      bodyRef.current.scrollLeft = 0
+    }
+  }, [tab])
   useLayoutEffect(() => {
     setCollapsedGroups([])
     setCollapseOpen(null)
@@ -1405,7 +1410,8 @@ export function Ribbon({
     const evaluate = () => {
       // hidden (collapsed ribbon): offsets read 0 and would poison the width caches
       if (!el.clientWidth) return
-      const kids = Array.from(el.children) as HTMLElement[]
+      const target = el.querySelector<HTMLElement>('.ribbon-tab-pane') ?? el
+      const kids = Array.from(target.children) as HTMLElement[]
       if (!kids.length) return
       // Natural content width: each child's box plus its fixed margins and the flex gaps. An
       // auto margin (the right-aligned AI group) is slack, not content — measuring first-left
@@ -2341,6 +2347,7 @@ export function Ribbon({
       </div>
 
       <div className="ribbon-body" data-ribbon-body="" ref={bodyRef}>
+        <div key={tab} className="ribbon-tab-pane">
         {tab === 'home' ? (
           <RibbonHomeTab rb={tabCtx} />
         ) : tab === 'insert' ? (
@@ -4467,6 +4474,7 @@ export function Ribbon({
             <Group label={t('ribbonShapeEffects')}>{renderShapeEffects()}</Group>
           </>
         ) : null}
+        </div>
       </div>
       <RibbonCollapseButton
         state={collapse}

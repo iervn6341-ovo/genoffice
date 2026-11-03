@@ -1132,8 +1132,8 @@ export function TextEditOverlay({
         justifyContent:
           anchor === 'middle' ? 'center' : anchor === 'bottom' ? 'flex-end' : 'flex-start',
         // 2 device px, zoom-compensated: the canvas is CSS-scaled, and 2 CSS px reads
-        // twice as heavy on retina displays
-        outline: `${2 / (globalThis.devicePixelRatio || 1) / Math.max(zoom, 0.1)}px solid ${frameColor}`,
+        // twice as heavy on retina displays. Dashed outline during text editing (PowerPoint & Word parity)
+        outline: `${2 / (globalThis.devicePixelRatio || 1) / Math.max(zoom, 0.1)}px dashed ${frameColor}`,
       }}
       onMouseMove={(e) => {
         const frame = frameRef.current

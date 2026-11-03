@@ -27,6 +27,8 @@ export interface SystemClipboardPayload {
   png?: Uint8Array
   text?: string
   html?: string
+  /** Further pasteboard types by name (e.g. PowerPoint's slide package) */
+  extra?: Record<string, Uint8Array>
 }
 
 const PB_TYPES = {
@@ -94,6 +96,7 @@ export function writeSystemClipboard(payload: SystemClipboardPayload): Promise<b
       await put(PB_TYPES.png, payload.png)
       await put(PB_TYPES.html, payload.html)
       await put(PB_TYPES.text, payload.text)
+      for (const [type, data] of Object.entries(payload.extra ?? {})) await put(type, data)
       const written = await runOsascript(spec)
       if (written < Object.keys(spec).length) {
         // a partial write still carries the marker first; make sure it is there

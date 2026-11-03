@@ -1,9 +1,9 @@
 /** Home tab of the slides ribbon. Extracted from Ribbon.tsx. */
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { platformShortcuts } from '@genoffice/i18n'
 import type { TextCaseMode } from '@genoffice/pptx-engine/text-case'
-import type { StringKey } from '../i18n/locale'
-import { ColorPicker, isSymbolFontFamily, labelFromTip } from '@genoffice/ui'
+import { useI18n, type StringKey } from '../i18n/locale'
+import { ColorPicker, fontFamiliesFor, isSymbolFontFamily, labelFromTip } from '@genoffice/ui'
 import { restoreEditSelection, saveEditSelection } from '../TextEditOverlay'
 import { armColorInput } from '../color-input'
 import { isNotesDefaultColor } from '../notes-color'
@@ -240,6 +240,8 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
     sizeOpen,
     t,
   } = rb
+  const { lang } = useI18n()
+  const builtinFonts = useMemo(() => fontFamiliesFor(lang), [lang])
   const [hangDraft, setHangDraft] = useState('')
   // Typed-ahead font query: only what the user actually typed filters the menu
   // (opening via the caret or focusing shows the full list)
@@ -259,7 +261,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
   // in-picker download path (the built-in row is hidden below while uninstalled).
   const catalogFonts = fontCatalog.filter(
     (c) =>
-      !c.installed || (!FONT_FAMILIES.includes(c.family) && !systemFontFamilies.includes(c.family)),
+      !c.installed || (!builtinFonts.includes(c.family) && !systemFontFamilies.includes(c.family)),
   )
   const uninstalledCatalog = new Set(fontCatalog.filter((c) => !c.installed).map((c) => c.family))
   const matchesFontFilter = (f: string) =>
@@ -1167,10 +1169,10 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   {(curFontFamily &&
-                  !FONT_FAMILIES.includes(curFontFamily) &&
+                  !builtinFonts.includes(curFontFamily) &&
                   !systemFontFamilies.includes(curFontFamily)
-                    ? [curFontFamily, ...FONT_FAMILIES]
-                    : FONT_FAMILIES
+                    ? [curFontFamily, ...builtinFonts]
+                    : builtinFonts
                   )
                     .filter(matchesFontFilter)
                     // Built-in names that are uninstalled catalog fonts render in the

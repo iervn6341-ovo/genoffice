@@ -750,34 +750,6 @@ export function SlideCanvas({
     window.addEventListener('keydown', onKey, true)
     gripEscRef.current = () => window.removeEventListener('keydown', onKey, true)
   }
-  const gripPressRef = useRef<{ x: number; y: number } | null>(null)
-  /**
-   * A press near a row / column line that then travels mostly ALONG the line (a row border dragged sideways,
-   * a column border dragged up or down) is a table move that happened to start at the border, not a resize:
-   * hand the drag to the table so nothing gets resized behind the pointer's back.
-   */
-  const yieldGripToTableMove = (
-    e: Konva.KonvaEventObject<DragEvent>,
-    kind: 'row' | 'col',
-    tableId: string,
-    home: { x: number; y: number },
-  ): boolean => {
-    const press = gripPressRef.current
-    const ev = e.evt as MouseEvent | undefined
-    if (!press || !ev || typeof ev.clientX !== 'number') return false
-    const dx = Math.abs(ev.clientX - press.x)
-    const dy = Math.abs(ev.clientY - press.y)
-    const across = kind === 'row' ? dy : dx
-    const along = kind === 'row' ? dx : dy
-    if (across >= along) return false
-    const stage = e.target.getStage()
-    const group = stage?.findOne(`#node_${tableId}`)
-    if (!stage || !group || !group.draggable()) return false
-    e.target.stopDrag()
-    e.target.position(home)
-    group.startDrag()
-    return true
-  }
   const disarmGripEscape = () => {
     gripEscRef.current?.()
     gripEscRef.current = null
@@ -1397,10 +1369,8 @@ export function SlideCanvas({
               />
             )
           })()}
-        {(() => {
-          if (selectedIds.length !== 1) return null
-          const n = slide.nodes.find((x) => x.sourceId === selectedIds[0])
-          if (!n || n.type !== 'table' || n.decoration || n.box.rotationDeg) return null
+        {slide.nodes.flatMap((n) => {
+          if (n.type !== 'table' || n.decoration || n.box.rotationDeg) return []
           const tbl = n as TableRenderNode
           // One grip per grid boundary; only boundaries a merged cell spans across are skipped
           const spansX = (b: number) => tbl.cells.some((c) => c.x < b - 0.5 && c.x + c.w > b + 0.5)
@@ -1414,12 +1384,13 @@ export function SlideCanvas({
             const g = gripRef.current
             return g && g.id === n.sourceId && g.kind === kind && g.idx === idx ? g : null
           }
+          // Scale grip hit area so it is easy to hover and click across all zoom levels
+          const gripHit = Math.max(10 / Math.max(zoom, 0.1), 8)
+          const gripHalf = gripHit / 2
+          const edge = Math.max(3 / Math.max(zoom, 0.1), 3)
           const colWant = (g: GripDrag, x: number) =>
-            tbl.rtl ? g.edge - (x + 3) : x + 3 - g.origin
-          const rowWant = (g: GripDrag, y: number) => y + 3 - g.origin
-          // The table's outer frame always moves the table: border grips stop short of it, so a press
-          // near the outer edge (even right at a row/column line) never turns into a row/column resize
-          const edge = (TABLE_BORDER_GRIP_PX * 2 + 2) / Math.max(zoom, 0.1)
+            tbl.rtl ? g.edge - (x + gripHalf) : x + gripHalf - g.origin
+          const rowWant = (g: GripDrag, y: number) => y + gripHalf - g.origin
           const lastCol = tbl.gridX.length - 2
           const lastRow = tbl.gridY.length - 2
           return [
@@ -1428,11 +1399,11 @@ export function SlideCanvas({
                 ? []
                 : [
                     <Rect
-                      key={`colgrip_${col}`}
-                      x={n.box.x + visX(col + 1) - 3}
+                      key={`colgrip_${n.sourceId}_${col}`}
+                      x={n.box.x + visX(col + 1) - gripHalf}
                       y={n.box.y + edge}
-                      width={6}
-                      height={n.box.h - 2 * edge}
+                      width={gripHit}
+                      height={Math.max(1, n.box.h - 2 * edge)}
                       fill="transparent"
                       draggable
                       dragBoundFunc={(pos) => {
@@ -1441,7 +1412,7 @@ export function SlideCanvas({
                         const widths =
                           g?.sizes ?? tbl.gridX.slice(1).map((v, i) => v - tbl.gridX[i]!)
                         const { lo, hi } = colDragRange(widths, col, g?.needs ?? tbl.colNeedPx)
-                        const start = CANVAS_BLEED + (g?.origin ?? n.box.x + tbl.gridX[col]!) - 3
+                        const start = CANVAS_BLEED + (g?.origin ?? n.box.x + tbl.gridX[col]!) - gripHalf
                         const x = tbl.rtl
                           ? pos.x
                           : Math.min(Math.max(pos.x, start + lo), start + hi)
@@ -1451,21 +1422,20 @@ export function SlideCanvas({
                         const st = e.target.getStage()
                         if (st) st.container().style.cursor = 'col-resize'
                       }}
+                      onMouseMove={(e) => {
+                        const st = e.target.getStage()
+                        if (st) st.container().style.cursor = 'col-resize'
+                      }}
                       onMouseLeave={(e) => {
                         const st = e.target.getStage()
                         if (st && !gripRef.current) st.container().style.cursor = 'default'
                       }}
                       onMouseDown={(e) => {
-                        gripPressRef.current = { x: e.evt.clientX, y: e.evt.clientY }
+                        if (!selectedIds.includes(n.sourceId)) {
+                          onSelect(n.sourceId, false)
+                        }
                       }}
                       onDragStart={(e) => {
-                        if (
-                          yieldGripToTableMove(e, 'col', n.sourceId, {
-                            x: n.box.x + visX(col + 1) - 3,
-                            y: n.box.y + edge,
-                          })
-                        )
-                          return
                         gripRef.current = {
                           id: n.sourceId,
                           kind: 'col',
@@ -1474,14 +1444,18 @@ export function SlideCanvas({
                           needs: tbl.colNeedPx,
                           origin: n.box.x + tbl.gridX[col]!,
                           edge: n.box.x + visX(col),
-                          home: n.box.x + visX(col + 1) - 3,
+                          home: n.box.x + visX(col + 1) - gripHalf,
                           cancelled: false,
                         }
+                        const st = e.target.getStage()
+                        if (st) st.container().style.cursor = 'col-resize'
                         armGripEscape(e.target)
                       }}
                       onDragMove={(e) => {
                         const g = held('col', col)
                         if (!g) return
+                        const st = e.target.getStage()
+                        if (st) st.container().style.cursor = 'col-resize'
                         // rtl: the grip is the column's visual-left edge; width grows leftward
                         const r = resolveColDrag(g.sizes, col, colWant(g, e.target.x()), g.needs)
                         onTableGridMove?.(n.sourceId, {
@@ -1495,6 +1469,8 @@ export function SlideCanvas({
                         const g = held('col', col)
                         disarmGripEscape()
                         gripRef.current = null
+                        const st = e.target.getStage()
+                        if (st) st.container().style.cursor = 'default'
                         if (!g) return
                         if (g.cancelled) {
                           e.target.x(g.home)
@@ -1513,11 +1489,11 @@ export function SlideCanvas({
                     ? []
                     : [
                         <Rect
-                          key={`rowgrip_${row}`}
+                          key={`rowgrip_${n.sourceId}_${row}`}
                           x={n.box.x + edge}
-                          y={n.box.y + b - 3}
-                          width={n.box.w - 2 * edge}
-                          height={6}
+                          y={n.box.y + b - gripHalf}
+                          width={Math.max(1, n.box.w - 2 * edge)}
+                          height={gripHit}
                           fill="transparent"
                           draggable
                           dragBoundFunc={(pos) => {
@@ -1527,7 +1503,7 @@ export function SlideCanvas({
                             const cur = g ? g.sizes[row]! : tbl.gridY[row + 1]! - tbl.gridY[row]!
                             const need = g ? g.needs?.[row] : tbl.rowNeedPx?.[row]
                             const start =
-                              CANVAS_BLEED + (g?.origin ?? n.box.y + tbl.gridY[row]!) - 3
+                              CANVAS_BLEED + (g?.origin ?? n.box.y + tbl.gridY[row]!) - gripHalf
                             return {
                               x: n.box.x + edge + CANVAS_BLEED,
                               y: Math.max(pos.y, start + rowDragFloor(cur, need)),
@@ -1537,21 +1513,20 @@ export function SlideCanvas({
                             const st = e.target.getStage()
                             if (st) st.container().style.cursor = 'row-resize'
                           }}
+                          onMouseMove={(e) => {
+                            const st = e.target.getStage()
+                            if (st) st.container().style.cursor = 'row-resize'
+                          }}
                           onMouseLeave={(e) => {
                             const st = e.target.getStage()
                             if (st && !gripRef.current) st.container().style.cursor = 'default'
                           }}
                           onMouseDown={(e) => {
-                            gripPressRef.current = { x: e.evt.clientX, y: e.evt.clientY }
+                            if (!selectedIds.includes(n.sourceId)) {
+                              onSelect(n.sourceId, false)
+                            }
                           }}
                           onDragStart={(e) => {
-                            if (
-                              yieldGripToTableMove(e, 'row', n.sourceId, {
-                                x: n.box.x + edge,
-                                y: n.box.y + b - 3,
-                              })
-                            )
-                              return
                             gripRef.current = {
                               id: n.sourceId,
                               kind: 'row',
@@ -1560,14 +1535,18 @@ export function SlideCanvas({
                               needs: tbl.rowNeedPx,
                               origin: n.box.y + tbl.gridY[row]!,
                               edge: 0,
-                              home: n.box.y + b - 3,
+                              home: n.box.y + b - gripHalf,
                               cancelled: false,
                             }
+                            const st = e.target.getStage()
+                            if (st) st.container().style.cursor = 'row-resize'
                             armGripEscape(e.target)
                           }}
                           onDragMove={(e) => {
                             const g = held('row', row)
                             if (!g) return
+                            const st = e.target.getStage()
+                            if (st) st.container().style.cursor = 'row-resize'
                             onTableGridMove?.(n.sourceId, {
                               kind: 'row',
                               row,
@@ -1582,6 +1561,8 @@ export function SlideCanvas({
                             const g = held('row', row)
                             disarmGripEscape()
                             gripRef.current = null
+                            const st = e.target.getStage()
+                            if (st) st.container().style.cursor = 'default'
                             if (!g) return
                             if (g.cancelled) {
                               e.target.y(g.home)
@@ -1600,7 +1581,7 @@ export function SlideCanvas({
                 )
               : []),
           ]
-        })()}
+        })}
         {/* Connector selection highlight: dashed bounding box (no transform handles) */}
         {selectedIds.flatMap((id) => {
           const n = slide.nodes.find((x) => x.sourceId === id)

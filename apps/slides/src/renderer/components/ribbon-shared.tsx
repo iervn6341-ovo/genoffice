@@ -23,7 +23,7 @@ import type { InkPenSettings, InkTool } from '../ink'
 import type { TextToggles } from '../TextEditOverlay'
 import type { TextCaseMode } from '@genoffice/pptx-engine/text-case'
 import { FONT_SIZE_LADDER } from '@genoffice/pptx-engine/font-size-step'
-import type { WordArtPreset } from '@genoffice/ui'
+import { BUILTIN_FONT_FAMILIES, type WordArtPreset } from '@genoffice/ui'
 import {
   SHAPE_GALLERY,
   type ChartPresetDef,
@@ -83,41 +83,8 @@ export const ELEMENT_FORMAT_CMDS: ReadonlySet<FormatCmd> = new Set<FormatCmd>([
 /** View modes: normal editing / outline / slide sorter / reading view. */
 export type SlidesViewMode = 'normal' | 'outline' | 'sorter' | 'reading'
 
-/** Font dropdown candidates (Western + common CJK/Traditional; the current font is inserted first when not in the list) */
-export const FONT_FAMILIES = [
-  'Calibri',
-  'Calibri Light',
-  'Arial',
-  'Times New Roman',
-  'Cambria',
-  'Georgia',
-  'Verdana',
-  'Tahoma',
-  'Courier New',
-  'Impact',
-  '等线',
-  '等线 Light',
-  '宋体',
-  '黑体',
-  '微软雅黑',
-  '楷体',
-  '仿宋',
-  'PingFang SC',
-  'Noto Sans SC',
-  'Noto Serif SC',
-  'Yu Gothic',
-  'Yu Mincho',
-  'Meiryo',
-  'MS Mincho',
-  'Hiragino Sans',
-  'Noto Sans JP',
-  'Malgun Gothic',
-  'Batang',
-  'Apple SD Gothic Neo',
-  'Microsoft JhengHei',
-  'PMingLiU',
-  'PingFang TC',
-]
+/** Font dropdown candidates covering Western + CJK fonts, sorted by name */
+export const FONT_FAMILIES = BUILTIN_FONT_FAMILIES
 
 /** Font size dropdown candidates (pt, same ladder as PowerPoint) */
 export const FONT_SIZES = FONT_SIZE_LADDER

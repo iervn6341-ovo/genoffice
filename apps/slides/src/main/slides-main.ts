@@ -160,6 +160,10 @@ import {
   openedDeckTheme,
   tableStyleGallery,
   buildNativeClipboard,
+  buildSlidesClipboardPackage,
+  openSlidesClipboardPackage,
+  copySlide as copySlideBundle,
+  SLIDES_PACKAGE_FORMAT,
   parseGvml,
   parseTableClip,
   htmlTableToItem,
@@ -326,7 +330,9 @@ import {
 } from './font-store'
 
 /** One slide, copied from any deck open in this process, waiting to be pasted into another. */
-let slideClipboard: { bundle: SlideBundle; png?: string } | null = null
+let slideClipboard: { bundle: SlideBundle; png?: string; extra?: SlideBundle[] } | null = null
+/** Identity of the PowerPoint slide package slideClipboard was loaded from (avoids re-parsing it) */
+let systemSlidesStamp = ''
 
 /** The immediately preceding slide paste per webContents, so the paste-options floater can redo it with another mode. */
 const lastSlidePaste = new Map<number, { afterIndex: number; undoLen: number }>()
@@ -2578,20 +2584,57 @@ export function registerSlidesIpc(): void {
     const bundle = copySlide(session.opened, slideIndex)
     if (!bundle) return false
     slideClipboard = { bundle, ...(pngBase64 ? { png: pngBase64 } : {}) }
+    systemSlidesStamp = ''
     // Marker so plain ⌘V knows the latest copy was a slide (element copies / external copies
-    // overwrite it); the page rendering rides along so other apps paste a picture of the slide
-    void writeSystemClipboard({
-      marker: MARKER_SLIDE,
-      ...(pngBase64 ? { png: Buffer.from(pngBase64, 'base64') } : {}),
-    })
+    // overwrite it); the page rendering rides along so other apps paste a picture of the slide,
+    // and PowerPoint's own slide package lets it paste the slide as a real slide
+    void (async () => {
+      let pkg: Uint8Array | null = null
+      try {
+        pkg = await buildSlidesClipboardPackage(session.opened, [slideIndex])
+      } catch {
+        pkg = null
+      }
+      await writeSystemClipboard({
+        marker: MARKER_SLIDE,
+        ...(pngBase64 ? { png: Buffer.from(pngBase64, 'base64') } : {}),
+        ...(pkg ? { extra: { [SLIDES_PACKAGE_FORMAT]: pkg } } : {}),
+      })
+    })()
     return true
   })
 
-  ipcMain.handle('slides:has-slide-clipboard', () => slideClipboard !== null)
+  ipcMain.handle(
+    'slides:has-slide-clipboard',
+    () => slideClipboard !== null || readCustomFormat(SLIDES_PACKAGE_FORMAT).length > 0,
+  )
+
+  /** Slides PowerPoint (or another GenOffice process) copied: load them as the slide clipboard */
+  const loadSystemSlides = async (): Promise<void> => {
+    if (slideClipboard && readCustomFormat(MARKER_SLIDE).length > 0) return
+    const buf = readCustomFormat(SLIDES_PACKAGE_FORMAT)
+    if (!buf.length) return
+    const stamp = `${buf.length}:${buf.subarray(0, 64).toString('base64')}`
+    if (stamp === systemSlidesStamp && slideClipboard) return
+    const pkg = await openSlidesClipboardPackage(new Uint8Array(buf))
+    if (!pkg) return
+    const bundles = pkg.deck.slides
+      .map((_, i) => copySlideBundle(pkg, i))
+      .filter((b): b is SlideBundle => !!b)
+    if (!bundles.length) return
+    const img = clipboard.readImage()
+    slideClipboard = {
+      bundle: bundles[0]!,
+      ...(bundles.length > 1 ? { extra: bundles.slice(1) } : {}),
+      ...(img.isEmpty() ? {} : { png: img.toPNG().toString('base64') }),
+    }
+    systemSlidesStamp = stamp
+  }
 
   const performSlidePaste = (
     session: Session,
     op: PasteSlideOp,
+    bundleOverride?: SlideBundle,
   ): { slides: RenderSlide[]; index: number; sourceId?: string } | null => {
     if (!slideClipboard) return null
     if (op.mode === 'picture' && !slideClipboard.png) return null
@@ -2603,7 +2646,7 @@ export function registerSlidesIpc(): void {
           mode: op.mode,
           ...(op.mode === 'picture'
             ? { png: slideClipboard.png }
-            : { bundle: slideClipboard.bundle }),
+            : { bundle: bundleOverride ?? slideClipboard.bundle }),
         },
       ],
     })
@@ -2617,14 +2660,23 @@ export function registerSlidesIpc(): void {
     }
   }
 
-  ipcMain.handle('slides:paste-slide', (e, op: PasteSlideOp) => {
+  ipcMain.handle('slides:paste-slide', async (e, op: PasteSlideOp) => {
     const session = sessions.get(e.sender.id)
+    await loadSystemSlides()
     if (!session || !slideClipboard) return null
     pushHistory(session)
-    const r = performSlidePaste(session, op)
+    let r = performSlidePaste(session, op)
     if (!r) {
       session.undoStack.pop()
       return null
+    }
+    // several slides copied in PowerPoint: the rest follow the first, in order
+    if (op.mode !== 'picture') {
+      for (const extra of slideClipboard.extra ?? []) {
+        const next = performSlidePaste(session, { ...op, afterIndex: r.index }, extra)
+        if (!next) break
+        r = { ...next, index: r.index, ...(r.sourceId ? { sourceId: r.sourceId } : {}) }
+      }
     }
     lastSlidePaste.set(e.sender.id, {
       afterIndex: op.afterIndex,
@@ -3772,9 +3824,13 @@ export function registerSlidesIpc(): void {
     return /<table\b/i.test(html) || htmlTextToItem(html, { widthEmu: 1 }) !== null
   }
 
-  ipcMain.handle('slides:clipboard-external', (_e, skipNative?: boolean) => {
+  ipcMain.handle('slides:clipboard-external', async (_e, skipNative?: boolean) => {
     if (slideClipboard && clipboardMarker(MARKER_SLIDE)) return { kind: 'slide' }
     if (elementClipboard && clipboardMarker(MARKER_ELEMENTS)) return { kind: 'internal' }
+    if (!skipNative && readCustomFormat(SLIDES_PACKAGE_FORMAT).length > 0) {
+      await loadSystemSlides()
+      if (slideClipboard) return { kind: 'slide' }
+    }
     if (!skipNative && (hasNativeShapes() || hasHtmlTable())) return { kind: 'native' }
     const img = clipboard.readImage()
     if (!img.isEmpty()) return { kind: 'image', base64: img.toPNG().toString('base64'), ext: 'png' }
@@ -3787,6 +3843,7 @@ export function registerSlidesIpc(): void {
   ipcMain.handle('slides:clipboard-probe', () => {
     if (slideClipboard && clipboardMarker(MARKER_SLIDE)) return true
     if (elementClipboard && clipboardMarker(MARKER_ELEMENTS)) return true
+    if (readCustomFormat(SLIDES_PACKAGE_FORMAT).length > 0) return true
     if (hasNativeShapes() || hasHtmlTable()) return true
     if (clipboard.availableFormats().some((f) => f.startsWith('image/'))) return true
     return clipboard.readText().trim().length > 0
