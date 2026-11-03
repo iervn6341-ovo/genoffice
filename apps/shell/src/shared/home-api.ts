@@ -12,6 +12,8 @@ import type {
 } from '@genoffice/ai-provider'
 import type { UpdateChannel } from './update-api'
 import type { AiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
+import type { FontSubstitutionRule } from '@genoffice/ui'
+export type { FontSubstitutionRule }
 
 /** UI language; kept self-contained here (mirrors Lang in @genoffice/i18n) */
 export type UiLanguage =
@@ -209,6 +211,11 @@ export interface HomeApi {
   /** user reacted to the star prompt; 'starred' resolves it permanently */
   starPromptAction(action: StarPromptAction): Promise<void>
 
+  /** user-configured and default font substitutions */
+  getFontSubstitutions(): Promise<FontSubstitutionRule[]>
+  /** save font substitutions; broadcasts 'app:font-substitutions-changed' */
+  setFontSubstitutions(rules: FontSubstitutionRule[]): Promise<void>
+
   getAiSettings(): Promise<AiSettings>
   /** persist AI settings; open editors pick the change up on their next settings read */
   setAiSettings(settings: AiSettings): Promise<void>
@@ -379,6 +386,8 @@ export const HOME_CHANNELS = {
   setAiPanelPrefs: 'home:set-ai-panel-prefs',
   getDefaultSaveDir: 'home:get-default-save-dir',
   pickDefaultSaveDir: 'home:pick-default-save-dir',
+  getFontSubstitutions: 'home:get-font-substitutions',
+  setFontSubstitutions: 'home:set-font-substitutions',
   openGitHubRepo: 'home:open-github-repo',
   githubStars: 'home:github-stars',
   starPromptShouldShow: 'home:star-prompt-should-show',

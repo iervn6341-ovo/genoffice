@@ -28,6 +28,7 @@ import type { StringKey, TFunc } from './locale'
 import type { AiCatalogEntry, UiTheme } from '../../shared/home-api'
 import { ProviderLogo } from './provider-logos'
 import { IntegrationsPane, skillUpdateDue } from './IntegrationsPane'
+import { FontSubstitutionPane } from './FontSubstitutionPane'
 import './settings.css'
 
 // ── Settings modal (opened from the account menu) ─────────
@@ -131,12 +132,13 @@ function CustomFontSizeInput({
   )
 }
 
-type SectionId = 'aiModel' | 'aiMedia' | 'general' | 'integrations' | 'about'
+type SectionId = 'aiModel' | 'aiMedia' | 'general' | 'fonts' | 'integrations' | 'about'
 
 const SECTIONS: readonly { id: SectionId; labelKey: StringKey }[] = [
   { id: 'aiModel', labelKey: 'setSecAiModel' },
   { id: 'aiMedia', labelKey: 'setSecAiMedia' },
   { id: 'general', labelKey: 'setSecGeneral' },
+  { id: 'fonts', labelKey: 'setSecFonts' },
   { id: 'integrations', labelKey: 'setSecIntegrations' },
   { id: 'about', labelKey: 'setSecAbout' },
 ]
@@ -172,6 +174,25 @@ function SectionIcon({ id }: { id: SectionId }) {
           strokeLinejoin="round"
         />
         <circle cx="10.5" cy="6" r="1.1" fill="currentColor" />
+      </svg>
+    )
+  }
+  if (id === 'fonts') {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path
+          d="M3 13.5L7.3 3.2c.3-.7 1.1-.7 1.4 0L13 13.5M4.6 9.8h6.8"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M2.5 13.5h2M11.5 13.5h2"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
       </svg>
     )
   }
@@ -1322,6 +1343,7 @@ export function SettingsModal({
                 </div>
               </>
             )}
+            {section === 'fonts' && <FontSubstitutionPane t={t} />}
             {section === 'integrations' && (
               <IntegrationsPane t={t} onStatus={(st) => onSkillUpdateDue?.(skillUpdateDue(st))} />
             )}

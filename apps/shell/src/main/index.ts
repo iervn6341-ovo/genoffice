@@ -244,6 +244,10 @@ import {
   sameAiPanelPrefs,
   type AiPanelPrefs,
 } from '@genoffice/ui/ai-panel-prefs'
+import {
+  normalizeFontSubstitutions,
+  type FontSubstitutionRule,
+} from '@genoffice/ui'
 import type { TabKind } from '../shared/tabs-api'
 import { TABS_CHANNELS } from '../shared/tabs-api'
 import { showErrorDialog } from './error-dialog'
@@ -500,6 +504,14 @@ function currentAiPanelPrefs(): AiPanelPrefs {
     contentTheme: saved.contentTheme,
   })
   return cachedAiPanelPrefs
+}
+
+let cachedFontSubstitutions: FontSubstitutionRule[] | null = null
+function currentFontSubstitutions(): FontSubstitutionRule[] {
+  if (cachedFontSubstitutions) return cachedFontSubstitutions
+  const saved = readAppSettings(APP_SETTINGS_PATH()).fontSubstitutions
+  cachedFontSubstitutions = normalizeFontSubstitutions(saved)
+  return cachedFontSubstitutions
 }
 
 // ---- anonymous usage analytics (see src/main/analytics.ts) ----
@@ -3486,6 +3498,24 @@ function registerHomeIpc(): void {
   }
   ipcMain.handle(HOME_CHANNELS.setAiPanelPrefs, (_event, patch) => setAiPanelPrefs(patch))
   ipcMain.handle('app:set-ai-panel-prefs', (_event, patch) => setAiPanelPrefs(patch))
+
+  ipcMain.handle(
+    HOME_CHANNELS.getFontSubstitutions,
+    (): FontSubstitutionRule[] => currentFontSubstitutions(),
+  )
+  ipcMain.handle(
+    'app:get-font-substitutions',
+    (): FontSubstitutionRule[] => currentFontSubstitutions(),
+  )
+
+  ipcMain.handle(HOME_CHANNELS.setFontSubstitutions, (_event, rawRules: unknown) => {
+    const rules = normalizeFontSubstitutions(rawRules)
+    cachedFontSubstitutions = rules
+    writeAppSetting(APP_SETTINGS_PATH(), 'fontSubstitutions', rules)
+    for (const wc of webContents.getAllWebContents()) {
+      if (!wc.isDestroyed()) wc.send('app:font-substitutions-changed', rules)
+    }
+  })
 
   // effective folder where new/untitled files land; the editor mains resolve
   // the same setting themselves (configuredDefaultSaveDir via docs' defaultSaveDir)

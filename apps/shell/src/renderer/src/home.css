@@ -212,6 +212,17 @@ body.vib .home {
   color: var(--text-muted);
   font-size: 14px;
   font-weight: 700;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.account-avatar svg {
+  width: 17px;
+  height: 17px;
+  display: block;
+}
+
+.account-btn:hover .account-avatar {
+  color: var(--text-normal);
 }
 
 .account-avatar.logged-in {

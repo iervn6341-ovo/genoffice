@@ -13,6 +13,10 @@ import type {
 } from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 import { normalizeAiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
+import {
+  normalizeFontSubstitutions,
+  type FontSubstitutionRule,
+} from '@genoffice/ui'
 import type {
   FolderListing,
   FolderRoot,
@@ -301,6 +305,13 @@ const homeApi: HomeApi = {
   async pickDefaultSaveDir() {
     const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.pickDefaultSaveDir)
     return typeof result === 'string' && result ? result : null
+  },
+  async getFontSubstitutions() {
+    const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.getFontSubstitutions)
+    return normalizeFontSubstitutions(result)
+  },
+  async setFontSubstitutions(rules: FontSubstitutionRule[]) {
+    await ipcRenderer.invoke(HOME_CHANNELS.setFontSubstitutions, rules)
   },
   onThemeChanged(handler) {
     const listener = (_event: Electron.IpcRendererEvent, theme: unknown) => {
