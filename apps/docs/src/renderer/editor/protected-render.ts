@@ -10,6 +10,7 @@ import {
   cjkDeclaredLineFactor,
   cssAutoLineMult,
   cssCsFontFamily,
+  cssEaOnlyFontFamily,
   cssFontFamily,
   cssRunFontFamily,
   cssGridLineBase,
@@ -112,9 +113,12 @@ export function renderFieldSpec(field: FieldDisplay): DomSpec | null {
     const tocStyles: string[] = []
     if (field.szHalfPoints) tocStyles.push(`font-size:${field.szHalfPoints / 2}pt`)
     if (field.fontFamily) {
+      const familyChain = isCjkFontName(field.fontFamily)
+        ? cssEaOnlyFontFamily(field.fontFamily)
+        : cssFontFamily(field.fontFamily)
       tocStyles.push(
         `--doc-line-factor:${lineHeightFactor(field.fontFamily)}`,
-        `font-family:${cssFontFamily(field.fontFamily)}`,
+        `font-family:${familyChain}`,
       )
     }
     if (field.bold) tocStyles.push('font-weight:bold')
@@ -164,9 +168,12 @@ export function renderFieldSpec(field: FieldDisplay): DomSpec | null {
     if (field.szHalfPoints) styles.push(`font-size:${field.szHalfPoints / 2}pt`)
     if (field.align) styles.push(`text-align:${field.align}`)
     if (field.fontFamily) {
+      const familyChain = isCjkFontName(field.fontFamily)
+        ? cssEaOnlyFontFamily(field.fontFamily)
+        : cssFontFamily(field.fontFamily)
       styles.push(
         `--doc-line-factor:${lineHeightFactor(field.fontFamily)}`,
-        `font-family:${cssFontFamily(field.fontFamily)}`,
+        `font-family:${familyChain}`,
       )
     }
     if (field.szHalfPoints || field.fontFamily || field.lineRule) {
@@ -2163,7 +2170,7 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
         cell.textDirection ? 'position:relative' : '',
         // authored colors stay the declarations; --dk-* twins feed the dark page (dark-page.ts)
         cell.styleColor ? `color:#${cell.styleColor};${dkColor(cell.styleColor)}` : '',
-        cell.styleBold ? 'font-weight:600' : '',
+        cell.styleBold ? 'font-weight:bold' : '',
         cell.fill ? `background-color:#${cell.fill};${dkBackground(`#${cell.fill}`)}` : '',
         cell.align ? `text-align:${cell.align}` : '',
         cell.vAlign && cell.vAlign !== 'top'

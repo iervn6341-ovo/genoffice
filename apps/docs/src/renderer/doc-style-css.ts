@@ -15,6 +15,7 @@ import {
   cssEaOnlyFontFamily,
   cssFontFamily,
   docLatinChainCss,
+  latinChainHead,
   cssGridLineBase,
   cssGridLineExpr,
   cssGridLineMaxExpr,
@@ -109,17 +110,30 @@ export function docThemeCss(
     // docDefaults names one (a declared body font supersedes the theme, and
     // docStyleCss already resolved theme references into it)
     // .pv-page too: preview header/footer strips live outside the body clone
-    rules.push(`.doc-page, .pv-page { font-family:${cssFontFamily(fonts.minor)} }`)
+    const minorEa = fonts.eastAsia
+    const bodyFamily = minorEa ? cssDualFontFamily(fonts.minor, minorEa) : cssFontFamily(fonts.minor)
+    rules.push(`.doc-page, .pv-page { font-family:${bodyFamily} }`)
     // .page-wrap too: header/footer areas are .doc-page siblings inside it
     rules.push(
       `.page-wrap, .doc-page, .pv-page { --doc-latin-chain:${docLatinChainCss(fonts.minor)} }`,
     )
+    if (minorEa) {
+      rules.push(`.page-wrap, .doc-page, .pv-page { --doc-ea-chain:${cssFontFamily(minorEa)} }`)
+    }
   }
   if (fonts?.major) {
     const headings = [1, 2, 3, 4, 5, 6]
       .map((n) => `.doc-page h${n}:where(:not(.doc-outline-only))`)
       .join(', ')
-    rules.push(`${headings} { font-family:${cssFontFamily(fonts.major)} }`)
+    const majorEa = fonts.majorEastAsia ?? fonts.eastAsia
+    const headingFamily = majorEa
+      ? cssDualFontFamily(fonts.major, majorEa)
+      : `${latinChainHead(fonts.major).join(',')},var(--doc-ea-chain,${cssFontFamily(fonts.major)})`
+    rules.push(`${headings} { font-family:${headingFamily} }`)
+    rules.push(`${headings} { --doc-latin-chain:${docLatinChainCss(fonts.major)} }`)
+    if (majorEa) {
+      rules.push(`${headings} { --doc-ea-chain:${cssFontFamily(majorEa)} }`)
+    }
   }
   if (colors?.accent1) {
     // Keep the live accent available to ribbon presets. Heading text itself must
@@ -478,7 +492,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       // (styles.css re-sets the paper ink the same way when there is none)
       darkRules.push(`.page-dark .doc-textbox-filled { color:#${color} }`)
     }
-    if (normal?.bold ?? dd?.bold) decls.push('font-weight:600')
+    if (normal?.bold ?? dd?.bold) decls.push('font-weight:bold')
     if (normal?.italic ?? dd?.italic) decls.push('font-style:italic')
     // default style's w:jc reaches unstyled paragraphs (explicit w:jc and
     // [data-style] alignment both override this inherited baseline)
@@ -638,7 +652,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
         decls.push(`background:#${t.firstRow.fill}`)
         darkDecls.push(`background:${darkPageColor(t.firstRow.fill)}`)
       }
-      if (t.firstRow.bold) decls.push('font-weight:600')
+      if (t.firstRow.bold) decls.push('font-weight:bold')
       if (t.firstRow.italic) decls.push('font-style:italic')
       if (t.firstRow.color) {
         decls.push(`color:#${t.firstRow.color}`)
@@ -713,8 +727,8 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       darkDecls.push(`color:${darkPageColor(d.color)}`)
     }
     // explicit off (w:val="0") must out-rule an inherited on from .doc-page defaults
-    if (d.bold) decls.push('font-weight:600')
-    else if (d.bold === false) decls.push('font-weight:400')
+    if (d.bold) decls.push('font-weight:bold')
+    else if (d.bold === false) decls.push('font-weight:normal')
     if (d.italic) decls.push('font-style:italic')
     else if (d.italic === false) decls.push('font-style:normal')
     if (d.underline || d.strike) {

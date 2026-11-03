@@ -109,7 +109,7 @@ describe('explicit off (w:val="0") overrides style-inherited formatting', () => 
     const rule = css
       .split('\n')
       .find((l) => l.includes('[data-style="PlainChild"]') && l.includes('font-weight'))
-    expect(rule).toContain('font-weight:400')
+    expect(rule).toContain('font-weight:normal')
     expect(rule).toContain('font-style:normal')
     expect(rule).toContain('font-variant-caps:normal')
     expect(rule).toContain('text-transform:none')

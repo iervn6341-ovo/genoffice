@@ -111,4 +111,49 @@ describe('Styles pane list', () => {
     const title = listStyles(new Map([['Title', own]]), {}).find((s) => s.styleId === 'Title')
     expect(title?.display?.sizeHalfPoints).toBe(80)
   })
+
+  it('filters styles correctly by mode (recommended, inUse, inDoc, all)', () => {
+    const docStyles = new Map<string, StyleInfo>([
+      ['Normal', info({ styleId: 'Normal', name: 'Normal', isDefault: true, qFormat: true })],
+      ['Custom', info({ styleId: 'Custom', name: 'CustomStyle', qFormat: false })],
+    ])
+    // inDoc only lists styles present in the document
+    const inDocIds = listStyles(docStyles, {}, 'inDoc').map((s) => s.styleId)
+    expect(inDocIds).toContain('Normal')
+    expect(inDocIds).toContain('Custom')
+    expect(inDocIds).not.toContain('Caption') // built-in not in doc
+
+    // all includes built-ins even if not in doc
+    const allIds = listStyles(docStyles, {}, 'all').map((s) => s.styleId)
+    expect(allIds).toContain('Caption')
+    expect(allIds).toContain('Bibliography')
+    expect(allIds).toContain('Custom')
+
+    // inUse only lists styles in use
+    const inUseIds = listStyles(docStyles, {}, 'inUse', new Set(['Normal', 'Caption'])).map(
+      (s) => s.styleId,
+    )
+    expect(inUseIds).toContain('Normal')
+    expect(inUseIds).toContain('Caption')
+    expect(inUseIds).not.toContain('Custom')
+  })
 })
+
+describe('localizedStyleName', () => {
+  it('localizes styles to Traditional Chinese matching Word', async () => {
+    const { localizedStyleName } = await import('../src/renderer/editor/builtin-styles')
+    expect(localizedStyleName('Normal', 'Normal', 'zh-TW')).toBe('內文')
+    expect(localizedStyleName('Heading1', 'Heading 1', 'zh-TW')).toBe('標題 1')
+    expect(localizedStyleName('Quote', 'Quote', 'zh-TW')).toBe('引文')
+    expect(localizedStyleName('IntenseQuote', 'Intense Quote', 'zh-TW')).toBe('鮮明引文')
+    expect(localizedStyleName('Caption', 'caption', 'zh-TW')).toBe('標號')
+    expect(localizedStyleName('Bibliography', 'bibliography', 'zh-TW')).toBe('書目')
+    expect(localizedStyleName('TOC1', 'toc 1', 'zh-TW')).toBe('目錄 1')
+    expect(localizedStyleName('TOCHeading', 'TOC Heading', 'zh-TW')).toBe('目錄標題')
+    expect(localizedStyleName('TableofFigures', 'table of figures', 'zh-TW')).toBe('圖表目錄')
+    expect(localizedStyleName('Header', 'header', 'zh-TW')).toBe('頁首')
+    expect(localizedStyleName('Footer', 'footer', 'zh-TW')).toBe('頁尾')
+    expect(localizedStyleName('Hyperlink', 'Hyperlink', 'zh-TW')).toBe('超連結')
+  })
+})
+

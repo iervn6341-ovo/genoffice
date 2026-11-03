@@ -595,7 +595,7 @@ export function ReferencesTab({
   onAddSource,
   headingPages,
 }: ReferencesTabProps) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [captionOpen, setCaptionOpen] = useState(false)
   const [tocOptionsOpen, setTocOptionsOpen] = useState(false)
   const [tocUpdateOpen, setTocUpdateOpen] = useState(false)
@@ -781,6 +781,24 @@ export function ReferencesTab({
       .focus()
       .insertContent(nodes as never)
       .run()
+  }
+
+  const insertTableOfFigures = () => {
+    const isZh = lang.startsWith('zh')
+    const entries: TocEntry[] = []
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'docProtected' && node.attrs.fieldDisplay?.kind === 'text') {
+        const text = String(node.attrs.fieldDisplay.left || '')
+        if (text) {
+          entries.push({ level: 1, text })
+        }
+      }
+    })
+    if (entries.length === 0) {
+      entries.push({ level: 1, text: isZh ? '圖 1-1 範例圖片' : 'Figure 1-1 Sample Image' })
+    }
+    const nodes = tocFieldNodes(entries, { ...DEFAULT_TOC_OPTIONS, leader: 'dot' }, 'TOC \\c "圖"')
+    editor.chain().focus().insertContent(nodes as never).run()
   }
 
   return (
@@ -1033,6 +1051,17 @@ export function ReferencesTab({
             <IconCaption size={BIG} />
           </span>
           <span>{t('ribbonCaption')}</span>
+        </button>
+        <button
+          className="rb-big"
+          disabled={!hasDoc}
+          data-tip={lang.startsWith('zh') ? '插入圖表目錄' : 'Insert Table of Figures'}
+          onClick={insertTableOfFigures}
+        >
+          <span className="rb-big-icon">
+            <IconToc size={BIG} />
+          </span>
+          <span>{lang.startsWith('zh') ? '圖表目錄' : 'Figures'}</span>
         </button>
         <div className="rb-split-wrap">
           <button

@@ -1862,7 +1862,7 @@ export function PaginationPreview({
                                   <span
                                     key={ri}
                                     style={{
-                                      fontWeight: run.bold ? 600 : undefined,
+                                      fontWeight: run.bold ? 'bold' : undefined,
                                       fontStyle: run.italic ? 'italic' : undefined,
                                       textDecoration:
                                         [run.underline && 'underline', run.strike && 'line-through']
@@ -1941,7 +1941,7 @@ export function PaginationPreview({
                                     <span
                                       key={ri}
                                       style={{
-                                        fontWeight: run.bold ? 600 : undefined,
+                                        fontWeight: run.bold ? 'bold' : undefined,
                                         fontStyle: run.italic ? 'italic' : undefined,
                                         textDecoration:
                                           [

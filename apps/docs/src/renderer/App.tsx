@@ -256,6 +256,7 @@ import {
   noteLineHeightPx,
   FOOTNOTE_SEPARATOR_H,
   textHasCjk,
+  setUserFontSubstitutions,
 } from './line-metrics'
 import { saveUntilPersisted } from './save-until-persisted'
 import { SPELLCHECK_KEY, spellcheckEnabled } from './spellcheck-pref'
@@ -264,7 +265,7 @@ import { useShallowStable, useStableCallbacks } from './use-stable'
 import { FindPanel } from './components/FindPanel'
 import { Ribbon } from './components/Ribbon'
 import { computeFormatState } from './components/ribbon-format-state'
-import { IconRedo, IconSave, IconUndo } from './components/icons'
+import { IconOutlineView, IconRedo, IconSave, IconUndo } from './components/icons'
 import { ToastHost } from './components/toast'
 import {
   AI_REWRITE_ACK_KEY,
@@ -318,6 +319,10 @@ import { type InkAnnotation, type InkTool } from './editor/ink'
 import { InkOverlay } from './components/InkOverlay'
 import { collectRevisions, gotoRevision, type TrackChangesStorage } from './editor/revisions'
 import { NavPane } from './components/NavPane'
+import { FloatingOutlinePane } from './components/FloatingOutlinePane'
+import { MissingFontsDialog } from './components/MissingFontsDialog'
+import { MissingFontsBanner } from './components/MissingFontsBanner'
+import type { FontSubstitution } from './font-check'
 import { Ruler } from './components/Ruler'
 import { docBodyFont, docLineFactor, docStyleCss, docThemeCss } from './doc-style-css'
 import { builtinStyle, styleInfoOfUpsert } from './editor/builtin-styles'
@@ -715,7 +720,16 @@ export function App() {
     null,
   )
   const [status, setStatus] = useState('')
-  const [zoom, setZoom] = useState(100)
+  const [zoom, setZoomState] = useState(100)
+  const lastFitRef = useRef<{ mode: 'width' | 'page'; value: number } | null>(null)
+  const zoomLiveRef = useRef(zoom)
+  useEffect(() => {
+    zoomLiveRef.current = zoom
+  }, [zoom])
+  const setZoom = useCallback((updater: number | ((prev: number) => number)) => {
+    lastFitRef.current = null
+    setZoomState(updater)
+  }, [])
   const scrollContainerRef = useRef<HTMLElement>(null)
   // Word-style dark page (editor/dark-page.ts): on by default in the dark theme,
   // View ▸ Dark Mode flips it for the session (Word's Switch Modes); a theme
@@ -726,6 +740,9 @@ export function App() {
   const [darkPage, setDarkPage] = useContentDarkPref(themeDark, saveDisplayPrefs)
   const darkPageRef = useRef(darkPage)
   darkPageRef.current = darkPage
+  const [missingFonts, setMissingFonts] = useState<FontSubstitution[]>([])
+  const [showMissingFontsDialog, setShowMissingFontsDialog] = useState(false)
+  const [missingFontsBannerDismissed, setMissingFontsBannerDismissed] = useState(false)
   const [section, setSection] = useState<SectionSettings | null>(null)
   /** All sections (readSections): pagination/preview use per-section geometry; layout edits apply to the cursor's section */
   const [sections, setSections] = useState<SectionInfo[]>([])
@@ -1183,6 +1200,11 @@ export function App() {
   const [showRuler, setShowRuler] = useState(false)
   const [showNav, setShowNav] = useState(() => localStorage.getItem('aidocs.showNav') === '1')
   const closeNav = useCallback(() => setShowNav(false), [])
+  const [showFloatingOutline, setShowFloatingOutline] = useState(false)
+  const [hasRightGutter, setHasRightGutter] = useState<boolean>(() => {
+    return typeof window !== 'undefined' ? window.innerWidth >= 1080 : true
+  })
+  const [activeHeadingText, setActiveHeadingText] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('print')
   const [readMode, setReadMode] = useState(false)
   const [showGrid, setShowGrid] = useState(false)
@@ -1353,6 +1375,19 @@ export function App() {
   const [showFontDialog, setShowFontDialog] = useState(false)
   const [showParaDialog, setShowParaDialog] = useState(false)
   const [, forceRender] = useReducer((x: number) => x + 1, 0)
+
+  useEffect(() => {
+    void window.desktop.getFontSubstitutions?.().then((rules) => {
+      if (rules) {
+        setUserFontSubstitutions(rules)
+        forceRender()
+      }
+    })
+    return window.desktop.onFontSubstitutionsChanged?.((rules) => {
+      setUserFontSubstitutions(rules)
+      forceRender()
+    })
+  }, [])
   const dirtyRef = useRef(false)
   // serializes save(): overlapping saves (Cmd+S vs autosave timer vs blur) would
   // otherwise race on the write + reparse + setContent sequence
@@ -1650,6 +1685,36 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('aidocs.showNav', showNav ? '1' : '0')
   }, [showNav])
+
+  useEffect(() => {
+    localStorage.setItem('aidocs.showFloatingOutline', showFloatingOutline ? '1' : '0')
+  }, [showFloatingOutline])
+
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const updateGutter = () => {
+      const area = el.closest('.editor-area') ?? el
+      const page = el.querySelector('.doc-page')
+      if (!area || !page) {
+        setHasRightGutter(window.innerWidth >= 1080)
+        return
+      }
+      const areaRect = area.getBoundingClientRect()
+      const pageRect = page.getBoundingClientRect()
+      const rightGutter = areaRect.right - pageRect.right
+      const fits = rightGutter >= 80 && areaRect.width >= 960
+      setHasRightGutter(fits)
+    }
+    updateGutter()
+    const ro = new ResizeObserver(updateGutter)
+    ro.observe(el)
+    window.addEventListener('resize', updateGutter)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', updateGutter)
+    }
+  }, [doc])
 
   const spellcheckWasOn = useRef(spellcheck)
   const respellKickBusy = useRef(false)
@@ -2214,6 +2279,19 @@ export function App() {
     setCompareResult,
     promptDocxPassword: (info) =>
       setDocPwdPrompt({ path: info.path, name: info.name, value: '', errorKey: '', busy: false }),
+    onMissingFontsDetected: (detected, filePath, fileName) => {
+      setMissingFonts(detected)
+      setMissingFontsBannerDismissed(false)
+      if (detected.length === 0) {
+        setShowMissingFontsDialog(false)
+        return
+      }
+      const docKey = filePath || fileName || 'default'
+      const isSuppressed = localStorage.getItem(`aidocs.suppressFontModal.${docKey}`) === '1'
+      if (!isSuppressed) {
+        setShowMissingFontsDialog(true)
+      }
+    },
   }
 
   const loadFile = useCallback(async (result: OpenDocxResult) => {
@@ -3165,21 +3243,6 @@ export function App() {
     [comments],
   )
 
-  /** Uncapped width-fit ratio (%) from the scroller's measured size */
-  const rawFitWidth = useCallback(() => {
-    if (!section) return null
-    const scroller = document.querySelector('.editor-scroll')
-    if (!scroller) return null
-    return ((scroller.clientWidth - 48) / (twipsToPx(section.pageWidth) + markupExtra)) * 100
-  }, [section, markupExtra])
-
-  /** Last auto-fit: if current zoom still equals its value → "fit mode", re-fit on size changes */
-  const lastFitRef = useRef<{ mode: 'width' | 'page'; value: number } | null>(null)
-  const zoomLiveRef = useRef(zoom)
-  useEffect(() => {
-    zoomLiveRef.current = zoom
-  }, [zoom])
-
   /** Word's page-width / whole-page zoom: compute the actual zoom ratio from the current window size */
   const zoomFit = useCallback(
     (mode: 'width' | 'page') => {
@@ -3194,47 +3257,58 @@ export function App() {
       // floor, not round: rounding up would push the page past the pane edge
       const next = mode === 'width' ? wFit : Math.min(wFit, hFit)
       const applied = Math.min(200, Math.max(50, Math.floor(next)))
+      if (
+        lastFitRef.current?.mode === mode &&
+        lastFitRef.current?.value === applied &&
+        zoomLiveRef.current === applied
+      ) {
+        return
+      }
       lastFitRef.current = { mode, value: applied }
-      setZoom(applied)
+      setZoomState(applied)
     },
     [section, markupExtra],
   )
 
   // On scroller size changes (window/AI-dock/nav-pane toggles): follow with a
-  // re-fit while in fit mode, and clamp any manual zoom back down to width-fit
-  // whenever the page no longer fits horizontally — the canvas must never
-  // overflow the pane on a resize (same contract as the slides stage). A manual
-  // zoom smaller than fit is left alone.
+  // re-fit only when explicitly in fit mode (Page Width or Whole Page).
+  // Manual zoom levels (e.g. 100%) are user choices and are preserved as in Word.
   useEffect(() => {
     const el = document.querySelector('.editor-scroll')
     if (!doc || !el) return
+    let rafId: number | null = null
+    let timer: number | null = null
     const ro = new ResizeObserver(() => {
-      const raw = rawFitWidth()
-      if (raw == null) return
       const lf = lastFitRef.current
-      if (lf != null && Math.abs(zoomLiveRef.current - lf.value) <= 0.5) {
-        zoomFit(lf.mode) // fit mode: follow the container in the user's chosen fit
-        return
-      }
-      // The overflow test uses the uncapped ratio: a manual zoom that still
-      // fits (or is smaller than fit) is the user's choice and must be kept
-      if (zoomLiveRef.current <= raw + 0.5) return
-      zoomFit('width')
+      if (lf == null) return
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        const cur = lastFitRef.current
+        if (cur != null) zoomFit(cur.mode)
+      }, 50)
+      if (rafId !== null) return
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null
+        const cur = lastFitRef.current
+        if (cur != null) zoomFit(cur.mode)
+      })
     })
     ro.observe(el)
-    return () => ro.disconnect()
-  }, [doc, zoomFit, rawFitWidth])
+    return () => {
+      ro.disconnect()
+      if (rafId !== null) window.cancelAnimationFrame(rafId)
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [doc, zoomFit])
 
   // markup column appearing/disappearing changes the canvas width without a
-  // pane resize: apply the same follow/clamp rules as the ResizeObserver above
+  // pane resize: apply fit when in fit mode
   useEffect(() => {
     if (!doc) return
-    const raw = rawFitWidth()
-    if (raw == null) return
     const lf = lastFitRef.current
-    if (lf != null && Math.abs(zoomLiveRef.current - lf.value) <= 0.5) zoomFit(lf.mode)
-    else if (zoomLiveRef.current > raw + 0.5) zoomFit('width')
-  }, [doc, markupExtra, rawFitWidth, zoomFit])
+    if (lf != null) zoomFit(lf.mode)
+  }, [doc, markupExtra, zoomFit])
 
   // Read Mode opens at 1:1 — the same page size as the Page Preview — and the
   // user's zoom / fit mode is restored on exit (wheel zoom still works inside).
@@ -3251,13 +3325,13 @@ export function App() {
       preReadZoomRef.current = { zoom: zoomLiveRef.current, fit: lastFitRef.current }
       lastFitRef.current = null
       zoomLiveRef.current = 100
-      setZoom(100)
+      setZoomState(100)
     } else if (preReadZoomRef.current) {
       const prev = preReadZoomRef.current
       preReadZoomRef.current = null
       lastFitRef.current = prev.fit
       zoomLiveRef.current = prev.zoom
-      setZoom(prev.zoom)
+      setZoomState(prev.zoom)
     }
   }, [readMode])
 
@@ -5682,6 +5756,25 @@ export function App() {
         e.preventDefault()
         runAiProofread()
       }
+      // Styles Pane: Ctrl+Alt+Shift+S (Word shortcut)
+      if (
+        (e.code === 'KeyS' || e.key === 's' || e.key === 'S') &&
+        e.altKey &&
+        e.shiftKey &&
+        (e.ctrlKey || e.metaKey)
+      ) {
+        e.preventDefault()
+        setShowStyles((v) => !v)
+      }
+      // Floating Outline Pane: Ctrl+Shift+O / Cmd+Shift+O
+      if (
+        (e.code === 'KeyO' || e.key === 'o' || e.key === 'O') &&
+        (e.shiftKey || e.altKey) &&
+        (e.ctrlKey || e.metaKey)
+      ) {
+        e.preventDefault()
+        setShowFloatingOutline((v) => !v)
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -6006,8 +6099,11 @@ export function App() {
       getStatus: () => status,
       exportPdfTo: (path: string) => exportPdf(path),
       exportHtmlTo: (path: string) => exportHtml(path),
+      setDarkPage: (dark: boolean) => setDarkPage(dark),
+      showMissingFontsDialog: (show: boolean) => setShowMissingFontsDialog(show),
+      getMissingFonts: () => missingFonts,
     }
-  }, [editor, openRecent, save, status, exportPdf, exportHtml])
+  }, [editor, openRecent, save, status, exportPdf, exportHtml, setDarkPage, missingFonts])
 
   // shallow-stable snapshot of every editor read the ribbon displays: caret moves
   // that change none of it keep the reference, so the memoized Ribbon skips
@@ -6446,6 +6542,113 @@ export function App() {
     setDocCss(docStyleCss(doc.parsed))
   }
 
+  /** Update an existing style definition to match current paragraph and run selection */
+  const updateStyleWithSelection = useCallback(
+    (styleId: string) => {
+      if (!doc || !editor) return
+      const existing = doc.parsed.styles.get(styleId)
+      const name = existing?.name ?? styleId
+      const isHeading = styleId.startsWith('Heading') || /^heading\s*\d$/i.test(name)
+      const headingLvl = isHeading ? parseInt(styleId.replace(/\D/g, '') || '1', 10) : undefined
+
+      const upsert: StyleUpsert = {
+        styleId,
+        name,
+        type: existing?.type ?? 'paragraph',
+        basedOn: existing?.basedOn ?? (isHeading ? 'Normal' : undefined),
+        next: existing?.next ?? 'Normal',
+        quickFormat: true,
+        pPr: {
+          outlineLevel: headingLvl,
+          align: (formatState.align as never) ?? existing?.display?.align,
+          lineSpacing: formatState.lineSpacing ?? existing?.display?.lineSpacing,
+          spaceBeforeTwips: formatState.spaceBefore ?? existing?.display?.spaceBeforeTwips,
+          spaceAfterTwips: formatState.spaceAfter ?? existing?.display?.spaceAfterTwips,
+          indentLeftTwips: formatState.indentLeft ?? existing?.display?.indentLeftTwips,
+          indentRightTwips: formatState.indentRight ?? existing?.display?.indentRightTwips,
+          firstLineTwips: formatState.indentFirstLine ?? existing?.display?.indentFirstLineTwips,
+        },
+        rPr: {
+          font: formatState.fontFamily || existing?.display?.fontAscii,
+          sizeHalfPoints: formatState.fontSizePt
+            ? Math.round(formatState.fontSizePt * 2)
+            : existing?.display?.sizeHalfPoints,
+          bold: formatState.bold,
+          italic: formatState.italic,
+          underline: formatState.underline,
+          color: formatState.textColor || existing?.display?.color,
+        },
+      }
+      doc.parsed.styles.set(styleId, styleInfoOfUpsert(upsert))
+      setStyleUpserts((prev) => ({ ...prev, [styleId]: upsert }))
+      setDocCss(docStyleCss(doc.parsed))
+      setStatus(
+        lang.startsWith('zh')
+          ? `已更新樣式「${name}」以符合選取範圍`
+          : `Updated style "${name}" to match selection`,
+      )
+    },
+    [doc, editor, formatState, lang, setStatus],
+  )
+
+  /** Upsert user-created or modified style */
+  const upsertCustomStyle = useCallback(
+    (upsert: StyleUpsert) => {
+      if (!doc) return
+      doc.parsed.styles.set(upsert.styleId, styleInfoOfUpsert(upsert))
+      setStyleUpserts((prev) => ({ ...prev, [upsert.styleId]: upsert }))
+      setDocCss(docStyleCss(doc.parsed))
+      setStatus(
+        lang.startsWith('zh')
+          ? `已儲存樣式「${upsert.name ?? upsert.styleId}」`
+          : `Saved style "${upsert.name ?? upsert.styleId}"`,
+      )
+    },
+    [doc, lang, setStatus],
+  )
+
+  /** Select all paragraphs sharing this style */
+  const selectAllWithStyle = useCallback(
+    (styleId: string | null, headingLvl: number | null) => {
+      if (!editor) return
+      const ranges: { from: number; to: number }[] = []
+      editor.state.doc.descendants((node, pos) => {
+        if (node.isBlock && node.type.name !== 'doc') {
+          const pStyle = (node.attrs.styleId as string | undefined) ?? null
+          const nodeHeading = node.type.name === 'docHeading' ? Number(node.attrs.level) : null
+          let match = false
+          if (headingLvl !== null) {
+            match = nodeHeading === headingLvl
+          } else if (styleId) {
+            match = pStyle === styleId
+          } else {
+            match = !pStyle && nodeHeading === null
+          }
+          if (match) {
+            ranges.push({ from: pos, to: pos + node.nodeSize })
+          }
+        }
+      })
+      if (ranges.length > 0) {
+        const first = ranges[0]
+        editor
+          .chain()
+          .setTextSelection({
+            from: first.from + 1,
+            to: Math.max(first.from + 1, first.to - 1),
+          })
+          .scrollIntoView()
+          .run()
+        setStatus(
+          lang.startsWith('zh')
+            ? `已選取符合樣式之文字 (${ranges.length} 個段落)`
+            : `Selected matching paragraphs (${ranges.length} found)`,
+        )
+      }
+    },
+    [editor, lang, setStatus],
+  )
+
   const ribbonActions = useStableCallbacks({
     allocateNumId: (kind: 'bullet' | 'ordered') => allocateListNumId(kind),
     createListDef: (levels: CustomNumberingLevel[]) => createCustomListDef(levels),
@@ -6573,6 +6776,7 @@ export function App() {
     onShowMarks: setShowMarks,
     onShowRuler: setShowRuler,
     onShowNav: setShowNav,
+    onShowFloatingOutline: setShowFloatingOutline,
     onShowComments: () => setShowComments(true),
     onNewComment: startNewComment,
     onTrackChanges: setTrackChanges,
@@ -6808,6 +7012,7 @@ export function App() {
         showMarks={showMarks}
         showRuler={showRuler}
         showNav={showNav}
+        showFloatingOutline={showFloatingOutline}
         commentCount={comments.length}
         openCommentCount={comments.filter((c) => !c.parentId && c.done !== true).length}
         canComment={!editor.state.selection.empty || wordRangeAtCaret(editor) !== null}
@@ -6829,6 +7034,15 @@ export function App() {
         splitView={splitView}
         {...ribbonActions}
       />
+
+      {missingFonts.length > 0 && !missingFontsBannerDismissed && (
+        <MissingFontsBanner
+          missing={missingFonts}
+          isDark={Boolean(darkPage || themeDark)}
+          onViewDetails={() => setShowMissingFontsDialog(true)}
+          onDismiss={() => setMissingFontsBannerDismissed(true)}
+        />
+      )}
 
       <div className="app-main">
         {doc && (
@@ -6895,6 +7109,17 @@ export function App() {
             {doc && <MarkdownPasteChip editor={editor} apply={applyMarkdownHtml} />}
             {doc && <SelectionToolbar editor={editor} onLink={() => setShowLinkModal(true)} />}
             <div className="editor-area">
+              {doc && (
+                <FloatingOutlinePane
+                  editor={editor}
+                  doc={editor.state.doc}
+                  visible={showFloatingOutline}
+                  isDark={Boolean(darkPage || themeDark)}
+                  canFitRightGutter={hasRightGutter}
+                  onClose={() => setShowFloatingOutline(false)}
+                  onActiveHeadingChange={setActiveHeadingText}
+                />
+              )}
               <main
                 className={imageDragOver ? 'editor-scroll image-drop-target' : 'editor-scroll'}
                 ref={scrollContainerRef}
@@ -6952,9 +7177,7 @@ export function App() {
                         </div>
                       )}
                       {!readMode && (
-                        <div
-                          className={`hf-variant-chips${multiHf || selectedTitlePg || evenOddHf ? '' : ' hf-chips-idle'}`}
-                        >
+                        <div className="hf-variant-chips hf-chips-idle">
                           {multiHf && (
                             <>
                               <button
@@ -7165,7 +7388,11 @@ export function App() {
                 paraStyleId={formatState.paraStyleId}
                 charStyleId={formatState.charStyleId}
                 headingLevel={formatState.headingLevel}
+                formatState={formatState}
                 onEnsureStyle={ensureBuiltinStyle}
+                onUpdateStyleWithSelection={updateStyleWithSelection}
+                onUpsertStyle={upsertCustomStyle}
+                onSelectAllWithStyle={selectAllWithStyle}
                 onClose={() => setShowStyles(false)}
               />
             )}
@@ -7206,10 +7433,30 @@ export function App() {
                   >
                     {t('appWordCountN', { n: wordCount })}
                   </button>
+                  {!hasRightGutter && (
+                    <button
+                      className={`status-item status-outline-btn ${showFloatingOutline ? 'active' : ''}`}
+                      data-tip={lang === 'zh-TW' ? '目錄與大綱導覽' : lang === 'zh' ? '目录与大纲导航' : 'Outline & TOC'}
+                      onClick={() => setShowFloatingOutline((prev) => !prev)}
+                    >
+                      <IconOutlineView size={12} />
+                      <span className="status-outline-text">
+                        {activeHeadingText ? activeHeadingText : (lang === 'zh-TW' ? '目錄' : 'Outline')}
+                      </span>
+                    </button>
+                  )}
                 </>
               )}
               {!doc && t('appReady')}
-              {status && <span className="status-msg"> — {status}</span>}
+              {status && (
+                <span
+                  className={`status-msg ${missingFonts.length > 0 ? 'status-font-clickable' : ''}`}
+                  onClick={missingFonts.length > 0 ? () => setShowMissingFontsDialog(true) : undefined}
+                  title={missingFonts.length > 0 ? (lang === 'zh-TW' ? '點擊檢視字型替換對照表' : 'Click to view font substitution details') : undefined}
+                >
+                  {' '}— {status}
+                </span>
+              )}
             </div>
             <div className="status-right">
               <button
@@ -7696,6 +7943,16 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {showMissingFontsDialog && missingFonts.length > 0 && (
+        <MissingFontsDialog
+          missing={missingFonts}
+          filePath={doc?.filePath}
+          fileName={doc?.fileName}
+          isDark={Boolean(darkPage || themeDark)}
+          onClose={() => setShowMissingFontsDialog(false)}
+        />
       )}
     </div>
   )

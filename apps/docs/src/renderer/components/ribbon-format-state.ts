@@ -7,7 +7,8 @@ import type { DocDefaults, Run, StyleInfo, TextboxDisplay } from '@genoffice/doc
 import { getActiveSubEditor } from '../editor/active-editor'
 import { effectiveSizeHalfPoints } from '../editor/text-style-resolve'
 import { isFlagActive } from '../editor/effective-format'
-import { textHasCjk } from '../line-metrics'
+import { textHasCjk, textHasComplexScript } from '../line-metrics'
+import { isEastAsianFontName } from '../font-list'
 import { cachedByDoc } from '../doc-cache'
 
 /**
@@ -82,6 +83,7 @@ export interface RibbonFormatState {
   paraBorders: unknown
   indentLeft: number
   indentRight: number
+  indentFirstLine: number
   spaceBefore: number
   spaceAfter: number
 }
@@ -139,6 +141,7 @@ export const EMPTY_FORMAT_STATE: RibbonFormatState = {
   paraBorders: null,
   indentLeft: 0,
   indentRight: 0,
+  indentFirstLine: 0,
   spaceBefore: 0,
   spaceAfter: 0,
 }
@@ -202,6 +205,84 @@ function shapeTextStateOf(
   }
 }
 
+/**
+ * Resolves the inherited East Asian font from the paragraph style chain, Normal style,
+ * or document defaults (mirroring Word's w:eastAsia inheritance).
+ */
+function resolveEastAsiaFont(
+  styleId: string | null | undefined,
+  styles?: Map<string, StyleInfo>,
+  docDefaults?: DocDefaults,
+): string | null {
+  let currentId = styleId
+  const visited = new Set<string>()
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId)
+    const s = styles?.get(currentId)
+    if (!s) break
+    const f = s.display?.font
+    if (f && !s.display?.eaSlotEmpty && (f !== s.display?.fontAscii || isEastAsianFontName(f))) {
+      return f
+    }
+    currentId = s.basedOn ?? null
+  }
+
+  if (styles) {
+    const normal =
+      styles.get('Normal') ??
+      Array.from(styles.values()).find((s) => s.name === 'Normal' || s.isDefault)
+    const normalEa = normal?.display?.font
+    if (
+      normalEa &&
+      !normal?.display?.eaSlotEmpty &&
+      (normalEa !== normal?.display?.fontAscii || isEastAsianFontName(normalEa))
+    ) {
+      return normalEa
+    }
+  }
+
+  if (docDefaults?.eastAsiaFont && !docDefaults.eaSlotEmpty) {
+    return docDefaults.eastAsiaFont
+  }
+
+  return null
+}
+
+/**
+ * Resolves the inherited Latin (ASCII) font from the paragraph style chain, Normal style,
+ * or document defaults.
+ */
+function resolveAsciiFont(
+  styleId: string | null | undefined,
+  styles?: Map<string, StyleInfo>,
+  docDefaults?: DocDefaults,
+): string {
+  let currentId = styleId
+  const visited = new Set<string>()
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId)
+    const s = styles?.get(currentId)
+    if (!s) break
+    if (s.display?.fontAscii) return s.display.fontAscii
+    if (s.display?.font && !isEastAsianFontName(s.display.font)) return s.display.font
+    currentId = s.basedOn ?? null
+  }
+
+  if (styles) {
+    const normal =
+      styles.get('Normal') ??
+      Array.from(styles.values()).find((s) => s.name === 'Normal' || s.isDefault)
+    if (normal?.display?.fontAscii) return normal.display.fontAscii
+    if (normal?.display?.font && !isEastAsianFontName(normal.display.font)) {
+      return normal.display.font
+    }
+  }
+
+  if (docDefaults?.asciiFont) return docDefaults.asciiFont
+
+  return 'Calibri'
+}
+
 export function computeFormatState(
   editor: Editor | null,
   styles?: Map<string, StyleInfo>,
@@ -241,24 +322,56 @@ export function computeFormatState(
   const protAttrs = editor.getAttributes('docProtected')
   const imageSelected = protAttrs.blockType === 'image' && !!protAttrs.imageDataUrl
 
+  const paraAttrs = sub ? ed.getAttributes('docParagraph') : paraAttrsOf(editor)
+  const mainPara = paraAttrsOf(editor)
+
   const textAttrs = ed.getAttributes('docTextStyle')
   // Dual-slot runs: like Word's font box, show the slot matching the script at the caret
   const displayFont = (): string => {
-    const font = str(textAttrs.font)
-    const fontAscii = str(textAttrs.fontAscii)
-    if (!font || !fontAscii || font === fontAscii) return font ?? fontAscii ?? ''
     const { from, to } = ed.state.selection
-    const sample =
-      from === to
-        ? ed.state.doc.textBetween(
-            Math.max(0, from - 1),
-            Math.min(ed.state.doc.content.size, from + 1),
-          )
-        : ed.state.doc.textBetween(from, Math.min(to, from + 32), ' ')
-    return textHasCjk(sample) ? font : fontAscii
+    let sample = ''
+    if (from !== to) {
+      sample = ed.state.doc.textBetween(from, Math.min(to, from + 32), ' ')
+    } else {
+      sample =
+        ed.state.doc.textBetween(
+          Math.max(0, from - 1),
+          Math.min(ed.state.doc.content.size, from + 1),
+        ) || ''
+      if (!sample.trim()) {
+        const $pos = ed.state.doc.resolve(from)
+        sample = $pos.parent.textBetween(0, Math.min($pos.parent.content.size, 32), ' ')
+      }
+    }
+
+    const isCjk = textHasCjk(sample)
+    const isCs = textHasComplexScript(sample)
+    const paraStyleId = str(paraAttrs.styleId)
+
+    if (isCs) {
+      const cs = str(textAttrs.csFont)
+      if (cs) return cs
+    }
+
+    if (isCjk) {
+      // Explicit East Asian font on the run (and not flagged as eaInherited)
+      if (textAttrs.font && !textAttrs.eaInherited) {
+        return String(textAttrs.font)
+      }
+      // Inherited East Asian font
+      const inheritedEa = resolveEastAsiaFont(paraStyleId, styles, docDefaults)
+      if (inheritedEa) return inheritedEa
+      if (textAttrs.font) return String(textAttrs.font)
+      return ''
+    }
+
+    // Latin / Western
+    if (textAttrs.fontAscii) return String(textAttrs.fontAscii)
+    if (textAttrs.font && !textAttrs.eaInherited && !isEastAsianFontName(String(textAttrs.font))) {
+      return String(textAttrs.font)
+    }
+    return resolveAsciiFont(paraStyleId, styles, docDefaults)
   }
-  const paraAttrs = sub ? ed.getAttributes('docParagraph') : paraAttrsOf(editor)
-  const mainPara = paraAttrsOf(editor)
 
   return {
     doc: editor.state.doc,
@@ -321,6 +434,7 @@ export function computeFormatState(
     paraBorders: paraAttrs.borders ?? null,
     indentLeft: Number(mainPara.indentLeft) || 0,
     indentRight: Number(mainPara.indentRight) || 0,
+    indentFirstLine: Number(mainPara.indentFirstLine) || 0,
     spaceBefore: Number(mainPara.spaceBefore) || 0,
     spaceAfter: Number(mainPara.spaceAfter) || 0,
   }

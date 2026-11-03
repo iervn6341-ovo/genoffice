@@ -48,6 +48,7 @@ import {
   cjkScriptRanges,
   cssAutoLineMult,
   cssFontFamily,
+  cssEaOnlyFontFamily,
   cssRunFontFamily,
   cssGridSpacingPt,
   cssLineHeight,
@@ -2141,7 +2142,7 @@ function measureMarkerTwips(
     }
   }
   if (!markerMeasureCtx) return null
-  const weight = bold ? '600 ' : ''
+  const weight = bold ? 'bold ' : ''
   markerMeasureCtx.font = `${weight}${(sizePt * 4) / 3}px "${family.replaceAll('"', '')}", Calibri, sans-serif`
   const w = markerMeasureCtx.measureText(text).width
   return Number.isFinite(w) && w > 0 ? Math.round(w * 15) : null
@@ -2476,8 +2477,15 @@ export const ListNumberingExtension = Extension.create<object, ListNumberingStor
           if (szHalf) styles.push(`--li-marker-size:${szHalf / 2}pt`)
           // a text-font glyph draws in its own face without letting that face's leading
           // stretch the line (an oversized w:sz below overrides the 0)
-          if (marker.font) {
-            styles.push(`--li-marker-font:${cssString(marker.font)}`, '--li-marker-lh:0')
+          const markerFont = marker.font
+          if (markerFont) {
+            const fontChain = isCjkFontName(markerFont)
+              ? cssEaOnlyFontFamily(markerFont)
+              : cssFontFamily(markerFont)
+            styles.push(`--li-marker-font:${fontChain}`, '--li-marker-lh:0')
+          }
+          if (level.bold !== undefined) {
+            styles.push(`--li-marker-weight:${level.bold ? 'bold' : 'normal'}`)
           }
           const para = markerParagraphFont(nodeAttrs.styleId, storage)
           // a level w:sz above the text size grows the first line by the marker's own
@@ -2543,9 +2551,9 @@ export const ListNumberingExtension = Extension.create<object, ListNumberingStor
             // inherits from the li unless the level declares a text font
             widthTw = measureMarkerTwips(
               text,
-              marker.font ?? para.family,
+              markerFont ?? para.family,
               (szHalf ?? para.sizeHalf) / 2,
-              para.bold,
+              level.bold ?? para.bold,
             )
           }
           // lvlJc right/center: the marker's end/middle sits at the marker position,
@@ -2713,7 +2721,7 @@ function tableCellHtml(node: PmNode): Record<string, string> {
     node.attrs.textDirection ? 'position:relative' : '',
     // font-weight before background: jsdom's CSSOM drops the background getter
     // when font-weight follows it (order is irrelevant to real browsers)
-    node.attrs.bold ? 'font-weight:600' : '',
+    node.attrs.bold ? 'font-weight:bold' : '',
     // authored colors stay the declaration; the --dk-* twins feed the dark page
     // (dark-page.ts). background-color, not the shorthand: jsdom's CSSOM drops a
     // `background` shorthand that shares the attribute with a custom property

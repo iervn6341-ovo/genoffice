@@ -24,6 +24,8 @@
  */
 
 import type { DocGrid } from '@genoffice/docx-engine'
+import { fontNameEquivalents } from '@genoffice/ui'
+import type { FontSubstitutionRule } from '@genoffice/ui'
 
 // ─── Font metrics interface (same interface as pptx-render/metrics.ts) ─────
 
@@ -135,6 +137,10 @@ export class CanvasMetrics implements FontMetricsProvider {
     }
   }
 
+  clearCache(): void {
+    this.cache.clear()
+  }
+
   metrics(style: RunStyle): FontMetrics {
     return this.fallback.metrics(style)
   }
@@ -171,6 +177,28 @@ export function canvasMetrics(): FontMetricsProvider | null {
   canvasMetricsSingleton =
     ctx && typeof ctx.measureText === 'function' ? new CanvasMetrics(ctx) : null
   return canvasMetricsSingleton
+}
+
+export function clearCanvasMetricsCache(): void {
+  if (canvasMetricsSingleton instanceof CanvasMetrics) {
+    canvasMetricsSingleton.clearCache()
+  }
+}
+
+const userFontSubstitutionsMap = new Map<string, string>()
+
+export function setUserFontSubstitutions(rules: readonly FontSubstitutionRule[]): void {
+  userFontSubstitutionsMap.clear()
+  for (const rule of rules) {
+    if (rule.original && rule.substitute) {
+      userFontSubstitutionsMap.set(rule.original.trim().toLowerCase(), rule.substitute.trim())
+    }
+  }
+  clearCanvasMetricsCache()
+}
+
+export function getUserFontSubstitutions(): Map<string, string> {
+  return new Map(userFontSubstitutionsMap)
 }
 
 /** Korean font names (Windows/Noto/Source Han/Nanum faces + bundled subsets) */
@@ -788,6 +816,13 @@ export function hgSubstituted(font: string): boolean {
   return isBundledFont(head) || !isFontAvailable(head)
 }
 
+export { fontNameEquivalents }
+
+/** Kai (brush) faces: Word's 標楷體 / DFKai-SB, Apple's BiauKai */
+const KAI_FACE_RE = /標楷|biaukai|dfkai|kaiu/i
+/** Installed Kai faces that complete a partial 標楷體 (embedded subset or missing declared name) */
+const KAI_FALLBACKS = ['DFKai-SB', 'BiauKaiTC', 'Kaiti TC']
+
 export function cssFontFamily(font: string, followAltName = true): string {
   const f = font.toLowerCase()
   const chain = (...families: string[]) =>
@@ -798,6 +833,32 @@ export function cssFontFamily(font: string, followAltName = true): string {
   // 'GenOffice Box Drawing' (fonts.css): U+2500 rules would otherwise fall to
   // the fullwidth CJK subset and overflow the column
   const BOX = 'GenOffice Box Drawing'
+
+  const head = font.split(',')[0].replace(/['"]/g, '').trim().toLowerCase()
+  const customSub = userFontSubstitutionsMap.get(head)
+  if (customSub && customSub.toLowerCase() !== head) {
+    const isSerif =
+      /serif|song|ming|kai|times|cambria|georgia|batang|myungjo|明朝|宋体|宋體|楷体|楷體|細明/i.test(
+        customSub,
+      )
+    // A Kai face keeps its glyph-level fallbacks in the Kai family. Substituting 標楷體 with
+    // "BiauKai" (a family name macOS no longer ships) leaves only the declared name, and that
+    // name may be nothing but the document's embedded SUBSET (Word embeds just the characters
+    // it typed: 436 glyphs, no 第 章 探 討 緒): every glyph outside it used to drop to the
+    // bundled Noto Serif SC and then Songti, so single characters of a bold Kai heading came
+    // out in another face, size and weight. The installed DFKai-SB / Apple BiauKai complete it.
+    const kaiTail = KAI_FACE_RE.test(customSub) || KAI_FACE_RE.test(font) ? KAI_FALLBACKS : []
+    // The rule reads "when the system lacks A, show A as B": a declared face that does resolve
+    // (installed, embedded in the document, or installed under its other-language name) is drawn
+    // as itself and B only completes it. Putting B first used to swap an installed face for its
+    // substitute silently. A bundled metric-compatible stand-in (Calibri → Carlito, Cambria →
+    // Caladea) stays first on purpose: identical line breaks on every machine.
+    const own = [font, ...fontNameEquivalents(font)]
+    const ownResolves = !isBundledFont(customSub) && own.some((name) => isFontAvailable(name))
+    const faces = ownResolves ? [...own, customSub] : [customSub, ...own]
+    return `${chain(...faces, ...kaiTail, isSerif ? CJK_SERIF : CJK_SANS)},${isSerif ? 'serif' : 'sans-serif'}`
+  }
+
   if (f.includes('calibri')) return `${chain(font, 'Carlito GO', CJK_SANS)},sans-serif`
   // Aptos (M365 cloud face, never installed locally): line metrics equal
   // Calibri's (Word probe 2026-08-22) but its advances do not, so the
@@ -1140,7 +1201,7 @@ export function cssFontFamily(font: string, followAltName = true): string {
  * render from the eastAsia slot (probe 2026-08-23) — so the backstop keeps
  * Latin text off the EA families when nothing earlier resolves.
  */
-function latinChainHead(ascii: string): string[] {
+export function latinChainHead(ascii: string): string[] {
   const fams = cssFontFamily(ascii).split(',')
   const generic = fams[fams.length - 1]
   const latin = fams.filter(
@@ -1173,7 +1234,9 @@ function latinBackstopFor(font: string): string {
  * so CJK glyphs fall through to the eastAsia font instead of a lookalike.
  */
 export function cssDualFontFamily(ascii: string, eastAsia: string): string {
-  if (ascii === eastAsia) return cssFontFamily(ascii)
+  if (ascii === eastAsia) {
+    return isCjkFontName(ascii) ? cssEaOnlyFontFamily(ascii) : cssFontFamily(ascii)
+  }
   // Korean ascii face (e.g. theme latin = Malgun): its fallback chain covers hangul
   // and would swallow the eastAsia font, so keep only the literal family — plus
   // the Latin-range backstop so a missing KO face still keeps Latin off the EA slot
@@ -1214,6 +1277,7 @@ export function cssRunFontFamily(
 ): string {
   if (ascii && ea) return cssDualFontFamily(ascii, ea)
   if (ea) return cssEaOnlyFontFamily(ea)
+  if (ascii && isCjkFontName(ascii)) return cssEaOnlyFontFamily(ascii)
   return cssFontFamily(ascii!)
 }
 

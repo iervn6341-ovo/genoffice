@@ -54,7 +54,7 @@ export interface HfValue {
 
 function runStyle(run: Run): React.CSSProperties {
   const style: React.CSSProperties = {}
-  if (run.bold) style.fontWeight = 600
+  if (run.bold) style.fontWeight = 'bold'
   else if (run.bold === false) style.fontWeight = 'normal'
   if (run.italic) style.fontStyle = 'italic'
   else if (run.italic === false) style.fontStyle = 'normal'

@@ -860,8 +860,20 @@ describe('list marker decorations', () => {
         '<w:pPr><w:ind w:left="1440" w:hanging="360"/></w:pPr><w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/></w:rPr>',
     )
     expect(bullet.el.getAttribute('data-marker')).toBe('o')
-    expect(bullet.el.getAttribute('style')).toContain('--li-marker-font: "Courier New"')
+    expect(bullet.el.getAttribute('style')).toContain("--li-marker-font: 'Courier New'")
     expect(bullet.el.getAttribute('style')).toContain('--li-marker-lh: 0')
     bullet.destroy()
+
+    const ordered = await renderLi(
+      '<w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="第%1章"/>' +
+        '<w:pPr><w:ind w:left="480" w:hanging="480"/></w:pPr><w:rPr><w:rFonts w:ascii="標楷體" w:eastAsia="標楷體"/><w:b/><w:sz w:val="32"/></w:rPr>',
+    )
+    expect(ordered.el.getAttribute('data-marker')).toBe('第1章')
+    const orderedStyle = ordered.el.getAttribute('style') ?? ''
+    expect(orderedStyle).toContain('--li-marker-font:')
+    expect(orderedStyle).toContain("'標楷體'")
+    expect(orderedStyle).toContain('--li-marker-weight: bold')
+    expect(orderedStyle).toContain('--li-marker-size: 16pt')
+    ordered.destroy()
   })
 })

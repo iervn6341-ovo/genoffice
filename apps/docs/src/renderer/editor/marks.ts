@@ -358,7 +358,7 @@ export const RevisionOriginalExtension = Extension.create({
               if (!rpr) return
               const old = (rpr.attrs.old ?? {}) as Record<string, unknown>
               const styles = [
-                `font-weight:${old.bold ? 600 : 400}`,
+                `font-weight:${old.bold ? 'bold' : 'normal'}`,
                 `font-style:${old.italic ? 'italic' : 'normal'}`,
               ]
               if (old.color) styles.push(...textColorDecls(String(old.color)))

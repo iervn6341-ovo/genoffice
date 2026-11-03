@@ -301,6 +301,8 @@ interface RibbonProps {
   onShowRuler: (v: boolean) => void
   showNav: boolean
   onShowNav: (v: boolean) => void
+  showFloatingOutline?: boolean
+  onShowFloatingOutline?: (v: boolean) => void
   commentCount: number
   /** unresolved root comments (drives the AI resolve-comments action) */
   openCommentCount: number
@@ -770,6 +772,8 @@ function RibbonInner({
   onShowRuler,
   showNav,
   onShowNav,
+  showFloatingOutline,
+  onShowFloatingOutline,
   commentCount,
   openCommentCount,
   onShowComments,
@@ -825,6 +829,12 @@ function RibbonInner({
   // shows text beside the icons when the window is wide enough (ribbon-fit)
   const ribbonBodyRef = useRef<HTMLDivElement | null>(null)
   useRibbonLabelFit(ribbonBodyRef)
+
+  useEffect(() => {
+    if (ribbonBodyRef.current) {
+      ribbonBodyRef.current.scrollLeft = 0
+    }
+  }, [tab])
   /** Picture Format → remove background / crop dialogs */
   const [pictureDialog, setPictureDialog] = useState<'cutout' | 'crop' | null>(null)
   const [listDialog, setListDialog] = useState(false)
@@ -1463,30 +1473,68 @@ function RibbonInner({
   // hugs it instead of floating at the group's far edge.
   const styleGalleryRef = useRef<HTMLDivElement | null>(null)
   const [styleGalleryOverflow, setStyleGalleryOverflow] = useState(false)
+  const overflowRef = useRef(false)
+  overflowRef.current = styleGalleryOverflow
+
   useLayoutEffect(() => {
     const el = styleGalleryRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const check = () => {
-      // measure the natural (uncapped) layout at the current wrapper width
-      el.style.maxWidth = ''
-      const cards = Array.from(el.children) as HTMLElement[]
-      const firstRow = cards.filter((c) => c.offsetTop === cards[0]?.offsetTop)
-      const overflow = firstRow.length < cards.length
-      if (overflow) {
-        const last = firstRow[firstRow.length - 1]
-        el.style.maxWidth = `${last.offsetLeft - firstRow[0].offsetLeft + last.offsetWidth}px`
+      const container = el.parentElement ?? el
+      const availableWidth = container.clientWidth
+      if (availableWidth <= 0) {
+        // Fallback for environments without layout engine (e.g. jsdom unit tests)
+        const cards = Array.from(el.children) as HTMLElement[]
+        if (cards.length === 0) return
+        const firstRow = cards.filter((c) => c.offsetTop === cards[0]?.offsetTop)
+        const overflow = firstRow.length < cards.length
+        if (overflow) {
+          const last = firstRow[firstRow.length - 1]
+          el.style.maxWidth = `${last.offsetLeft - firstRow[0].offsetLeft + last.offsetWidth}px`
+        } else {
+          el.style.maxWidth = ''
+        }
+        setStyleGalleryOverflow(overflow)
+        return
       }
-      setStyleGalleryOverflow(overflow)
+
+      const cards = Array.from(el.children) as HTMLElement[]
+      if (cards.length === 0) {
+        if (el.style.maxWidth) el.style.maxWidth = ''
+        if (overflowRef.current) setStyleGalleryOverflow(false)
+        return
+      }
+
+      const cardWidth = cards[0]?.offsetWidth || 74
+      const gap = 4
+      const cardStep = cardWidth + gap
+      const totalNaturalWidth = cards.length * cardStep - gap
+
+      if (availableWidth >= totalNaturalWidth) {
+        if (el.style.maxWidth) el.style.maxWidth = ''
+        if (overflowRef.current) setStyleGalleryOverflow(false)
+        return
+      }
+
+      // Extra cards overflow available width: calculate how many fit alongside the more-styles button
+      const moreWidth = 21
+      const spaceForCards = Math.max(0, availableWidth - moreWidth)
+      const fitCount = Math.max(1, Math.min(cards.length - 1, Math.floor((spaceForCards + gap) / cardStep)))
+      const targetMaxWidth = `${fitCount * cardStep - gap}px`
+
+      if (el.style.maxWidth !== targetMaxWidth) {
+        el.style.maxWidth = targetMaxWidth
+      }
+      if (!overflowRef.current) {
+        setStyleGalleryOverflow(true)
+      }
     }
     check()
     const ro = new ResizeObserver(check)
-    // observe the wrapper, not the gallery: once capped, the gallery no longer
-    // resizes with the window, so it would never re-trigger the observer
+    // Observe the wrapper container: capped gallery no longer resizes with the window
     ro.observe(el.parentElement ?? el)
     return () => ro.disconnect()
-    // re-check when the card set can change, and after the expander mounts or
-    // unmounts (it takes row width, which can change how many cards fit)
-  }, [tab, charStyleItems.length, lang, styleGalleryOverflow])
+  }, [tab, charStyleItems.length, lang])
 
   const currentSize = fs.fontSizePt
   const currentFont = fs.fontFamily
@@ -1513,8 +1561,8 @@ function RibbonInner({
 
   /** font picks target only their script's rFonts slot (Word never flattens the other one) */
   const setFont = (name: string | null) => {
-    if (!name) setTextStyle({ font: null, fontAscii: null })
-    else if (isEastAsianFontName(name)) setTextStyle({ font: name })
+    if (!name) setTextStyle({ font: null, fontAscii: null, eaInherited: null })
+    else if (isEastAsianFontName(name)) setTextStyle({ font: name, eaInherited: null })
     else setTextStyle({ fontAscii: name })
   }
 
@@ -2085,6 +2133,7 @@ function RibbonInner({
       </div>
 
       <div className="ribbon-body" data-ribbon-body="" ref={ribbonBodyRef}>
+        <div key={tab} className="ribbon-tab-pane">
         {tab === 'equationTools' && inEquation ? (
           (() => {
             const equation = selectedEquation(editor)
@@ -3304,6 +3353,18 @@ function RibbonInner({
                         >
                           {t('ribbonFontBodyNamed', { font: bodyFontName })}
                         </button>
+                        {currentFont &&
+                          currentFont !== bodyFontName &&
+                          !fontFamilies.includes(currentFont) &&
+                          !systemFontFamilies.includes(currentFont) && (
+                            <button
+                              className="active"
+                              style={{ fontFamily: cssFontFamily(currentFont) }}
+                              onClick={() => setFont(currentFont)}
+                            >
+                              {currentFont}
+                            </button>
+                          )}
                         {fontFamilies
                           .filter((f) => f !== bodyFontName)
                           .map((f) => (
@@ -3966,12 +4027,19 @@ function RibbonInner({
                     disabled={!canEdit}
                     data-tip={t('ribbonParagraphBorders')}
                     aria-label={t('ribbonParagraphBorders')}
-                    onClick={() => setDropdown((v) => (v === 'borders' ? null : 'borders'))}
+                    onClick={() => setBorderSides(toggleSide(paraBordersNow, 'b'))}
                   >
                     <IconBorderAll />
-                    <span className="rb-caret-inline">
-                      <IconCaret />
-                    </span>
+                  </button>
+                  <button
+                    className={`rb-caret${dropdown === 'borders' ? ' active' : ''}`}
+                    disabled={!canEdit}
+                    data-tip={t('ribbonParagraphBorders')}
+                    aria-label={`${t('ribbonParagraphBorders')} options`}
+                    aria-expanded={dropdown === 'borders'}
+                    onClick={() => setDropdown((v) => (v === 'borders' ? null : 'borders'))}
+                  >
+                    <IconCaret />
                   </button>
                   {dropdown === 'borders' && (
                     <div data-rb-panel="" className="spacing-menu borders-menu">
@@ -4078,7 +4146,7 @@ function RibbonInner({
               <div className="style-gallery" ref={styleGalleryRef}>
                 {renderStyleCards(false)}
               </div>
-              {/* clipped cards stay reachable through the expander grid */}
+              {/* Expand to gallery menu / styles pane */}
               {styleGalleryOverflow && (
                 <button
                   className="style-gallery-more"
@@ -4386,6 +4454,8 @@ function RibbonInner({
             onShowRuler={onShowRuler}
             showNav={showNav}
             onShowNav={onShowNav}
+            showFloatingOutline={showFloatingOutline}
+            onShowFloatingOutline={onShowFloatingOutline}
             viewMode={viewMode}
             onViewMode={onViewMode}
             readMode={readMode}
@@ -4399,6 +4469,7 @@ function RibbonInner({
             onPagePreview={onPagePreview}
           />
         )}
+        </div>
       </div>
       <RibbonCollapseButton
         state={collapse}

@@ -345,7 +345,10 @@ function patchedStyleAttrs(
         delete themed.font
       }
     }
-    if (changes.font !== undefined) delete themed.font
+    if (changes.font !== undefined) {
+      delete themed.font
+      next.eaInherited = null
+    }
     next.themeRFonts = Object.keys(themed).length ? JSON.stringify(themed) : null
   }
   if (changes.italic !== undefined) next.italicOff = changes.italic ? null : true

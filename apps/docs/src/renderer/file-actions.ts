@@ -91,7 +91,7 @@ import { isDocDirty, resetCrossDocEditState } from './doc-dirty'
 import { applySectPrRewrites, type SectPrRewrite } from './sectpr-rewrite'
 import { effectiveHfRefs } from './pagination-hf'
 import { createSaveSerializer } from './save-until-persisted'
-import { checkMissingFonts, collectDocFonts } from './font-check'
+import { checkMissingFonts, collectDocFonts, type FontSubstitution } from './font-check'
 import { setDocFontTable } from './line-metrics'
 import { adoptEmbeddedFonts } from './embedded-fonts'
 import { defaultEastAsiaFontFor, defaultTabStopFor } from './font-list'
@@ -238,6 +238,7 @@ export interface FileActionContext {
   themeColors: ThemeColors | null
   themeColorsDirty: boolean
   setThemeFonts: (value: ThemeFonts | null) => void
+  onMissingFontsDetected?: (missing: FontSubstitution[], filePath?: string, fileName?: string) => void
   setThemeFontsDirty: (dirty: boolean) => void
   setThemeColors: (value: ThemeColors | null) => void
   setThemeColorsDirty: (dirty: boolean) => void
@@ -495,8 +496,10 @@ export async function loadFile(
         .map((m) => (m.substitute ? `${m.name} → ${m.substitute}` : m.name))
         .join(', ')
       ctx.setStatus(t('appFontsMissing', { names: missing.length > 3 ? `${names}…` : names }))
+      ctx.onMissingFontsDetected?.(missing, result.path, result.name)
     } else {
       ctx.setStatus(t('appOpenedFile', { name: result.name }))
+      ctx.onMissingFontsDetected?.([], result.path, result.name)
     }
     void window.desktop.getRecentFiles().then(ctx.setRecent)
     return 'ok'

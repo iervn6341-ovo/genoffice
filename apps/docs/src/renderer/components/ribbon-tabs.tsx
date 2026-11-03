@@ -1123,6 +1123,8 @@ interface ViewTabProps {
   onShowRuler: (v: boolean) => void
   showNav: boolean
   onShowNav: (v: boolean) => void
+  showFloatingOutline?: boolean
+  onShowFloatingOutline?: (v: boolean) => void
   viewMode: ViewMode
   onViewMode: (mode: ViewMode) => void
   readMode: boolean
@@ -1150,6 +1152,8 @@ export function ViewTab({
   onShowRuler,
   showNav,
   onShowNav,
+  showFloatingOutline,
+  onShowFloatingOutline,
   viewMode,
   onViewMode,
   readMode,
@@ -1162,7 +1166,7 @@ export function ViewTab({
   onSplitView,
   onPagePreview,
 }: ViewTabProps) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [winMenuOpen, setWinMenuOpen] = useState(false)
   const [windows, setWindows] = useState<DocsTabInfo[]>([])
   /** wrap holding both the switch-tabs trigger and its menu */
@@ -1397,6 +1401,25 @@ export function ViewTab({
             <IconNavPane size={BIG} />
           </span>
           <span>{t('ribbonNavPane')}</span>
+        </button>
+        <button
+          className={`rb-big ${showFloatingOutline ? 'active' : ''}`}
+          disabled={!hasDoc}
+          data-tip={
+            lang === 'zh-TW'
+              ? '顯示/隱藏側邊浮動式段落與大綱視窗'
+              : lang === 'zh'
+                ? '显示/隐藏侧边浮动式段落与大纲窗口'
+                : 'Show/hide floating outline window'
+          }
+          onClick={() => onShowFloatingOutline?.(!showFloatingOutline)}
+        >
+          <span className="rb-big-icon">
+            <IconOutlineView size={BIG} />
+          </span>
+          <span>
+            {lang === 'zh-TW' ? '浮動大綱' : lang === 'zh' ? '浮动大纲' : 'Floating Outline'}
+          </span>
         </button>
       </RibbonFoldGroup>
 

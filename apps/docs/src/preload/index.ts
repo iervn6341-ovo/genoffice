@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { VIEW_IMAGE_CHANNEL, type PrinterJobSettings } from '../shared/ipc'
-import type { AiPanelPrefs } from '@genoffice/ui'
+import type { AiPanelPrefs, FontSubstitutionRule } from '@genoffice/ui'
 import type {
   AiChatRequest,
   AiSettings,
@@ -44,6 +44,12 @@ const api: DesktopApi = {
     const listener = (_event: IpcRendererEvent, prefs: AiPanelPrefs) => handler(prefs)
     ipcRenderer.on('app:ai-panel-prefs-changed', listener)
     return () => ipcRenderer.removeListener('app:ai-panel-prefs-changed', listener)
+  },
+  getFontSubstitutions: () => ipcRenderer.invoke('app:get-font-substitutions'),
+  onFontSubstitutionsChanged: (handler) => {
+    const listener = (_event: IpcRendererEvent, rules: FontSubstitutionRule[]) => handler(rules)
+    ipcRenderer.on('app:font-substitutions-changed', listener)
+    return () => ipcRenderer.removeListener('app:font-substitutions-changed', listener)
   },
   onChromePressed: (handler) => {
     const listener = () => handler()

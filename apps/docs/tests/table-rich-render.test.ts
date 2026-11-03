@@ -205,7 +205,7 @@ describe('renderTableSpec rich cell content', () => {
     const td = renderTable(styled).querySelector('td')!
     const tdStyle = td.getAttribute('style')!
     expect(tdStyle).toMatch(/color:\s*(#112233|rgb\(17,\s*34,\s*51\))/i)
-    expect(tdStyle).toMatch(/font-weight:\s*600/)
+    expect(tdStyle).toMatch(/font-weight:\s*(600|bold)/)
     expect(td.querySelector('span')!.getAttribute('style')).toBeNull()
   })
 })

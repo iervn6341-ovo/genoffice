@@ -146,7 +146,7 @@ describe('auto ink on dark shading', () => {
       'table[data-tbl-style="DarkHead"] tr[data-repeat-header="1"]:not(tr:not([data-repeat-header="1"]) ~ tr)'
     const headCells = (cell: string): string =>
       `${head} ${cell}, .doc-page ${head} ${cell.replace('td', 'th')}, .doc-page ${lead} ${cell}, .doc-page ${lead} ${cell.replace('td', 'th')}`
-    expect(css).toContain(`${headCells('td')} { background:#1f1f1f;font-weight:600 }`)
+    expect(css).toContain(`${headCells('td')} { background:#1f1f1f;font-weight:bold }`)
     // cells with their own fill (data-ink) are left to that attribute: the nearest fill wins
     expect(css).toContain(`${headCells('td:not([data-ink])')} { ${light} }`)
     expect(css).toContain(`.page-dark .doc-page ${head} td:not([data-ink])`)

@@ -44,9 +44,9 @@ import type {
 } from '@genoffice/ai-provider'
 import type { HeadlessExportTarget } from '@genoffice/electron-utils/headless-export'
 import type { FaceVerticalMetrics } from '@genoffice/font-metrics'
-import type { AiPanelPrefs, PrinterListItem } from '@genoffice/ui'
+import type { AiPanelPrefs, FontSubstitutionRule, PrinterListItem } from '@genoffice/ui'
 
-export type { FaceVerticalMetrics }
+export type { FaceVerticalMetrics, FontSubstitutionRule }
 
 export type {
   AiChatRequest,
@@ -273,6 +273,8 @@ export interface DesktopApi {
   getAiPanelPrefs(): Promise<AiPanelPrefs>
   setAiPanelPrefs(patch: Partial<AiPanelPrefs>): Promise<AiPanelPrefs>
   onAiPanelPrefsChanged(handler: (prefs: AiPanelPrefs) => void): () => void
+  getFontSubstitutions?: () => Promise<FontSubstitutionRule[]>
+  onFontSubstitutionsChanged?: (handler: (rules: FontSubstitutionRule[]) => void) => () => void
   /** press on the shell chrome (tab strip is a sibling WebContentsView whose
    *  clicks produce no DOM event here) — dismiss open popovers */
   onChromePressed(handler: () => void): () => void

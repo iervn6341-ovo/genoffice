@@ -115,7 +115,7 @@ export function FontDialog({ editor, onClose }: { editor: Editor; onClose: () =>
   const change = <K extends keyof FontChanges>(key: K, value: FontChanges[K]) =>
     setChanges((prior) => ({ ...prior, [key]: value }))
   const latin = common(samples, (s) => String(s.attrs.fontAscii ?? ''))
-  const eastAsian = common(samples, (s) => String(s.attrs.font ?? ''))
+  const eastAsian = common(samples, (s) => (s.attrs.eaInherited ? '' : String(s.attrs.font ?? '')))
   const size = common(samples, (s) => Number(s.attrs.sizeHalfPoints ?? 0))
   const color = common(samples, (s) => String(s.attrs.color ?? ''))
   const style = common(samples, (s) => styleKey(s.marks.has('bold'), s.marks.has('italic')))
