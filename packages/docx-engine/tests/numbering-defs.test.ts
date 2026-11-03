@@ -771,6 +771,30 @@ describe('bullets declared in an ordinary text font', () => {
     // a private-use glyph is not literal text: the common bullet substitute
     expect(infos[2]).toEqual({ text: '\u2022' })
   })
+
+  it('keeps font and bold for ordered list markers', async () => {
+    const numbering =
+      '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:abstractNum w:abstractNumId="0">' +
+      '<w:lvl w:ilvl="0">' +
+      '<w:start w:val="1"/>' +
+      '<w:numFmt w:val="decimal"/>' +
+      '<w:lvlText w:val="第%1章"/>' +
+      '<w:rPr><w:rFonts w:ascii="標楷體" w:eastAsia="標楷體"/><w:b/><w:sz w:val="32"/></w:rPr>' +
+      '</w:lvl>' +
+      '</w:abstractNum>' +
+      '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' +
+      '</w:numbering>'
+    const doc = await parseDocx(
+      await buildDocx({ bodyXml: '<w:p><w:r><w:t>x</w:t></w:r></w:p>', numberingXml: numbering }),
+    )
+    const level0 = doc.numbering.get('1')?.levels[0]
+    expect(level0?.font).toBe('標楷體')
+    expect(level0?.bold).toBe(true)
+    expect(level0?.szHalfPoints).toBe(32)
+    const infos = computeListMarkerInfos([{ numId: '1', ilvl: 0 }], doc.numbering)
+    expect(infos[0]).toEqual({ text: '第1章', font: '標楷體' })
+  })
 })
 
 describe('markerTabAdvance with custom tab stops', () => {

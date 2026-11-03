@@ -57,7 +57,16 @@ export { AiTypingIndicator } from './AiTypingIndicator'
 export { IconSend, IconStop, type IconProps } from './icons'
 export { Markdown, type MarkdownNav } from './Markdown'
 export { isSymbolFontFamily } from './symbol-fonts'
-export { BUILTIN_FONT_FAMILIES, fontFamiliesFor } from './font-list'
+export { BUILTIN_FONT_FAMILIES, fontFamiliesFor, sortFontFamilies } from './font-list'
+export {
+  DEFAULT_FONT_SUBSTITUTIONS,
+  fontNameEquivalents,
+  isAppBundledFamily,
+  isFontInstalled,
+  normalizeFontSubstitutions,
+  substituteIsUnavailable,
+  type FontSubstitutionRule,
+} from './font-substitution'
 export {
   WORDART_PRESETS,
   wordArtSolidColor,

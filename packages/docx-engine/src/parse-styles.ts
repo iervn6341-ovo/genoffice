@@ -59,6 +59,9 @@ const BUILT_IN_DOC_DEFAULTS: DocDefaults = {
 /** w:numPr as declared on one style (either child may be absent) */
 type OwnNumPr = { numId?: string; ilvl?: number }
 
+export const EAST_ASIAN_FONT_RE =
+  /[⺀-鿿豈-﫿぀-ヿㇰ-ㇿ가-힯]|sim(sun|hei)|nsimsun|kaiti|fangsong|dengxian|yahei|songti|heiti|xingkai|lisu|youyuan|st(zhongsong|song|kai|fangsong|xihei|hupo|liti|caiyun)|pingfang|hiragino|meiryo|osaka|kozuka|yu (gothic|mincho)|yugoth|ms (ui )?p?(gothic|mincho)|biz ud|malgun|batang|gulim|dotum|gungsuh|m(ye|yu)ngjo|nanum|apple (sd )?gothic|applemyungjo|jhenghei|p?mingliu|biaukai|dfkai|kaiu|source han|noto (sans|serif) (cjk|sc|tc|hk|jp|kr)|wenquanyi/i
+
 /** Word inherits numId and ilvl through basedOn as separate properties: a heading
  *  style may declare only w:ilvl and take the numId from its parent. */
 function mergeNumPr(own: OwnNumPr, parent: StyleInfo['numPr']): StyleInfo['numPr'] {
@@ -288,6 +291,20 @@ export async function parseStyles(
     if (parent?.display) {
       const own = info.display
       info.display = { ...parent.display, ...(own ?? {}) }
+      // If the style only declared an ASCII/Latin font and did not declare an East Asian font,
+      // preserve the parent's East Asian font (Word inherits rFonts slots independently).
+      if (!own?.eastAsiaFont && own?.fontAscii && parent.display.font) {
+        const parentEa =
+          parent.display.eastAsiaFont ??
+          (parent.display.font !== parent.display.fontAscii ||
+          EAST_ASIAN_FONT_RE.test(parent.display.font.normalize('NFKC'))
+            ? parent.display.font
+            : undefined)
+        if (parentEa) {
+          info.display.font = parentEa
+          info.display.eastAsiaFont = parentEa
+        }
+      }
       // w:ind character attributes layer per component: a child's twips-only
       // w:ind keeps the parent's *Chars, a child's explicit zero cancels it
       if (parent.display.indentChars && own?.indentChars) {
@@ -345,6 +362,7 @@ export async function parseStyles(
     'strike',
     'font',
     'fontAscii',
+    'eastAsiaFont',
     'csFont',
     'caps',
     'bdr',
@@ -554,6 +572,7 @@ function styleDisplayOf(
     if (fontAscii) display.fontAscii = fontAscii
     if (rf.cs) display.csFont = rf.cs
     if (font) display.font = font
+    if (rf.eastAsia) display.eastAsiaFont = rf.eastAsia
     if (rf.eaSlotEmpty && font && font === rf.eastAsia) display.eaSlotEmpty = true
     const spc = parseInt(attrsOf(findChild(rPr, 'w:spacing') ?? {})['w:val'] ?? '', 10)
     if (!Number.isNaN(spc)) display.charSpacingTwips = spc

@@ -852,6 +852,8 @@ export interface NumberingLevel {
   szHalfPoints?: number
   /** w:rPr/w:rFonts of the marker (bullet glyphs in Symbol/Wingdings need decoding) */
   font?: string
+  /** w:rPr/w:b of the marker */
+  bold?: boolean
   /** w:rPr/w:color of the marker (hex, non-auto) */
   color?: string
   /** w:lvlPicBulletId: the level draws a w:numPicBullet image instead of lvlText */
@@ -1914,6 +1916,8 @@ export interface StyleDisplay {
   font?: string
   /** latin-slot font when it differs from the east-asian one (w:ascii/w:hAnsi) */
   fontAscii?: string
+  /** east-asian font slot (w:eastAsia/w:eastAsiaTheme) */
+  eastAsiaFont?: string
   /** the EA face is a backfill for an empty theme slot (<a:ea typeface=""/>), not a document choice */
   eaSlotEmpty?: boolean
   /** complex-script font (w:rFonts cs/cstheme) */

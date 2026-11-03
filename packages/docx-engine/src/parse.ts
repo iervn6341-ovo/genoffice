@@ -198,7 +198,7 @@ import {
 } from './parse-package'
 import { parseSdtBlock, sdtMeta, sdtTableXml, splitSdtParts } from './parse-sdt'
 import { sdtCheckboxControl } from './checkbox-control'
-import { extractStyleXml, parseStyles, runBorderOf } from './parse-styles'
+import { EAST_ASIAN_FONT_RE, extractStyleXml, parseStyles, runBorderOf } from './parse-styles'
 import {
   VML_PICT_RID_RE,
   VML_WORDART_RE,
@@ -3818,6 +3818,9 @@ function extractRuns(
         ctx.xmlSpacePreserve,
         paraVanish,
         paraBdr,
+        ctx.vmlShapeTypes,
+        undefined,
+        pStyleId,
       )
     }
     if (!src) return {}
@@ -3929,6 +3932,9 @@ function extractRuns(
                 ctx.xmlSpacePreserve,
                 paraVanish,
                 paraBdr,
+                ctx.vmlShapeTypes,
+                undefined,
+                pStyleId,
               )
               pushRun(
                 {
@@ -3991,6 +3997,9 @@ function extractRuns(
           ctx.xmlSpacePreserve,
           paraVanish,
           paraBdr,
+          ctx.vmlShapeTypes,
+          undefined,
+          pStyleId,
         )
         if (cached) {
           fieldCached += cached.text
@@ -4077,6 +4086,7 @@ function extractRuns(
         paraBdr,
         ctx.vmlShapeTypes,
         runNamespaceBindings,
+        pStyleId,
       )
       if (run) pushRun(run, rev)
     }
@@ -4230,6 +4240,7 @@ function buildRun(
   paraBdr?: Run['bdr'],
   vmlShapeTypes?: ReadonlyMap<string, Record<string, string>>,
   namespaceBindings: Readonly<Record<string, string>> = {},
+  pStyleId?: string,
 ): Run | null {
   let text = ''
   let sym: (Run['sym'] & { glyph: string }) | null | undefined
@@ -4422,11 +4433,28 @@ function buildRun(
     if (sz) run.sizeHalfPoints = parseInt(sz, 10) || undefined
     const rfAttrs = attrsOf(findChild(rPr, 'w:rFonts') ?? {})
     const rf = themedRFonts(rfAttrs, themeFonts)
-    const font = rf.eastAsia ?? rf.ascii ?? rf.hAnsi
+    const charStyle = rStyle ? styles?.get(rStyle) : undefined
+    const pStyle = pStyleId ? styles?.get(pStyleId) : undefined
+    const inheritedEa =
+      charStyle?.display?.eastAsiaFont ??
+      (charStyle?.display?.font &&
+      (charStyle.display.font !== charStyle.display.fontAscii ||
+        EAST_ASIAN_FONT_RE.test(charStyle.display.font.normalize('NFKC')))
+        ? charStyle.display.font
+        : undefined) ??
+      pStyle?.display?.eastAsiaFont ??
+      (pStyle?.display?.font &&
+      (pStyle.display.font !== pStyle.display.fontAscii ||
+        EAST_ASIAN_FONT_RE.test(pStyle.display.font.normalize('NFKC')))
+        ? pStyle.display.font
+        : undefined)
+    const inheritedAscii = charStyle?.display?.fontAscii ?? pStyle?.display?.fontAscii
+    const font = rf.eastAsia ?? inheritedEa ?? rf.ascii ?? rf.hAnsi ?? inheritedAscii
     if (font) run.font = font
     if (rf.eastAsia) run.eastAsiaFont = rf.eastAsia
+    else if (inheritedEa) run.eastAsiaFont = inheritedEa
     if (rf.eaSlotEmpty && font && font === rf.eastAsia) run.eaSlotEmpty = true
-    const fontAscii = rf.ascii ?? rf.hAnsi
+    const fontAscii = rf.ascii ?? rf.hAnsi ?? inheritedAscii
     if (fontAscii) run.fontAscii = fontAscii
     // record which resolved values came from theme refs (per winning slot)
     const fontThemed =

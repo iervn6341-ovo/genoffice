@@ -45,10 +45,16 @@ export function fitRibbonLabels(
  */
 export function fitRibbonFolded(
   el: RibbonFitTarget,
-  groups: readonly { dataset: DOMStringMap }[],
+  groups: readonly { dataset: DOMStringMap; classList?: DOMTokenList }[],
   maxLevel: number = RIBBON_LABEL_MAX_LEVEL,
 ): { level: number; folded: number } {
-  for (const g of groups) delete g.dataset.folded
+  // Preserve folded state on any group that currently has its panel open to prevent
+  // layout thrashing and continuous collapse/expand oscillation.
+  for (const g of groups) {
+    if (!g.classList?.contains('rb-fold-open')) {
+      delete g.dataset.folded
+    }
+  }
   const level = fitRibbonLabels(el, maxLevel)
   if (level > 0 || el.scrollWidth <= el.clientWidth + 1) return { level, folded: 0 }
   const order = [...groups].sort(
@@ -100,8 +106,19 @@ export function useRibbonLabelFit(ref: RefObject<HTMLElement | null>): void {
     if (typeof ResizeObserver === 'undefined' || typeof MutationObserver === 'undefined') return
     const resize = new ResizeObserver(schedule)
     resize.observe(el)
-    // childList only: fitting writes an attribute, which must not retrigger itself
-    const mutation = new MutationObserver(schedule)
+    // childList only: fitting writes an attribute, which must not retrigger itself.
+    // Also ignore mutations inside open popovers, flyouts, and dropdown panels.
+    const mutation = new MutationObserver((mutations) => {
+      const shouldSchedule = mutations.some((m) => {
+        const target = m.target as HTMLElement | null
+        if (!target) return false
+        if (target.closest?.('.rb-fold-open, [data-rb-panel], .style-gallery-menu, .menu-select-drop')) {
+          return false
+        }
+        return true
+      })
+      if (shouldSchedule) schedule()
+    })
     mutation.observe(el, { childList: true, subtree: true })
     return () => {
       resize.disconnect()

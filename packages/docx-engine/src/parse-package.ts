@@ -13,6 +13,7 @@ import {
   type XNode,
 } from './xml-utils'
 import { customEnumItems } from './list-markers'
+import { isSymbolFont } from './symbol-fonts'
 import { decodeNumericCharRefs, type RelInfo } from './parse-xml-text'
 import type {
   CommentInfo,
@@ -253,10 +254,20 @@ function parseNumberingLevel(lvlNode: XNode): NumberingLevel {
   const lvlRPr = findChild(lvlNode, 'w:rPr')
   const sz = lvlRPr ? parseInt(attrsOf(findChild(lvlRPr, 'w:sz') ?? {})['w:val'] ?? '', 10) : NaN
   if (sz > 0) level.szHalfPoints = sz
+  const bNode = lvlRPr ? findChild(lvlRPr, 'w:b') : undefined
+  if (bNode) {
+    const val = attrsOf(bNode)['w:val']
+    level.bold = !val || ['1', 'true', 'on'].includes(val)
+  }
   const color = lvlRPr ? attrsOf(findChild(lvlRPr, 'w:color') ?? {})['w:val'] : undefined
   if (color && /^[0-9a-f]{6}$/i.test(color)) level.color = color.toUpperCase()
   const fonts = lvlRPr ? attrsOf(findChild(lvlRPr, 'w:rFonts') ?? {}) : {}
-  const font = fonts['w:ascii'] ?? fonts['w:hAnsi'] ?? fonts['w:eastAsia']
+  const font =
+    fonts['w:ascii'] && isSymbolFont(fonts['w:ascii'])
+      ? fonts['w:ascii']
+      : (fonts['w:hint'] === 'eastAsia' || /[\u4e00-\u9fff]/.test(level.lvlText)) && fonts['w:eastAsia']
+        ? fonts['w:eastAsia']
+        : (fonts['w:ascii'] ?? fonts['w:hAnsi'] ?? fonts['w:eastAsia'])
   if (font) level.font = font
   const picId = parseInt(attrsOf(findChild(lvlNode, 'w:lvlPicBulletId') ?? {})['w:val'] ?? '', 10)
   if (Number.isFinite(picId)) level.picBulletId = picId

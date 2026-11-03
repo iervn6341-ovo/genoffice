@@ -417,7 +417,10 @@ export function computeListMarkerInfos(
     // numFmt "none": an explicit empty marker (Word shows nothing) so renderer
     // counter fallbacks don't kick in on the null
     if (!marker && level.numFmt !== 'none') return null
-    return { text: marker }
+    return {
+      text: marker,
+      ...(level.font && !isSymbolFont(level.font) ? { font: level.font } : {}),
+    }
   })
 }
 
