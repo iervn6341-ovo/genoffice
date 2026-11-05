@@ -5,6 +5,7 @@
  * paragraph/run structure (each run's format preserved independently) and go through IPC editText.
  */
 import React, { useEffect, useRef } from 'react'
+import { registerTextCommit } from './active-text-edit'
 import { moveToLineBoundary } from './line-boundary'
 import { createTextHistory, setActiveTextHistory, type TextHistory } from './text-history'
 import type { EditCaret } from './action-context'
@@ -38,7 +39,7 @@ interface Props {
   /** `owner` = the session (text box / `cellEdit_<table>_<row>_<col>`) whose text these paragraphs are:
    * the editor DOM is reused when the edit target changes, so a late commit (blur, press guard) must be
    * written back to the cell the DOM was populated for, not to whichever cell is current by then */
-  onCommit: (paragraphs: EditParagraph[], owner?: string) => void
+  onCommit: (paragraphs: EditParagraph[], owner?: string) => void | Promise<void>
   onCancel: (owner?: string) => void
   /** Tab/Shift+Tab (for table cell editing): commit current content and jump to the next/previous cell.
    * paragraphs=null means content unchanged (the host may skip committing and only jump). */
@@ -696,9 +697,19 @@ export function populateEditorDom(
       const probe = document.createElement('span')
       probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline'
       p.insertBefore(probe, p.firstChild)
-      const pr = p.getBoundingClientRect()
-      const br = probe.getBoundingClientRect()
-      probe.remove()
+      // Axis-aligned bounding boxes include rotation; using them as a zoom factor
+      // moves a rotated label's baseline. Measure in the frame's local axes instead.
+      const frame = div.parentElement
+      const rotation = frame?.style.transform
+      if (frame && rotation?.startsWith('rotate(')) frame.style.transform = 'none'
+      let pr: DOMRect, br: DOMRect
+      try {
+        pr = p.getBoundingClientRect()
+        br = probe.getBoundingClientRect()
+      } finally {
+        if (frame && rotation?.startsWith('rotate(')) frame.style.transform = rotation
+        probe.remove()
+      }
       const k = pr.width / p.offsetWidth
       const measured = (br.top - pr.top) / k
       if (k > 0 && Number.isFinite(measured)) {
@@ -1050,7 +1061,7 @@ export function TextEditOverlay({
     if (!div) return onCancel(owner)
     const paras = extractParagraphs(div, norm)
     if (JSON.stringify(paras) === initialRef.current) return onCancel(owner)
-    onCommit(paras, owner)
+    return onCommit(paras, owner)
   }
 
   // Targeted layout release (native listeners: React's onBeforeInput synthetic event does
@@ -1097,6 +1108,7 @@ export function TextEditOverlay({
   // immediately when focus is already parked off the editor.
   const commitRef = useRef(commit)
   commitRef.current = commit
+  useEffect(() => registerTextCommit(() => commitRef.current()), [])
   useEffect(
     () =>
       installKeepEditGuard({
@@ -1154,6 +1166,9 @@ export function TextEditOverlay({
         ref={ref}
         className={darkContent ? 'slide-text-editor dk' : 'slide-text-editor'}
         contentEditable
+        data-dynamic-field={
+          node.placeholder === 'sldNum' || node.placeholder === 'dt' ? 'true' : undefined
+        }
         spellCheck
         suppressContentEditableWarning
         onFocus={keeper.clearPaint}
@@ -1267,13 +1282,15 @@ export function TextEditOverlay({
           }
         }}
         style={{
-          // wrap=none: no wrapping (width follows content, same as the canvas overflow behavior); soft-break \n still breaks via pre.
+          // The text area must match the authored width, including tiny page numbers and cells.
+          // A usability minimum changes center/right alignment and wrapping when editing starts.
+          // wrap=none: max-content follows overflow; soft-break \n still breaks via pre.
           // insets use padding not margin: paragraph divs' marginTop (paragraph spacing) must not collapse with the root node
-          width: wrap ? Math.max(box.w, 40 + insets.l + insets.r) : 'max-content',
+          width: wrap ? Math.max(box.w, 1 + insets.l + insets.r) : 'max-content',
           // nowrap keeps max-content growth for overflow, but never below the box width:
           // a narrower block would defeat per-paragraph text-align (centered titles would
           // visually snap left on entering edit) — the canvas centers within the box
-          minWidth: wrap ? undefined : Math.max(box.w, 40 + insets.l + insets.r),
+          minWidth: wrap ? undefined : Math.max(box.w, 1 + insets.l + insets.r),
           // Only an empty body needs a synthetic height (so typing matches the canvas line
           // height); inflating a laid-out body distorts the flex vertical anchor — a
           // middle-anchored single line with tight spacing sat a few px too high in edit
@@ -1870,7 +1887,8 @@ export function liveBulletChar(): string | null | undefined {
   const blocks = Array.from(root.children).filter(
     (el): el is HTMLElement => el instanceof HTMLElement && el.tagName === 'DIV',
   )
-  if (!blocks.length || !blocks.some((b) => b.dataset.bullet)) return undefined
+  if (!blocks.length || !blocks.some((b) => b.dataset.bullet || b.dataset.hadBullet))
+    return undefined
   const found = new Set<string>()
   for (const b of blocks) {
     const kind = b.dataset.bullet ?? b.dataset.hadBullet

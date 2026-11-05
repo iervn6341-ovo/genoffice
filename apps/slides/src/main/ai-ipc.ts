@@ -1,3 +1,5 @@
+import { registerAiSettingsHandlers } from '@genoffice/ai-provider'
+import { webContents as aiSettingsWebContents } from 'electron'
 /**
  * AI IPC for the slides main process, extracted from slides-main.ts:
  * settings persistence, the streaming proxy (main process does the networking
@@ -21,18 +23,13 @@ import {
   AiTimeoutError,
   isAiNetworkError,
   isAiOverloadedError,
-  defaultAiSettings,
-  activeProvider,
   providerRequiresApiKey,
   maxOutputTokensOf,
-  resolveAiSettings,
   setAiUserAgent,
   setRescueFetch,
   streamForProvider,
-  type AiSettings,
   type AiStreamChunk,
   type AiStreamRequest,
-  type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { shutdownCodexAppServers } from '@genoffice/ai-provider/codex-app-server'
 import { fetchRemoteImage } from '@genoffice/electron-utils'
@@ -103,16 +100,15 @@ export function registerAiIpc(): void {
   setRescueFetch((url, init) => net.fetch(url, init))
   setAiUserAgent(`GenOffice/${app.getVersion()}`)
 
-  ipcMain.handle('ai:get-settings', (): AiSettings => {
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(AI_SETTINGS_PATH(), {})
-    const settings = resolveAiSettings(stored, defaultAiSettings())
-
-    settings.provider = activeProvider(settings)
-    return settings
-  })
-
-  ipcMain.handle('ai:set-settings', (_event, settings: AiSettings) => {
-    writeJson(AI_SETTINGS_PATH(), settings)
+  registerAiSettingsHandlers({
+    ipc: ipcMain,
+    read: () => readJson(AI_SETTINGS_PATH(), {}),
+    write: (settings) => writeJson(AI_SETTINGS_PATH(), settings),
+    broadcast: (settings) => {
+      for (const contents of aiSettingsWebContents.getAllWebContents()) {
+        if (!contents.isDestroyed()) contents.send('ai:settings-changed', settings)
+      }
+    },
   })
 
   ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {

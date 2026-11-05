@@ -30,6 +30,7 @@ export const he = {
   appStatusFormatPasted: 'העיצוב הודבק',
   appStatusBrushOnce: 'לחץ על רכיב יעד כדי להחיל את העיצוב; לחץ פעמיים על הלחצן למצב רציף',
   appStatusBrushContinuous: 'מצב רציף של מברשת העיצוב; הקש Esc ליציאה',
+  appStatusFormatApplyFailed: "לא ניתן להחיל את העיצוב. יש לבחור שוב את היעד ולנסות שוב.",
   appStatusFormatApplied: 'העיצוב הוחל',
   appStatusTableInserted: 'הוספה טבלה בגודל {rows} × {cols}',
   appStatusIconInserted: 'הסמל "{name}" נוסף',

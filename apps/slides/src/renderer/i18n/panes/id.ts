@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const id = {
+  paneAnimSaveFailed: 'Tidak dapat memperbarui animasi: {error}',
   paneShowSetupTitle: 'Atur Peragaan Slide',
   paneShowSetupType: 'Jenis peragaan',
   paneShowTypeSpeaker: 'Disajikan pembicara (layar penuh)',
@@ -31,6 +32,8 @@ export const id = {
   paneMoveDown: 'Turunkan',
 
   paneAnimTitle: 'Panel Animasi · Slide {n}',
+  paneAnimSelectHint: 'Pilih animasi untuk mengedit efek dan waktunya.',
+  paneAnimOrderLabel: 'Urutan animasi {n}: {target}',
   paneAnimPreview: 'Putar pratinjau animasi slide ini',
   paneAnimCollapse: 'Ciutkan Panel Animasi',
   paneAnimEmpty: 'Belum ada animasi pada slide ini',

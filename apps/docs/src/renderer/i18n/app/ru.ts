@@ -106,6 +106,15 @@ export const ru = {
     'Стиль «{name}» обновлен по формату выделения; будет записан в документ при сохранении',
   appStyleCreated: 'Стиль «{name}» создан и применен к выделению',
   appPgNumFormatSet: 'Формат номеров страниц задан',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Формат номера страницы',
   appNumberFormat: 'Формат номера',
   appIncludeChapterNumber: 'Включить номер главы',

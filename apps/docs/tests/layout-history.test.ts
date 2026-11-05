@@ -67,6 +67,13 @@ async function setup() {
 }
 
 describe('layout on the undo stack (C7)', () => {
+  it('clears dirty flags at the saved layout and keeps Undo across Save dirty', () => {
+    const changed = { ...BASE, section: margins(720), sectionDirty: true }
+    expect(withRestoreDirty(BASE, changed, BASE).sectionDirty).toBe(false)
+    expect(withRestoreDirty(changed, BASE, BASE).sectionDirty).toBe(true)
+    expect(withRestoreDirty(BASE, changed, changed).sectionDirty).toBe(true)
+    expect(withRestoreDirty(changed, BASE, changed).sectionDirty).toBe(false)
+  })
   it('⌘Z after typing then changing margins undoes the margins first', async () => {
     const t = await setup()
     const { editor } = t

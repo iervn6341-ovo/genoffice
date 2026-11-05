@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const ko = {
+  paneAnimSaveFailed: '애니메이션을 업데이트할 수 없습니다: {error}',
   paneShowSetupTitle: '슬라이드 쇼 설정',
   paneShowSetupType: '쇼 유형',
   paneShowTypeSpeaker: '발표자가 진행(전체 화면)',
@@ -31,6 +32,8 @@ export const ko = {
   paneMoveDown: '아래로 이동',
 
   paneAnimTitle: '애니메이션 창 · 슬라이드 {n}',
+  paneAnimSelectHint: '애니메이션을 선택하여 효과와 타이밍을 편집하세요.',
+  paneAnimOrderLabel: '애니메이션 순서 {n}: {target}',
   paneAnimPreview: '현재 슬라이드 애니메이션 미리 보기 재생',
   paneAnimCollapse: '애니메이션 창 접기',
   paneAnimEmpty: '이 슬라이드에는 아직 애니메이션이 없습니다',

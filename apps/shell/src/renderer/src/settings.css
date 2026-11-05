@@ -143,6 +143,98 @@
   line-height: 1.2;
 }
 
+.set-ai-profile-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  min-width: 0;
+}
+.set-ai-profile-list {
+  flex: 0 0 146px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+}
+.set-ai-profile-list h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.set-ai-profile-row {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 9px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.set-ai-profile-row span,
+.set-ai-profile-row small {
+  display: block;
+}
+.set-ai-profile-row small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.set-ai-profile-row.selected {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+.set-ai-profile-row .set-ai-profile-active {
+  color: var(--accent);
+}
+.set-ai-profile-editor {
+  flex: 1;
+  min-width: 0;
+}
+.set-ai-profile-editor .set-field {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.set-ai-profile-editor .set-input,
+.set-ai-profile-editor .set-dd {
+  min-width: 0;
+  max-width: 100%;
+}
+.set-ai-profile-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.set-model-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-shrink: 0;
+  gap: 8px;
+  width: 46%;
+  min-width: min(200px, 100%);
+  max-width: 100%;
+}
+.set-model-picker .set-input {
+  box-sizing: border-box;
+  width: 100%;
+}
+@media (max-width: 760px) {
+  .set-ai-profile-layout {
+    flex-direction: column;
+  }
+  .set-ai-profile-list {
+    flex-basis: auto;
+    position: static;
+    width: 100%;
+  }
+}
+
 .set-field {
   display: flex;
   align-items: center;
@@ -1045,7 +1137,6 @@
   padding: 0 8px;
   font-size: 12px;
 }
-
 
 .font-sub-warn {
   margin-top: 4px;

@@ -24,6 +24,8 @@ export type AiProviderId =
 export interface AiProviderConfig {
   apiKey: string
   model: string
+  /** Keep a user-entered model id, including gateway aliases, outside the bundled catalog. */
+  customModel?: boolean | undefined
   /** required for custom; for other direct providers it overrides the default endpoint (regional mirrors) */
   baseUrl?: string | undefined
   /** optional Codex CLI override; empty means auto-detect the current authenticated install */
@@ -115,6 +117,14 @@ export interface AiSearchSettings {
   providers: Record<Exclude<AiSearchProviderId, 'auto'>, { apiKey: string }>
 }
 
+export interface AiModelProfile {
+  id: string
+  name: string
+  provider: AiProviderId
+  config: AiProviderConfig
+  maxOutputTokens?: number | undefined
+}
+
 export interface AiSettings {
   provider: AiProviderId
   providers: Record<AiProviderId, AiProviderConfig>
@@ -130,6 +140,8 @@ export interface AiSettings {
    * (absent = the default, so pre-existing settings files keep working).
    */
   maxOutputTokens?: number | undefined
+  modelProfiles?: AiModelProfile[] | undefined
+  activeModelProfileId?: string | undefined
 }
 
 /** pre-provider settings shape (single OpenAI-compatible endpoint); migrated into "custom" */

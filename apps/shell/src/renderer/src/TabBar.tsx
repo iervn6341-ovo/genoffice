@@ -138,6 +138,7 @@ export function TabBar() {
     id: string
     from: number
     startX: number
+    startY: number
     /** viewport-x left edge + width of every tab, sampled at drag start */
     lefts: number[]
     widths: number[]
@@ -151,9 +152,14 @@ export function TabBar() {
     from: number
     target: number
     width: number
+    dy: number
   } | null>(null)
 
-  const finishDrag = (pointerId: number, commit: boolean) => {
+  const finishDrag = async (
+    pointerId: number,
+    commit: boolean,
+    screenPoint?: { x: number; y: number },
+  ) => {
     const drag = dragRef.current
     if (!drag || pointerId !== drag.pointerId) return
     dragRef.current = null
@@ -166,6 +172,12 @@ export function TabBar() {
       return
     }
     setDragVisual(null)
+    if (
+      commit &&
+      screenPoint &&
+      (await window.aiOfficeTabs.drop(drag.id, screenPoint.x, screenPoint.y).catch(() => false))
+    )
+      return
     if (commit && drag.target !== drag.from) {
       // optimistic local reorder so clearing the transforms causes no flash;
       // the main-process broadcast arrives with the identical order
@@ -205,6 +217,18 @@ export function TabBar() {
       setDragVisual(null)
     }
   }, [tabs])
+
+  useEffect(() => {
+    const cancel = (event: KeyboardEvent) => {
+      const drag = dragRef.current
+      if (event.key === 'Escape' && drag) {
+        event.preventDefault()
+        void finishDrag(drag.pointerId, false)
+      }
+    }
+    window.addEventListener('keydown', cancel)
+    return () => window.removeEventListener('keydown', cancel)
+  }, [])
 
   // Trackpads scroll the strip natively; map a mouse's vertical wheel to
   // horizontal scrolling. Native listener because React registers wheel as
@@ -266,7 +290,7 @@ export function TabBar() {
           let dragStyle: CSSProperties | undefined
           if (dragVisual) {
             if (dragVisual.id === tab.id) {
-              dragStyle = { transform: `translateX(${dragVisual.dx}px)` }
+              dragStyle = { transform: `translate(${dragVisual.dx}px, ${dragVisual.dy}px)` }
             } else if (dragVisual.target <= index && index < dragVisual.from) {
               dragStyle = { transform: `translateX(${dragVisual.width}px)` }
             } else if (dragVisual.from < index && index <= dragVisual.target) {
@@ -307,6 +331,7 @@ export function TabBar() {
                   id: tab.id,
                   from: index,
                   startX: event.clientX,
+                  startY: event.clientY,
                   lefts: rects.map((r) => r.left),
                   widths: rects.map((r) => r.width),
                   target: index,
@@ -320,7 +345,7 @@ export function TabBar() {
                 let dx = event.clientX - drag.startX
                 // 4px dead zone so plain clicks never wiggle the tab
                 if (!drag.started) {
-                  if (Math.abs(dx) < 4) return
+                  if (Math.hypot(dx, event.clientY - drag.startY) < 4) return
                   // re-sample geometry the moment the drag really starts — the
                   // pointer-down activation re-renders and could have moved tabs
                   const strip = stripRef.current
@@ -368,9 +393,12 @@ export function TabBar() {
                   from: drag.from,
                   target,
                   width: drag.widths[drag.from],
+                  dy: event.clientY - drag.startY,
                 })
               }}
-              onPointerUp={(event) => finishDrag(event.pointerId, true)}
+              onPointerUp={(event) =>
+                void finishDrag(event.pointerId, true, { x: event.screenX, y: event.screenY })
+              }
               onPointerCancel={(event) => finishDrag(event.pointerId, false)}
               onLostPointerCapture={(event) => finishDrag(event.pointerId, false)}
             >

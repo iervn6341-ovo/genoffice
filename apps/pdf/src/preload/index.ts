@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { Lang } from '@genoffice/i18n'
@@ -8,7 +9,9 @@ import type { PdfApi, UiTheme } from '../shared/ipc'
 
 const api: PdfApi = {
   consumePending: () => ipcRenderer.invoke(PDF_CHANNELS.consumePending),
+  requestInitialSave: () => ipcRenderer.invoke(PDF_CHANNELS.requestInitialSave),
   readFile: (path) => ipcRenderer.invoke(PDF_CHANNELS.readFile, path),
+  sourceModified: () => ipcRenderer.invoke(PDF_CHANNELS.sourceModified),
   printNative: (path) => ipcRenderer.invoke(PDF_CHANNELS.printNative, path),
   save: (request) => ipcRenderer.invoke(PDF_CHANNELS.save, request),
   requestRedactionCopy: (path) => ipcRenderer.invoke(PDF_CHANNELS.requestRedactionCopy, path),
@@ -124,3 +127,5 @@ contextBridge.exposeInMainWorld('projectApi', projectApi)
 
 // open documents dragged from the OS onto this tab as a new shell tab
 installDropOpenBridge()
+
+installAiSettingsBridge()

@@ -631,6 +631,8 @@ export const pt = {
   ribbonDlgHeaderFooter: 'Cabeçalho e Rodapé',
   ribbonDlgSlidesTab: 'Slides',
   ribbonDlgNotesHandoutsTab: 'Anotações e folhetos',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Começar em',
   ribbonDlgHeader: 'Cabeçalho',
   ribbonDlgHeaderPlaceholder: 'Texto do cabeçalho',

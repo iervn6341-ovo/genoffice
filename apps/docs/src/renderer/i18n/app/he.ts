@@ -103,6 +103,15 @@ export const he = {
   appStyleUpdated: 'הסגנון "{name}" עודכן לפי עיצוב הקטע המסומן; ייכתב למסמך בעת השמירה',
   appStyleCreated: 'הסגנון "{name}" נוצר והוחל על הקטע המסומן',
   appPgNumFormatSet: 'תבנית מספרי העמודים הוגדרה',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'תבנית מספרי עמודים',
   appNumberFormat: 'תבנית מספור',
   appIncludeChapterNumber: 'כלול מספר פרק',

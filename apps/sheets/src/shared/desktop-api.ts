@@ -2471,6 +2471,7 @@ const aiProviderConfigSchema = z
   .object({
     apiKey: z.string(),
     model: z.string(),
+    customModel: z.boolean().optional(),
     baseUrl: z.string().optional(),
     cliPath: z.string().optional(),
   })
@@ -2886,6 +2887,8 @@ export interface DesktopApi {
   openPathInShell?(path: string): Promise<void>
   /** File view: open a blank workbook in a new tab */
   newBlankWorkbookTab?(): Promise<void>
+  /** Initialize this tab's private unsaved workbook; no user file exists yet. */
+  openNewBlankWorkbook(): Promise<WorkbookFile | null>
   selectWorkbook(): Promise<WorkbookFile | null>
   /** multi-select xlsx picker; each file opens a secondary sidecar session for merge reads */
   selectWorkbooksForMerge(): Promise<WorkbookFile[] | null>

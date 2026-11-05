@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const hi = {
+  paneAnimSaveFailed: 'एनिमेशन अपडेट नहीं हो सका: {error}',
   paneShowSetupTitle: 'स्लाइड शो सेट करें',
   paneShowSetupType: 'शो का प्रकार',
   paneShowTypeSpeaker: 'वक्ता द्वारा प्रस्तुत (पूर्ण स्क्रीन)',
@@ -31,6 +32,8 @@ export const hi = {
   paneMoveDown: 'नीचे ले जाएँ',
 
   paneAnimTitle: 'एनिमेशन फलक · स्लाइड {n}',
+  paneAnimSelectHint: 'प्रभाव और समय संपादित करने के लिए ऐनिमेशन चुनें।',
+  paneAnimOrderLabel: 'ऐनिमेशन क्रम {n}: {target}',
   paneAnimPreview: 'इस स्लाइड के एनिमेशन का पूर्वावलोकन चलाएँ',
   paneAnimCollapse: 'एनिमेशन फलक संक्षिप्त करें',
   paneAnimEmpty: 'इस स्लाइड पर कोई एनिमेशन नहीं है',

@@ -63,6 +63,40 @@ function makeScheduler() {
 }
 
 describe('setContentPhased', () => {
+  it('shows the start of a medium TOC document before mounting the rest', async () => {
+    const doc = docOf(80)
+    for (const node of doc.content!.slice(2, 42)) {
+      node.type = 'docProtected'
+      node.attrs = { ...node.attrs, fieldDisplay: { kind: 'tocLine', left: 'Chapter', right: '1' } }
+    }
+    const { host, state } = makeHost()
+    const scheduler = makeScheduler()
+    let pendingAtMount = false
+    const originalSet = host.setContent
+    host.setContent = (content) => {
+      pendingAtMount = isPhasedContentPending()
+      originalSet(content)
+    }
+    setContentPhased(host, doc, scheduler.schedule)
+    expect(pendingAtMount).toBe(true)
+    expect(state.mounted.length).toBeLessThan(80)
+    expect(state.loading).toBe(true)
+    while (scheduler.pending()) scheduler.drain()
+    await waitForFullContent()
+    expect(state.mounted).toEqual(doc.content)
+    expect(state.loading).toBe(false)
+    expect(state.dirty).toBe(false)
+  })
+
+  it('releases the loading/save gate when the first partial mount fails', () => {
+    const { host, state } = makeHost()
+    host.setContent = () => {
+      throw new Error('mount failed')
+    }
+    expect(() => setContentPhased(host, docOf(PHASED_MIN_BLOCKS + 1))).toThrow('mount failed')
+    expect(isPhasedContentPending()).toBe(false)
+    expect(state.loading).toBe(false)
+  })
   it('mounts small documents in one pass without the loading flag', () => {
     const { host, state } = makeHost()
     const s = makeScheduler()

@@ -1,5 +1,6 @@
 import { defaultAiMediaSettings, resolveAiMediaSettings } from './media'
 import { defaultAiSearchSettings, resolveAiSearchSettings } from './search-settings'
+import { withModelProfiles } from './model-profiles'
 import type { AiProviderId, AiProviderMeta, AiSettings, LegacyAiSettings } from './types'
 
 /**
@@ -370,6 +371,7 @@ function migrateRetiredModels(providers: AiSettings['providers']): AiSettings['p
   const migrated = { ...providers }
   for (const [id, replacements] of Object.entries(RETIRED_MODELS)) {
     const config = migrated[id as AiProviderId]
+    if (config?.customModel) continue
     const replacement = config?.model ? replacements[config.model] : undefined
     if (replacement) migrated[id as AiProviderId] = { ...config, model: replacement }
   }
@@ -411,7 +413,7 @@ export function resolveAiSettings(
           : !!normalized[m.id].model &&
             (m.needsBaseUrl ? !!normalized[m.id].baseUrl : !!normalized[m.id].apiKey),
       )?.id ?? defaults.provider)
-  return {
+  return withModelProfiles({
     provider,
     providers: normalized,
     media: resolveAiMediaSettings(stored.media ?? defaults.media),
@@ -421,7 +423,9 @@ export function resolveAiSettings(
           maxOutputTokens: clampMaxOutputTokens(stored.maxOutputTokens ?? defaults.maxOutputTokens),
         }
       : {}),
-  }
+    modelProfiles: stored.modelProfiles,
+    activeModelProfileId: stored.activeModelProfileId,
+  })
 }
 
 /** Preserve a selected service rather than silently sending requests elsewhere. */

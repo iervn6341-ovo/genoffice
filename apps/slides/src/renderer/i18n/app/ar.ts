@@ -31,6 +31,7 @@ export const ar = {
   appStatusBrushOnce:
     'انقر فوق العنصر الهدف لتطبيق التنسيق؛ انقر نقرًا مزدوجًا فوق الزر للوضع المستمر',
   appStatusBrushContinuous: 'وضع نسخ التنسيق المستمر؛ اضغط على Esc للخروج',
+  appStatusFormatApplyFailed: "تعذر تطبيق التنسيق. حدد الهدف مجددًا وأعد المحاولة.",
   appStatusFormatApplied: 'تم تطبيق التنسيق',
   appStatusTableInserted: 'تم إدراج جدول {rows} × {cols}',
   appStatusIconInserted: 'تم إدراج الأيقونة «{name}»',

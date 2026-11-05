@@ -1,3 +1,6 @@
+import { externalFiles } from '@genoffice/electron-utils/external-files'
+import { registerAiSettingsHandlers } from '@genoffice/ai-provider'
+import { webContents as aiSettingsWebContents } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   createReadStream,
@@ -67,22 +70,18 @@ import {
   isAiNetworkError,
   isAiOverloadedError,
   chatForProvider,
-  defaultAiSettings,
-  activeProvider,
   providerRequiresApiKey,
   maxOutputTokensOf,
-  resolveAiSettings,
   setAiUserAgent,
   setRescueFetch,
   streamForProvider,
   type AiProviderId,
-  type AiSettings,
   type AiStreamChunk,
-  type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { shutdownCodexAppServers } from '@genoffice/ai-provider/codex-app-server'
 import {
   DEFAULT_CSV_DIALECT,
+  blankXlsxBuffer,
   csvDialectOf,
   csvToXlsxBuffer,
   decodeCsvBuffer,
@@ -117,7 +116,6 @@ import type {
 import {
   ATTACHMENT_IMAGE_EXTS,
   aiChatRequestSchema,
-  aiSettingsInputSchema,
   aiStreamRequestSchema,
   workbookFileSchema,
   workbookFormulaCellsRequestSchema,
@@ -1650,6 +1648,22 @@ async function saveFileDialog(event: IpcMainInvokeEvent, options: SaveDialogOpti
 
 /** register a tab's webContents/client pair and wire up cleanup on teardown */
 function registerSheetsSession(webContents: WebContents, client: XlsxSidecarClient): void {
+  externalFiles.attach(webContents, {
+    language: getUiLang,
+    isDirty: () => sheetsPendingEditCount(webContents.id) > 0,
+    reload: async (path) => {
+      await stat(path)
+      clearWorkbookRecovery(path)
+      const entry = sheetsTabs.get(webContents.id)
+      if (entry) await closeAllSessions(entry)
+      pendingEditCounts.delete(webContents.id)
+      queueWorkbookForView(webContents, path)
+      webContents.reload()
+    },
+    saveCopy: () => {
+      webContents.send(IPC_CHANNELS.menuAction, 'save-as')
+    },
+  })
   startPastedTempCleanup()
   sheetsTabs.set(webContents.id, {
     webContents,
@@ -1690,6 +1704,7 @@ export function setActiveSheetsWebContents(wc: WebContents | null): void {
  *  Home list) — sync the matching session's path in that tab (later saves write
  *  the new file) and push the renderer to update the title-bar file name. */
 export function sheetsFileRenamed(wc: WebContents, oldPath: string, newPath: string): void {
+  void externalFiles.renamed(wc.id, oldPath, newPath)
   // A user-chosen name always wins: the file no longer qualifies for auto-rename.
   // A move that keeps the untitled name (folder tree), including the "(2)"
   // suffix a keep-both move adds, does not count as choosing one.
@@ -1910,12 +1925,15 @@ export function hasActiveQueuedWorkbook(): boolean {
   return activeSheetsWebContents !== null && queuedWorkbookPaths.has(activeSheetsWebContents.id)
 }
 
-/** set by shell for home:new-sheet: renderer opens blank workbook instead of demo */
-let pendingNewBlank = false
+/** A new workbook belongs to exactly one tab; its suggested path is not created yet. */
+const queuedNewBlankTargets = new Map<number, string>()
 
-/** signal the next sheets renderer to open a new blank workbook (shell mode only) */
-export function setSheetsNewBlank(): void {
-  pendingNewBlank = true
+export function queueNewBlankWorkbookForView(contents: WebContents, suggestedPath: string): void {
+  if (!isAbsolute(suggestedPath) || !/\.xlsx$/i.test(suggestedPath)) {
+    throw new Error('A blank workbook needs an absolute .xlsx save suggestion.')
+  }
+  queuedNewBlankTargets.set(contents.id, suggestedPath)
+  contents.once('destroyed', () => queuedNewBlankTargets.delete(contents.id))
 }
 
 // capturePage forces a renderer frame even when the window is occluded or on
@@ -2438,13 +2456,64 @@ export function registerSheetsIpc(): void {
     }
   })
 
-  /** returns true once when shell opened this tab for a new blank workbook */
-  ipcMain.handle('sheets:consume-new-blank', () => {
-    if (pendingNewBlank) {
-      pendingNewBlank = false
-      return true
+  /** Returns true while this view has a queued unsaved blank workbook. */
+  ipcMain.handle('sheets:consume-new-blank', (event) => {
+    return queuedNewBlankTargets.has(event.sender.id)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.openNewBlankWorkbook, async (event) => {
+    const entry = sessionFor(event)
+    const suggestedPath = queuedNewBlankTargets.get(event.sender.id)
+    if (suggestedPath === undefined) return null
+    queuedNewBlankTargets.delete(event.sender.id)
+    // The sidecar currently opens by path. This private staging file is owned
+    // by the session and never appears in the default save folder or recents.
+    const directory = join(app.getPath('temp'), 'genoffice-imports', randomUUID())
+    await mkdir(directory, { recursive: true })
+    const stagedPath = join(directory, 'blank.xlsx')
+    try {
+      await writeFile(stagedPath, await blankXlsxBuffer())
+      if (event.sender.isDestroyed()) {
+        await cleanupImportTempDirectory(app.getPath('temp'), directory)
+        return null
+      }
+      const opened = await openWorkbookSession(entry.client, stagedPath, entry.sessions, {
+        suggestSaveAs: suggestedPath,
+        importTempDir: directory,
+      })
+      if (event.sender.isDestroyed()) {
+        const session = entry.sessions.get(opened.sessionId)
+        entry.sessions.delete(opened.sessionId)
+        if (session) {
+          await cleanupSessionResources({
+            tempRoot: app.getPath('temp'),
+            snapshotPath: session.snapshotPath,
+            importTempDir: session.importTempDir,
+            closeSidecar: () => entry.client.close(opened.sessionId),
+          })
+        }
+        return null
+      }
+      const { path: _stagedPath, ...visible } = opened
+      return workbookFileSchema.parse({
+        ...visible,
+        name: basename(suggestedPath),
+        needsSaveAs: true,
+      })
+    } catch (error) {
+      for (const [sessionId, session] of entry.sessions) {
+        if (session.path !== stagedPath) continue
+        entry.sessions.delete(sessionId)
+        await cleanupSessionResources({
+          tempRoot: app.getPath('temp'),
+          snapshotPath: session.snapshotPath,
+          importTempDir: session.importTempDir,
+          closeSidecar: () => entry.client.close(sessionId),
+        })
+      }
+      await cleanupImportTempDirectory(app.getPath('temp'), directory)
+      throw error
     }
-    return false
   })
 
   /**
@@ -2528,6 +2597,7 @@ export function registerSheetsIpc(): void {
       }
       return null
     }
+    await trackSheetsDisk(event.sender, result, path)
     workbookOpenedHook?.(event.sender, path)
     return result
   }
@@ -2992,7 +3062,9 @@ export function registerSheetsIpc(): void {
       Buffer.from([0xef, 0xbb, 0xbf]),
       Buffer.from(request.content, 'utf8'),
     ])
-    await atomicWriteFile(targetPath, csvBytes)
+    await externalFiles.write(event.sender.id, targetPath, () =>
+      atomicWriteFile(targetPath, csvBytes),
+    )
     // An export can land on a CSV session's own source file — refresh that
     // session's guard digest so its next Save doesn't mistake this write for
     // an external change.
@@ -3137,6 +3209,7 @@ export function registerSheetsIpc(): void {
       // changed it since the restore.
       const currentSha = await sha256File(session.restoreTarget).catch(() => undefined)
       if (currentSha !== undefined && currentSha !== session.restoreTargetSha) {
+        externalFiles.blocked(event.sender.id)
         throw new Error(tm('errDiskChanged'))
       }
       targetPath = session.restoreTarget
@@ -3149,6 +3222,7 @@ export function registerSheetsIpc(): void {
       // was deleted on disk is fine: saving recreates it.
       const currentSha = await sha256File(session.path).catch(() => undefined)
       if (currentSha !== undefined && currentSha !== session.sha256) {
+        externalFiles.blocked(event.sender.id)
         throw new Error(tm('errDiskChanged'))
       }
     }
@@ -3157,11 +3231,14 @@ export function registerSheetsIpc(): void {
     if (csvInPlace && session.csvSourcePath !== undefined) {
       const csvSha = await sha256File(session.csvSourcePath).catch(() => undefined)
       if (csvSha !== undefined && csvSha !== session.csvSourceSha) {
+        externalFiles.blocked(event.sender.id)
         throw new Error(tm('errDiskChanged'))
       }
     }
 
-    const mutation = await writeWorkbookTo(client, session, request, targetPath)
+    const mutation = await externalFiles.write(event.sender.id, targetPath, () =>
+      writeWorkbookTo(client, session, request, targetPath),
+    )
 
     if (csvInPlace && session.csvSourcePath !== undefined && request.csvContent !== undefined) {
       // The temp copy already holds the saved bytes: refresh the session's
@@ -3177,7 +3254,9 @@ export function registerSheetsIpc(): void {
       // bytes say how it was written. A deleted file gets Excel-friendly UTF-8.
       const original = await readFile(session.csvSourcePath).catch(() => null)
       const dialect = original ? csvDialectOf(original, legacyCsvCharset()) : DEFAULT_CSV_DIALECT
-      await writeFile(session.csvSourcePath, encodeCsvForDialect(request.csvContent, dialect))
+      await externalFiles.write(event.sender.id, session.csvSourcePath, () =>
+        writeFile(session.csvSourcePath!, encodeCsvForDialect(request.csvContent!, dialect)),
+      )
     }
 
     // The sidecar session still streams the pre-save bytes; swap it for a
@@ -3203,6 +3282,7 @@ export function registerSheetsIpc(): void {
           }
         : undefined,
     )
+    await trackSheetsDisk(event.sender, file)
     // Notify shell (if running) so it can update the tab title and record the
     // saved path in recent files (mirrors the open hook; covers Save As + first
     // save after converting an .xls/.csv import). A CSV session's user-visible
@@ -3492,19 +3572,15 @@ export function registerSheetsAiIpc(): void {
   setRescueFetch((url, init) => net.fetch(url, init))
   setAiUserAgent(`GenOffice/${app.getVersion()}`)
 
-  ipcMain.handle(IPC_CHANNELS.aiGetSettings, (event): AiSettings => {
-    sessionFor(event)
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
-    const settings = resolveAiSettings(stored, defaultAiSettings())
-
-    settings.provider = activeProvider(settings)
-    return settings
-  })
-
-  ipcMain.handle(IPC_CHANNELS.aiSetSettings, (event, input: unknown) => {
-    sessionFor(event)
-    const settings = aiSettingsInputSchema.parse(input)
-    writeJson(SETTINGS_PATH(), settings)
+  registerAiSettingsHandlers({
+    ipc: ipcMain,
+    read: () => readJson(SETTINGS_PATH(), {}),
+    write: (settings) => writeJson(SETTINGS_PATH(), settings),
+    broadcast: (settings) => {
+      for (const contents of aiSettingsWebContents.getAllWebContents()) {
+        if (!contents.isDestroyed()) contents.send('ai:settings-changed', settings)
+      }
+    },
   })
 
   ipcMain.handle(IPC_CHANNELS.aiChat, async (event, input: unknown) => {
@@ -4092,6 +4168,25 @@ function systemShortDate(): string {
     setSystemShortDate(cachedShortDate)
   }
   return cachedShortDate
+}
+
+async function trackSheetsDisk(
+  contents: WebContents,
+  file: WorkbookFile,
+  openedPath?: string,
+): Promise<void> {
+  const session = sheetsTabs.get(contents.id)?.sessions.get(file.sessionId)
+  if (!session) return
+  const path = openedPath ?? session.csvSourcePath ?? session.restoreTarget ?? session.path
+  const hash =
+    path === session.path
+      ? session.sha256
+      : path === session.csvSourcePath
+        ? session.csvSourceSha
+        : path === session.restoreTarget
+          ? session.restoreTargetSha
+          : undefined
+  await externalFiles.remember(contents.id, path, hash)
 }
 
 async function openWorkbookSession(

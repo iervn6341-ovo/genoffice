@@ -1,3 +1,6 @@
+import { externalFiles, ExternalFileChangedError } from '@genoffice/electron-utils/external-files'
+import { registerAiSettingsHandlers } from '@genoffice/ai-provider'
+import { webContents as aiSettingsWebContents } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   appendFileSync,
@@ -83,24 +86,19 @@ import {
   isAiNetworkError,
   isAiOverloadedError,
   chatForProvider,
-  defaultAiSettings,
-  activeProvider,
   providerRequiresApiKey,
   testMediaProvider,
   type AiMediaProviderConfig,
   type AiMediaProviderId,
   type AiSearchProviderId,
-  resolveAiSettings,
   maxOutputTokensOf,
   listOpenAiCompatibleModels,
   setAiUserAgent,
   setRescueFetch,
   streamForProvider,
   type AiChatRequest,
-  type AiSettings,
   type AiStreamChunk,
   type AiStreamRequest,
-  type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { listCodexModels, shutdownCodexAppServers } from '@genoffice/ai-provider/codex-app-server'
 import {
@@ -152,7 +150,7 @@ import {
   setDocPassword,
   snapshotDocPassword,
 } from './docx-encryption'
-import { isExternallyModified, type DiskFileState } from './external-change'
+import type { DiskFileState } from './external-change'
 import { initDocsAutoUpdater } from './updater'
 import { registerZoteroIpc, teardownZoteroIpc } from './zotero-ipc'
 
@@ -2297,6 +2295,7 @@ export function removeRecentFiles(filePaths: string[]): void {
  *  the Home list) — push to the matching renderer so it syncs its save path and
  *  title bar (docs keeps path state on the renderer side). */
 export function docsFileRenamed(wc: WebContents, oldPath: string, newPath: string): void {
+  void externalFiles.renamed(wc.id, oldPath, newPath)
   // keep the save allowlist in sync so docs:save accepts the renamed path
   docWritablePaths.get(wc.id)?.delete(oldPath)
   allowDocWrite(wc.id, newPath)
@@ -2360,12 +2359,27 @@ export function removeStarredFiles(filePaths: string[]): void {
 
 // ---- original archive (pass-through base: original file archived by content hash) ----
 
-async function archiveOriginal(filePath: string, hash: string, size: number): Promise<void> {
+const pinnedOriginals = new Map<number, Set<string>>()
+function unpinOriginals(wcId: number): void {
+  if (pinnedOriginals.delete(wcId)) void pruneOriginals(userDataPath('originals'))
+}
+
+async function archiveOriginal(
+  filePath: string,
+  hash: string,
+  size: number,
+  lazyOwner?: number,
+): Promise<void> {
   // a copy larger than the whole cap would only evict every other original
-  if (size > ORIGINALS_MAX_BYTES) return
+  if (size > ORIGINALS_MAX_BYTES && lazyOwner === undefined) return
   const dir = userDataPath('originals')
   await mkdir(dir, { recursive: true })
   const target = join(dir, `${hash}.docx`)
+  if (lazyOwner !== undefined) {
+    const pins = pinnedOriginals.get(lazyOwner) ?? new Set<string>()
+    pins.add(target)
+    pinnedOriginals.set(lazyOwner, pins)
+  }
   if (!existsSync(target)) await copyFile(filePath, target)
   void pruneOriginals(dir)
 }
@@ -2391,6 +2405,8 @@ async function pruneOriginals(dir: string): Promise<void> {
     files.sort((a, b) => a.mtimeMs - b.mtimeMs)
     for (const f of files) {
       if (total <= ORIGINALS_MAX_BYTES) break
+      // Open lazy documents still need this exact version for display and Save a Copy.
+      if ([...pinnedOriginals.values()].some((paths) => paths.has(f.path))) continue
       try {
         await unlink(f.path)
         total -= f.size
@@ -2453,6 +2469,7 @@ function isImageExportTemp(wcId: number, filePath: string): boolean {
 }
 
 function dropDocWriter(wcId: number): void {
+  unpinOriginals(wcId)
   docWritablePaths.delete(wcId)
   pdfWritablePaths.delete(wcId)
   for (const p of imageExportTemps.get(wcId) ?? []) void rm(p, { force: true })
@@ -2479,25 +2496,27 @@ async function rememberDiskState(wcId: number, filePath: string, hash: string): 
     const states = docDiskStates.get(wcId) ?? new Map<string, DiskFileState>()
     states.set(filePath, { mtimeMs: s.mtimeMs, size: s.size, hash })
     docDiskStates.set(wcId, states)
+    const wc = webContents.fromId(wcId)
+    if (wc) {
+      externalFiles.attach(wc, {
+        language: getUiLang,
+        isDirty: () => docsQueryDirty(wc),
+        reload: async (path) => {
+          // A deliberate reload must not restore the recovery copy being discarded.
+          await rm(recoveryPathFor(path), { force: true })
+          const result = await loadDocx(path, wc.id)
+          if (!result) throw new Error('The document could not be reopened.')
+          wc.send('docs:opened', result)
+        },
+        saveCopy: () => {
+          wc.send('menu:command', 'save-as')
+        },
+      })
+      await externalFiles.remember(wcId, filePath, hash)
+    }
   } catch {
     /* unstatable target: skip tracking; the next save simply won't flag a conflict */
   }
-}
-
-async function diskChangedExternally(wcId: number, filePath: string): Promise<boolean> {
-  let current: { mtimeMs: number; size: number } | null
-  try {
-    current = await stat(filePath)
-  } catch {
-    current = null
-  }
-  return isExternallyModified(docDiskStates.get(wcId)?.get(filePath), current, async () => {
-    try {
-      return sha256Hex(await readFile(filePath))
-    } catch {
-      return null
-    }
-  })
 }
 
 /** A closed docs tab detaches without destroying its webContents (shell freeze
@@ -2506,11 +2525,14 @@ async function diskChangedExternally(wcId: number, filePath: string): Promise<bo
 export function teardownDocsRenderer(contents: WebContents): void {
   teardownZoteroIpc(contents)
   tornDownWcIds.add(contents.id)
+  externalFiles.forget(contents.id)
+  unpinOriginals(contents.id)
   forgetLazyMediaOwner(contents.id)
   // Sweep recovery copies for this renderer's documents: every non-crash close
   // either saved (docs:save already cleared it) or explicitly discarded, so a
   // copy still on disk here is a leftover from an in-flight recovery write.
   for (const p of docWritablePaths.get(contents.id) ?? []) clearRecoveryCopy(p)
+  clearUntitledRecovery(contents.id)
   // reclaim every per-wcId grant, not just doc saves — the orphaned renderer
   // must also lose its dialog-authorized PDF targets and disk-state cache
   docWritablePaths.delete(contents.id)
@@ -2525,6 +2547,17 @@ export function teardownDocsRenderer(contents: WebContents): void {
 const recoveryDir = () => userDataPath('docs-autosave')
 const recoveryPathFor = (filePath: string) =>
   join(recoveryDir(), `${createHash('sha1').update(filePath).digest('hex').slice(0, 16)}.docx`)
+
+/** Untitled recovery stays private to userData and never becomes a recent document. */
+const untitledRecoveryByWc = new Map<number, string>()
+const untitledRecoveryEpochs = new Map<number, number>()
+
+function clearUntitledRecovery(wcId: number): void {
+  untitledRecoveryEpochs.set(wcId, (untitledRecoveryEpochs.get(wcId) ?? 0) + 1)
+  const path = untitledRecoveryByWc.get(wcId)
+  untitledRecoveryByWc.delete(wcId)
+  if (path) void rm(path, { force: true }).catch(() => {})
+}
 
 /** Bumped by every clear: an in-flight docs:write-recovery that started before
  * the bump must not recreate the file it is about to land (stale-recovery race). */
@@ -2630,7 +2663,10 @@ async function loadDocx(
   // the archive keeps the on-disk original as-is (encrypted ones included: they
   // reopen with the user's password), so a bad save never loses the source file
   const hash = lazy?.hash ?? sha256Hex(original)
-  await archiveOriginal(filePath, hash, size)
+  await archiveOriginal(filePath, hash, size, lazy ? wcId : undefined)
+  // Lazy media must keep serving the opened version after an external replacement.
+  const archivedSource = join(userDataPath('originals'), `${hash}.docx`)
+  if (lazy && existsSync(archivedSource)) pointLazyMediaAt(new Set([hash]), archivedSource, wcId)
   const recovery = await maybeRecoverDocBytes(filePath, plainBytes)
   let bytes = recovery.bytes
   let recovered = recovery.recovered
@@ -2645,6 +2681,7 @@ async function loadDocx(
     }
   }
   if (recovered) await adoptLazyMediaHashes(bytes, filePath, wcId)
+  clearUntitledRecovery(wcId)
   pushRecent(filePath)
   allowDocWrite(wcId, filePath)
   if (fileOpenedHook) fileOpenedHook(wcId, filePath)
@@ -2842,16 +2879,15 @@ const activeAiStreams = new Map<string, AbortController>()
  */
 export function registerAiIpc(): void {
   app.once('before-quit', shutdownCodexAppServers)
-  ipcMain.handle('ai:get-settings', (): AiSettings => {
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
-    const settings = resolveAiSettings(stored, defaultAiSettings())
-
-    settings.provider = activeProvider(settings)
-    return settings
-  })
-
-  ipcMain.handle('ai:set-settings', (_event, settings: AiSettings) => {
-    writeJson(SETTINGS_PATH(), settings)
+  registerAiSettingsHandlers({
+    ipc: ipcMain,
+    read: () => readJson(SETTINGS_PATH(), {}),
+    write: (settings) => writeJson(SETTINGS_PATH(), settings),
+    broadcast: (settings) => {
+      for (const contents of aiSettingsWebContents.getAllWebContents()) {
+        if (!contents.isDestroyed()) contents.send('ai:settings-changed', settings)
+      }
+    },
   })
 
   ipcMain.handle('ai:list-models', async (_event, baseUrl: unknown, apiKey: unknown) => {
@@ -3061,6 +3097,7 @@ export function setDocsFileSavedHook(hook: (wc: WebContents, filePath: string) =
 }
 
 function notifyFileSaved(wc: WebContents, filePath: string): void {
+  clearUntitledRecovery(wc.id)
   if (fileSavedHook) fileSavedHook(wc, filePath)
 }
 
@@ -3390,31 +3427,11 @@ export function registerDocsIpc(): void {
 
   ipcMain.handle(
     'docs:save',
-    async (event, filePath: string, data: ArrayBuffer, auto?: boolean) => {
+    async (event, filePath: string, data: ArrayBuffer, _auto?: boolean) => {
       try {
         // only paths this renderer opened or chose via save-as may be overwritten
         if (typeof filePath !== 'string' || !canDocWrite(event.sender.id, filePath)) {
           return { ok: false, error: 'save target is not an opened document' }
-        }
-        if (await diskChangedExternally(event.sender.id, filePath)) {
-          // autosave must never clobber another program's edits silently; the
-          // renderer stays dirty and the next manual save raises the dialog
-          if (auto === true) return { ok: false, reason: 'external-modified' }
-          const options = {
-            type: 'warning' as const,
-            message: tm('extModifiedMsg'),
-            detail: tm('extModifiedDetail'),
-            buttons: [tm('btnOverwrite'), tm('btnCancel')],
-            defaultId: 0,
-            cancelId: 1,
-            noLink: true,
-          }
-          const parent = dialogParent(event)
-          const { response } =
-            parent && !parent.isDestroyed()
-              ? await dialog.showMessageBox(parent, options)
-              : await dialog.showMessageBox(options)
-          if (response !== 0) return { ok: false, reason: 'external-modified' }
         }
         // The tab may have been closed while the external-change check or the
         // overwrite prompt was pending: a Don't Save close revoked this tab's
@@ -3427,7 +3444,7 @@ export function registerDocsIpc(): void {
         const passwordState = snapshotDocPassword(event.sender.id, filePath)
         const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-        await atomicWriteFile(filePath, bytes)
+        await externalFiles.write(event.sender.id, filePath, () => atomicWriteFile(filePath, bytes))
         // Teardown may have cleared all in-memory secrets while the atomic
         // write was pending. Never resurrect state for an orphaned renderer.
         if (tornDownWcIds.has(event.sender.id)) {
@@ -3437,12 +3454,7 @@ export function registerDocsIpc(): void {
         if (tornDownWcIds.has(event.sender.id)) {
           return { ok: false, error: 'save target is not an opened document' }
         }
-        pointLazyMediaAt(
-          hashes,
-          filePath,
-          event.sender.id,
-          passwordState.password ? plain : undefined,
-        )
+        pointLazyMediaAt(hashes, filePath, event.sender.id, plain)
         // Commit immediately after the final await: intents received during
         // post-write bookkeeping are included, with no later async race.
         const passwordIntentPending = commitDocPasswordSave(
@@ -3458,6 +3470,8 @@ export function registerDocsIpc(): void {
           ...reissuedDoc(!!passwordState.password, hashes, plain),
         }
       } catch (err) {
+        if (err instanceof ExternalFileChangedError)
+          return { ok: false, reason: 'external-modified' }
         return { ok: false, error: String(err) }
       }
     },
@@ -3494,6 +3508,85 @@ export function registerDocsIpc(): void {
       return { ok: true }
     } catch {
       return { ok: false }
+    }
+  })
+
+  ipcMain.handle('docs:write-untitled-recovery', async (event, data: ArrayBuffer) => {
+    const wcId = event.sender.id
+    if (tornDownWcIds.has(wcId) || !(data instanceof ArrayBuffer)) return { ok: false }
+    const path =
+      untitledRecoveryByWc.get(wcId) ?? join(recoveryDir(), `untitled-${randomUUID()}.docx`)
+    untitledRecoveryByWc.set(wcId, path)
+    const epoch = untitledRecoveryEpochs.get(wcId) ?? 0
+    try {
+      await mkdir(recoveryDir(), { recursive: true })
+      await atomicWriteFile(path, Buffer.from(data))
+      if (
+        tornDownWcIds.has(wcId) ||
+        untitledRecoveryByWc.get(wcId) !== path ||
+        untitledRecoveryEpochs.get(wcId) !== epoch
+      ) {
+        await rm(path, { force: true })
+        return { ok: false }
+      }
+      return { ok: true }
+    } catch {
+      return { ok: false }
+    }
+  })
+
+  ipcMain.handle('docs:consume-untitled-recovery', async (event): Promise<OpenDocxResult> => {
+    if (tornDownWcIds.has(event.sender.id)) return null
+    try {
+      const candidates = await Promise.all(
+        (await readdir(recoveryDir()))
+          .filter((name) => /^untitled-[0-9a-f-]{36}\.docx$/.test(name))
+          .map(async (name) => {
+            const path = join(recoveryDir(), name)
+            return { path, mtime: (await stat(path)).mtimeMs }
+          }),
+      )
+      const active = new Set(untitledRecoveryByWc.values())
+      const latest = candidates
+        .filter((item) => !active.has(item.path))
+        .sort((a, b) => b.mtime - a.mtime)[0]
+      if (!latest) return null
+      untitledRecoveryByWc.set(event.sender.id, latest.path)
+      const parent = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+      const options = {
+        type: 'question' as const,
+        buttons: [tm('autosaveRestore'), tm('autosaveDiscard')],
+        defaultId: 0,
+        cancelId: 1,
+        message: tm('autosaveFoundTitle'),
+        detail: tm('autosaveFoundBody'),
+      }
+      const response =
+        parent && !parent.isDestroyed()
+          ? await dialog.showMessageBox(parent, options)
+          : await dialog.showMessageBox(options)
+      if (response.response !== 0) {
+        clearUntitledRecovery(event.sender.id)
+        return null
+      }
+      const bytes = await readFile(latest.path)
+      if (!looksLikeZip(bytes)) {
+        clearUntitledRecovery(event.sender.id)
+        return null
+      }
+      return {
+        path: '',
+        name: 'Untitled.docx',
+        data: bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer,
+        hash: '',
+        recovered: true,
+      }
+    } catch {
+      clearUntitledRecovery(event.sender.id)
+      return null
     }
   })
 
@@ -3557,16 +3650,13 @@ export function registerDocsIpc(): void {
         )
         const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-        await atomicWriteFile(result.filePath, bytes)
+        await externalFiles.write(event.sender.id, result.filePath, () =>
+          atomicWriteFile(result.filePath, bytes),
+        )
         if (tornDownWcIds.has(event.sender.id)) return { ok: false }
         allowDocWrite(event.sender.id, result.filePath)
         await rememberDiskState(event.sender.id, result.filePath, sha256Hex(bytes))
-        pointLazyMediaAt(
-          hashes,
-          result.filePath,
-          event.sender.id,
-          passwordState.password ? plain : undefined,
-        )
+        pointLazyMediaAt(hashes, result.filePath, event.sender.id, plain)
         if (tornDownWcIds.has(event.sender.id)) return { ok: false }
         const passwordIntentPending = commitDocPasswordSave(
           event.sender.id,
@@ -3596,7 +3686,7 @@ export function registerDocsIpc(): void {
       const passwordState = snapshotDocPassword(event.sender.id, null)
       const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
       const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-      await atomicWriteFile(filePath, bytes)
+      await externalFiles.write(event.sender.id, filePath, () => atomicWriteFile(filePath, bytes))
       // teardown may have happened while the write was in flight — the path is
       // freshly created, so rolling it back is safe (mirrors docs:write-recovery)
       if (tornDownWcIds.has(event.sender.id)) {
@@ -3605,12 +3695,7 @@ export function registerDocsIpc(): void {
       }
       allowDocWrite(event.sender.id, filePath)
       await rememberDiskState(event.sender.id, filePath, sha256Hex(bytes))
-      pointLazyMediaAt(
-        hashes,
-        filePath,
-        event.sender.id,
-        passwordState.password ? plain : undefined,
-      )
+      pointLazyMediaAt(hashes, filePath, event.sender.id, plain)
       if (tornDownWcIds.has(event.sender.id)) {
         await unlink(filePath).catch(() => {})
         return { ok: false }
@@ -3665,7 +3750,7 @@ export function registerDocsIpc(): void {
         const passwordState = snapshotDocPassword(event.sender.id, null)
         const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-        await atomicWriteFile(filePath, bytes)
+        await externalFiles.write(event.sender.id, filePath, () => atomicWriteFile(filePath, bytes))
         // teardown may have happened while the write was in flight — only a file
         // this handler created is safe to roll back; an overwritten one stays
         const rollback = async (): Promise<{ ok: false }> => {
@@ -3674,12 +3759,7 @@ export function registerDocsIpc(): void {
         }
         if (tornDownWcIds.has(event.sender.id)) return rollback()
         await rememberDiskState(event.sender.id, filePath, sha256Hex(bytes))
-        pointLazyMediaAt(
-          hashes,
-          filePath,
-          event.sender.id,
-          passwordState.password ? plain : undefined,
-        )
+        pointLazyMediaAt(hashes, filePath, event.sender.id, plain)
         if (tornDownWcIds.has(event.sender.id)) return rollback()
         const passwordIntentPending = commitDocPasswordSave(
           event.sender.id,
@@ -4829,6 +4909,7 @@ async function performDocsClose(
   if (response === 1) {
     // Explicitly discarded: also drop the recovery copy so the next open doesn't offer it
     if (state.filePath) clearRecoveryCopy(state.filePath)
+    else clearUntitledRecovery(contents.id)
     return true
   }
   return requestRendererSave(contents)

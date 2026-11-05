@@ -237,7 +237,7 @@ const SELECTION_PATCH_KEYS = new Set([
 export function onParagraphFormat(ctx: ActionCtx, patch: ParagraphFormatPatch): void {
   // Cell editing commits regenerate whole paragraphs from the overlay DOM, which round-trips
   // the rtl mark; the other selection keys keep their historical element-wide semantics there
-  const selectable = ctx.editing
+  const selectable = ctx.editing || ctx.editingNotes
     ? Object.keys(patch).every((k) => SELECTION_PATCH_KEYS.has(k))
     : ctx.editingCell != null && Object.keys(patch).every((k) => k === 'rtl')
   if (selectable) {

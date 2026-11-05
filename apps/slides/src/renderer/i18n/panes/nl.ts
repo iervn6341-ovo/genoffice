@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const nl = {
+  paneAnimSaveFailed: 'Kan animatie niet bijwerken: {error}',
   paneShowSetupTitle: 'Diavoorstelling instellen',
   paneShowSetupType: 'Type voorstelling',
   paneShowTypeSpeaker: 'Gepresenteerd door spreker (volledig scherm)',
@@ -31,6 +32,8 @@ export const nl = {
   paneMoveDown: 'Omlaag',
 
   paneAnimTitle: 'Animatiedeelvenster · Dia {n}',
+  paneAnimSelectHint: 'Selecteer een animatie om het effect en de timing te bewerken.',
+  paneAnimOrderLabel: 'Animatievolgorde {n}: {target}',
   paneAnimPreview: 'Voorbeeld van animaties van deze dia afspelen',
   paneAnimCollapse: 'Animatiedeelvenster samenvouwen',
   paneAnimEmpty: 'Geen animaties op deze dia',

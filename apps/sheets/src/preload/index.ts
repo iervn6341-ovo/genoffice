@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
@@ -116,6 +117,10 @@ const desktopApi: DesktopApi = {
   },
   async newBlankWorkbookTab() {
     await ipcRenderer.invoke('home:new-sheet')
+  },
+  async openNewBlankWorkbook() {
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.openNewBlankWorkbook)
+    return result === null ? null : parseWorkbookFile(result)
   },
   async selectWorkbook() {
     const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.selectWorkbook)
@@ -3822,3 +3827,5 @@ function isOptionalEnum<T extends string>(
 ): input is T | undefined {
   return input === undefined || (values as readonly unknown[]).includes(input)
 }
+
+installAiSettingsBridge()

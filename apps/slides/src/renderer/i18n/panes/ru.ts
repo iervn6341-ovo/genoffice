@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const ru = {
+  paneAnimSaveFailed: 'Не удалось обновить анимацию: {error}',
   paneShowSetupTitle: 'Настройка показа слайдов',
   paneShowSetupType: 'Тип показа',
   paneShowTypeSpeaker: 'Под управлением докладчика (полный экран)',
@@ -31,6 +32,8 @@ export const ru = {
   paneMoveDown: 'Вниз',
 
   paneAnimTitle: 'Область анимации · Слайд {n}',
+  paneAnimSelectHint: 'Выберите анимацию, чтобы изменить эффект и время.',
+  paneAnimOrderLabel: 'Порядок анимации {n}: {target}',
   paneAnimPreview: 'Воспроизвести предварительный просмотр анимации этого слайда',
   paneAnimCollapse: 'Свернуть область анимации',
   paneAnimEmpty: 'На этом слайде пока нет анимации',

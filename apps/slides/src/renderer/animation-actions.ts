@@ -6,6 +6,25 @@ import type { ShapeRenderNode } from '@genoffice/pptx-render'
 import type { AnimEffectKind, AnimTrigger, AnimationItem, TransitionKind } from '../shared/ipc'
 import type { ActionCtx } from './action-context'
 import { t } from './i18n/locale'
+import { showToast } from './components/toast-bus'
+
+function sameDocument(ctx: ActionCtx): boolean {
+  return !ctx.getLatestContext || ctx.getLatestContext().path === ctx.path
+}
+
+function displayAnimations(ctx: ActionCtx, items: AnimationItem[]): void {
+  const active = ctx.getLatestContext?.() ?? ctx
+  if (active.path === ctx.path && active.current === ctx.current) active.setAnimations(items)
+}
+
+function animationFailure(ctx: ActionCtx, error: unknown): void {
+  if (!sameDocument(ctx)) return
+  const message = t('paneAnimSaveFailed', {
+    error: error instanceof Error ? error.message : String(error),
+  })
+  ctx.setStatus(message)
+  showToast(message, 'error')
+}
 
 export async function applyTransition(
   ctx: ActionCtx,
@@ -54,14 +73,32 @@ export function hoverPreviewAnimation(
 }
 
 /** Commit the whole page's animation list overwrite-style, then read back on success (target names/stale items per the main process). */
-export async function commitAnimations(ctx: ActionCtx, items: AnimationItem[]): Promise<void> {
-  const ok = await window.slidesApi.setAnimations({
+export async function commitAnimations(ctx: ActionCtx, items: AnimationItem[]): Promise<boolean> {
+  const payload = {
     slideIndex: ctx.current,
     items: items.map(({ targetName: _t, ...rest }) => rest),
-  })
-  if (!ok) return
-  ctx.setDirty(true)
-  ctx.setAnimations(await window.slidesApi.getAnimations(ctx.current))
+  }
+  try {
+    if (!sameDocument(ctx)) return false
+    const ok = await window.slidesApi.setAnimations(payload)
+    if (!ok) {
+      const diagnostic = await window.slidesApi.applyTxn({
+        ops: [{ op: 'setAnimations', target: { slide: ctx.current }, items: payload.items }],
+        dryRun: true,
+      })
+      throw new Error(diagnostic?.failures?.[0]?.error ?? t('appUnknownError'))
+    }
+    if (sameDocument(ctx)) ctx.setDirty(true)
+    displayAnimations(ctx, await window.slidesApi.getAnimations(ctx.current))
+    return true
+  } catch (error) {
+    if (sameDocument(ctx)) {
+      const actual = await window.slidesApi.getAnimations(ctx.current).catch(() => ctx.animations)
+      displayAnimations(ctx, actual)
+    }
+    animationFailure(ctx, error)
+    return false
+  }
 }
 
 /** Paragraph count of a text-bearing node ("by paragraph" animation splitting). */
@@ -75,8 +112,15 @@ export function paraCountOf(ctx: ActionCtx, id: string): number {
   return text.lines.filter((l) => l.paraStart !== false).length
 }
 
-/** Gallery click: replace all animations of the selected shape; 'none' only removes. */
+/** Gallery click: edit the selected effect, or replace a shape's effects when no effect is selected. */
 export function applyAnimation(ctx: ActionCtx, effect: AnimEffectKind | 'none'): void {
+  // A pane/number selection addresses one effect, including stacked effects on
+  // the same shape. The gallery must not replace its siblings in that case.
+  if (ctx.selAnim >= 0 && ctx.selAnim < ctx.animations.length) {
+    if (effect === 'none') deleteAnimation(ctx, ctx.selAnim)
+    else patchAnimation(ctx, ctx.selAnim, { effect })
+    return
+  }
   if (ctx.selectedIds.length === 0) return
   const sel = new Set(ctx.selectedIds)
   const kept = ctx.animations.filter((a) => !sel.has(a.sourceId))
@@ -145,16 +189,91 @@ export function patchAnimTiming(
     after?: AnimationItem['after'] | null
   },
 ): void {
-  if (ctx.timingIdx < 0) return
-  const next = ctx.animations.map((a, i) => {
-    if (i !== ctx.timingIdx) return a
-    const { after, ...rest } = patch
-    const updated: AnimationItem = { ...a, ...rest }
-    if (after === null) delete updated.after
-    else if (after !== undefined) updated.after = after
-    return updated
-  })
-  void commitAnimations(ctx, next)
+  patchAnimation(ctx, ctx.timingIdx, patch)
+}
+
+export type AnimationEditPatch = {
+  effect?: AnimEffectKind
+  trigger?: AnimTrigger
+  durationMs?: number
+  delayMs?: number
+  direction?: AnimationItem['direction']
+  after?: AnimationItem['after'] | null
+}
+
+/** Change just the addressed effect; untouched imported effects retain their native IDs. */
+export function editedAnimation(item: AnimationItem, patch: AnimationEditPatch): AnimationItem {
+  const { after, ...rest } = patch
+  const updated: AnimationItem = { ...item, ...rest }
+  if (after === null) delete updated.after
+  else if (after !== undefined) updated.after = after
+  if (patch.effect && (patch.effect !== item.effect || item.customPreset)) {
+    updated.durationMs = animDefaultDur(patch.effect)
+    delete updated.customPreset
+    delete updated.nativeId // deliberate replacement must not retain an approximated imported preset
+    if (!['flyIn', 'flyOut', 'wipe', 'wipeOut'].includes(patch.effect)) delete updated.direction
+    if (patch.effect === 'motionPath') updated.motionPath ??= 'M 0 0 L 0.25 0.25'
+    else delete updated.motionPath
+  }
+  return updated
+}
+
+let animationEditTail: Promise<void> = Promise.resolve()
+
+/** Save and history commands wait for the choice that was just made in the pane. */
+export async function flushAnimationEdits(): Promise<void> {
+  await animationEditTail
+}
+
+/** Locate the intended effect after native cTn IDs have changed during an earlier edit/save. */
+function refreshedIndex(before: AnimationItem[], index: number, latest: AnimationItem[]): number {
+  const target = before[index]!
+  if (target.nativeId != null) {
+    const native = latest.findIndex(
+      (a) =>
+        a.nativeId === target.nativeId &&
+        (a.sourceId === target.sourceId || a.targetName === target.targetName),
+    )
+    if (native >= 0) return native
+  }
+  const sameTarget = (a: AnimationItem) =>
+    a.sourceId === target.sourceId && (a.paragraph ?? null) === (target.paragraph ?? null)
+  const oldSiblings = before.flatMap((a, i) => (sameTarget(a) ? [i] : []))
+  const currentSiblings = latest.flatMap((a, i) => (sameTarget(a) ? [i] : []))
+  // A removed effect must not turn a delayed edit into a change to its sibling.
+  if (oldSiblings.length !== currentSiblings.length) return -1
+  return currentSiblings[oldSiblings.indexOf(index)] ?? -1
+}
+
+export function patchAnimation(
+  ctx: ActionCtx,
+  index: number,
+  patch: AnimationEditPatch,
+): Promise<void> {
+  if (index < 0 || index >= ctx.animations.length) return Promise.resolve()
+  const before = ctx.animations
+  const run = async (): Promise<void> => {
+    if (!sameDocument(ctx)) return
+    try {
+      const latest = await window.slidesApi.getAnimations(ctx.current)
+      if (!sameDocument(ctx)) return
+      const currentIndex = refreshedIndex(before, index, latest)
+      if (currentIndex < 0) {
+        displayAnimations(ctx, latest)
+        throw new Error(t('paneAnimSelectHint'))
+      }
+      const fresh = { ...ctx, animations: latest }
+      const next = latest.map((a, i) => (i === currentIndex ? editedAnimation(a, patch) : a))
+      // Keep the chosen value visible while the main process validates/writes it.
+      displayAnimations(fresh, next)
+      await commitAnimations(fresh, next)
+    } catch (error) {
+      animationFailure(ctx, error)
+    }
+  }
+  const work = animationEditTail.then(run)
+  animationEditTail = work.catch(() => undefined)
+  return work
 }
 
 export function moveAnimation(ctx: ActionCtx, idx: number, dir: -1 | 1): void {

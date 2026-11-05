@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const de = {
+  paneAnimSaveFailed: 'Animation konnte nicht aktualisiert werden: {error}',
   paneShowSetupTitle: 'Bildschirmpräsentation einrichten',
   paneShowSetupType: 'Präsentationstyp',
   paneShowTypeSpeaker: 'Präsentation durch einen Redner (Vollbild)',
@@ -31,6 +32,8 @@ export const de = {
   paneMoveDown: 'Nach unten',
 
   paneAnimTitle: 'Animationsbereich · Folie {n}',
+  paneAnimSelectHint: 'Wählen Sie eine Animation aus, um Effekt und Anzeigedauer zu bearbeiten.',
+  paneAnimOrderLabel: 'Animationsreihenfolge {n}: {target}',
   paneAnimPreview: 'Animationsvorschau für diese Folie abspielen',
   paneAnimCollapse: 'Animationsbereich einklappen',
   paneAnimEmpty: 'Keine Animationen auf dieser Folie',

@@ -31,6 +31,7 @@ export const th = {
   appStatusBrushOnce:
     'คลิกองค์ประกอบเป้าหมายเพื่อนำการจัดรูปแบบไปใช้ ดับเบิลคลิกที่ปุ่มเพื่อเข้าสู่โหมดต่อเนื่อง',
   appStatusBrushContinuous: 'โหมดตัวคัดวางรูปแบบต่อเนื่อง กด Esc เพื่อออก',
+  appStatusFormatApplyFailed: "ไม่สามารถนำรูปแบบไปใช้ได้ โปรดเลือกเป้าหมายอีกครั้งแล้วลองใหม่",
   appStatusFormatApplied: 'นำการจัดรูปแบบไปใช้แล้ว',
   appStatusTableInserted: 'แทรกตาราง {rows} × {cols} แล้ว',
   appStatusIconInserted: 'แทรกไอคอน "{name}" แล้ว',

@@ -636,6 +636,8 @@ export const nl = {
   ribbonDlgHeaderFooter: 'Koptekst en voettekst',
   ribbonDlgSlidesTab: 'Dia’s',
   ribbonDlgNotesHandoutsTab: 'Notities en hand-outs',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Beginnen bij',
   ribbonDlgHeader: 'Koptekst',
   ribbonDlgHeaderPlaceholder: 'Koptekst',

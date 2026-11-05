@@ -1116,6 +1116,7 @@ export function Ribbon({
   onAnimTiming,
   animPaneOpen,
   onToggleAnimPane,
+  onAnimationTabActive,
   animCount,
   onAnimPreview,
   onSlideShow,
@@ -1233,6 +1234,7 @@ export function Ribbon({
   const autoContextTab = autoContextTabForElement(contextElementType ?? null)
 
   const [tab, setTab] = useState<MainTab | ContextTab>('home')
+  useEffect(() => { onAnimationTabActive?.(tab === 'animations') }, [tab, onAnimationTabActive])
   const [colorOpen, setColorOpen] = useState(false)
   const [fontOpen, setFontOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)

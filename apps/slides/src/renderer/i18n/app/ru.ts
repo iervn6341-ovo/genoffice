@@ -31,6 +31,7 @@ export const ru = {
   appStatusBrushOnce:
     'Щелкните целевой элемент, чтобы применить формат; двойной щелчок по кнопке — непрерывный режим',
   appStatusBrushContinuous: 'Непрерывный режим «Формат по образцу»; нажмите Esc для выхода',
+  appStatusFormatApplyFailed: "Не удалось применить форматирование. Выберите объект заново и повторите попытку.",
   appStatusFormatApplied: 'Формат применен',
   appStatusTableInserted: 'Вставлена таблица {rows} × {cols}',
   appStatusIconInserted: 'Вставлен значок «{name}»',

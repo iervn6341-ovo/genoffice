@@ -326,6 +326,8 @@ const anchorAttrs = {
       block, restored as storedMarks when the caret re-enters bare — arrow
       navigation must not drop the pending format */
   caretMarks: { default: null as string | null },
+  /** Cursor landing below a final table; discarded from save until authored. */
+  navigationOnly: { default: false },
 }
 
 /** Word lays a space-only paragraph out like an empty one: the mark sizes the line */

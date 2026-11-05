@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import {
@@ -13,10 +14,7 @@ import type {
 } from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 import { normalizeAiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
-import {
-  normalizeFontSubstitutions,
-  type FontSubstitutionRule,
-} from '@genoffice/ui'
+import { normalizeFontSubstitutions, type FontSubstitutionRule } from '@genoffice/ui'
 import type {
   FolderListing,
   FolderRoot,
@@ -459,6 +457,9 @@ const tabsApi: TabsApi = {
   async reorder(id, toIndex) {
     await ipcRenderer.invoke(TABS_CHANNELS.reorder, id, toIndex)
   },
+  async drop(id, screenX, screenY) {
+    return await ipcRenderer.invoke(TABS_CHANNELS.drop, id, screenX, screenY)
+  },
   onChanged(handler) {
     const listener = (_event: IpcRendererEvent, tabs: TabSummary[]) => handler(tabs)
     ipcRenderer.on(TABS_CHANNELS.changed, listener)
@@ -478,3 +479,5 @@ contextBridge.exposeInMainWorld('aiOfficeTabs', tabsApi)
 
 // open documents dragged from the OS anywhere over Home or the tab strip
 installDropOpenBridge()
+
+installAiSettingsBridge()

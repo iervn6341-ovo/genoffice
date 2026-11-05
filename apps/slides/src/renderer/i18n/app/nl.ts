@@ -33,6 +33,7 @@ export const nl = {
     'Klik op een doelelement om de opmaak toe te passen; dubbelklik op de knop voor de continue modus',
   appStatusBrushContinuous:
     'Continue modus van Opmaak kopiëren/plakken; druk op Esc om af te sluiten',
+  appStatusFormatApplyFailed: "Opmaak toepassen mislukt. Selecteer het doel opnieuw en probeer het nogmaals.",
   appStatusFormatApplied: 'Opmaak toegepast',
   appStatusTableInserted: 'Tabel van {rows} × {cols} ingevoegd',
   appStatusIconInserted: 'Pictogram "{name}" ingevoegd',

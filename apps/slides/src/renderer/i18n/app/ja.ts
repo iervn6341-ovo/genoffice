@@ -32,6 +32,7 @@ export const ja = {
   appStatusBrushOnce:
     '対象の要素をクリックすると書式を適用。ボタンをダブルクリックすると連続モード',
   appStatusBrushContinuous: '書式のコピー/貼り付けの連続モード中。Esc キーで終了',
+  appStatusFormatApplyFailed: "書式を適用できません。対象を選び直して再試行してください。",
   appStatusFormatApplied: '書式を適用しました',
   appStatusTableInserted: '{rows} × {cols} の表を挿入しました',
   appStatusIconInserted: 'アイコン「{name}」を挿入しました',

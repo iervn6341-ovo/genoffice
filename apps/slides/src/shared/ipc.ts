@@ -1,3 +1,4 @@
+import type { SlideNumberingRule } from '@genoffice/pptx-engine'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import type { PrintCommentItem, PrintLayout, PrintOutlineItem, PrintPaper } from './print-html'
 import type { SlidesPrintPrefs } from './print-prefs'
@@ -92,6 +93,8 @@ export interface SetEffectsPatch {
 export interface OpenResult {
   path: string
   slides: RenderSlide[]
+  /** A private crash copy was restored but is not yet saved to a document path. */
+  recovered?: boolean
   /** Slide page size in EMU */
   size: { cx: number; cy: number }
   /** Theme body default font (fallback shown in the font box when the selection has no text element) */
@@ -157,6 +160,8 @@ export interface DesktopFilesApi {
 /** A raw op transaction from the AI batch surface (ops are validated by the registry; coordinates are document-space EMU). */
 export interface ApplyTxnOp {
   ops: unknown[]
+  /** UI edits confined to one page can request only that page's rebuilt result. */
+  renderSlideIndex?: number
   /** atomic (default): all-or-nothing. per_op: independent, failures skip. */
   isolation?: 'atomic' | 'per_op'
   /** Validate and return the plan without touching the deck. */
@@ -165,6 +170,7 @@ export interface ApplyTxnOp {
 
 export interface ApplyTxnResult {
   applied: boolean
+  slide?: RenderSlide
   dryRun?: boolean
   /** dry-run: one line per validated op */
   plan?: string[]
@@ -1018,6 +1024,10 @@ export interface NotesParagraphView {
   level: number
   /** Bullet glyph to show before the text ('•', '1.' …); absent = none */
   bullet?: string
+  /** Source list metadata for the live notes ribbon; the label alone loses numbering type. */
+  bulletKind?: 'char' | 'number'
+  numType?: string
+  startAt?: number
 }
 
 /** Add a comment (the author is the system username fetched by the main process). */
@@ -1129,6 +1139,7 @@ export interface HeaderFooterOp {
   dateFormat?: string
   dontShowOnTitleSlide?: boolean
   firstSlideNum?: number
+  numbering?: SlideNumberingRule | null
   fitWidthPx: number
 }
 
@@ -1370,6 +1381,8 @@ export interface PrinterInfo {
 export interface ShowSyncState {
   /** Original index of the current page */
   idx: number
+  /** Visit identity; repeated jumps to a page restart its in-page animations. */
+  visit?: number
   /** Number of in-page animation steps already played */
   played: number
   /** Whether the current step is playing (audience plays that step from the start) */
@@ -1541,6 +1554,8 @@ export interface SlidesApi {
   batchEditTransform: (op: BatchEditTransformOp) => Promise<RenderSlide | null>
   /** Read-only: RenderSlide for every page of the current session (E2E driver/debug use) */
   getRenderSlides: () => Promise<RenderSlide[] | null>
+  /** Read the current native page after pending edits without rebuilding the entire deck. */
+  getRenderSlide: (slideIndex: number) => Promise<RenderSlide | null>
   /** Update the picture crop srcRect (0..1 ratios; null = full image); returns the updated page */
   editPictureSrcRect: (op: EditPictureSrcRectOp) => Promise<RenderSlide | null>
   /** Whole-picture opacity */
@@ -1666,9 +1681,7 @@ export interface SlidesApi {
     op: PasteElementsOp,
   ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
   /** Paste PowerPoint-native shapes/table or an HTML table from the system clipboard as editable elements, centred on the page */
-  pasteSystem: (
-    op: PasteElementsOp,
-  ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
+  pasteSystem: (op: PasteElementsOp) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
   duplicateElements: (
     op: DuplicateElementsOp,
   ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
@@ -1738,6 +1751,7 @@ export interface SlidesApi {
     dateFormat: string
     dontShowOnTitleSlide: boolean
     firstSlideNum: number
+    numbering?: SlideNumberingRule | null
     isTitleSlide: boolean
     slideNumber: number
     notesHandouts: NotesHandoutsHeaderFooterState

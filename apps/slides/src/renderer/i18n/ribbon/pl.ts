@@ -632,6 +632,8 @@ export const pl = {
   ribbonDlgHeaderFooter: 'Nagłówek i stopka',
   ribbonDlgSlidesTab: 'Slajdy',
   ribbonDlgNotesHandoutsTab: 'Notatki i materiały informacyjne',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Rozpocznij od',
   ribbonDlgHeader: 'Nagłówek',
   ribbonDlgHeaderPlaceholder: 'Tekst nagłówka',

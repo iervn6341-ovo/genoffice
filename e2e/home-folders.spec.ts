@@ -123,7 +123,7 @@ test.describe('home folders panel', () => {
     }
   })
 
-  test('a file created from a folder view lands in that folder', async () => {
+  test('a blank file opened from a folder view stays unsaved until Save', async () => {
     const launched = await launchShell({
       onboardingSeen: true,
       settings: { defaultSaveDir: root },
@@ -135,20 +135,20 @@ test.describe('home folders panel', () => {
       await expect(page.locator('.folder-panel .tree .tree-row.active .tree-name')).toHaveText(
         'Personal',
       )
-      // the blank PDF is written synchronously by the shell, so it exercises the pending-folder path
+      // The selected folder becomes the suggested first-save location, not an eager file.
       await page.locator('.quick-card', { hasText: 'AI PDF' }).click()
       const hasPdf = (dir: string) =>
         existsSync(dir) && readdirSync(dir).some((f) => f.endsWith('.pdf'))
-      await expect.poll(() => hasPdf(join(root, 'Personal')), { timeout: 15_000 }).toBe(true)
+      await expect(page.locator('.tab-bar .tab-item.active')).toContainText('Untitled PDF')
+      expect(hasPdf(join(root, 'Personal'))).toBe(false)
       expect(hasPdf(root)).toBe(false)
-      // and the tab opened on the moved path, not the vanished root one
-      await expect(page.locator('.tab-bar .tab-item', { hasText: '.pdf' })).toBeVisible()
-      // a second New from the same folder view lands there too (the folder is not a one-shot slot)
+      // A second blank tab from the same folder is also still in memory.
       await page.locator('.tab-bar .tab-item.tab-home').click()
       await page.locator('.quick-card', { hasText: 'AI Sheets' }).click()
       const hasXlsx = (dir: string) =>
         existsSync(dir) && readdirSync(dir).some((f) => f.endsWith('.xlsx'))
-      await expect.poll(() => hasXlsx(join(root, 'Personal')), { timeout: 15_000 }).toBe(true)
+      await expect(page.locator('.tab-bar .tab-item.active')).toContainText('Untitled Spreadsheet')
+      expect(hasXlsx(join(root, 'Personal'))).toBe(false)
       expect(hasXlsx(root)).toBe(false)
       // back home: the new tab must not block shutdown
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus())

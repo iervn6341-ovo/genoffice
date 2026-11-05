@@ -31,6 +31,7 @@ export const cs = {
   appStatusBrushOnce:
     'Klikněte na cílový prvek a použijte formát; dvojklikem na tlačítko zapnete nepřetržitý režim',
   appStatusBrushContinuous: 'Nepřetržitý režim Kopírovat formát; ukončíte klávesou Esc',
+  appStatusFormatApplyFailed: "Formátování nelze použít. Vyberte cíl znovu a opakujte akci.",
   appStatusFormatApplied: 'Formát použit',
   appStatusTableInserted: 'Vložena tabulka {rows} × {cols}',
   appStatusIconInserted: 'Vložena ikona „{name}“',

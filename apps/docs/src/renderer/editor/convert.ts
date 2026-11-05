@@ -1920,6 +1920,9 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
   }
 
   for (const node of doc.content ?? []) {
+    // A table-exit cursor landing is UI state until text or formatting promotes it.
+    if (node.type === 'docParagraph' && node.attrs?.navigationOnly && !node.content?.length)
+      continue
     const revision = node.attrs?.blockRevision as {
       kind: 'ins' | 'del'
       author: string

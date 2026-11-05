@@ -32,6 +32,7 @@ export const pl = {
   appStatusBrushOnce:
     'Kliknij element docelowy, aby zastosować formatowanie; kliknij przycisk dwukrotnie, aby włączyć tryb ciągły',
   appStatusBrushContinuous: 'Tryb ciągły Malarza formatów; naciśnij Esc, aby wyjść',
+  appStatusFormatApplyFailed: "Nie można zastosować formatowania. Wybierz ponownie obiekt i spróbuj jeszcze raz.",
   appStatusFormatApplied: 'Zastosowano formatowanie',
   appStatusTableInserted: 'Wstawiono tabelę {rows} × {cols}',
   appStatusIconInserted: 'Wstawiono ikonę „{name}”',

@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { Lang } from '@genoffice/i18n'
@@ -118,3 +119,5 @@ contextBridge.exposeInMainWorld('projectApi', projectApi)
 
 // open documents dragged from the OS onto this tab as a new shell tab
 installDropOpenBridge()
+
+installAiSettingsBridge()

@@ -616,6 +616,8 @@ export const ar = {
   ribbonDlgHeaderFooter: 'رأس وتذييل الصفحة',
   ribbonDlgSlidesTab: 'الشرائح',
   ribbonDlgNotesHandoutsTab: 'الملاحظات والنشرات',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'يبدأ من',
   ribbonDlgHeader: 'رأس الصفحة',
   ribbonDlgHeaderPlaceholder: 'نص رأس الصفحة',

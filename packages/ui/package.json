@@ -13,6 +13,7 @@
     "./color-picker.css": "./src/color-picker.css",
     "./dropdown.css": "./src/dropdown.css",
     "./find-panel.css": "./src/find-panel.css",
+    "./floating-outline.css": "./src/floating-outline.css",
     "./ribbon-collapse.css": "./src/ribbon-collapse.css",
     "./ribbon-fit.css": "./src/ribbon-fit.css",
     "./ribbon-density.css": "./src/ribbon-density.css",
@@ -43,6 +44,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@genoffice/ai-provider": "*",
     "@genoffice/i18n": "*",
     "@genoffice/pptx-render": "*",
     "@genoffice/office-math": "*"

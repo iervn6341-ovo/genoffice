@@ -342,6 +342,11 @@ function parseShapeFragment(
   if (isHiddenElement(node, sp.name)) {
     const silent = passthrough(anchor, 'unknown', node)
     silent.noChip = true
+    // A hidden local footer placeholder still overrides its layout/master slot.
+    // Keep its identity so inheritance stays masked and Header & Footer can
+    // restore the original styled shape instead of adding a duplicate.
+    const ph = sp.name === 'p:sp' ? node?.['p:nvSpPr']?.['p:nvPr']?.['p:ph']?.['@_type'] : undefined
+    if (ph === 'sldNum' || ph === 'dt' || ph === 'ftr') silent.placeholder = ph
     return silent
   }
 

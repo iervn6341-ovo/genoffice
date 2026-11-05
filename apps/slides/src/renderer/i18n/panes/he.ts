@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const he = {
+  paneAnimSaveFailed: 'לא ניתן לעדכן את ההנפשה: {error}',
   paneShowSetupTitle: 'הגדרת הצגת שקופיות',
   paneShowSetupType: 'סוג הצגה',
   paneShowTypeSpeaker: 'מוצג על ידי דובר (מסך מלא)',
@@ -31,6 +32,8 @@ export const he = {
   paneMoveDown: 'העבר למטה',
 
   paneAnimTitle: 'חלונית הנפשה · שקופית {n}',
+  paneAnimSelectHint: 'בחר הנפשה כדי לערוך את האפקט והתזמון שלה.',
+  paneAnimOrderLabel: 'סדר הנפשה {n}: {target}',
   paneAnimPreview: 'הפעל תצוגה מקדימה של הנפשות השקופית',
   paneAnimCollapse: 'כווץ את חלונית ההנפשה',
   paneAnimEmpty: 'אין הנפשות בשקופית זו',

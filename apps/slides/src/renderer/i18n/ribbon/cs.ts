@@ -623,6 +623,8 @@ export const cs = {
   ribbonDlgHeaderFooter: 'Záhlaví a zápatí',
   ribbonDlgSlidesTab: 'Snímky',
   ribbonDlgNotesHandoutsTab: 'Poznámky a podklady',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Začít od',
   ribbonDlgHeader: 'Záhlaví',
   ribbonDlgHeaderPlaceholder: 'Text záhlaví',

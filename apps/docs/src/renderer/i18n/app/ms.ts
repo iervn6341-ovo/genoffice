@@ -108,6 +108,15 @@ export const ms = {
     'Gaya "{name}" dikemas kini dengan format pilihan; ditulis ke dokumen semasa disimpan',
   appStyleCreated: 'Gaya "{name}" dibuat dan digunakan pada pilihan',
   appPgNumFormatSet: 'Format nombor halaman ditetapkan',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Format Nombor Halaman',
   appNumberFormat: 'Format nombor',
   appIncludeChapterNumber: 'Sertakan nombor bab',

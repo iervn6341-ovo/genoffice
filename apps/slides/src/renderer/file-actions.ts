@@ -10,6 +10,9 @@ import { collectExportPdfLinks } from './export-links'
 import { renderSlidesToPngBase64 } from './export-render'
 import { t } from './i18n/locale'
 import { showToast } from './components/toast-bus'
+import { flushAnimationEdits } from './animation-actions'
+import { flushFormatEdits } from './format-edit-queue'
+import { flushPendingTransforms } from './history-group'
 
 /**
  * If a text box/table is still being edited on ⌘S/close-save, blur first so the
@@ -18,6 +21,10 @@ import { showToast } from './components/toast-bus'
  */
 export async function flushActiveEdit(ctx: ActionCtx): Promise<void> {
   const active = document.activeElement as HTMLElement | null
+  if (active?.matches('.anim-properties input, .rb-anim-timing input')) active.blur()
+  await flushAnimationEdits()
+  await flushFormatEdits()
+  await flushPendingTransforms()
   if (!active?.isContentEditable) return
   active.blur()
   for (let i = 0; i < 40 && ctx.editingActiveRef.current; i++) {

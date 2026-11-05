@@ -643,6 +643,8 @@ export const it = {
   ribbonDlgHeaderFooter: 'Intestazione e Piè di Pagina',
   ribbonDlgSlidesTab: 'Diapositive',
   ribbonDlgNotesHandoutsTab: 'Note e stampati',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Inizia da',
   ribbonDlgHeader: 'Intestazione',
   ribbonDlgHeaderPlaceholder: 'Testo intestazione',

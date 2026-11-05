@@ -637,6 +637,8 @@ export interface Props {
   /** Animation pane (right side) toggle */
   animPaneOpen: boolean
   onToggleAnimPane: () => void
+  /** Editor order badges follow the Animations tab, even when the pane is closed. */
+  onAnimationTabActive?: (active: boolean) => void
   /** Current page's animation count (preview button availability) */
   animCount: number
   /** Preview the current page's animations on the edit canvas */

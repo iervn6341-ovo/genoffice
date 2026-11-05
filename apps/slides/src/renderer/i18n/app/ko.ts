@@ -32,6 +32,7 @@ export const ko = {
   appStatusBrushOnce:
     '대상 요소를 클릭하면 서식이 적용됩니다. 단추를 두 번 클릭하면 연속 모드로 전환됩니다',
   appStatusBrushContinuous: '연속 서식 복사 모드입니다. Esc 키로 종료',
+  appStatusFormatApplyFailed: "서식을 적용할 수 없습니다. 대상을 다시 선택하고 재시도하세요.",
   appStatusFormatApplied: '서식을 적용했습니다',
   appStatusTableInserted: '{rows} × {cols} 표를 삽입했습니다',
   appStatusIconInserted: '아이콘 "{name}"을(를) 삽입했습니다',

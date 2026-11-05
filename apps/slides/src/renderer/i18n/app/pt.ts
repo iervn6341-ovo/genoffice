@@ -31,6 +31,7 @@ export const pt = {
   appStatusBrushOnce:
     'Clique em um elemento de destino para aplicar a formatação; clique duas vezes no botão para o modo contínuo',
   appStatusBrushContinuous: 'Modo contínuo do Pincel de Formatação; pressione Esc para sair',
+  appStatusFormatApplyFailed: "Não foi possível aplicar a formatação. Selecione o destino novamente e tente outra vez.",
   appStatusFormatApplied: 'Formatação aplicada',
   appStatusTableInserted: 'Tabela {rows} × {cols} inserida',
   appStatusIconInserted: 'Ícone "{name}" inserido',

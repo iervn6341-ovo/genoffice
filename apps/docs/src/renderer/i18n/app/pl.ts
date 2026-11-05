@@ -106,6 +106,15 @@ export const pl = {
     'Styl „{name}” zaktualizowano formatem zaznaczenia; zostanie zapisany w dokumencie przy zapisie',
   appStyleCreated: 'Utworzono styl „{name}” i zastosowano go do zaznaczenia',
   appPgNumFormatSet: 'Ustawiono format numerów stron',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Format numeru strony',
   appNumberFormat: 'Format numeracji',
   appIncludeChapterNumber: 'Dołącz numer rozdziału',

@@ -5,7 +5,13 @@ import {
   type MarkdownSourceSnapshot,
 } from './markdown/roundtripSerializer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ImageViewer, useAutoSavePref } from '@genoffice/ui'
+import {
+  FloatingOutline,
+  floatingOutlineLabels,
+  ImageViewer,
+  useAutoSavePref,
+  useOutlineScrollSpy,
+} from '@genoffice/ui'
 import {
   pollUntilReady,
   runHeadlessRendererExport,
@@ -13,6 +19,7 @@ import {
 import { EditorContent, useEditor } from '@tiptap/react'
 import { FindPanel, type FindFocusRequest, type FindPanelStrings } from '@genoffice/ui'
 import type { Editor } from '@tiptap/core'
+import type { Node as PmNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import { t as translateNow, useI18n } from './i18n/locale'
 import { printEntryFor, type HtmlPrintOptions } from '@genoffice/electron-utils/print-job'
@@ -128,7 +135,7 @@ export function deriveAutoFileName(editor: Editor): string {
 }
 
 export default function App() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [filePath, setFilePath] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -173,6 +180,8 @@ export default function App() {
   const originalSourceRef = useRef<MarkdownSourceSnapshot | undefined>(undefined)
   const envelopeRef = useRef<DocEnvelope>(EMPTY_ENVELOPE)
   const editorRef = useRef<Editor | null>(null)
+  const savedBodyRef = useRef<PmNode | null>(null)
+  const savedFrontmatterRef = useRef('')
   // blocks of the text on disk paired with the editor's nodes; null until a
   // file is loaded or saved, and whenever the pairing could not be established
   const sourceMapRef = useRef<SourceMap | null>(null)
@@ -195,11 +204,17 @@ export default function App() {
   )
 
   const markDirty = useCallback(() => {
-    if (statusRef.current !== 'ready' || dirtyRef.current) return
-    dirtyRef.current = true
-    setDirty(true)
+    if (statusRef.current !== 'ready') return
+    const current = editorRef.current
+    const changed =
+      !current ||
+      !savedBodyRef.current ||
+      !current.state.doc.eq(savedBodyRef.current) ||
+      envelopeRef.current.frontmatter !== savedFrontmatterRef.current
+    dirtyRef.current = changed
+    setDirty(changed)
     setSaveState('idle')
-    window.markdownApi.setDirty(true)
+    window.markdownApi.setDirty(changed)
   }, [])
 
   const insertImage = useCallback(() => {
@@ -249,6 +264,24 @@ export default function App() {
     if (outlineWidth) localStorage.setItem('mdapp.outlineWidth', String(outlineWidth))
   }, [outlineWidth])
   const findTarget = useMemo(() => (editor ? tiptapFindTarget(editor) : null), [editor])
+  const floatingOutlineItems = useMemo(
+    () => outlineItems.map((item) => ({ ...item, id: String(item.pos) })),
+    [outlineItems],
+  )
+  const outlineAnchors = useCallback(() => {
+    const scroller = scrollRef.current
+    if (!scroller || !editor) return []
+    const origin = scroller.getBoundingClientRect().top - scroller.scrollTop
+    return floatingOutlineItems.flatMap((item) => {
+      const node = editor.view.nodeDOM(item.pos)
+      return node instanceof HTMLElement && node.getClientRects().length > 0
+        ? [{ id: item.id, top: node.getBoundingClientRect().top - origin }]
+        : []
+    })
+    // CSS zoom changes the displayed offsets without changing the source nodes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, floatingOutlineItems, zoom])
+  const activeOutlineId = useOutlineScrollSpy(scrollRef, editor?.view.dom ?? null, outlineAnchors)
 
   useEffect(() => {
     setImageBaseDir(filePath ? dirOf(filePath) : null)
@@ -286,6 +319,8 @@ export default function App() {
         } else {
           envelopeRef.current = { ...EMPTY_ENVELOPE }
         }
+        savedBodyRef.current = editor.state.doc
+        savedFrontmatterRef.current = envelopeRef.current.frontmatter
         statusRef.current = 'ready'
         setStatus('ready')
       } catch (err) {
@@ -311,7 +346,7 @@ export default function App() {
   )
 
   /** Serialize and write to disk; false when canceled/failed (caller keeps the tab open) */
-  const doSave = useCallback(async (mode: SaveMode, suggestedName?: string): Promise<boolean> => {
+  const doSave = useCallback(async (mode: SaveMode): Promise<boolean> => {
     const current = editorRef.current
     if (!current || statusRef.current !== 'ready' || savingRef.current) return false
     savingRef.current = true
@@ -330,7 +365,7 @@ export default function App() {
         sourceAtSave,
       )
       const imageSources = imageSourcesFromEditor(current)
-      const result = await window.markdownApi.save({ text, imageSources, mode, suggestedName })
+      const result = await window.markdownApi.save({ text, imageSources, mode })
       if (result.ok && 'path' in result) {
         const unchanged =
           editorRef.current?.state.doc === docAtSave && envelopeRef.current.frontmatter === fmAtSave
@@ -372,6 +407,9 @@ export default function App() {
         }
         setImageBaseDir(dirOf(result.path))
         setFilePath(result.path)
+        savedBodyRef.current =
+          unchanged && editorRef.current ? editorRef.current.state.doc : docAtSave
+        savedFrontmatterRef.current = fmAtSave
         if (unchanged) {
           dirtyRef.current = false
           setDirty(false)
@@ -379,9 +417,12 @@ export default function App() {
           setSaveState('saved')
         } else {
           // the main process cleared its dirty flag on write — re-assert it
-          dirtyRef.current = true
-          setDirty(true)
-          window.markdownApi.setDirty(true)
+          const changed =
+            !editorRef.current?.state.doc.eq(savedBodyRef.current) ||
+            envelopeRef.current.frontmatter !== fmAtSave
+          dirtyRef.current = changed
+          setDirty(changed)
+          window.markdownApi.setDirty(changed)
           setSaveState('idle')
         }
         return true
@@ -699,9 +740,25 @@ export default function App() {
   const jumpToOutline = useCallback((pos: number): void => {
     const current = editorRef.current
     if (!current) return
-    const selection = TextSelection.near(current.state.doc.resolve(pos))
-    current.view.dispatch(current.state.tr.setSelection(selection).scrollIntoView())
-    current.view.focus()
+    const selection = TextSelection.near(
+      current.state.doc.resolve(Math.min(pos + 1, current.state.doc.content.size)),
+    )
+    current.view.dispatch(current.state.tr.setSelection(selection))
+    current.view.dom.focus({ preventScroll: true })
+    const target = current.view.nodeDOM(pos)
+    const scroller = scrollRef.current
+    if (target instanceof HTMLElement && scroller) {
+      scroller.scrollTo({
+        top: Math.max(
+          0,
+          scroller.scrollTop +
+            target.getBoundingClientRect().top -
+            scroller.getBoundingClientRect().top -
+            24,
+        ),
+        behavior: 'smooth',
+      })
+    }
   }, [])
   const askSendNow = useCallback((text: string): void => {
     setAiOpen(true)
@@ -735,12 +792,8 @@ export default function App() {
       sourceMapRef.current = buildSourceMap(current, current.state.doc, snapshot.body)
       markDirty()
     },
-    onRunDone: (mutated) => {
-      // AI wrote into a never-saved document → name it from the content and save silently
-      if (!mutated || filePathRef.current || !editorRef.current) return
-      const name = deriveAutoFileName(editorRef.current)
-      if (name) void doSave('save', name)
-    },
+    // An AI edit keeps an untitled document in memory until the user saves it.
+    onRunDone: () => {},
   }
 
   const fileName = filePath ? filePath.replace(/^.*[/\\]/, '') : null
@@ -841,6 +894,14 @@ export default function App() {
           />
         )}
         <div className="app-content">
+          {!outlineOpen && (
+            <FloatingOutline
+              {...floatingOutlineLabels(lang)}
+              items={floatingOutlineItems}
+              activeId={activeOutlineId}
+              onSelect={(id) => jumpToOutline(Number(id))}
+            />
+          )}
           {showFind && findTarget && (
             <FindPanel
               target={findTarget}

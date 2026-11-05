@@ -630,6 +630,8 @@ export const ko = {
   ribbonDlgHeaderFooter: '머리글 및 바닥글',
   ribbonDlgSlidesTab: '슬라이드',
   ribbonDlgNotesHandoutsTab: '발표자 노트 및 유인물',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: '시작 번호',
   ribbonDlgHeader: '머리글',
   ribbonDlgHeaderPlaceholder: '머리글 텍스트',

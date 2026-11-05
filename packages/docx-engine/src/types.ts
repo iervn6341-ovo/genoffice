@@ -875,6 +875,8 @@ export interface NumberingDef {
 
 /** Content for the default page header / footer. */
 export interface HeaderFooter {
+  /** Remove PAGE fields in preserved layout tables and protected XML, retaining surrounding objects. */
+  suppressPageNumber?: boolean
   text: string
   /** append an automatic page number (PAGE field), footer only */
   pageNumber?: boolean

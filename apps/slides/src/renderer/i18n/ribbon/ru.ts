@@ -629,6 +629,8 @@ export const ru = {
   ribbonDlgHeaderFooter: 'Колонтитулы',
   ribbonDlgSlidesTab: 'Слайды',
   ribbonDlgNotesHandoutsTab: 'Заметки и раздаточные материалы',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Начать с',
   ribbonDlgHeader: 'Верхний колонтитул',
   ribbonDlgHeaderPlaceholder: 'Текст верхнего колонтитула',

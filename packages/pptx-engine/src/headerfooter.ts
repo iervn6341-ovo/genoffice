@@ -9,7 +9,14 @@ import { materializeSlide, type OpenedPptx } from './index'
 import { nextCNvPrId } from './insert'
 import { escapeXmlAttr, escapeXmlText } from './xml-utils'
 import { relsPathFor, resolveTarget } from './zip'
-import { getFirstSlideNumber, setFirstSlideNumber } from './numbering'
+import {
+  getFirstSlideNumber,
+  setFirstSlideNumber,
+  getSlideNumberingRule,
+  setSlideNumberingRule,
+  OFFSET_SLIDE_NUMBER_FIELD,
+  type SlideNumberingRule,
+} from './numbering'
 
 export interface HeaderFooterOptions {
   footer?: string | null
@@ -21,6 +28,7 @@ export interface HeaderFooterOptions {
   /** Clear footer-family placeholders on slides using a title layout. */
   dontShowOnTitleSlide?: boolean
   firstSlideNum?: number
+  numbering?: SlideNumberingRule | null
 }
 
 export interface HeaderFooterState {
@@ -31,9 +39,23 @@ export interface HeaderFooterState {
   dateFormat: string
   dontShowOnTitleSlide: boolean
   firstSlideNum: number
+  numbering?: SlideNumberingRule | null
 }
 
 const FIELD_RE = /^datetime[\w.-]*$/
+
+/** Empty placeholders display a localized prompt on PowerPoint's editing canvas.
+ * Keep the local inheritance mask, but hide the shape through native DrawingML. */
+function placeholderVisibility(xml: string, hidden: boolean): string {
+  return xml.replace(/<p:cNvPr\b[^>]*>/, (tag) => {
+    const attr = /\shidden=["']([^"']*)["']/
+    if (hidden) {
+      if (attr.test(tag)) return tag.replace(attr, ' hidden="1"')
+      return tag.replace(/\/?>(?=$)/, (end) => ` hidden="1"${end}`)
+    }
+    return tag.replace(/\shidden=["'](?:1|true)["']/, '')
+  })
+}
 
 function fieldType(value: string | undefined): string {
   return value && FIELD_RE.test(value) ? value : 'datetime1'
@@ -241,6 +263,7 @@ export function applyHeaderFooter(
   opened: OpenedPptx,
   opts: HeaderFooterOptions,
   slideIndexes?: number[],
+  numberingOnly = false,
 ): boolean {
   const { deck } = opened
   const targets = slideIndexes ?? deck.slides.map((_, i) => i)
@@ -248,12 +271,29 @@ export function applyHeaderFooter(
   const barH = Math.round(cy * 0.045)
   const barY = Math.round(cy * 0.93)
   const style = { fontSize: 12, color: '898989' }
-  const changedLayouts = slideIndexes
-    ? new Set<string>()
-    : setTitleLayoutExclusion(opened, !!opts.dontShowOnTitleSlide)
-  const numberChanged =
-    opts.firstSlideNum != null ? setFirstSlideNumber(opened.archive, opts.firstSlideNum) : false
-  let changed = changedLayouts.size > 0 || numberChanged
+  const changedLayouts =
+    numberingOnly || slideIndexes
+      ? new Set<string>()
+      : setTitleLayoutExclusion(opened, !!opts.dontShowOnTitleSlide)
+  const ruleChanged =
+    opts.numbering !== undefined
+      ? setSlideNumberingRule(
+          opened.archive,
+          opts.numbering
+            ? {
+                ...opts.numbering,
+                ...(opts.dontShowOnTitleSlide ? { excludeTitleSlide: true } : {}),
+              }
+            : null,
+        )
+      : false
+  const rule = getSlideNumberingRule(opened.archive)
+  const numberChanged = rule
+    ? setFirstSlideNumber(opened.archive, rule.startSlide > 1 ? 1 : rule.startNumber)
+    : opts.firstSlideNum != null
+      ? setFirstSlideNumber(opened.archive, opts.firstSlideNum)
+      : false
+  let changed = changedLayouts.size > 0 || numberChanged || ruleChanged
 
   for (const i of new Set(targets)) {
     let slide = deck.slides[i]
@@ -273,6 +313,14 @@ export function applyHeaderFooter(
       slide = materializeSlide(opened, i) ?? slide
     }
     const excluded = !!opts.dontShowOnTitleSlide && titleLayout(opened, slide)
+    const numbered = rule
+      ? rule.enabled && (!rule.hideBefore || i >= rule.startSlide - 1)
+      : !!opts.slideNum
+    const number = rule
+      ? i >= rule.startSlide - 1
+        ? rule.startNumber + i - rule.startSlide + 1
+        : getFirstSlideNumber(opened.archive) + i
+      : getFirstSlideNumber(opened.archive) + i
     const values: Record<'dt' | 'ftr' | 'sldNum', { value: string; field?: string } | null> = {
       dt:
         !excluded && opts.date
@@ -280,20 +328,30 @@ export function applyHeaderFooter(
           : null,
       ftr: !excluded && opts.footer ? { value: opts.footer } : null,
       sldNum:
-        !excluded && opts.slideNum
-          ? { value: String(getFirstSlideNumber(opened.archive) + i), field: 'slidenum' }
+        !excluded && numbered
+          ? {
+              value: String(number),
+              field: rule && rule.startSlide > 1 ? OFFSET_SLIDE_NUMBER_FIELD : 'slidenum',
+            }
           : null,
     }
     let dirty = false
     const removedIds = new Set<number>()
-    for (const type of ['dt', 'ftr', 'sldNum'] as const) {
+    for (const type of (numberingOnly ? ['sldNum'] : ['dt', 'ftr', 'sldNum']) as (
+      'dt' | 'ftr' | 'sldNum'
+    )[]) {
       const existing = slide.elements.filter((el) => el.placeholder === type)
+      // Prefer the visible object if an older producer left duplicate masks.
+      existing.sort((a, b) => Number(a.type === 'passthrough') - Number(b.type === 'passthrough'))
       const wanted = values[type]
       if (!wanted) {
         if (existing.length) {
           // A local empty placeholder masks a layout/master placeholder on this slide.
           const first = existing[0]!
-          const blank = editPlaceholderXml(first.anchor.originalXml, '')
+          const blank = placeholderVisibility(
+            editPlaceholderXml(first.anchor.originalXml, ''),
+            true,
+          )
           if (blank !== first.anchor.originalXml) {
             first.anchor.originalXml = blank
             dirty = true
@@ -306,7 +364,7 @@ export function applyHeaderFooter(
         } else if (slide.decorations?.some((el) => el.placeholder === type)) {
           const source = cloneInheritedTemplate(opened, slide, type)
           if (source) {
-            const xml = editPlaceholderXml(source, '')
+            const xml = placeholderVisibility(editPlaceholderXml(source, ''), true)
             slide.elements.push({
               id: `hfmask_${slide.elements.length}_${Date.now().toString(36)}`,
               type: 'text',
@@ -325,7 +383,17 @@ export function applyHeaderFooter(
       }
       if (existing.length) {
         const el = existing[0]!
-        const nextXml = editPlaceholderXml(el.anchor.originalXml, wanted.value, wanted.field)
+        const runs = (el as TextElement).text?.paragraphs.flatMap((p) => p.runs) ?? []
+        const same =
+          runs.map((r) => r.text).join('') === wanted.value &&
+          runs.length === 1 &&
+          runs[0]?.field === wanted.field
+        const nextXml = placeholderVisibility(
+          same
+            ? el.anchor.originalXml
+            : editPlaceholderXml(el.anchor.originalXml, wanted.value, wanted.field),
+          false,
+        )
         if (nextXml !== el.anchor.originalXml) {
           el.anchor.originalXml = nextXml
           dirty = true
@@ -350,9 +418,12 @@ export function applyHeaderFooter(
       const source = slide.decorations?.some((el) => el.placeholder === type)
         ? cloneInheritedTemplate(opened, slide, type)
         : null
-      const xml = source
-        ? editPlaceholderXml(source, wanted.value, wanted.field)
-        : hfSpXml(slide, type, type === 'dt' ? 10 : type === 'ftr' ? 11 : 12, box, para)
+      const xml = placeholderVisibility(
+        source
+          ? editPlaceholderXml(source, wanted.value, wanted.field)
+          : hfSpXml(slide, type, type === 'dt' ? 10 : type === 'ftr' ? 11 : 12, box, para),
+        false,
+      )
       const el: TextElement = {
         id: `hfnew_${slide.elements.length}_${Date.now().toString(36)}`,
         type: 'text',
@@ -368,7 +439,38 @@ export function applyHeaderFooter(
     materializeSlide(opened, i)
     changed = true
   }
+  if (!numberingOnly && opts.numbering !== undefined)
+    changed = refreshSlideNumbers(opened) || changed
   return changed
+}
+
+/** Refresh cached native fields after slide insertion, deletion and reordering. */
+export function refreshSlideNumbers(opened: OpenedPptx): boolean {
+  let rule = getSlideNumberingRule(opened.archive)
+  if (
+    !rule &&
+    getFirstSlideNumber(opened.archive) < 0 &&
+    opened.deck.slides.some((s) => s.elements.some((e) => e.placeholder === 'sldNum'))
+  ) {
+    rule = {
+      startSlide: 2 - getFirstSlideNumber(opened.archive),
+      startNumber: 1,
+      hideBefore: true,
+      enabled: true,
+    }
+    setSlideNumberingRule(opened.archive, rule)
+  }
+  if (!rule) return false
+  return applyHeaderFooter(
+    opened,
+    {
+      numbering: rule,
+      dontShowOnTitleSlide:
+        rule.excludeTitleSlide ?? readDeckHeaderFooter(opened, 0).dontShowOnTitleSlide,
+    },
+    undefined,
+    true,
+  )
 }
 
 /** Read a slide's current footer state for dialog echo. */
@@ -438,8 +540,12 @@ export function readDeckHeaderFooter(
       : undefined
   return {
     ...readHeaderFooter(fallback ?? selected ?? slides[0]!),
-    dontShowOnTitleSlide: excluded,
+    ...(getSlideNumberingRule(opened.archive)
+      ? { slideNum: getSlideNumberingRule(opened.archive)!.enabled }
+      : {}),
+    dontShowOnTitleSlide: getSlideNumberingRule(opened.archive)?.excludeTitleSlide ?? excluded,
     firstSlideNum: getFirstSlideNumber(opened.archive),
+    numbering: getSlideNumberingRule(opened.archive),
     isTitleSlide: !!selected && titleLayout(opened, selected),
     slideNumber: getFirstSlideNumber(opened.archive) + slideIndex,
   }

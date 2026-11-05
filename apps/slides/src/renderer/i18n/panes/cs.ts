@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const cs = {
+  paneAnimSaveFailed: 'Animaci se nepodařilo aktualizovat: {error}',
   paneShowSetupTitle: 'Nastavit prezentaci',
   paneShowSetupType: 'Typ prezentace',
   paneShowTypeSpeaker: 'Prezentovaná přednášejícím (celá obrazovka)',
@@ -31,6 +32,8 @@ export const cs = {
   paneMoveDown: 'Přesunout dolů',
 
   paneAnimTitle: 'Podokno animací · Snímek {n}',
+  paneAnimSelectHint: 'Vyberte animaci pro úpravu efektu a časování.',
+  paneAnimOrderLabel: 'Pořadí animace {n}: {target}',
   paneAnimPreview: 'Přehrát náhled animací tohoto snímku',
   paneAnimCollapse: 'Sbalit podokno animací',
   paneAnimEmpty: 'Na tomto snímku nejsou žádné animace',

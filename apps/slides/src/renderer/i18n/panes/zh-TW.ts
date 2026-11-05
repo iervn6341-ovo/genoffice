@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const zhTW = {
+  paneAnimSaveFailed: '無法更新動畫：{error}',
   paneShowSetupTitle: '設定投影片放映',
   paneShowSetupType: '放映類型',
   paneShowTypeSpeaker: '演講者放映（全螢幕）',
@@ -31,6 +32,8 @@ export const zhTW = {
   paneMoveDown: '下移',
 
   paneAnimTitle: '動畫窗格 · 第 {n} 頁',
+  paneAnimSelectHint: '選取一個動畫以編輯效果與時間。',
+  paneAnimOrderLabel: '動畫順序 {n}：{target}',
   paneAnimPreview: '播放目前頁動畫預覽',
   paneAnimCollapse: '收合動畫窗格',
   paneAnimEmpty: '本頁還沒有動畫',

@@ -634,6 +634,8 @@ export const ms = {
   ribbonDlgHeaderFooter: 'Pengepala dan Pengaki',
   ribbonDlgSlidesTab: 'Slaid',
   ribbonDlgNotesHandoutsTab: 'Nota dan Edaran',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Mula pada',
   ribbonDlgHeader: 'Pengepala',
   ribbonDlgHeaderPlaceholder: 'Teks pengepala',

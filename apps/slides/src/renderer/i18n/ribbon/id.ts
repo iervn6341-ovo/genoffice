@@ -629,6 +629,8 @@ export const id = {
   ribbonDlgHeaderFooter: 'Header dan Footer',
   ribbonDlgSlidesTab: 'Slide',
   ribbonDlgNotesHandoutsTab: 'Catatan dan Handout',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Mulai dari',
   ribbonDlgHeader: 'Header',
   ribbonDlgHeaderPlaceholder: 'Teks header',

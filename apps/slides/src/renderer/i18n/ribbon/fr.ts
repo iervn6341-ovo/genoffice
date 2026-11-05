@@ -644,6 +644,8 @@ export const fr = {
   ribbonDlgHeaderFooter: 'En-tête et pied de page',
   ribbonDlgSlidesTab: 'Diapositives',
   ribbonDlgNotesHandoutsTab: 'Notes et documents',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Commencer à',
   ribbonDlgHeader: 'En-tête',
   ribbonDlgHeaderPlaceholder: 'Texte de l’en-tête',

@@ -5,7 +5,7 @@
  * - The playback sequence skips hidden slides (starting from a hidden slide still plays it)
  * - Moving forward plays the target page's transition effect (CSS approximations of fade/push/wipe/split/circle/random)
  * - In-page shape animations (Animations tab): moving forward plays animations step by step, turning the page only when done;
- *   going back/jumping shows the all-animations-finished state
+ *   every page visit resets its in-page animations, including back/jump
  * - →/space/enter/PgDn/click next step/page; ←/PgUp/right-click previous page; Home/End first/last page;
  *   Esc exits; advancing past the last page shows the "end of show" black screen
  */
@@ -217,8 +217,6 @@ export function SlideShowView({
   const runLinksRef = useRef<Array<Map<string, LinkTargetOp>>>([])
   /** Morph tween in progress: previous/target page original indexes + replay nonce */
   const [morph, setMorph] = useState<{ fromIdx: number; toIdx: number; nonce: number } | null>(null)
-  /** How the current page was entered: forward = initial state playing step by step, others = all-finished state */
-  const navModeRef = useRef<'fresh' | 'all'>('fresh')
 
   useEffect(() => {
     let cancelled = false
@@ -267,7 +265,18 @@ export function SlideShowView({
   // froze for ~200ms around the 10th page. Skipped pages still count (counter, order); only the
   // intermediate paints are dropped, a single press paints at once.
   const paintSlide = useThrottledValue(slide, PAINT_MIN_MS)
-  const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960)
+  const paintContent = useMemo(() => paintSlide && withoutNarration(paintSlide), [paintSlide])
+  const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960, {
+    key: `${order[pos]}:${loopTurn}`,
+    items: allAnims?.[order[pos]!] ?? null,
+  })
+  // A throttled paint retains BOTH the old page and its cursor. Applying the new
+  // cursor to the retained page exposed entrances with overlapping shape IDs.
+  const paintedFrame = useRef({ slide, states: player.states })
+  const paintStates = paintSlide === slide ? player.states : paintedFrame.current.states
+  useLayoutEffect(() => {
+    if (paintSlide === slide) paintedFrame.current = { slide, states: player.states }
+  }, [paintSlide, slide, player.states])
 
   // ── Rehearsal timing: start timing the first page on entry; accumulate the previous page's dwell on turn; redraw the timer bar every 500ms ──
   const rehearseRef = useRef<RehearseTiming | null>(null)
@@ -286,11 +295,6 @@ export function SlideShowView({
       rehearseRef.current = switchRehearsePage(t, curIdx, Date.now())
     }
   }, [curIdx])
-
-  // Load the page's animations when the page changes/prefetch completes (forward = initial state, back/jump = finished state)
-  useEffect(() => {
-    player.load(allAnims?.[order[pos]!] ?? [], navModeRef.current)
-  }, [allAnims, pos, loopTurn, order, player.load]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const exitRef = useRef(() => {})
   exitRef.current = () => {
@@ -401,7 +405,6 @@ export function SlideShowView({
       const target = order[nextPos]
       if (target == null) return
       if (nextPos !== pos) lastViewedRef.current = pos
-      navModeRef.current = animate ? 'fresh' : 'all'
       const current = order[pos]
       let kind: TransitionKind = 'none'
       if (animate) {
@@ -451,13 +454,14 @@ export function SlideShowView({
       exitRef.current()
       return
     }
+    if (!player.ready) return
     // Advance in-page animations first; turn the page only when this page's animations are done
     if (player.advance()) return
     if (pos >= order.length - 1) {
       if (loop) goTo(0, true)
       else setEnded(true)
     } else goTo(pos + 1, true)
-  }, [ended, pos, order.length, goTo, player.advance, loop]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ended, pos, order.length, goTo, player.advance, player.ready, loop]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const prev = useCallback(() => {
     if (ended) {
@@ -734,12 +738,14 @@ export function SlideShowView({
                       : undefined
                   }
                 >
-                  <AnimatedSlideStage
-                    slide={withoutNarration(paintSlide ?? slide)}
-                    images={images}
-                    width={fitW}
-                    states={player.states}
-                  />
+                  {player.ready && (
+                    <AnimatedSlideStage
+                      slide={paintContent ?? slide}
+                      images={images}
+                      width={fitW}
+                      states={paintStates}
+                    />
+                  )}
                   <ShowMediaLayer
                     slide={slide}
                     slideIndex={order[pos]!}

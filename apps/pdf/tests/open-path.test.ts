@@ -1,7 +1,9 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { PDFDocument } from 'pdf-lib'
+import { dialog } from 'electron'
 
 /**
  * pdf-main open-path bookkeeping: the renderer calls consume-pending on every
@@ -19,7 +21,8 @@ interface FakeWebContents {
   setWindowOpenHandler: ReturnType<typeof vi.fn>
   loadURL: ReturnType<typeof vi.fn>
   loadFile: ReturnType<typeof vi.fn>
-  loadURL: ReturnType<typeof vi.fn>
+  send: ReturnType<typeof vi.fn>
+  isDestroyed: ReturnType<typeof vi.fn>
   listeners: Map<string, () => void>
 }
 
@@ -40,7 +43,8 @@ function makeFakeWebContents(): FakeWebContents {
     setWindowOpenHandler: vi.fn(),
     loadURL: vi.fn(),
     loadFile: vi.fn(),
-    loadURL: vi.fn(),
+    send: vi.fn(),
+    isDestroyed: vi.fn(() => false),
   }
   lastWebContents = wc
   return wc
@@ -48,9 +52,13 @@ function makeFakeWebContents(): FakeWebContents {
 
 vi.mock('electron', () => ({
   app: { on: vi.fn(), whenReady: vi.fn(() => new Promise(() => {})) },
-  dialog: {},
+  dialog: { showSaveDialog: vi.fn(), showMessageBox: vi.fn() },
   shell: {},
-  BrowserWindow: class {},
+  BrowserWindow: class {
+    static fromWebContents() {
+      return null
+    }
+  },
   WebContentsView: class {
     webContents = makeFakeWebContents()
   },
@@ -66,7 +74,14 @@ vi.mock('electron', () => ({
 }))
 
 import { PDF_CHANNELS } from '../src/shared/ipc'
-import { configurePdfRuntime, createPdfView, pdfIsDirty } from '../src/main/pdf-main'
+import {
+  configurePdfRuntime,
+  createPdfView,
+  flushPdfSave,
+  pdfIsDirty,
+  requestPdfClose,
+  setPdfMaterializedHook,
+} from '../src/main/pdf-main'
 import type { CreateDocumentRequest, CreateDocumentResult } from '../src/shared/ipc'
 
 function makePdfFile(): string {
@@ -108,6 +123,130 @@ describe('pdf open-path lifecycle', () => {
     expect(pdfIsDirty(wc.id)).toBe(true)
     wc.listeners.get('did-start-loading')?.()
     expect(pdfIsDirty(wc.id)).toBe(false)
+  })
+})
+
+describe('memory-only new PDF', () => {
+  it('closes an untouched blank without a save prompt', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pdf-blank-close-'))
+    createPdfView(undefined, { blank: true, saveDir: dir })
+    const wc = lastWebContents
+    vi.mocked(dialog.showMessageBox).mockClear()
+    expect(pdfIsDirty(wc.id)).toBe(false)
+    expect(await requestPdfClose(wc as never)).toBe(true)
+    expect(dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  it('keeps rewritten memory content dirty after renderer reload or clean reports', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pdf-edited-close-'))
+    createPdfView(undefined, { blank: true, saveDir: dir })
+    const wc = lastWebContents
+    const path = consume(wc.id)
+    expect(handlers.get(PDF_CHANNELS.sourceModified)!({ sender: wc })).toBe(false)
+    expect(
+      await handlers.get(PDF_CHANNELS.insertBlankPage)!(
+        { sender: wc },
+        {
+          path,
+          afterPageIndex: 0,
+        },
+      ),
+    ).toMatchObject({ ok: true })
+    wc.listeners.get('did-start-loading')?.()
+    handlers.get(PDF_CHANNELS.dirtyChanged)!({ sender: wc }, false)
+    expect(pdfIsDirty(wc.id)).toBe(true)
+    expect(handlers.get(PDF_CHANNELS.sourceModified)!({ sender: wc })).toBe(true)
+    vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 2, checkboxChecked: false })
+    expect(await requestPdfClose(wc as never)).toBe(false)
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  it('routes explicit Save through the renderer even before any edits exist', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pdf-blank-save-'))
+    createPdfView(undefined, { blank: true, saveDir: dir })
+    const wc = lastWebContents
+    const saving = flushPdfSave(wc as never)
+    expect(wc.send).toHaveBeenCalledWith(PDF_CHANNELS.closeSaveRequest)
+    handlers.get(PDF_CHANNELS.closeSaveResult)!({ sender: wc }, false)
+    expect(await saving).toBe(false)
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  it('does not create a file until the user confirms Save in its originating folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pdf-origin-'))
+    createPdfView(undefined, { blank: true, saveDir: dir, untitledName: '未命名 PDF' })
+    const wc = lastWebContents
+    const virtualPath = consume(wc.id)
+    expect(virtualPath).toMatch(/^genoffice-memory-pdf:\/\//)
+    expect(readdirSync(dir)).toEqual([])
+
+    const read = handlers.get(PDF_CHANNELS.readFile)!
+    const bytes = (await read({ sender: wc }, virtualPath)) as ArrayBuffer
+    expect((await PDFDocument.load(new Uint8Array(bytes))).getPageCount()).toBe(1)
+    expect(readdirSync(dir)).toEqual([])
+
+    const inserted = (await handlers.get(PDF_CHANNELS.insertBlankPage)!(
+      { sender: wc },
+      {
+        path: virtualPath,
+        afterPageIndex: 0,
+      },
+    )) as { ok: boolean }
+    expect(inserted.ok).toBe(true)
+    const editedBytes = (await read({ sender: wc }, virtualPath)) as ArrayBuffer
+    expect((await PDFDocument.load(new Uint8Array(editedBytes))).getPageCount()).toBe(2)
+    expect(readdirSync(dir)).toEqual([])
+    expect(handlers.get(PDF_CHANNELS.isUntitled)!({ sender: wc }, virtualPath)).toBe(false)
+    const memorySave = (await handlers.get(PDF_CHANNELS.save)!(
+      { sender: wc },
+      {
+        path: virtualPath,
+        markups: [],
+        drawings: [],
+        formValues: [],
+        stamps: [],
+      },
+    )) as { ok: boolean }
+    expect(memorySave.ok).toBe(true)
+    expect(readdirSync(dir)).toEqual([])
+
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true, filePath: '' })
+    const initialSave = handlers.get(PDF_CHANNELS.requestInitialSave)!
+    expect(await initialSave({ sender: wc })).toBe(false)
+    expect(vi.mocked(dialog.showSaveDialog).mock.calls.at(-1)?.[0]).toMatchObject({
+      defaultPath: join(dir, '未命名 PDF.pdf'),
+    })
+    expect(readdirSync(dir)).toEqual([])
+    expect(consume(wc.id)).toBe(virtualPath)
+
+    const target = join(dir, 'Saved.pdf')
+    const materialized = vi.fn()
+    setPdfMaterializedHook(materialized)
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target })
+    wc.send.mockImplementation((channel: string, requestedPath?: string) => {
+      if (channel !== PDF_CHANNELS.saveAsRequest) return
+      void (async () => {
+        const result = (await handlers.get(PDF_CHANNELS.save)!(
+          { sender: wc },
+          {
+            path: virtualPath,
+            targetPath: requestedPath,
+            markups: [],
+            drawings: [],
+            formValues: [],
+            stamps: [],
+          },
+        )) as { ok: boolean }
+        handlers.get(PDF_CHANNELS.saveAsResult)!({ sender: wc }, result.ok)
+      })()
+    })
+    expect(await initialSave({ sender: wc })).toBe(true)
+    expect(readdirSync(dir)).toEqual(['Saved.pdf'])
+    expect(consume(wc.id)).toBe(target)
+    expect(materialized).toHaveBeenCalledWith(wc, target)
+    const savedBytes = (await read({ sender: wc }, target)) as ArrayBuffer
+    expect((await PDFDocument.load(new Uint8Array(savedBytes))).getPageCount()).toBe(2)
   })
 })
 

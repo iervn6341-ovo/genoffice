@@ -1,3 +1,4 @@
+import { AiModelProfilePicker } from '@genoffice/ui'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import {
@@ -2004,6 +2005,7 @@ export function AiPanel({
           <AssistantMark size={22} />
           {t('aiPanelTitle')}
         </span>
+        <AiModelProfilePicker lang={lang} disabled={busy} />
         <div className="ai-panel-header-actions">
           <AiPanelSideButton
             lang={lang}

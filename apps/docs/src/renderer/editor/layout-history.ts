@@ -68,6 +68,7 @@ export interface DesignSnapshot {
 export interface LayoutSnapshot {
   readonly section: SectionSettings | null
   readonly sectionDirty: boolean
+  readonly fullSections?: readonly SectionInfo[]
   readonly sections: readonly SectionLayout[]
   readonly sectionsDirty: readonly number[]
   readonly titlePg: boolean
@@ -142,7 +143,7 @@ export function pageNumberEditsAgainstBaseline(
   const sections: number[] = []
   restored.forEach((s, i) => {
     const original = baseline[i]
-    if (!original || !changed(s, original)) return
+    if (original && !changed(s, original)) return
     if (i === restored.length - 1)
       final = {
         fmt: s.pageNumberFmt,
@@ -203,7 +204,58 @@ const union = (a: readonly number[], b: readonly number[]) => [...new Set([...a,
  * write the reverted layout, so a flag stays set when either side has it or
  * the value actually changes.
  */
-export function withRestoreDirty(restored: LayoutSnapshot, live: LayoutSnapshot): LayoutSnapshot {
+export function withRestoreDirty(
+  restored: LayoutSnapshot,
+  live: LayoutSnapshot,
+  saved?: LayoutSnapshot | null,
+): LayoutSnapshot {
+  const values = (snapshot: LayoutSnapshot) => {
+    const design = snapshot.design
+    return {
+      section: snapshot.section,
+      sections: snapshot.sections,
+      titlePg: snapshot.titlePg,
+      evenOddHf: snapshot.evenOddHf,
+      sectionHfEdits: snapshot.sectionHfEdits ?? {},
+      sectionHfLinkEdits: snapshot.sectionHfLinkEdits ?? {},
+      sectionHfRefEdits: snapshot.sectionHfRefEdits ?? {},
+      sectionHfLocalRefs: snapshot.sectionHfLocalRefs ?? {},
+      notes: snapshot.notes,
+      noteSettings: snapshot.noteSettings,
+      design: design
+        ? Object.fromEntries(Object.entries(design).filter(([key]) => !key.endsWith('Dirty')))
+        : undefined,
+    }
+  }
+  if (saved && same(values(restored), values(saved))) {
+    return {
+      ...restored,
+      sectionDirty: false,
+      sectionsDirty: [],
+      titlePgDirty: false,
+      evenOddHfDirty: false,
+      pgNumEdit: null,
+      pgNumDirtySections: [],
+      sectionHfEdits: {},
+      sectionHfLinkEdits: {},
+      sectionHfRefEdits: {},
+      ...(restored.design
+        ? {
+            design: {
+              ...restored.design,
+              docFlagsDirty: false,
+              pageColorDirty: false,
+              watermarkDirty: false,
+              themeFontsDirty: false,
+              themeColorsDirty: false,
+              headerDirty: false,
+              footerDirty: false,
+              hfVariantsDirty: [],
+            },
+          }
+        : {}),
+    }
+  }
   const changedSections = restored.sections.flatMap((s, i) =>
     same(s, live.sections[i]) ? [] : [i],
   )

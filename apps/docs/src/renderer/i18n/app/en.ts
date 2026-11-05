@@ -104,6 +104,15 @@ export const en = {
   appStyleUpdated: 'Style "{name}" updated from the selection; written to the document on save',
   appStyleCreated: 'Style "{name}" created and applied to the selection',
   appPgNumFormatSet: 'Page number format set',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Page Number Format',
   appNumberFormat: 'Number format',
   appIncludeChapterNumber: 'Include chapter number',

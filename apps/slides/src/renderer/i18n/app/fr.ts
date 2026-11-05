@@ -33,6 +33,7 @@ export const fr = {
     'Cliquez sur un élément cible pour appliquer la mise en forme ; double-cliquez sur le bouton pour le mode continu',
   appStatusBrushContinuous:
     'Mode continu « Reproduire la mise en forme » ; appuyez sur Échap pour quitter',
+  appStatusFormatApplyFailed: "Impossible d’appliquer la mise en forme. Sélectionnez à nouveau la cible et réessayez.",
   appStatusFormatApplied: 'Mise en forme appliquée',
   appStatusTableInserted: 'Tableau {rows} × {cols} inséré',
   appStatusIconInserted: 'Icône « {name} » insérée',

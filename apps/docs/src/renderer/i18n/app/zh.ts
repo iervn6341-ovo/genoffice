@@ -108,6 +108,12 @@ export const zh = {
   appStyleCreated: '已新建样式“{name}”并应用到选区',
   // Page number format
   appPgNumFormatSet: '已设置页码格式',
+  appPageNumberPhysical: '從指定頁面開始編號',
+  appPageNumberFromPage: '從第幾頁開始',
+  appPageNumberHideBefore: '前面不顯示頁碼',
+  appPageNumberSectionHint: '將在指定頁建立 Word 相容的分節；後續各節接續編號。',
+  appPageNumberBoundaryUnavailable: '正在更新分頁，請待版面配置完成後再試一次。',
+  appPageNumberInsideTable: '此頁從表格或不支援的物件中間開始，請先在物件前插入分節。',
   appPageNumFormatTitle: '页码格式',
   appNumberFormat: '编号格式',
   appIncludeChapterNumber: '包含章节号',

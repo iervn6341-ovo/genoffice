@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const pl = {
+  paneAnimSaveFailed: 'Nie można zaktualizować animacji: {error}',
   paneShowSetupTitle: 'Konfiguruj pokaz slajdów',
   paneShowSetupType: 'Typ pokazu',
   paneShowTypeSpeaker: 'Prezentowany przez prelegenta (pełny ekran)',
@@ -31,6 +32,8 @@ export const pl = {
   paneMoveDown: 'Przenieś w dół',
 
   paneAnimTitle: 'Okienko animacji · Slajd {n}',
+  paneAnimSelectHint: 'Wybierz animację, aby edytować efekt i chronometraż.',
+  paneAnimOrderLabel: 'Kolejność animacji {n}: {target}',
   paneAnimPreview: 'Odtwórz podgląd animacji tego slajdu',
   paneAnimCollapse: 'Zwiń okienko animacji',
   paneAnimEmpty: 'Brak animacji na tym slajdzie',

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { isUnsavedPdfPath } from '../shared/unsaved'
 import { handlePdfControl, type ControlRequest } from './control'
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
 // legacy build: the modern build relies on new APIs like Math.sumPrecise that the current
@@ -65,7 +66,13 @@ import {
 } from './view-state'
 import type { PdfViewState, ZoomAnchor } from './view-state'
 import { LinkLayer } from './LinkLayer'
-import { OutlinePanel } from './OutlinePanel'
+import { flattenOutline, OutlinePanel } from './OutlinePanel'
+import { FloatingOutline, floatingOutlineLabels, useOutlineScrollSpy } from '@genoffice/ui'
+import {
+  resolveOutlineDestination,
+  resolveOutlineDestinations,
+  type OutlineDestination,
+} from './outline-navigation'
 import type { OutlineNode } from './OutlinePanel'
 import { buildHeadingOutline, remapOutlinePages } from './heading-outline'
 import { printPdf } from './print'
@@ -378,6 +385,23 @@ export default function App() {
   const [spread, setSpread] = useState<1 | 2>(1)
   const [nightMode, setNightMode] = useState(false)
   const [outline, setOutline] = useState<OutlineNode[] | null>(null)
+  const floatingOutlineItems = useMemo(() => flattenOutline(outline ?? []), [outline])
+  const [outlineDestinations, setOutlineDestinations] = useState<
+    (OutlineDestination & { id: string })[]
+  >([])
+  useEffect(() => {
+    let cancelled = false
+    setOutlineDestinations([])
+    if (doc)
+      void resolveOutlineDestinations(doc, floatingOutlineItems, () => cancelled).then(
+        (targets) => {
+          if (!cancelled) setOutlineDestinations(targets)
+        },
+      )
+    return () => {
+      cancelled = true
+    }
+  }, [doc, floatingOutlineItems])
   const [outlineGenerated, setOutlineGenerated] = useState(false)
   const outlineDocRef = useRef<PDFDocumentProxy | null>(null)
   const [markups, setMarkups] = useState<LocalMarkup[]>([])
@@ -825,6 +849,7 @@ export default function App() {
   const [thumbMenu, setThumbMenu] = useState<ThumbMenu | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState('')
+  const [sourceModified, setSourceModified] = useState(false)
   /** Transient message toast (save failures, skipped/rejected text edits) */
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimerRef = useRef<number | null>(null)
@@ -1000,7 +1025,11 @@ export default function App() {
       saved?: SavedSnapshot,
       waitForPageNos: number[] = [],
     ) => {
-      const data = await window.pdfApi.readFile(path)
+      const [data, modified] = await Promise.all([
+        window.pdfApi.readFile(path),
+        window.pdfApi.sourceModified(),
+      ])
+      setSourceModified(modified)
       const bytes = new Uint8Array(data)
       setFormHasXfa(hasXfaMarker(bytes))
       if (!saved) {
@@ -1366,6 +1395,32 @@ export default function App() {
   const rowPages = (el: HTMLElement, rowIdx: number) =>
     el.querySelectorAll(`.pdf-row[data-idx="${rowIdx}"] > .pdf-page`)
   const rowHeights = useMemo(() => rows.map((row) => rowSize(row).height), [rows, rowSize])
+  const outlineAnchors = useCallback(() => {
+    if (status !== 'ready') return []
+    const rowTops: number[] = []
+    let top = PAGE_GAP
+    for (const height of rowHeights) {
+      rowTops.push(top)
+      top += height * scale + PAGE_GAP
+    }
+    const positions = new Map(visList.map((original, index) => [original, index]))
+    return outlineDestinations.flatMap((target) => {
+      const visible = positions.get(target.pageIndex)
+      if (visible === undefined) return []
+      const geom = pageGeom(target.pageIndex)
+      const y =
+        target.top === null ? 0 : pdfToView(geom, target.left ?? geom.x0 ?? 0, target.top)[1]
+      return [
+        {
+          id: target.id,
+          top:
+            rowTops[rowOfVis(visible)]! +
+            Math.max(0, Math.min(y, geomDispSize(geom).height)) * scale,
+        },
+      ]
+    })
+  }, [status, outlineDestinations, rowHeights, scale, visList, pageGeom, rowOfVis])
+  const activeOutlineId = useOutlineScrollSpy(scrollRef, null, outlineAnchors)
   /** Committed layout: the native wheel listener can fire before the passive effect
    *  re-subscribes it, when its closure still holds the previous render's scale. */
   const layoutRef = useRef({ scale, rowHeights })
@@ -1683,7 +1738,9 @@ export default function App() {
     deleted.size > 0 ||
     order !== null ||
     metadata !== null
-  const dirty = redactions.length > 0 || ordinaryDirty
+  // A new blank is clean until edited. Rewrites already applied to its memory
+  // source still need saving even after the pending edit arrays are cleared.
+  const dirty = sourceModified || redactions.length > 0 || ordinaryDirty
 
   // Mirror dirty state to the main process (close-tab/close-window guard)
   useEffect(() => {
@@ -3463,16 +3520,35 @@ export default function App() {
       post-save reload has committed. Running the follow-up straight off the completion
       promise would reuse the pre-reload render's closure — dirty still true, the saved
       edits still listed — and write them onto the file a second time. */
-  const queuedSavesRef = useRef<{ autosave: boolean; resolve: (ok: boolean) => void }[]>([])
+  const queuedSavesRef = useRef<
+    { autosave: boolean; memoryOnly: boolean; resolve: (ok: boolean) => void }[]
+  >([])
+  const initialSaveRef = useRef<Promise<boolean> | null>(null)
 
-  const save = (autosave = false): Promise<boolean> => {
+  const save = (autosave = false, memoryOnly = false): Promise<boolean> => {
+    if (isUnsavedPdfPath(filePath) && !memoryOnly) {
+      if (initialSaveRef.current) return initialSaveRef.current
+      const request = window.pdfApi
+        .requestInitialSave()
+        .catch((err: unknown) => {
+          opFailed(err instanceof Error ? err.message : String(err))
+          return false
+        })
+        .finally(() => {
+          initialSaveRef.current = null
+        })
+      initialSaveRef.current = request
+      return request
+    }
     // A save is already writing: queue behind it instead of reporting failure — the
     // close prompt's "Save" and ⌘S regularly collide with the blur-triggered autosave
     // (the prompt itself blurs the window). The ref is set synchronously, so this also
     // covers two triggers landing in the same frame, where the saveState snapshot
     // still reads 'idle' for both.
     if (saveInFlightRef.current !== null) {
-      return new Promise<boolean>((resolve) => queuedSavesRef.current.push({ autosave, resolve }))
+      return new Promise<boolean>((resolve) =>
+        queuedSavesRef.current.push({ autosave, memoryOnly, resolve }),
+      )
     }
     // Fold an open floating-editor draft in first: keyboard save and autosave can land
     // mid-typing, and the post-save reload closes the editor — without this the
@@ -3487,7 +3563,7 @@ export default function App() {
       noteFlush.noteEdits !== noteEdits
     if (!anythingToSave || !filePath) return Promise.resolve(!anythingToSave)
     // An explicit save opts this file into autosave
-    if (!autosave) savedOnceRef.current = true
+    if (!autosave && !memoryOnly) savedOnceRef.current = true
     // What this save writes — the post-save reload subtracts exactly this, keeping
     // any edits the user makes while the write is in flight
     const snapshot: SavedSnapshot = {
@@ -3583,7 +3659,8 @@ export default function App() {
     queuedSavesRef.current = []
     // One explicit request makes the whole drained batch explicit (autosave opt-in)
     const autosaveOnly = queued.every((q) => q.autosave)
-    void save(autosaveOnly).then((ok) => {
+    const memoryOnly = queued.every((q) => q.memoryOnly)
+    void save(autosaveOnly, memoryOnly).then((ok) => {
       for (const q of queued) q.resolve(ok)
     })
   })
@@ -3670,6 +3747,13 @@ export default function App() {
     }
     if (result.skippedImageEdits && result.skippedImageEdits.length > 0) {
       noticeSkippedImages(result.skippedImageEdits)
+    }
+    if (isUnsavedPdfPath(filePath)) {
+      // The source existed only in memory; this first Save As becomes the open
+      // document. Reload from the new grant to clear pending overlays atomically.
+      savedOnceRef.current = true
+      window.setTimeout(() => window.location.reload(), 0)
+      return true
     }
     // Back to idle, not 'saved': only the copy was written — this tab's edits are
     // still pending, so a saved-confirmation next to the unsaved badge would lie
@@ -4939,7 +5023,7 @@ export default function App() {
       opFailed(t('redactStructureBlocked'))
       return undefined
     }
-    if (dirty && !(await save())) return undefined
+    if (dirty && !(await save(false, isUnsavedPdfPath(filePath)))) return undefined
     return fn()
   }
 
@@ -5204,7 +5288,7 @@ export default function App() {
       await flushThen(async () => {
         setPrinting(true)
         try {
-          if (printEntryFor(navigator.platform) === 'native-panel') {
+          if (printEntryFor(navigator.platform) === 'native-panel' && !isUnsavedPdfPath(filePath)) {
             // the saved file prints as is; the panel's own page range picks the pages
             const result = await window.pdfApi.printNative(filePath)
             if (!result.ok) opFailed(t('printSheetFailed', { error: result.error }))
@@ -5598,18 +5682,17 @@ export default function App() {
   /** Internal destination of a Link annotation → jump to that page */
   const goToDest = async (dest: unknown) => {
     if (!doc) return
-    try {
-      const arr = typeof dest === 'string' ? await doc.getDestination(dest) : dest
-      if (!Array.isArray(arr)) return
-      const ref = arr[0]
-      const origIdx =
-        typeof ref === 'number'
-          ? ref
-          : await doc.getPageIndex(ref as Parameters<PDFDocumentProxy['getPageIndex']>[0])
-      const visIdx = visList.indexOf(origIdx)
-      if (visIdx >= 0) scrollToPage(visIdx + 1)
-    } catch {
-      /* Ignore corrupted destinations */
+    const target = await resolveOutlineDestination(doc, dest)
+    const scroller = scrollRef.current
+    if (!target || !scroller) return
+    const visible = visList.indexOf(target.pageIndex)
+    if (visible < 0) return
+    if (target.top === null) scrollToPage(visible + 1)
+    else {
+      const geom = pageGeom(target.pageIndex)
+      const y = pdfToView(geom, target.left ?? geom.x0 ?? 0, target.top)[1]
+      scroller.scrollTop =
+        pageTop(visible) + Math.max(0, Math.min(y, geomDispSize(geom).height)) * scale - 24
     }
   }
 
@@ -5893,7 +5976,7 @@ export default function App() {
   /** Converter dropdown → the shell's local conversion flows (save dialog, password prompt) */
   const convertTo = async (format: PdfConvertFormat): Promise<void> => {
     setConvertOpen(false)
-    if (convertBusy) return
+    if (convertBusy || isUnsavedPdfPath(filePath)) return
     setConvertBusy(true)
     try {
       await window.pdfApi.convertOffice(format)
@@ -6187,7 +6270,7 @@ export default function App() {
             className="qa-btn"
             data-tip={`${t('save')} (${platformShortcuts('⌘S')})`}
             aria-label={t('save')}
-            disabled={!dirty || saveState === 'saving'}
+            disabled={(!dirty && !isUnsavedPdfPath(filePath)) || saveState === 'saving'}
             onClick={() => void save()}
           >
             <IconSave />
@@ -6322,7 +6405,7 @@ export default function App() {
                     <button
                       className={`rb-big${convertOpen ? ' active' : ''}`}
                       data-tip={t('convertPdfTip')}
-                      disabled={convertBusy}
+                      disabled={convertBusy || isUnsavedPdfPath(filePath)}
                       onClick={() => setConvertOpen((v) => !v)}
                     >
                       <span className="rb-big-icon">
@@ -6931,7 +7014,7 @@ export default function App() {
           )}
           <AiPanel
             api={aiApi}
-            filePath={filePath}
+            filePath={isUnsavedPdfPath(filePath) ? undefined : filePath}
             preset={aiPreset}
             onCollapse={() => setAiCollapsed(true)}
             onRunDone={() => void autoSaveAfterAiRun()}
@@ -6940,6 +7023,19 @@ export default function App() {
         </div>
         <div className="app-content">
           <div className="pdf-body">
+            {sidebar !== 'outline' && (
+              <FloatingOutline
+                items={floatingOutlineItems}
+                {...floatingOutlineLabels(lang)}
+                activeId={activeOutlineId}
+                note={outlineGenerated ? t('outlineGenerated') : undefined}
+                onSelect={(id) => {
+                  const node = floatingOutlineItems.find((item) => item.id === id)?.node
+                  if (node?.url) window.open(node.url, '_blank')
+                  else if (node?.dest != null) void goToDest(node.dest)
+                }}
+              />
+            )}
             {sidebar === 'outline' && outline && (
               <div className="pdf-thumbs pdf-outline-pane" style={{ width: sidebarW }}>
                 <div className="pdf-outline-header">

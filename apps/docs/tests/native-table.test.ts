@@ -23,6 +23,7 @@ import {
 import { editorExtensions, rowHeightCss, tableRowEatCss } from '../src/renderer/editor/extensions'
 import { renderTableSpec } from '../src/renderer/editor/protected-render'
 import { collectRevisions, type TrackChangesStorage } from '../src/renderer/editor/revisions'
+import { persistedBodyChanged } from '../src/renderer/doc-dirty'
 import {
   constrainSelectedTableWidth,
   constrainTableWidthAtCell,
@@ -114,6 +115,7 @@ describe('native editable tables', () => {
 
   it('clicking below an imported trailing table places a text cursor in a new paragraph', async () => {
     const { editor } = await openTable()
+    const before = editor.state.doc
 
     clickBelowTrailingTable(editor)
 
@@ -121,11 +123,39 @@ describe('native editable tables', () => {
     expect(editor.state.doc.lastChild?.content.size).toBe(0)
     expect(editor.state.selection).toBeInstanceOf(TextSelection)
     expect(editor.state.selection.$from.parent.type.name).toBe('docParagraph')
+    expect(persistedBodyChanged(before, editor.state.doc)).toBe(false)
 
     editor.commands.insertContent('below-click')
 
     expect(editor.state.doc.lastChild?.textContent).toBe('below-click')
+    expect(editor.state.doc.lastChild?.attrs.navigationOnly).toBe(false)
+    expect(persistedBodyChanged(before, editor.state.doc)).toBe(true)
     editor.destroy()
+  })
+
+  it('does not export an untouched navigation landing; Enter and paragraph formatting author it', async () => {
+    const { editor, parsed } = await openTable()
+    const before = editor.state.doc
+    clickBelowTrailingTable(editor)
+    expect(
+      pmDocToSavePlan(editor.state.doc.toJSON() as PmNode, parsed.blocks).saveBlocks,
+    ).toHaveLength(1)
+    editor.commands.splitBlock()
+    expect(persistedBodyChanged(before, editor.state.doc)).toBe(true)
+    expect(editor.state.doc.lastChild?.attrs.navigationOnly).toBe(false)
+    expect(
+      pmDocToSavePlan(editor.state.doc.toJSON() as PmNode, parsed.blocks).saveBlocks.length,
+    ).toBeGreaterThan(1)
+    editor.destroy()
+
+    const other = await openTable()
+    clickBelowTrailingTable(other.editor)
+    other.editor.commands.updateAttributes('docParagraph', { align: 'center' })
+    expect(other.editor.state.doc.lastChild?.attrs.navigationOnly).toBe(false)
+    expect(
+      pmDocToSavePlan(other.editor.state.doc.toJSON() as PmNode, other.parsed.blocks).saveBlocks,
+    ).toHaveLength(2)
+    other.editor.destroy()
   })
 
   it('does not add a second paragraph when clicking below a trailing table with one already', async () => {

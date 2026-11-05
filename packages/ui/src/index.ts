@@ -1,4 +1,8 @@
 export { AiPanelSideButton } from './AiPanelSideButton'
+export { FloatingOutline, type FloatingOutlineItem } from './FloatingOutline'
+export { floatingOutlineLabels } from './strings-floating-outline'
+export { useOutlineScrollSpy, type OutlineAnchor } from './outline-scroll'
+export { AiModelProfilePicker, useAiSettingsSync, aiProfileStrings } from './ai-model-profiles'
 export { AiComposer } from './AiComposer'
 export { AiScopeQuote, type AiScopeQuoteData } from './AiScopeQuote'
 export {

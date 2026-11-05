@@ -73,6 +73,22 @@ function ctxWith(opts: { dirty: boolean; needsSaveAs?: boolean; restoredFromReco
 }
 
 describe('handleSave recovery mode', () => {
+  it('offers the first explicit Save of an untouched unsaved workbook', async () => {
+    const { ctx } = ctxWith({ dirty: false, needsSaveAs: true })
+    await handleSave(ctx, 'save')
+    expect(saveWorkbookEdits).toHaveBeenCalledTimes(1)
+    expect(saveWorkbookEdits).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'save', edits: [] }),
+    )
+    expect(writeWorkbookRecovery).not.toHaveBeenCalled()
+  })
+
+  it('keeps an untouched file-backed workbook out of the Save pipeline', async () => {
+    const { ctx } = ctxWith({ dirty: false })
+    await handleSave(ctx, 'save')
+    expect(saveWorkbookEdits).not.toHaveBeenCalled()
+  })
+
   it('writes a recovery copy and never the opened file', async () => {
     const { ctx, messages } = ctxWith({ dirty: true })
     await handleSave(ctx, 'recovery')
@@ -494,7 +510,10 @@ describe('formal save of a new pivot on a sheet created in the same save', () =>
       current: {
         univerAPI: {
           getActiveWorkbook: () => ({
-            getSheets: () => [{ getSheetId: () => 'sheet-1' }, { getSheetId: () => 'added-sheet-tmp' }],
+            getSheets: () => [
+              { getSheetId: () => 'sheet-1' },
+              { getSheetId: () => 'added-sheet-tmp' },
+            ],
             getActiveSheet: () => null,
           }),
         },
@@ -544,7 +563,10 @@ describe('formal save of a new pivot on a sheet created in the same save', () =>
     expect(outcome).toMatchObject({ ok: true })
 
     expect(saveWorkbookEdits).toHaveBeenCalledTimes(2)
-    const phase1 = saveWorkbookEdits.mock.calls[0]![0] as { pivotAdditions: unknown[]; sheetOps: unknown[] }
+    const phase1 = saveWorkbookEdits.mock.calls[0]![0] as {
+      pivotAdditions: unknown[]
+      sheetOps: unknown[]
+    }
     expect(phase1.pivotAdditions).toEqual([])
     expect(phase1.sheetOps.length).toBeGreaterThan(0)
     const phase2 = saveWorkbookEdits.mock.calls[1]![0] as {

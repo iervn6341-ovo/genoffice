@@ -971,13 +971,27 @@ export async function savePdfToPath(
   targetPath: string,
   request: SavePdfRequest,
 ): Promise<SavePdfSkips> {
-  const { bytes, ...skips } = await applySaveRequest(
-    new Uint8Array(await readFile(sourcePath)),
-    request,
-  )
-  await verifyContentEdits(bytes, request, skips)
+  return savePdfBytesToPath(new Uint8Array(await readFile(sourcePath)), targetPath, request)
+}
+
+/** Save a memory-only blank source without first creating a temporary PDF file. */
+export async function savePdfBytesToPath(
+  sourceBytes: Uint8Array,
+  targetPath: string,
+  request: SavePdfRequest,
+): Promise<SavePdfSkips> {
+  const { bytes, ...skips } = await savePdfToBytes(sourceBytes, request)
   await writePdfAtomically(targetPath, bytes)
   return skips
+}
+
+export async function savePdfToBytes(
+  sourceBytes: Uint8Array,
+  request: SavePdfRequest,
+): Promise<AppliedSaveRequest> {
+  const { bytes, ...skips } = await applySaveRequest(sourceBytes, request)
+  await verifyContentEdits(bytes, request, skips)
+  return { bytes, ...skips }
 }
 
 export interface AppliedSaveRequest {

@@ -1,3 +1,9 @@
+import { useAiSettingsSync } from '@genoffice/ui'
+import {
+  captureCellSaveCheckpoint,
+  invalidateCellSaveCheckpoints,
+  reconcileCellSaveCheckpoint,
+} from './cell-save-checkpoint'
 import { IRenderManagerService } from '@univerjs/engine-render'
 import type { Observable } from 'rxjs'
 import { decoupleUniverUiTheme, useContentDark } from './content-theme'
@@ -381,6 +387,7 @@ import { installForceStringMarkGate, installLongTextRender } from './long-text-r
 import { installAutofitWrapBudget } from './autofit-wrap-budget'
 import { installAutofitLinePitch } from './autofit-line-pitch'
 import { installHeaderUnhideDebounce } from './load-perf-patches'
+import { installCanvasResizeCoalescing } from './canvas-resize'
 import { installHeaderResizeTooltip } from './header-resize-tooltip'
 import { installCopyAnimationIdle } from './copy-animation-idle'
 import { installNumberAsTextAlertSeverity } from './number-as-text-alert'
@@ -1669,9 +1676,7 @@ export function App(): React.JSX.Element {
     }
   }
 
-  useEffect(() => {
-    void window.desktopApi.getAiSettings().then(setAiSettingsState)
-  }, [])
+  useAiSettingsSync(setAiSettingsState)
 
   useEffect(() => {
     // Univer paints the grid on canvas, so it can't follow the CSS tokens —
@@ -1806,6 +1811,9 @@ export function App(): React.JSX.Element {
     // canvas line box (Calibri 10: 12.75 pt per line, not ~10 pt).
     installAutofitLinePitch()
     installHeaderUnhideDebounce()
+    const disposeCanvasResize = installCanvasResizeCoalescing(
+      runtime.univer.__getInjector().get(IRenderManagerService),
+    )
     installHeaderResizeTooltip()
     // The dashed border on a copied range is a per-frame animation. It must
     // not keep repainting the scene while nobody is looking at it.
@@ -1815,9 +1823,24 @@ export function App(): React.JSX.Element {
     // Hold the formula engine's per-chunk recalculation while file data streams
     // in; one merged cycle follows once the chunks stop.
     installFormulaStreamHold(runtime)
-    // The window always starts blank now; still consume the one-shot
-    // new-blank flag so it doesn't leak into the next workbook open.
-    void window.desktopApi?.consumeNewBlankWorkbook?.()
+    // A new tab starts as a preview grid; the shell's per-view blank request
+    // replaces it with a private unsaved sidecar session. No user file or
+    // recent entry exists until Save commits the first real destination.
+    void window.desktopApi
+      ?.consumeNewBlankWorkbook?.()
+      .then(async (requested) => {
+        if (!requested) return
+        const opened = await window.desktopApi.openNewBlankWorkbook()
+        if (!opened) return
+        if (univerRef.current !== runtime) {
+          await window.desktopApi.closeWorkbook(opened.sessionId)
+          return
+        }
+        openLazyWorkbook(opened)
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : t('appOpenFailed'))
+      })
     // Pull any shell-queued workbook ourselves: the shell's 'open' nudge loop
     // gives up after 30s, and on slow dev cold starts Univer mounts later than
     // that — the tab would strand as a blank in-memory workbook (no save, no
@@ -2746,6 +2769,23 @@ export function App(): React.JSX.Element {
                 sharedFormulaResolverFor(runtime, params.subUnitId),
               )
         if (recorded.length === 0) return
+        const checkpointSheet = runtime.univerAPI
+          .getActiveWorkbook()
+          ?.getSheetBySheetId(params.subUnitId)
+        if (checkpointSheet)
+          for (const entry of recorded) {
+            try {
+              reconcileCellSaveCheckpoint(
+                state.editJournal,
+                params.subUnitId,
+                entry.row,
+                entry.column,
+                checkpointSheet.getRange(entry.row, entry.column, 1, 1).getCellData(),
+              )
+            } catch {
+              /* Uninstalled cells keep their journal entry conservatively. */
+            }
+          }
         setPendingEdits(journalSize(state.editJournal))
         const contentEdited = recorded.some(
           (entry) => entry.hasValue || entry.formula !== undefined,
@@ -2827,6 +2867,42 @@ export function App(): React.JSX.Element {
       (event) => {
         const state = lazyWorkbookRef.current
         if (journalSuppression.active || !state) return
+        if (
+          ROW_COLUMN_MUTATIONS[event.id] ||
+          event.id === REORDER_RANGE_MUTATION ||
+          event.id === MOVE_RANGE_MUTATION ||
+          event.id === MOVE_ROWS_MUTATION
+        )
+          invalidateCellSaveCheckpoints(state.editJournal)
+        if (event.id === SET_RANGE_VALUES_MUTATION) {
+          const options = event.options as { fromFormula?: boolean } | undefined
+          const params = event.params as
+            { subUnitId?: string; cellValue?: Record<string, Record<string, unknown>> } | undefined
+          const sheet = params?.subUnitId
+            ? runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(params.subUnitId)
+            : null
+          if (!options?.fromFormula && params?.subUnitId && sheet && params.cellValue) {
+            for (const [row, columns] of Object.entries(params.cellValue)) {
+              if (!columns || typeof columns !== 'object') continue
+              for (const column of Object.keys(columns)) {
+                const r = Number(row),
+                  c = Number(column)
+                if (Number.isInteger(r) && r >= 0 && Number.isInteger(c) && c >= 0)
+                  try {
+                    captureCellSaveCheckpoint(
+                      state.editJournal,
+                      params.subUnitId,
+                      r,
+                      c,
+                      sheet.getRange(r, c, 1, 1).getCellData(),
+                    )
+                  } catch {
+                    /* A failed checkpoint must never block an edit. */
+                  }
+              }
+            }
+          }
+        }
         if (event.id === SET_RANGE_VALUES_COMMAND || event.id === SET_RANGE_VALUES_MUTATION) {
           // Quadratic array-criteria formulas (distinct-count COUNTIF idioms
           // over 80k+ rows) freeze the main-thread formula engine for
@@ -3332,6 +3408,7 @@ export function App(): React.JSX.Element {
       contextSubmenuReopenDisposable.dispose()
       contextSubmenuExclusiveDisposable.dispose()
       contextMenuResizeCloseDisposable.dispose()
+      disposeCanvasResize()
       selectionGrabGuardDisposable.dispose()
       macCommandMultiSelectOff()
       multiRowAutofitDisposable.dispose()

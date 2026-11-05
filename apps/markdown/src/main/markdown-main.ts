@@ -1,3 +1,4 @@
+import { externalFiles, fileContentHash } from '@genoffice/electron-utils/external-files'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -432,6 +433,7 @@ export function markdownFilePath(webContentsId: number): string | undefined {
 /** The file was renamed on disk — re-grant the new path and tell the renderer */
 export function markdownFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
+  void externalFiles.renamed(wcId, oldPath, newPath)
   if (savePathByWc.get(wcId) === oldPath) savePathByWc.set(wcId, newPath)
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
   const allowed = allowedByWc.get(wcId)
@@ -622,23 +624,9 @@ async function writeTextAtomic(path: string, text: string): Promise<void> {
 async function resolveSaveTarget(
   e: Electron.IpcMainInvokeEvent,
   mode: SaveMode,
-  suggestedName?: string,
 ): Promise<string | null | 'canceled'> {
   const current = savePathByWc.get(e.sender.id)
   if (mode === 'save' && current) return current
-  // AI auto-naming: silent first save of an untitled document
-  if (mode === 'save' && !current && suggestedName) {
-    const base = suggestedName
-      .replace(/[/\\:*?"<>|]/g, '_')
-      .slice(0, 80)
-      .trim()
-    if (base) {
-      const dir = configuredDefaultSaveDir(app)
-      let target = join(dir, `${base}.md`)
-      for (let n = 1; existsSync(target); n++) target = join(dir, `${base}-${n}.md`)
-      return target
-    }
-  }
   const win =
     BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow() ?? undefined
   const defaultPath = current
@@ -732,7 +720,9 @@ function registerMarkdownIpc(): void {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       throw new Error('markdown: path not granted to this view')
     }
-    return await readFile(path, 'utf8')
+    const text = await readFile(path, 'utf8')
+    await externalFiles.remember(e.sender.id, path, fileContentHash(text))
+    return text
   })
 
   ipcMain.handle(
@@ -760,9 +750,7 @@ function registerMarkdownIpc(): void {
         ? await pendingOwnedAssetsForDocument(pathAtRequest)
         : []
       try {
-        const suggestedName =
-          typeof request.suggestedName === 'string' ? request.suggestedName : undefined
-        const target = await resolveSaveTarget(e, mode, suggestedName)
+        const target = await resolveSaveTarget(e, mode)
         if (target === 'canceled') return done({ ok: true, canceled: true })
         if (!target) return done({ ok: false, error: 'markdown: no save target' })
         const currentPath = pathAtRequest
@@ -781,11 +769,12 @@ function registerMarkdownIpc(): void {
         const textToWrite = prepared?.text ?? request.text
         const savedImageSources = prepared?.imageSources ?? imageSources
         try {
-          await writeTextAtomic(target, textToWrite)
+          await externalFiles.write(e.sender.id, target, () => writeTextAtomic(target, textToWrite))
         } catch (error) {
           if (prepared) await rollbackPreparedSaveAsAssets(prepared).catch(() => {})
           throw error
         }
+        await externalFiles.remember(e.sender.id, target, fileContentHash(textToWrite))
         savePathByWc.set(e.sender.id, target)
         // keep the reload path in sync — a stale openPathByWc would make a
         // reloaded renderer load the OLD file and then save it over the new one
@@ -1099,6 +1088,20 @@ function registerMarkdownIpc(): void {
 }
 
 function grantAndTrack(wc: WebContents, openPath?: string | null): void {
+  externalFiles.attach(wc, {
+    language: getUiLang,
+    isDirty: () => markdownIsDirty(wc.id),
+    reload: async (path) => {
+      await readFile(path) // Keep the live editor if the source is no longer readable.
+      await markdownDiscardPendingAssets(wc)
+      dirtyByWc.delete(wc.id)
+      openPathByWc.set(wc.id, path)
+      wc.reload()
+    },
+    saveCopy: () => {
+      void requestMarkdownSave(wc, 'saveAs')
+    },
+  })
   const wcId = wc.id
   if (openPath && existsSync(openPath)) {
     openPathByWc.set(wcId, openPath)

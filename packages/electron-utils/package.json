@@ -6,6 +6,8 @@
   "type": "module",
   "description": "Shared helpers for the Electron main processes (no Electron dependency, pure TS)",
   "exports": {
+    "./external-files": "./src/external-files.ts",
+    "./ai-settings-preload": "./src/ai-settings-preload.ts",
     ".": "./src/index.ts",
     "./drop-open": "./src/drop-open.ts",
     "./generated-images": "./src/generated-images.ts",

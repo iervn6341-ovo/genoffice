@@ -92,12 +92,24 @@ test('custom TOC settings and page-only/full updates retain native fields throug
     expect(xml).toContain('<w:fldSimple w:instr=" DATE ">')
     expect(xml).toContain('<w:drawing>')
 
-    await page
-      .locator('.doc-page.ProseMirror')
-      .getByText('CHAPTER_ONE', { exact: true })
-      .last()
-      .click()
-    await page.keyboard.press('End')
+    // Select the live heading explicitly: the cached TOC has the same title,
+    // and a layout-settling click can otherwise land in its adjacent blank row.
+    await page.evaluate(() => {
+      const editor = (window as any).__aidocs.editor
+      editor.state.doc.forEach((node: any, pos: number) => {
+        if (node.type.name === 'docHeading' && node.textContent === 'CHAPTER_ONE') {
+          editor.commands.setTextSelection(pos + node.nodeSize - 1)
+        }
+      })
+      editor.commands.focus()
+    })
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as any).__aidocs.editor.state.selection.$from.parent.textContent,
+        ),
+      )
+      .toBe('CHAPTER_ONE')
     await page.keyboard.type('_EDITED')
     await updateToc(page, 'pages')
     await page.keyboard.press('ControlOrMeta+s')

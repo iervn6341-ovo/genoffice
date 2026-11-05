@@ -612,6 +612,8 @@ export const th = {
   ribbonDlgHeaderFooter: 'หัวกระดาษและท้ายกระดาษ',
   ribbonDlgSlidesTab: 'สไลด์',
   ribbonDlgNotesHandoutsTab: 'บันทึกย่อและเอกสารประกอบ',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'เริ่มที่',
   ribbonDlgHeader: 'หัวกระดาษ',
   ribbonDlgHeaderPlaceholder: 'ข้อความหัวกระดาษ',

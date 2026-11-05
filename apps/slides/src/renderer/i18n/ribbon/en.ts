@@ -618,6 +618,8 @@ export const en = {
   ribbonDlgHeaderFooter: 'Header and Footer',
   ribbonDlgSlidesTab: 'Slides',
   ribbonDlgNotesHandoutsTab: 'Notes and Handouts',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Start at',
   ribbonDlgHeader: 'Header',
   ribbonDlgHeaderPlaceholder: 'Header text',

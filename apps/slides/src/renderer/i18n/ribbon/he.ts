@@ -607,6 +607,8 @@ export const he = {
   ribbonDlgHeaderFooter: 'כותרת עליונה ותחתונה',
   ribbonDlgSlidesTab: 'שקופיות',
   ribbonDlgNotesHandoutsTab: 'הערות ודפי מידע',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'התחל ב־',
   ribbonDlgHeader: 'כותרת עליונה',
   ribbonDlgHeaderPlaceholder: 'טקסט כותרת עליונה',

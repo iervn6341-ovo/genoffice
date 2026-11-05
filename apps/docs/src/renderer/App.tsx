@@ -1,3 +1,5 @@
+import { numberingSectionBreak, withPageNumber, withoutPageNumber } from './editor/page-numbering'
+import { useAiSettingsSync } from '@genoffice/ui'
 import { DOC_CSS_COMMITTED_EVENT } from './editor/cjk-punct-shrink'
 import { refreshLayoutMeasurement } from './editor/layout-measure-refresh'
 import { nextNoteReference } from './editor/note-navigation'
@@ -265,7 +267,7 @@ import { useShallowStable, useStableCallbacks } from './use-stable'
 import { FindPanel } from './components/FindPanel'
 import { Ribbon } from './components/Ribbon'
 import { computeFormatState } from './components/ribbon-format-state'
-import { IconOutlineView, IconRedo, IconSave, IconUndo } from './components/icons'
+import { IconRedo, IconSave, IconUndo } from './components/icons'
 import { ToastHost } from './components/toast'
 import {
   AI_REWRITE_ACK_KEY,
@@ -334,7 +336,12 @@ import {
   type SpacingFields,
 } from './editor/paragraph-spacing'
 import { StylesPane } from './components/StylesPane'
-import { isDocDirty } from './doc-dirty'
+import {
+  bodyDirtyAgainstSaved,
+  forceBodyDirty,
+  isDocDirty,
+  persistedBodyChanged,
+} from './doc-dirty'
 import {
   EMPTY_HF_VARIANTS,
   hfFromPart,
@@ -781,12 +788,21 @@ export function App() {
     setHfViewState(v)
     setHfViewTouched(true)
   }
+  const numberPageBoundaries = useRef<{
+    doc: unknown
+    pages: PageSlice[]
+    blocks: BlockBox[]
+    factor: number
+  } | null>(null)
   const [pageInfo, setPageInfo] = useState({ current: 1, total: 1 })
   // last page's number for the document-end footer: text for the page marker, num for
   // even/odd parity (section restarts / pageNumberFmt make both differ from the physical count)
   const [lastPageNo, setLastPageNo] = useState<{ text: string; num: number } | null>(null)
   /** Page-number-format dialog + pending final-section pgNumType write (non-final sections rewrite sectPr via pgNumDirtySections) */
   const [pgNumModal, setPgNumModal] = useState<{
+    fromPage: string
+    hideBefore: boolean
+    physical: boolean
     fmt: string
     start: string
     chapStyle: number | null
@@ -1037,6 +1053,7 @@ export function App() {
   const layoutSnapshot = (): LayoutSnapshot => ({
     section,
     sectionDirty,
+    fullSections: sections,
     sections: sectionLayouts(sections),
     sectionsDirty,
     titlePg,
@@ -1105,7 +1122,7 @@ export function App() {
     }
     setSection(s.section)
     setSectionDirty(s.sectionDirty)
-    const restoredSections = applySectionLayouts(sections, s.sections)
+    const restoredSections = applySectionLayouts(s.fullSections ?? sections, s.sections)
     const numberingBaseline = doc ? readSections(doc.parsed) : []
     const numberingEdits = pageNumberEditsAgainstBaseline(restoredSections, numberingBaseline)
     setSections(restoredSections)
@@ -1144,6 +1161,7 @@ export function App() {
   }
   const layoutRef = useRef({ snapshot: layoutSnapshot, apply: applyLayoutSnapshot })
   layoutRef.current = { snapshot: layoutSnapshot, apply: applyLayoutSnapshot }
+  const savedLayoutRef = useRef<LayoutSnapshot | null>(null)
   const commitLayout = (change: (before: LayoutSnapshot) => Partial<LayoutSnapshot>) => {
     const before = layoutRef.current.snapshot()
     const after: LayoutSnapshot = { ...before, ...change(before) }
@@ -1201,10 +1219,6 @@ export function App() {
   const [showNav, setShowNav] = useState(() => localStorage.getItem('aidocs.showNav') === '1')
   const closeNav = useCallback(() => setShowNav(false), [])
   const [showFloatingOutline, setShowFloatingOutline] = useState(false)
-  const [hasRightGutter, setHasRightGutter] = useState<boolean>(() => {
-    return typeof window !== 'undefined' ? window.innerWidth >= 1080 : true
-  })
-  const [activeHeadingText, setActiveHeadingText] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('print')
   const [readMode, setReadMode] = useState(false)
   const [showGrid, setShowGrid] = useState(false)
@@ -1641,8 +1655,10 @@ export function App() {
     onSelectionUpdate: () => forceRender(),
     // typing in the main document takes ribbon routing back from any textbox
     onFocus: () => setActiveSubEditor(null),
-    onUpdate: () => {
-      dirtyRef.current = true
+    onUpdate: ({ editor: updated, transaction }) => {
+      const againstSaved = bodyDirtyAgainstSaved(updated)
+      if (againstSaved !== null) dirtyRef.current = againstSaved
+      else if (persistedBodyChanged(transaction.before, updated.state.doc)) dirtyRef.current = true
       forceRender()
     },
   })
@@ -1653,7 +1669,9 @@ export function App() {
     const onTransaction = ({ transaction }: { transaction: Transaction }) => {
       const restored = restoredLayout(transaction, transaction.before.attrs[LAYOUT_ATTR])
       if (restored) {
-        layoutRef.current.apply(withRestoreDirty(restored, layoutRef.current.snapshot()))
+        layoutRef.current.apply(
+          withRestoreDirty(restored, layoutRef.current.snapshot(), savedLayoutRef.current),
+        )
       }
     }
     editor.on('transaction', onTransaction)
@@ -1673,9 +1691,10 @@ export function App() {
     [],
   )
 
+  useAiSettingsSync(setSettings)
+
   useEffect(() => {
     void window.desktop.getRecentFiles().then(setRecent)
-    void window.desktop.getAiSettings().then(setSettings)
   }, [])
 
   useEffect(() => {
@@ -1689,32 +1708,6 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('aidocs.showFloatingOutline', showFloatingOutline ? '1' : '0')
   }, [showFloatingOutline])
-
-  useEffect(() => {
-    const el = scrollContainerRef.current
-    if (!el) return
-    const updateGutter = () => {
-      const area = el.closest('.editor-area') ?? el
-      const page = el.querySelector('.doc-page')
-      if (!area || !page) {
-        setHasRightGutter(window.innerWidth >= 1080)
-        return
-      }
-      const areaRect = area.getBoundingClientRect()
-      const pageRect = page.getBoundingClientRect()
-      const rightGutter = areaRect.right - pageRect.right
-      const fits = rightGutter >= 80 && areaRect.width >= 960
-      setHasRightGutter(fits)
-    }
-    updateGutter()
-    const ro = new ResizeObserver(updateGutter)
-    ro.observe(el)
-    window.addEventListener('resize', updateGutter)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', updateGutter)
-    }
-  }, [doc])
 
   const spellcheckWasOn = useRef(spellcheck)
   const respellKickBusy = useRef(false)
@@ -2294,6 +2287,11 @@ export function App() {
     },
   }
 
+  const savedParsedDoc = doc?.parsed
+  useLayoutEffect(() => {
+    savedLayoutRef.current = savedParsedDoc ? layoutRef.current.snapshot() : null
+  }, [savedParsedDoc])
+
   const loadFile = useCallback(async (result: OpenDocxResult) => {
     const outcome = await loadFileImpl(fileCtxRef.current, result)
     // a failed open with no document yet (boot, or the open that superseded the
@@ -2343,7 +2341,11 @@ export function App() {
 
         // 'password': the prompt is up; its cancel path lands on blank instead.
         const outcome = pending ? await loadFile(pending) : 'canceled'
-        if (outcome === 'canceled') await newFile()
+        if (outcome === 'canceled') {
+          const recovery = aiContent ? null : await window.desktop.consumeUntitledRecovery()
+          if (recovery) await loadFile(recovery)
+          else await newFile()
+        }
         if (aiContent && !pending) {
           // fileCtxRef refreshes per render: wait until newFile's setDoc landed
           for (let i = 0; i < 100 && !fileCtxRef.current.doc; i++) {
@@ -2413,6 +2415,7 @@ export function App() {
       if (res.ok) {
         setDoc((d) => (d ? { ...d, encrypted: !!result.openPassword } : d))
         // the on-disk file only changes on the next save
+        forceBodyDirty(editor)
         dirtyRef.current = true
         changed = true
       }
@@ -2850,12 +2853,15 @@ export function App() {
   const openPgNumModal = useCallback(() => {
     const sec = sections[Math.min(activeSection, sections.length - 1)]
     setPgNumModal({
+      fromPage: String(pageInfo.current),
+      hideBefore: true,
+      physical: false,
       fmt: sec?.pageNumberFmt ?? 'decimal',
       start: sec?.pageNumberStart !== undefined ? String(sec.pageNumberStart) : '',
       chapStyle: sec?.pageNumberChapterStyle ?? null,
       chapSep: sec?.pageNumberChapterSeparator ?? 'hyphen',
     })
-  }, [sections, activeSection])
+  }, [sections, activeSection, pageInfo.current])
 
   const numberedHeadingLevels = Array.from({ length: 9 }, (_, i) => i + 1).filter((level) => {
     const parsed = doc?.parsed
@@ -2875,6 +2881,134 @@ export function App() {
   /** Apply the page-number format to the cursor's section: final section via SaveOptions.pgNumType, others rewrite their sectPr */
   const applyPgNumFormat = useCallback(() => {
     if (!pgNumModal) return
+    if (pgNumModal.physical && editor) {
+      const fromPage = Number(pgNumModal.fromPage),
+        start = Number(pgNumModal.start)
+      const boundaries = numberPageBoundaries.current
+      if (
+        !Number.isInteger(fromPage) ||
+        fromPage < 1 ||
+        fromPage > pageInfo.total ||
+        pgNumModal.start.trim() === '' ||
+        !Number.isInteger(start) ||
+        start < 0 ||
+        start > 32767
+      )
+        return
+      const boundary = boundaries?.pages[fromPage - 1]
+      if (!boundaries || boundaries.doc !== editor.state.doc || !boundary) {
+        setStatus(t('appPageNumberBoundaryUnavailable'))
+        return
+      }
+      let boundaryPos: number | undefined = fromPage === 1 ? 0 : undefined
+      if (fromPage > 1) {
+        const block = boundaries.blocks.find((b) => b.el && b.top + b.height > boundary.start + 0.5)
+        const pm = editor.view.dom
+        const natural = pm.classList.contains('measuring-natural')
+        pm.classList.add('measuring-natural')
+        try {
+          if (block?.el) {
+            if (boundary.start > block.top + 1.5) {
+              const anchor =
+                lineStartAnchor(block.el, boundary.start - block.top, boundaries.factor) ??
+                nextLineAnchor(block.el, boundary.start - block.top, boundaries.factor)
+              boundaryPos = anchor ? posFromAnchor(editor.view, anchor) : undefined
+            } else {
+              const resolved = editor.state.doc.resolve(editor.view.posAtDOM(block.el, 0))
+              boundaryPos = resolved.depth ? resolved.before(1) : resolved.pos
+            }
+          }
+        } catch {
+          /* A stale DOM boundary must be remeasured before editing. */
+        } finally {
+          if (!natural) pm.classList.remove('measuring-natural')
+        }
+      }
+      if (boundaryPos === undefined) {
+        setStatus(t('appPageNumberBoundaryUnavailable'))
+        return
+      }
+      const before = layoutRef.current.snapshot()
+      let next = [...sections],
+        target = boundary.section
+      let mutate:
+        | ((tr: import('@tiptap/pm/state').Transaction) => import('@tiptap/pm/state').Transaction)
+        | undefined
+      const alreadyStarts = fromPage === 1 || boundaries.pages[fromPage - 2]?.section !== target
+      if (!alreadyStarts) {
+        try {
+          const split = numberingSectionBreak(
+            editor,
+            boundaryPos,
+            sections,
+            target,
+            effectiveSectPrXml(target) ?? sections[target].sectPrXml,
+          )
+          next = split.sections
+          target = split.target
+          mutate = split.mutate
+        } catch {
+          setStatus(t('appPageNumberInsideTable'))
+          return
+        }
+      }
+      next = next.map((sec, i) =>
+        i < target
+          ? sec
+          : {
+              ...sec,
+              ...(i === target && target > 0 ? { startType: 'nextPage' as const } : {}),
+              pageNumberStart: i === target ? start : undefined,
+              pageNumberFmt: pgNumModal.fmt === 'decimal' ? undefined : pgNumModal.fmt,
+              pageNumberChapterStyle: pgNumModal.chapStyle ?? undefined,
+              pageNumberChapterSeparator:
+                pgNumModal.chapStyle === null ? undefined : pgNumModal.chapSep,
+            },
+      )
+      const edits = { ...before.sectionHfEdits },
+        links = { ...before.sectionHfLinkEdits },
+        refs = { ...before.sectionHfRefEdits }
+      next.forEach((sec, i) => {
+        // A new prefix and suffix inherit the original owner's effective parts.
+        const source = mutate
+          ? i === target - 1 || i === target
+            ? target - 1
+            : i > target
+              ? i - 1
+              : i
+          : i
+        for (const kind of ['header', 'footer'] as const)
+          for (const view of ['default', 'first', 'even'] as const) {
+            const hf = sectionHfAt(source, kind, view)
+            const key = `${sec.lastBlockIndex}:${kind}:${view}`
+            if (i < target && pgNumModal.hideBefore) edits[key] = withoutPageNumber(hf)
+            else if (i >= target) {
+              const headerHasNumber =
+                sectionHfAt(source, 'header', view)?.pageNumber ||
+                sectionHfAt(source, 'header', view)?.text.includes('\uE001')
+              edits[key] =
+                kind === 'footer' && !headerHasNumber ? withPageNumber(hf) : (hf ?? { text: '' })
+            } else if (mutate && i === target - 1) edits[key] = hf ?? { text: '' }
+            else continue
+            delete links[key]
+            delete refs[key]
+          }
+      })
+      const after: LayoutSnapshot = {
+        ...before,
+        fullSections: next,
+        sections: sectionLayouts(next),
+        pgNumDirtySections: next.slice(0, -1).map((_, i) => i),
+        sectionHfEdits: edits,
+        sectionHfLinkEdits: links,
+        sectionHfRefEdits: refs,
+      }
+      layoutRef.current.apply(after)
+      recordLayoutChange(editor, before, after, mutate)
+      setPgNumModal(null)
+      setStatus(t('appPgNumFormatSet'))
+      return
+    }
     const fmt = pgNumModal.fmt === 'decimal' ? undefined : pgNumModal.fmt
     const start =
       pgNumModal.start.trim() === '' ? undefined : Math.max(0, parseInt(pgNumModal.start, 10) || 0)
@@ -2912,7 +3046,7 @@ export function App() {
     requestAnimationFrame(() => editor?.commands.focus())
     setStatus(t('appPgNumFormatSet'))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- commitLayout reads the live layout through layoutRef
-  }, [pgNumModal, sections, activeSection, editor])
+  }, [pgNumModal, sections, activeSection, editor, pageInfo.total, sectionHfAt])
 
   const exportPdf = useCallback(
     (outPath?: string) => exportPdfImpl(fileCtxRef.current, outPath),
@@ -4255,6 +4389,10 @@ export function App() {
         oversizeClips,
       } = measured
       slices = measured.s
+      // Keep the existing pagination result; resolve just the requested page on Apply.
+      // Measuring every line of every page here would penalize normal editing of large documents.
+      if (editor)
+        numberPageBoundaries.current = { doc: editor.state.doc, pages: slices, blocks, factor }
       const measuredPageNotes = pageFootnotesOf(blocks, slices)
       const measuredNoteNumbers = Object.fromEntries(
         measuredPageNotes.flatMap((page) => page.map((item) => [item.id, item.no])),
@@ -5464,15 +5602,18 @@ export function App() {
 
   // "has unsaved changes" check shared by the close guard and autosave; refreshed on every
   // render (all edit paths forceRender), so the guard's query reads the latest value
-  const anyDirtyRef = useRef(false)
   const hasUnsavedChanges = isDocDirty(fileCtxRef.current)
-  anyDirtyRef.current = hasUnsavedChanges
 
   // close guard: the main process queries dirty state before closing a tab/window; choosing "Save" runs a full save and reports back
   useEffect(() => {
     const offCheck = window.desktop.onCloseCheck?.(() => {
+      // Flush a live textbox before comparing with the saved body, including
+      // a local Undo that restored the box without a parent transaction.
+      window.dispatchEvent(new Event('ai-docs-commit-tables'))
+      const bodyDirty = bodyDirtyAgainstSaved(editor)
+      if (bodyDirty !== null) dirtyRef.current = bodyDirty
       window.desktop.reportCloseCheck({
-        dirty: !!doc && (anyDirtyRef.current || dirtyRef.current),
+        dirty: !!doc && isDocDirty(fileCtxRef.current),
         autoSave: autoSave && !!doc?.filePath,
         filePath: doc?.filePath ?? null,
       })
@@ -5496,7 +5637,7 @@ export function App() {
       offCheck?.()
       offSave?.()
     }
-  }, [doc, save, autoSave])
+  }, [doc, save, autoSave, editor])
 
   // autosave: every 30s and on window blur, silently persist pending changes
   useEffect(() => {
@@ -5515,21 +5656,6 @@ export function App() {
       window.removeEventListener('blur', tick)
     }
   }, [tornDown, autoSave, doc, editor, save])
-
-  // After an AI run finishes on a never-saved document, silently save it once: the
-  // first save derives the file name from the first heading (see deriveAutoFileName
-  // in file-actions), which also renames the shell tab — mirrors slides, where AI
-  // generation names and persists the draft deck.
-  useEffect(() => {
-    const handler = () => {
-      const cur = fileCtxRef.current
-      if (!cur.doc || cur.doc.filePath || !anyDirtyRef.current) return
-      if (editor?.view.composing) return
-      void save(false, true)
-    }
-    window.addEventListener('ai-docs-run-done', handler)
-    return () => window.removeEventListener('ai-docs-run-done', handler)
-  }, [editor, save])
 
   useEffect(() => {
     // editing shortcuts only fire when focus is in an editor surface (main
@@ -7114,14 +7240,14 @@ export function App() {
                   editor={editor}
                   doc={editor.state.doc}
                   visible={showFloatingOutline}
-                  isDark={Boolean(darkPage || themeDark)}
-                  canFitRightGutter={hasRightGutter}
-                  onClose={() => setShowFloatingOutline(false)}
-                  onActiveHeadingChange={setActiveHeadingText}
+                  onVisibleChange={setShowFloatingOutline}
+                  scrollRef={scrollContainerRef}
+                  zoom={zoom}
                 />
               )}
               <main
                 className={imageDragOver ? 'editor-scroll image-drop-target' : 'editor-scroll'}
+                aria-busy={docLoading}
                 ref={scrollContainerRef}
                 onScroll={(e) => {
                   scrollPosRef.current = {
@@ -7433,28 +7559,25 @@ export function App() {
                   >
                     {t('appWordCountN', { n: wordCount })}
                   </button>
-                  {!hasRightGutter && (
-                    <button
-                      className={`status-item status-outline-btn ${showFloatingOutline ? 'active' : ''}`}
-                      data-tip={lang === 'zh-TW' ? '目錄與大綱導覽' : lang === 'zh' ? '目录与大纲导航' : 'Outline & TOC'}
-                      onClick={() => setShowFloatingOutline((prev) => !prev)}
-                    >
-                      <IconOutlineView size={12} />
-                      <span className="status-outline-text">
-                        {activeHeadingText ? activeHeadingText : (lang === 'zh-TW' ? '目錄' : 'Outline')}
-                      </span>
-                    </button>
-                  )}
                 </>
               )}
               {!doc && t('appReady')}
-              {status && (
+              {(status || docLoading) && (
                 <span
                   className={`status-msg ${missingFonts.length > 0 ? 'status-font-clickable' : ''}`}
-                  onClick={missingFonts.length > 0 ? () => setShowMissingFontsDialog(true) : undefined}
-                  title={missingFonts.length > 0 ? (lang === 'zh-TW' ? '點擊檢視字型替換對照表' : 'Click to view font substitution details') : undefined}
+                  onClick={
+                    missingFonts.length > 0 ? () => setShowMissingFontsDialog(true) : undefined
+                  }
+                  title={
+                    missingFonts.length > 0
+                      ? lang === 'zh-TW'
+                        ? '點擊檢視字型替換對照表'
+                        : 'Click to view font substitution details'
+                      : undefined
+                  }
                 >
-                  {' '}— {status}
+                  {' '}
+                  — {docLoading ? t('appStartOpening') : status}
                 </span>
               )}
             </div>
@@ -7802,6 +7925,45 @@ export function App() {
           <div className="modal">
             <h2>{t('appPageNumFormatTitle')}</h2>
             <label className="pgnum-row">
+              <input
+                data-testid="pgnum-physical"
+                type="checkbox"
+                checked={pgNumModal.physical}
+                onChange={(e) =>
+                  setPgNumModal({
+                    ...pgNumModal,
+                    physical: e.target.checked,
+                    start: pgNumModal.start || '1',
+                  })
+                }
+              />
+              {t('appPageNumberPhysical')}
+            </label>
+            {pgNumModal.physical && (
+              <>
+                <label className="pgnum-row">
+                  {t('appPageNumberFromPage')}
+                  <input
+                    data-testid="pgnum-from-page"
+                    type="number"
+                    min={1}
+                    max={pageInfo.total}
+                    value={pgNumModal.fromPage}
+                    onChange={(e) => setPgNumModal({ ...pgNumModal, fromPage: e.target.value })}
+                  />
+                </label>
+                <label className="pgnum-row">
+                  <input
+                    data-testid="pgnum-hide-before"
+                    type="checkbox"
+                    checked={pgNumModal.hideBefore}
+                    onChange={(e) => setPgNumModal({ ...pgNumModal, hideBefore: e.target.checked })}
+                  />
+                  {t('appPageNumberHideBefore')}
+                </label>
+              </>
+            )}
+            <label className="pgnum-row">
               {t('appNumberFormat')}
               <Dropdown
                 value={pgNumModal.fmt}
@@ -7908,6 +8070,7 @@ export function App() {
               <input
                 type="radio"
                 name="pgnum-start"
+                disabled={pgNumModal.physical}
                 checked={pgNumModal.start === ''}
                 onChange={() => setPgNumModal({ ...pgNumModal, start: '' })}
               />
@@ -7930,7 +8093,7 @@ export function App() {
               />
             </label>
             <p className="pgnum-hint">
-              {t('appPgNumHintBlank')}
+              {pgNumModal.physical ? t('appPageNumberSectionHint') : t('appPgNumHintBlank')}
               {sections.length > 1
                 ? t('appPgNumAppliesTo', { n: Math.min(activeSection, sections.length - 1) + 1 })
                 : ''}

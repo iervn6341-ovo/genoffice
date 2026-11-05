@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core'
+import { carrySavedTocHistorySource } from '../doc-dirty'
 import type { Node as PmNode } from '@tiptap/pm/model'
 import { closeHistory } from '@tiptap/pm/history'
 import type { Block, StyleInfo, TocEntry, TocOptions } from '@genoffice/docx-engine'
@@ -157,6 +158,7 @@ export function preserveTocHistorySource(
   for (const { pos, node, xml } of region.nodes) {
     const inner = innerTocXml(xml, node.attrs.docxIndex, blocks)
     if (!inner || node.attrs.genXml === inner) continue
+    carrySavedTocHistorySource(editor, node, inner)
     tr.setNodeMarkup(pos, undefined, { ...node.attrs, genXml: inner })
   }
   if (tr.docChanged)

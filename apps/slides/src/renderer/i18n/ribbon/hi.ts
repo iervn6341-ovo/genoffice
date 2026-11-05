@@ -628,6 +628,8 @@ export const hi = {
   ribbonDlgHeaderFooter: 'शीर्षलेख और पादलेख',
   ribbonDlgSlidesTab: 'स्लाइड',
   ribbonDlgNotesHandoutsTab: 'नोट्स और हैंडआउट',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'यहाँ से शुरू करें',
   ribbonDlgHeader: 'शीर्षलेख',
   ribbonDlgHeaderPlaceholder: 'शीर्षलेख पाठ',

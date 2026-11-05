@@ -299,6 +299,8 @@ export interface DesktopApi {
   consumePendingOpenDocx(): Promise<OpenDocxResult>
   /** returns true when this tab was created via "New Document" and should start blank */
   consumeNewBlankDoc(): Promise<boolean>
+  /** Restore a crash copy of an untitled draft without assigning a save path. */
+  consumeUntitledRecovery(): Promise<OpenDocxResult>
   /** AI-authored content queued for this tab by create_document; one-shot, null when none */
   consumeAiDocContent(): Promise<AiDocContent | null>
   /** Headless export mode: the path and format this hidden renderer must export, null in normal use */
@@ -311,9 +313,8 @@ export interface DesktopApi {
   onOpenDocx(handler: (result: Exclude<OpenDocxResult, null>) => void): () => void
   /** File was renamed externally (renamed in the shell Home list) — pushes old and new paths; renderer syncs its save path and title bar */
   onRenamedDocx(handler: (paths: { oldPath: string; newPath: string }) => void): () => void
-  /** auto=true marks an autosave: an externally modified file then fails with
-   *  reason 'external-modified' instead of prompting (manual saves get an
-   *  Overwrite/Cancel dialog in the main process) */
+  /** auto=true marks an autosave. Externally modified files are never overwritten;
+   *  the shared external-file notice offers keeping edits, saving a copy, or reloading. */
   saveDocx(
     path: string,
     data: ArrayBuffer,
@@ -330,6 +331,7 @@ export interface DesktopApi {
   }>
   /** crash-recovery copy of a dirty document, stored under userData */
   writeRecoveryCopy(path: string, data: ArrayBuffer): Promise<{ ok: boolean }>
+  writeUntitledRecoveryCopy(data: ArrayBuffer): Promise<{ ok: boolean }>
   /** tab closed but webContents kept alive (shell freeze workaround) — stop background timers */
   onTeardown(handler: () => void): () => void
   /** one trusted space keystroke into this webContents — the only thing that

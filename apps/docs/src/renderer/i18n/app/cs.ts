@@ -105,6 +105,15 @@ export const cs = {
   appStyleUpdated: 'Styl „{name}“ aktualizován podle výběru; do dokumentu se zapíše při uložení',
   appStyleCreated: 'Styl „{name}“ vytvořen a použit na výběr',
   appPgNumFormatSet: 'Formát čísel stránek nastaven',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Formát čísel stránek',
   appNumberFormat: 'Formát čísla',
   appIncludeChapterNumber: 'Zahrnout číslo kapitoly',

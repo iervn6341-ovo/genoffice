@@ -30,6 +30,7 @@ export const zhTW = {
   appStatusFormatPasted: '已貼上格式',
   appStatusBrushOnce: '按一下目標元素以套用格式；按兩下按鈕進入連續模式',
   appStatusBrushContinuous: '連續複製格式模式，按 Esc 離開',
+  appStatusFormatApplyFailed: "無法套用格式，請重新選擇目標後重試。",
   appStatusFormatApplied: '已套用格式',
   appStatusTableInserted: '已插入 {rows} × {cols} 表格',
   appStatusIconInserted: '已插入圖示「{name}」',

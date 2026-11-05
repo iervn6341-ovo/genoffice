@@ -32,6 +32,7 @@ export const ms = {
   appStatusBrushOnce:
     'Klik elemen sasaran untuk menggunakan format; dwiklik butang untuk mod berterusan',
   appStatusBrushContinuous: 'Mod berterusan Penyalin Format; tekan Esc untuk keluar',
+  appStatusFormatApplyFailed: "Format tidak dapat digunakan. Pilih semula sasaran dan cuba lagi.",
   appStatusFormatApplied: 'Format digunakan',
   appStatusTableInserted: 'Jadual {rows} × {cols} diselitkan',
   appStatusIconInserted: 'Ikon "{name}" diselitkan',

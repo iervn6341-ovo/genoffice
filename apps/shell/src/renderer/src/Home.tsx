@@ -714,7 +714,7 @@ function DropToOpenOverlay(): ReactElement | null {
 
 // ── Main component ──────────────────────────────────────
 
-export function Home() {
+export function Home({ active }: { active: boolean }) {
   const i18n = useI18n()
   const { t, lang } = i18n
   // ── Paged list state (rows loaded for the current view + filter) ──
@@ -892,6 +892,12 @@ export function Home() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [])
+
+  // The shell window stays focused while WebContentsView tabs cover Home, so
+  // returning to Home needs its own refresh to show newly saved documents.
+  useEffect(() => {
+    if (active) refreshRef.current()
+  }, [active])
 
   const hasMore = entries.length < listTotal
 
@@ -1702,6 +1708,24 @@ export function Home() {
             ref={rowMenu === entry.path ? rowMenuWrapRef : undefined}
             onClick={(event) => event.stopPropagation()}
           >
+            {context === 'global' && view === 'recent' && (
+              <button
+                className="remove-recent-btn"
+                aria-label={t('removeFromList')}
+                title={t('removeFromList')}
+                onClick={() => removeRecent([entry.path])}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M4 4l8 8m0-8l-8 8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
             <button
               className="more-btn"
               aria-label={t('moreActions')}

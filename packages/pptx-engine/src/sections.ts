@@ -1,3 +1,4 @@
+import { refreshSlideNumbers } from './headerfooter'
 /**
  * Section read/write — modeled after PowerPoint's "sections".
  *
@@ -317,6 +318,7 @@ export function moveSlide(opened: OpenedPptx, fromIndex: number, toIndex: number
     }))
     setSections(opened, rebuilt)
   }
+  refreshSlideNumbers(opened)
   return true
 }
 
@@ -371,5 +373,6 @@ export function moveSection(
     return { ...s, slideIndices: indices }
   })
   setSections(opened, rebuilt)
+  refreshSlideNumbers(opened)
   return getSections(opened)
 }

@@ -1,3 +1,4 @@
+import { AiModelProfilePicker, useAiSettingsSync } from '@genoffice/ui'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react'
@@ -249,6 +250,9 @@ export function AiPanel({
     dock?.style.setProperty('--ai-panel-width', `${panelWidth}px`)
   }, [panelWidth])
   const settingsRef = useRef<AiSettings | null>(null)
+  useAiSettingsSync((next) => {
+    settingsRef.current = next
+  })
   const langRef = useRef(lang)
   langRef.current = lang
   const apiRef = useRef(api)
@@ -603,6 +607,7 @@ export function AiPanel({
           <AssistantMark size={22} />
           AI
         </span>
+        <AiModelProfilePicker lang={lang} disabled={busy} />
         <div className="ai-panel-header-actions">
           <AiPanelSideButton
             lang={lang}

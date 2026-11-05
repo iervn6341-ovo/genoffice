@@ -65,7 +65,7 @@ export function buildSteps(items: AnimationItem[]): AnimStep[] {
     }
     const base = it.trigger === 'afterPrev' ? prevEnd : it.trigger === 'withPrev' ? prevStart : 0
     const start = base + Math.max(0, it.delayMs)
-    const end = start + Math.max(1, it.durationMs)
+    const end = start + Math.max(0, it.durationMs)
     const step = steps[steps.length - 1]!
     step.items.push({ item: it, startMs: start, endMs: end })
     step.totalMs = Math.max(step.totalMs, end)
@@ -366,7 +366,11 @@ export function computeNodeStates(
       if (si < played) p = 1
       else if (si === played && activeMs != null) {
         p =
-          activeMs <= t.startMs ? null : Math.min(1, (activeMs - t.startMs) / (t.endMs - t.startMs))
+          activeMs < t.startMs || (activeMs === t.startMs && t.endMs > t.startMs)
+            ? null
+            : t.endMs === t.startMs
+              ? 1
+              : Math.min(1, (activeMs - t.startMs) / (t.endMs - t.startMs))
       } else p = null
       if (p == null) continue
       // Playing/finished: reset to normal first, then apply this effect (later animations on the same node override earlier ones)

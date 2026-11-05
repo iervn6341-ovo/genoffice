@@ -32,6 +32,7 @@ export const hi = {
   appStatusBrushOnce:
     'स्वरूपण लागू करने के लिए लक्ष्य तत्व पर क्लिक करें; निरंतर मोड के लिए बटन पर डबल-क्लिक करें',
   appStatusBrushContinuous: 'निरंतर स्वरूप पेंटर मोड; बाहर निकलने के लिए Esc दबाएँ',
+  appStatusFormatApplyFailed: "फ़ॉर्मैट लागू नहीं हो सका। लक्ष्य फिर से चुनें और दोबारा कोशिश करें।",
   appStatusFormatApplied: 'स्वरूपण लागू किया गया',
   appStatusTableInserted: '{rows} × {cols} तालिका सम्मिलित की गई',
   appStatusIconInserted: 'आइकन "{name}" सम्मिलित किया गया',

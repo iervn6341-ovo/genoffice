@@ -32,6 +32,7 @@ export const es = {
   appStatusBrushOnce:
     'Haga clic en un elemento de destino para aplicar el formato; haga doble clic en el botón para el modo continuo',
   appStatusBrushContinuous: 'Modo continuo de Copiar formato; presione Esc para salir',
+  appStatusFormatApplyFailed: "No se pudo aplicar el formato. Selecciona el destino de nuevo y reinténtalo.",
   appStatusFormatApplied: 'Formato aplicado',
   appStatusTableInserted: 'Se insertó una tabla de {rows} × {cols}',
   appStatusIconInserted: 'Se insertó el icono «{name}»',

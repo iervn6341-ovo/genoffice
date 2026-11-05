@@ -4,7 +4,9 @@ import type { AiSettings, AiStreamChunk, AiStreamRequest } from '@genoffice/ai-p
 
 export const PDF_CHANNELS = {
   consumePending: 'pdf:consume-pending',
+  requestInitialSave: 'pdf:request-initial-save',
   readFile: 'pdf:read-file',
+  sourceModified: 'pdf:source-modified',
   printNative: 'pdf:print-native',
   save: 'pdf:save',
   requestRedactionCopy: 'pdf:request-redaction-copy',
@@ -706,8 +708,12 @@ export type PrintNativeResult =
 export interface PdfApi {
   /** Take the pdf path pending for this view (queued at tab creation); null if none */
   consumePending(): Promise<string | null>
+  /** Open the native save dialog for a memory-only blank PDF; cancel leaves it memory-only. */
+  requestInitialSave(): Promise<boolean>
   /** Read pdf bytes. Only paths granted to this view are allowed */
   readFile(path: string): Promise<ArrayBuffer>
+  /** Whether the memory-only source has changed since this blank PDF was created. */
+  sourceModified(): Promise<boolean>
   /** macOS: show the system print panel (with preview) for the saved file itself, so the PDF prints as vector pages. Path grants same as readFile */
   printNative(path: string): Promise<PrintNativeResult>
   /** Write markups/form values/page ops back to the original file (pdf-lib, content streams untouched); path grants same as readFile. With targetPath set (Save As), the original is only read and the result goes to targetPath */

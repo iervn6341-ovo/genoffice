@@ -641,6 +641,8 @@ export const es = {
   ribbonDlgHeaderFooter: 'Encabezado y pie de página',
   ribbonDlgSlidesTab: 'Diapositivas',
   ribbonDlgNotesHandoutsTab: 'Notas y documentos',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Comenzar en',
   ribbonDlgHeader: 'Encabezado',
   ribbonDlgHeaderPlaceholder: 'Texto del encabezado',

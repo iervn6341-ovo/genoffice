@@ -32,6 +32,7 @@ export const de = {
   appStatusBrushOnce:
     'Klicken Sie auf ein Zielelement, um das Format anzuwenden; Doppelklick auf die Schaltfläche für den Dauermodus',
   appStatusBrushContinuous: 'Dauermodus „Format übertragen“; zum Beenden Esc drücken',
+  appStatusFormatApplyFailed: "Formatierung konnte nicht angewendet werden. Ziel erneut auswählen und versuchen.",
   appStatusFormatApplied: 'Format angewendet',
   appStatusTableInserted: 'Tabelle mit {rows} × {cols} eingefügt',
   appStatusIconInserted: 'Symbol „{name}“ eingefügt',

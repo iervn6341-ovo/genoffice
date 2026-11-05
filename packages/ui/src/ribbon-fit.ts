@@ -91,6 +91,7 @@ export function useRibbonLabelFit(ref: RefObject<HTMLElement | null>): void {
     const el = ref.current
     if (!el) return
     let frame = 0
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined
     // RibbonFoldGroup children, re-read every run (tab switches replace them)
     const fit = () =>
       fitRibbonFolded(el, Array.from(el.querySelectorAll<HTMLElement>('[data-fold-priority]')))
@@ -104,7 +105,16 @@ export function useRibbonLabelFit(ref: RefObject<HTMLElement | null>): void {
     fit()
     // no observers (jsdom, very old webviews): the one-time fit above still applies
     if (typeof ResizeObserver === 'undefined' || typeof MutationObserver === 'undefined') return
-    const resize = new ResizeObserver(schedule)
+    // Measuring each label tier forces layout. During a native window drag,
+    // keep the current ribbon for a few frames rather than repeating that
+    // search at display refresh rate; the last size is always fitted too.
+    const resize = new ResizeObserver(() => {
+      if (resizeTimer !== undefined) return
+      resizeTimer = setTimeout(() => {
+        resizeTimer = undefined
+        schedule()
+      }, 80)
+    })
     resize.observe(el)
     // childList only: fitting writes an attribute, which must not retrigger itself.
     // Also ignore mutations inside open popovers, flyouts, and dropdown panels.
@@ -112,7 +122,9 @@ export function useRibbonLabelFit(ref: RefObject<HTMLElement | null>): void {
       const shouldSchedule = mutations.some((m) => {
         const target = m.target as HTMLElement | null
         if (!target) return false
-        if (target.closest?.('.rb-fold-open, [data-rb-panel], .style-gallery-menu, .menu-select-drop')) {
+        if (
+          target.closest?.('.rb-fold-open, [data-rb-panel], .style-gallery-menu, .menu-select-drop')
+        ) {
           return false
         }
         return true
@@ -122,6 +134,7 @@ export function useRibbonLabelFit(ref: RefObject<HTMLElement | null>): void {
     mutation.observe(el, { childList: true, subtree: true })
     return () => {
       resize.disconnect()
+      clearTimeout(resizeTimer)
       mutation.disconnect()
       if (frame !== 0) cancelAnimationFrame(frame)
     }

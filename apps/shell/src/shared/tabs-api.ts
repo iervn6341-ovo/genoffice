@@ -55,6 +55,8 @@ export interface TabsApi {
   showAppMenu(x: number, y: number): Promise<void>
   /** move a tab to a new index in the strip; Home stays pinned at index 0 */
   reorder(id: string, toIndex: number): Promise<void>
+  /** Release a captured tab drag in screen coordinates. True if moved to another window. */
+  drop(id: string, screenX: number, screenY: number): Promise<boolean>
   /** subscribe to tab list changes (open/close/activate/title updates); returns unsubscribe */
   onChanged(handler: (tabs: TabSummary[]) => void): () => void
   /**
@@ -77,6 +79,7 @@ export const TABS_CHANNELS = {
   showNewMenu: 'tabs:show-new-menu',
   showAppMenu: 'tabs:show-app-menu',
   reorder: 'tabs:reorder',
+  drop: 'tabs:drop',
   changed: 'tabs:changed',
   chromePressed: 'tabs:chrome-pressed',
 } as const

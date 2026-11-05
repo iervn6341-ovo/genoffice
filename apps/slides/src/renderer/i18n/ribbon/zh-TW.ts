@@ -597,6 +597,8 @@ export const zhTW = {
   ribbonDlgHeaderFooter: '頁首及頁尾',
   ribbonDlgSlidesTab: '投影片',
   ribbonDlgNotesHandoutsTab: '備忘稿與講義',
+  ribbonDlgNumberFromSlide: '從第幾張投影片開始',
+  ribbonDlgHideBefore: '前面不顯示頁碼',
   ribbonDlgSlideStartAt: '起始編號',
   ribbonDlgHeader: '頁首',
   ribbonDlgHeaderPlaceholder: '頁首文字',

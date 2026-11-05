@@ -251,10 +251,20 @@ describe('After Animation hide', () => {
   })
 
   it('hides at the start of the next click, not after it', () => {
-    const steps = buildSteps([item('a', 'hideOnNextClick'), item('b')])
+    const steps = buildSteps([
+      item('a', 'hideOnNextClick'),
+      { ...item('b'), effect: 'fade' as const, durationMs: 500 },
+    ])
     const s = computeNodeStates(steps, 1, 0, 540)
     expect(s.get('a')!.hidden).toBe(true)
     expect(s.get('b')!.hidden).toBe(true)
+  })
+
+  it('reveals an instant replacement on that same click without a synthetic frame delay', () => {
+    const steps = buildSteps([item('a', 'hideOnNextClick'), item('b')])
+    const s = computeNodeStates(steps, 1, 0, 540)
+    expect(s.get('a')!.hidden).toBe(true)
+    expect(s.get('b')!.hidden).toBe(false)
   })
 
   it('hide after animation goes away once its own effect finishes', () => {

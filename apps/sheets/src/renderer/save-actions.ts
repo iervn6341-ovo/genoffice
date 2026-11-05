@@ -23,6 +23,7 @@ import {
   toSaveVisualEdits,
 } from './edit-journal'
 import { activeCsvSheet, handleExportCsv, serializeActiveSheetCsv } from './csv-export'
+import { streamedFormulaValuesForSave } from './streamed-formula-save'
 import type { CellState } from '@genoffice/xlsx-gateway/domain/workbook.types'
 import {
   journaledFormulaValues,
@@ -228,6 +229,37 @@ export async function handleSave(
             ? {}
             : { fonts: state.editJournal.theme.fonts }),
         }
+  let streamedValues: CachedFormulaValue[] = []
+  if (
+    mode !== 'recovery' &&
+    !state.formulaMode &&
+    state.closure?.status === 'unavailable' &&
+    structuralOps.length === 0 &&
+    sheetOps.length === 0 &&
+    !isManualCalculation(ctx.univerRef.current)
+  ) {
+    const snapshot = JSON.stringify(edits)
+    if (!quiet && edits.length > 0) ctx.setMessage(t('appSavingEdits', { count: edits.length }))
+    try {
+      streamedValues = await streamedFormulaValuesForSave(
+        state,
+        window.desktopApi,
+        () => ctx.lazyWorkbookRef.current === state,
+      )
+      if (
+        ctx.lazyWorkbookRef.current !== state ||
+        JSON.stringify(toSaveEdits(state.editJournal)) !== snapshot ||
+        toSaveStructuralOps(state.editJournal).length !== 0 ||
+        toSaveSheetOps(state.editJournal).length !== 0
+      )
+        throw new Error('Workbook changed during formula calculation')
+    } catch {
+      const message = t('appSaveCalcPending')
+      ctx.setMessage(message)
+      if (!quiet) showToast(message, 'error')
+      return { ok: false, error: message }
+    }
+  }
   // Recalculated formula results: the engine's values are on screen but
   // deliberately kept out of the journal (they must not become literals). Send them
   // separately so the save refreshes each formula cell's cached <v>, keeping its <f>.
@@ -296,6 +328,7 @@ export async function handleSave(
   }
   const valueKeys = new Set<string>()
   const formulaValues = [
+    ...streamedValues,
     ...overlayValues,
     ...verifiedValues,
     ...typedValues,
@@ -348,7 +381,10 @@ export async function handleSave(
   // bytes themselves, not the journal: a plain Save with nothing pending must
   // still write back to the original file (and clear the recovery copy).
   const restoreWriteBack = mode === 'save' && state.file.restoredFromRecovery === true
-  if (total === 0 && mode !== 'save-as' && !restoreWriteBack) {
+  // The first explicit Save of a new unsaved workbook must offer a real path
+  // even if the sheet is still empty. Background recovery remains a no-op.
+  const firstSave = mode === 'save' && state.file.needsSaveAs === true
+  if (total === 0 && mode !== 'save-as' && !restoreWriteBack && !firstSave) {
     if (mode !== 'recovery') ctx.setMessage(t('appNoEditsToSave'))
     return { ok: false }
   }

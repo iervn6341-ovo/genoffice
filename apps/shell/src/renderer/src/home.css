@@ -212,7 +212,9 @@ body.vib .home {
   color: var(--text-muted);
   font-size: 14px;
   font-weight: 700;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .account-avatar svg {
@@ -658,7 +660,7 @@ body.vib .home {
 .recent-columns,
 .recent-item {
   display: grid;
-  grid-template-columns: 18px 24px minmax(0, 1fr) 120px 110px 76px 24px 28px;
+  grid-template-columns: 18px 24px minmax(0, 1fr) 120px 110px 76px 24px 58px;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
@@ -833,8 +835,10 @@ body.vib .home {
   justify-content: flex-end;
   anchor-name: --row-actions;
   anchor-scope: --row-actions;
+  gap: 4px;
 }
 
+.remove-recent-btn,
 .more-btn {
   display: flex;
   align-items: center;
@@ -849,6 +853,7 @@ body.vib .home {
   transition: background 0.1s;
 }
 
+.remove-recent-btn:hover,
 .more-btn:hover,
 .more-btn[aria-expanded='true'] {
   background: var(--bg-hover-strong);
@@ -1943,7 +1948,7 @@ body.vib .home {
 
   .recent-columns,
   .recent-item {
-    grid-template-columns: 18px 24px minmax(0, 1fr) 110px 24px 28px;
+    grid-template-columns: 18px 24px minmax(0, 1fr) 110px 24px 58px;
   }
 
   .recent-columns .col-path,

@@ -614,6 +614,8 @@ export const zh = {
   ribbonDlgHeaderFooter: '页眉和页脚',
   ribbonDlgSlidesTab: '幻灯片',
   ribbonDlgNotesHandoutsTab: '备注和讲义',
+  ribbonDlgNumberFromSlide: '從第幾張投影片開始',
+  ribbonDlgHideBefore: '前面不顯示頁碼',
   ribbonDlgSlideStartAt: '起始编号',
   ribbonDlgHeader: '页眉',
   ribbonDlgHeaderPlaceholder: '页眉文本',

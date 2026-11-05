@@ -23,6 +23,7 @@ import {
   Path,
 } from 'react-konva'
 import type Konva from 'konva'
+import { createSelectionDrag, selectionMoveRequests, stopSelectionDrags, type SelectionDrag } from './selection-drag'
 import type {
   RenderSlide,
   RenderNode,
@@ -803,6 +804,8 @@ export function SlideCanvas({
   }
   const layerRef = useRef<Konva.Layer>(null)
   const stageRef = useRef<Konva.Stage>(null)
+  const selectionDrag = useRef(createSelectionDrag()).current
+  const selectionMoveCommit = useRef<((delta: { x: number; y: number }) => Promise<void>) | null>(null)
 
   useImperativeHandle(ref, () => ({
     startNodeDrag(sourceId, ev) {
@@ -1052,6 +1055,72 @@ export function SlideCanvas({
     }
   }, [selectedIds, slide])
 
+  const beginSelectionDrag = (sourceId: string) => {
+    selectionMoveCommit.current = null
+    selectionDrag.reset()
+    const pointer = stageRef.current?.getPointerPosition()
+    if (!pointer || selectedIds.length < 2 || !selectedIds.includes(sourceId)) return
+    const members = selectedIds.map((id) => findNodeDeep(slide.nodes, id)).filter((n): n is RenderNode => !!n)
+    const snapshots = members.map((n) => ({ ...n, box: { ...n.box } }))
+    const positions = new Map<string, { x: number; y: number }>()
+    const parents = new Map<string, Konva.Transform>()
+    for (const id of selectedIds) {
+      const member = layerRef.current?.findOne<Konva.Node>(`#node_${id}`)
+      if (member) {
+        positions.set(id, { ...member.absolutePosition() })
+        const parent = member.getParent()
+        if (parent) parents.set(id, parent.getAbsoluteTransform().copy().invert())
+      }
+    }
+    selectionMoveCommit.current = async (delta) => {
+      const requests = selectionMoveRequests(snapshots, delta, enteredGroupId ?? undefined, (id, d) => {
+        const inverse = parents.get(id)
+        if (!inverse) return d
+        const origin = inverse.point({ x: 0, y: 0 })
+        const point = inverse.point(d)
+        return { x: point.x - origin.x, y: point.y - origin.y }
+      })
+      await Promise.all(requests.map((r) => onTransform(r.sourceId, r.box, undefined, r.groupId)))
+    }
+    selectionDrag.begin(pointer, positions, (delta) => {
+      if (!selBBox) return delta
+      const bb = { ...selBBox, x: selBBox.x + delta.x, y: selBBox.y + delta.y }
+      const threshold = 6 / Math.max(zoom, 0.1)
+      const snap = computeSnap(bb, snapTargets(selectedIds), threshold)
+      const spaced = computeSpacingSnap(
+        { ...bb, x: snap.x ?? bb.x, y: snap.y ?? bb.y },
+        spacingBoxes(selectedIds), threshold,
+      )
+      setGuides(snap.guides)
+      setSpacing(spaced.indicators.filter((i) => i.axis === 'x' ? snap.x == null : snap.y == null))
+      return {
+        x: delta.x + (snap.x ?? spaced.x ?? bb.x) - bb.x,
+        y: delta.y + (snap.y ?? spaced.y ?? bb.y) - bb.y,
+      }
+    })
+  }
+
+  const endSelectionDrag = (): Promise<void> => {
+    const delta = selectionDrag.finish()
+    if (!delta) return Promise.resolve()
+    // Proxy drags created on the last mousemove may miss Konva's mouseup filter
+    // (their pointer id has not been initialized yet). End them explicitly so
+    // later pointer movement cannot keep moving peers after this drop.
+    stopSelectionDrags([
+      ...selectedIds.map((id) => layerRef.current?.findOne<Konva.Node>(`#node_${id}`)),
+      trRef.current,
+    ])
+    return selectionMoveCommit.current?.(delta) ?? Promise.resolve()
+  }
+  const syncSelectionDrag = () => {
+    const pointer = stageRef.current?.getPointerPosition()
+    if (!pointer) return
+    for (const id of selectedIds) {
+      const position = selectionDrag.bound(id, pointer)
+      if (position) layerRef.current?.findOne<Konva.Node>(`#node_${id}`)?.absolutePosition(position)
+    }
+  }
+
   return (
     <Stage
       ref={stageRef}
@@ -1069,6 +1138,9 @@ export function SlideCanvas({
           return
         }
         suppressClickRef.current = false
+        if (e.evt.button === 0 && e.target.getParent()?.getClassName() === 'Transformer') {
+          beginSelectionDrag(selectedIds[0] ?? '')
+        }
         // Blank = the Stage itself (bleed area), the slide base/background (name=slide-bg),
         // or a full-page background-like node (still click-selectable, but a drag on it
         // rubber-bands instead of moving it)
@@ -1221,6 +1293,10 @@ export function SlideCanvas({
             livePreview={selectedIds.length === 1}
             zoom={zoom}
             multiDrag={selectedIds.length > 1 && selectedIds.includes(n.sourceId)}
+            selectionDrag={selectionDrag}
+            onSelectionDragPress={beginSelectionDrag}
+            onSelectionDragEnd={endSelectionDrag}
+            onSelectionDragMove={syncSelectionDrag}
             onDuplicateTo={onDuplicateTo}
             entered={n.sourceId === enteredGroupId}
             onEnterGroup={onEnterGroup}
@@ -1430,7 +1506,7 @@ export function SlideCanvas({
                         const st = e.target.getStage()
                         if (st && !gripRef.current) st.container().style.cursor = 'default'
                       }}
-                      onMouseDown={(e) => {
+                      onMouseDown={() => {
                         if (!selectedIds.includes(n.sourceId)) {
                           onSelect(n.sourceId, false)
                         }
@@ -1521,7 +1597,7 @@ export function SlideCanvas({
                             const st = e.target.getStage()
                             if (st && !gripRef.current) st.container().style.cursor = 'default'
                           }}
-                          onMouseDown={(e) => {
+                          onMouseDown={() => {
                             if (!selectedIds.includes(n.sourceId)) {
                               onSelect(n.sourceId, false)
                             }
@@ -1633,6 +1709,12 @@ export function SlideCanvas({
       <Layer x={CANVAS_BLEED} y={CANVAS_BLEED} listening={!drawMode}>
         <Transformer
           ref={trRef}
+          onDragMove={() => {
+            if (selectedIds.length > 1) queueMicrotask(syncSelectionDrag)
+          }}
+          onDragEnd={() => {
+            if (selectedIds.length > 1) void endSelectionDrag()
+          }}
           rotateEnabled
           // Rotating locks onto the 45° multiples when within a few degrees (PowerPoint-style snap)
           rotationSnaps={ROTATION_SNAPS}
@@ -1908,6 +1990,10 @@ function bgFill(slide: RenderSlide, images: Map<string, HTMLImageElement>) {
 }
 
 interface NodeProps {
+  selectionDrag?: SelectionDrag
+  onSelectionDragPress?: (sourceId: string) => void
+  onSelectionDragEnd?: () => Promise<void>
+  onSelectionDragMove?: () => void
   node: RenderNode
   onSelect: (id: string | null, additive?: boolean) => void
   onEditText: (id: string, caret?: EditCaret) => void
@@ -1954,6 +2040,10 @@ const boxKey = (b: { x: number; y: number; w: number; h: number; rotationDeg?: n
 const PREVIEW_MIN_GAP_MS = 12
 
 function NodeView({
+  selectionDrag,
+  onSelectionDragPress,
+  onSelectionDragEnd,
+  onSelectionDragMove,
   node,
   onSelect,
   onEditText,
@@ -2185,8 +2275,14 @@ function NodeView({
     id: `node_${node.sourceId}`,
     ...boxPivotProps(box),
     draggable,
-    dragBoundFunc: (pos: { x: number; y: number }) => tablePinRef.current ?? pos,
+    dragBoundFunc: (pos: { x: number; y: number }) => {
+      if (tablePinRef.current) return tablePinRef.current
+      const pointer = groupRef.current?.getStage()?.getPointerPosition()
+      return (multiDrag && pointer && selectionDrag?.bound(node.sourceId, pointer)) || pos
+    },
     onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (e.target !== e.currentTarget && insideGroupId == null && node.type === 'group' && entered) return
+      if (e.evt.button === 0) onSelectionDragPress?.(node.sourceId)
       tablePinRef.current = null
       if (node.type !== 'table' || insideGroupId || selected || !onTableCellPress) return
       if (e.evt.button !== 0 || e.evt.shiftKey || e.evt.metaKey || e.evt.ctrlKey || e.evt.altKey)
@@ -2254,6 +2350,14 @@ function NodeView({
         dx: e.target.x() - box.w / 2 - box.x,
         dy: e.target.y() - box.h / 2 - box.y,
       })
+      // The shared bound function has already snapped the whole selection. Re-snapping
+      // each proxy here introduces different pointer offsets after the first move.
+      if (multiDrag && selectionDrag) {
+        // Run after Konva's proxy callbacks, before paint; connectors are not attached
+        // to its Transformer but still belong to the moved selection.
+        queueMicrotask(() => onSelectionDragMove?.())
+        return
+      }
       // Children in in-group editing use a different coordinate system from page snap targets; don't snap
       if (insideGroupId) {
         onDragGuides([])
@@ -2322,6 +2426,10 @@ function NodeView({
       emitNodeGesture({ sourceId: node.sourceId, kind: 'end' })
       setAltDrag(false)
       onDragGuides([])
+      if (multiDrag && onSelectionDragEnd) {
+        void onSelectionDragEnd().finally(() => emitNodeGesture({ sourceId: node.sourceId, kind: 'committed' }))
+        return
+      }
       const dropX = e.target.x() - box.w / 2
       const dropY = e.target.y() - box.h / 2
       // Option+drag = duplicate at the drop point;
@@ -2513,6 +2621,10 @@ function NodeView({
               livePreview={false}
               zoom={zoom}
               multiDrag={(selectedIds?.length ?? 0) > 1 && !!selectedIds?.includes(c.sourceId)}
+              selectionDrag={selectionDrag}
+              onSelectionDragPress={onSelectionDragPress}
+              onSelectionDragEnd={onSelectionDragEnd}
+              onSelectionDragMove={onSelectionDragMove}
               selectedIds={selectedIds}
               insideGroupId={node.sourceId}
               allowChildTextEdit={plain}

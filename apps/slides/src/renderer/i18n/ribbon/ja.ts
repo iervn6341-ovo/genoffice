@@ -638,6 +638,8 @@ export const ja = {
   ribbonDlgHeaderFooter: 'ヘッダーとフッター',
   ribbonDlgSlidesTab: 'スライド',
   ribbonDlgNotesHandoutsTab: 'ノートと配布資料',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: '開始番号',
   ribbonDlgHeader: 'ヘッダー',
   ribbonDlgHeaderPlaceholder: 'ヘッダーテキスト',

@@ -29,6 +29,7 @@ export const zh = {
   appStatusFormatPasted: '已贴格式',
   appStatusBrushOnce: '点击目标元素应用格式；双击按钮进入连续模式',
   appStatusBrushContinuous: '连续格式刷模式，按 Esc 退出',
+  appStatusFormatApplyFailed: "无法套用格式，请重新选择目标后重试。",
   appStatusFormatApplied: '格式已应用',
   appStatusTableInserted: '已插入 {rows} × {cols} 表格',
   appStatusIconInserted: '已插入图标「{name}」',

@@ -127,6 +127,13 @@ async function flushZoomPreview() {
   })
 }
 
+async function fireStageResize(wrap: Element) {
+  await act(async () => {
+    FakeResizeObserver.fire(wrap)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  })
+}
+
 function stageZoom(container: HTMLElement): number {
   const el = container.querySelector<HTMLElement>('.stage-scale')
   expect(el, 'stage-scale should be mounted').not.toBeNull()
@@ -212,6 +219,31 @@ async function bootApp(): Promise<HTMLElement> {
 }
 
 describe('stage fit-to-window follow', () => {
+  it('coalesces a resize burst without recreating its observer and follows the final bounds', async () => {
+    const wrap = await bootApp()
+    const observer = FakeResizeObserver.instances.find((item) => item.targets.has(wrap))!
+    // Drain observe()'s initial real timer, then control the burst's clock: a busy
+    // build can otherwise advance 80ms while async act() is flushing React work.
+    await fireStageResize(wrap)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await act(async () => {
+        resizeStage(1000, 800)
+        FakeResizeObserver.fire(wrap)
+        resizeStage(696, 800)
+        FakeResizeObserver.fire(wrap)
+      })
+      expect(stageZoom(container!)).toBeCloseTo(1, 5)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      expect(stageZoom(container!)).toBeCloseTo(0.5, 5)
+      expect(observer.targets.has(wrap)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('hides bleed-only scrollbars until the nominal slide overflows', async () => {
     const wrap = await bootApp()
     expect(wrap.classList.contains('stage-fits-viewport')).toBe(true)
@@ -226,7 +258,7 @@ describe('stage fit-to-window follow', () => {
     // Growing the viewport makes the unchanged manual zoom fit again. The
     // ResizeObserver must refresh the class even though it does not change zoom.
     resizeStage(1500, 900)
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(1.1, 5)
     expect(wrap.classList.contains('stage-fits-viewport')).toBe(true)
   })
@@ -236,7 +268,7 @@ describe('stage fit-to-window follow', () => {
 
     // sanity: the follow works before any view-mode round trip
     resizeStage(696, 800) // avail 640 → fit 0.5
-    await act(async () => FakeResizeObserver.fire(wrap!))
+    await fireStageResize(wrap!)
     expect(stageZoom(container!)).toBeCloseTo(0.5, 5)
 
     // reading view unmounts the editor; returning remounts a fresh .stage-wrap
@@ -256,7 +288,7 @@ describe('stage fit-to-window follow', () => {
 
     // shrink again: the observer must follow the NEW stage-wrap
     resizeStage(376, 800) // avail 320 → fit 0.25
-    await act(async () => FakeResizeObserver.fire(wrap2!))
+    await fireStageResize(wrap2!)
     expect(stageZoom(container!)).toBeCloseTo(0.25, 5)
   })
 
@@ -271,12 +303,12 @@ describe('stage fit-to-window follow', () => {
 
     // container shrinks: 1.1 no longer fits → clamp down to the new fit
     resizeStage(696, 800) // avail 640 → fit 0.5
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(0.5, 5)
 
     // and fit mode is re-entered: the next resize follows again
     resizeStage(376, 800) // avail 320 → fit 0.25
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(0.25, 5)
   })
 
@@ -290,7 +322,7 @@ describe('stage fit-to-window follow', () => {
     expect(stageZoom(container!)).toBeCloseTo(0.9, 5)
 
     // resize with fit still 1: 0.9 fits already → the user's choice is kept
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(0.9, 5)
   })
 
@@ -299,7 +331,7 @@ describe('stage fit-to-window follow', () => {
 
     // container big enough for 200%: uncapped fit ≈ 2.07, fitZoom caps at 1.5
     resizeStage(2700, 1600)
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(1.5, 5) // fit-mode follow, capped
 
     // manual zoom to 2.0 — still fits geometrically
@@ -310,12 +342,12 @@ describe('stage fit-to-window follow', () => {
 
     // a resize that still fits 200% must NOT wipe the manual zoom down to 1.5
     resizeStage(2680, 1590)
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(2.0, 5)
 
     // but a real overflow still clamps back to fit
     resizeStage(1336, 800) // uncapped fit 1
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(1, 5)
   })
 
@@ -332,13 +364,13 @@ describe('stage fit-to-window follow', () => {
     // unchanged — no real window/pane resize happened, so the manual zoom
     // must NOT snap back to fit (regression: zooming past fit bounced back).
     stageSize = { w: 1321, h: 785 }
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(1.1, 5)
     expect(wrap.classList.contains('stage-fits-viewport')).toBe(false)
 
     // A real shrink afterwards still clamps back down to the fit value
     resizeStage(696, 800) // avail 640 → fit 0.5
-    await act(async () => FakeResizeObserver.fire(wrap))
+    await fireStageResize(wrap)
     expect(stageZoom(container!)).toBeCloseTo(0.5, 5)
   })
 })

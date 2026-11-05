@@ -4,6 +4,7 @@ export type {
   AiProviderId,
   AiProviderMeta,
   AiSettings,
+  AiModelProfile,
   CodexModelCatalog,
 } from './types'
 export {
@@ -21,3 +22,9 @@ export type { ListModelsResult } from './list-models'
 export { getProviderAdapter, modelLacksVision } from './registry'
 export { AI_MEDIA_PROVIDERS, imageGenerationAvailable, mediaAnalysisAvailable } from './media'
 export { AI_SEARCH_PROVIDERS } from './search-settings'
+export {
+  withModelProfiles,
+  saveModelProfile,
+  activateModelProfile,
+  removeModelProfile,
+} from './model-profiles'

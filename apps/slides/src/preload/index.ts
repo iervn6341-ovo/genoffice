@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
@@ -214,12 +215,14 @@ const api: SlidesApi = {
   }) => ipcRenderer.invoke('slides:set-text-body-props', op),
   setEffects: (op: { slideIndex: number; sourceId: string; effects: SetEffectsPatch }) =>
     ipcRenderer.invoke('slides:set-effects', op),
-  clipboardExternal: (skipNative?: boolean) => ipcRenderer.invoke('slides:clipboard-external', skipNative),
+  clipboardExternal: (skipNative?: boolean) =>
+    ipcRenderer.invoke('slides:clipboard-external', skipNative),
   groupElements: (op: GroupElementsOp) => ipcRenderer.invoke('slides:group-elements', op),
   ungroupElement: (op: UngroupElementOp) => ipcRenderer.invoke('slides:ungroup-element', op),
   batchEditTransform: (op: BatchEditTransformOp) =>
     ipcRenderer.invoke('slides:batch-edit-transform', op),
   getRenderSlides: () => ipcRenderer.invoke('slides:get-render-slides'),
+  getRenderSlide: (slideIndex: number) => ipcRenderer.invoke('slides:get-render-slide', slideIndex),
   addElement: (op: AddElementOp) => ipcRenderer.invoke('slides:add-element', op),
   deleteElement: (op: DeleteElementOp) => ipcRenderer.invoke('slides:delete-element', op),
   addSlide: (op: AddSlideOp) => ipcRenderer.invoke('slides:add-slide', op),
@@ -513,3 +516,5 @@ contextBridge.exposeInMainWorld('projectApi', projectApi)
 
 // open documents dragged from the OS onto this tab as a new shell tab
 installDropOpenBridge()
+
+installAiSettingsBridge()

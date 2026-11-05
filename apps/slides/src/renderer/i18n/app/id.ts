@@ -32,6 +32,7 @@ export const id = {
   appStatusBrushOnce:
     'Klik elemen tujuan untuk menerapkan format; klik dua kali tombol untuk mode berkelanjutan',
   appStatusBrushContinuous: 'Mode Penyalin Format berkelanjutan; tekan Esc untuk keluar',
+  appStatusFormatApplyFailed: "Format tidak dapat diterapkan. Pilih kembali target lalu coba lagi.",
   appStatusFormatApplied: 'Format diterapkan',
   appStatusTableInserted: 'Tabel {rows} × {cols} disisipkan',
   appStatusIconInserted: 'Ikon "{name}" disisipkan',

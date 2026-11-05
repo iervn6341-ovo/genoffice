@@ -105,6 +105,15 @@ export const th = {
     'อัปเดตสไตล์ "{name}" ด้วยรูปแบบของส่วนที่เลือกแล้ว จะเขียนลงในเอกสารเมื่อบันทึก',
   appStyleCreated: 'สร้างสไตล์ "{name}" และนำไปใช้กับส่วนที่เลือกแล้ว',
   appPgNumFormatSet: 'ตั้งค่ารูปแบบหมายเลขหน้าแล้ว',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'รูปแบบหมายเลขหน้า',
   appNumberFormat: 'รูปแบบตัวเลข',
   appIncludeChapterNumber: 'รวมหมายเลขบท',

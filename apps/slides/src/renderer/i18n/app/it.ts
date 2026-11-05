@@ -31,6 +31,7 @@ export const it = {
   appStatusBrushOnce:
     'Fai clic su un elemento di destinazione per applicare il formato; fai doppio clic sul pulsante per la modalità continua',
   appStatusBrushContinuous: 'Modalità continua di Copia formato; premi Esc per uscire',
+  appStatusFormatApplyFailed: "Impossibile applicare la formattazione. Seleziona di nuovo la destinazione e riprova.",
   appStatusFormatApplied: 'Formato applicato',
   appStatusTableInserted: 'Tabella {rows} × {cols} inserita',
   appStatusIconInserted: 'Icona "{name}" inserita',

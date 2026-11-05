@@ -108,6 +108,15 @@ export const de = {
     'Formatvorlage „{name}“ mit der Formatierung der Auswahl aktualisiert; wird beim Speichern in das Dokument geschrieben',
   appStyleCreated: 'Formatvorlage „{name}“ erstellt und auf die Auswahl angewendet',
   appPgNumFormatSet: 'Seitenzahlenformat festgelegt',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Seitenzahlenformat',
   appNumberFormat: 'Zahlenformat',
   appIncludeChapterNumber: 'Kapitelnummer einschließen',

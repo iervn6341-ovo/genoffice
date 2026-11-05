@@ -637,6 +637,8 @@ export const de = {
   ribbonDlgHeaderFooter: 'Kopf- und Fußzeile',
   ribbonDlgSlidesTab: 'Folien',
   ribbonDlgNotesHandoutsTab: 'Notizen und Handzettel',
+  ribbonDlgNumberFromSlide: 'Start on slide',
+  ribbonDlgHideBefore: 'Hide numbers before this slide',
   ribbonDlgSlideStartAt: 'Beginnen bei',
   ribbonDlgHeader: 'Kopfzeile',
   ribbonDlgHeaderPlaceholder: 'Kopfzeilentext',

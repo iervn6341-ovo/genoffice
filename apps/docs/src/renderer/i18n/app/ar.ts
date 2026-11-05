@@ -104,6 +104,15 @@ export const ar = {
   appStyleUpdated: 'تم تحديث النمط "{name}" بتنسيق التحديد؛ سيُكتب في المستند عند الحفظ',
   appStyleCreated: 'تم إنشاء النمط "{name}" وتطبيقه على التحديد',
   appPgNumFormatSet: 'تم تعيين تنسيق أرقام الصفحات',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'تنسيق أرقام الصفحات',
   appNumberFormat: 'تنسيق الأرقام',
   appIncludeChapterNumber: 'تضمين رقم الفصل',

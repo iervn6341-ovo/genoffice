@@ -14,6 +14,7 @@ import {
   applyHeaderFooter,
   applyNotesHandoutsHeaderFooter,
   applyThemeToArchive,
+  applyParagraphFormat,
   commitSaved,
   materializeSlide,
   remapDeckColors,
@@ -69,8 +70,9 @@ import {
   type SlideTransitionDetailPatch,
   type SlideTransitionKind,
   type TextElement,
+  type PPrDirty,
 } from '@genoffice/pptx-engine'
-import { applyEditParagraphs } from '../edit-text'
+import { applyEditParagraphs, collectParagraphFormatPatches } from '../edit-text'
 import type { EditParagraph } from '../types'
 import {
   coerceBytes,
@@ -893,11 +895,21 @@ register({
         ...p,
         runs: p.runs.map(({ link: _link, ...r }) => r),
       }))
-      const merged = applyEditParagraphs(
-        getSlideNotesParagraphs(ctx.opened.archive, slide.path),
-        edited,
-      )
-      if (!setSlideNotesParagraphs(ctx.opened, index, merged)) {
+      const old = getSlideNotesParagraphs(ctx.opened.archive, slide.path)
+      const merged = applyEditParagraphs(old, edited)
+      const paragraphFormats = new Map<number, PPrDirty>()
+      for (const { index: pi, patch } of collectParagraphFormatPatches(edited)) {
+        const paragraph = merged[pi]
+        if (paragraph) paragraphFormats.set(pi, applyParagraphFormat([paragraph], patch))
+      }
+      edited.forEach((p, pi) => {
+        const before = old[p.srcPara ?? pi] ?? old.at(-1)
+        if (p.align != null && p.align !== before?.align && merged[pi]) {
+          const dirty = applyParagraphFormat([merged[pi]!], { align: p.align })
+          paragraphFormats.set(pi, { ...paragraphFormats.get(pi), ...dirty })
+        }
+      })
+      if (!setSlideNotesParagraphs(ctx.opened, index, merged, paragraphFormats)) {
         throw new GuidedError(`op "setNotes": notes for slide ${index} could not be written.`)
       }
       return { op, after: getSlideNotes(ctx.opened.archive, slide.path) }

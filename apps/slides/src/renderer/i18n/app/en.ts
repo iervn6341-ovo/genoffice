@@ -32,6 +32,7 @@ export const en = {
   appStatusBrushOnce:
     'Click a target element to apply the format; double-click the button for continuous mode',
   appStatusBrushContinuous: 'Continuous Format Painter mode; press Esc to exit',
+  appStatusFormatApplyFailed: "Could not apply formatting. Select the target again and retry.",
   appStatusFormatApplied: 'Format applied',
   appStatusTableInserted: 'Inserted a {rows} × {cols} table',
   appStatusIconInserted: 'Inserted icon "{name}"',

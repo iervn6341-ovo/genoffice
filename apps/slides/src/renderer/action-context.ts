@@ -1,3 +1,4 @@
+import type { SlideNumberingRule } from '@genoffice/pptx-engine'
 /**
  * Shared context for action modules extracted from App.tsx.
  *
@@ -100,6 +101,7 @@ export interface HfDialogState {
   dateFormat: string
   dontShowOnTitleSlide: boolean
   firstSlideNum: number
+  numbering?: SlideNumberingRule | null
   isTitleSlide: boolean
   slideNumber: number
   notesHandouts: NotesHandoutsHeaderFooterState
@@ -114,6 +116,8 @@ export interface ChartDataDialogInit {
 
 /** App state bundle passed to every extracted action; refreshed each render. */
 export interface ActionCtx {
+  /** Read the active scope after asynchronous work without publishing into another document/page. */
+  getLatestContext?: () => ActionCtx
   // Document
   slides: RenderSlide[]
   setSlides: Set<RenderSlide[]>
