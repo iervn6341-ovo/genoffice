@@ -25,7 +25,7 @@
 | 待辦／進行中 | 後續工作 |
 | --- | --- |
 | 舊版 Office 轉換 | `.doc` 轉換仍在開發；目前有 4 項測試未通過，涉及大小寫、字型屬性及目錄連結樣式。 |
-| CLI 與回歸測試 | 文件頁首頁尾欄位與試算表填色的 CLI 測試目前未通過；其他編輯器測試仍需複驗。 |
+| 回歸測試 | 2026-11-18：CLI 2、Docs 4、Shell 2 項測試失敗，原因待釐清；HTML 轉 DOCX 的瀏覽器測試尚未完成。 |
 | 上游整合 | 比較並整合上游後續功能、修正與安全更新；處理衝突後重新測試。 |
 | Office 相容性 | 持續檢查 Docs、Sheets、Slides 的工具列細項與 Word／Excel／PowerPoint 存檔往返。 |
 | Swift／Rust 移植 | 依 [重構計畫](docs/architecture/swift-rust-refactor-plan.md) 逐步實作及驗證；計畫本身不代表功能已完成。 |
