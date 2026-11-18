@@ -46,6 +46,10 @@ export function notesParagraphViews(paras: Paragraph[]): NotesParagraphView[] {
       level,
       ...(p.align ? { align: p.align } : {}),
       ...(bullet ? { bullet } : {}),
+      ...(p.bullet?.type === 'char' ? { bulletKind: 'char' as const } : {}),
+      ...(p.bullet?.type === 'number'
+        ? { bulletKind: 'number' as const, numType: p.bullet.numType, startAt: p.bullet.startAt }
+        : {}),
       runs: p.runs.map((r) => ({
         text: r.text,
         bold: !!r.bold,

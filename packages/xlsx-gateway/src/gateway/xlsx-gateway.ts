@@ -18,7 +18,7 @@ import type {
   WorkbookVisualEdit,
 } from '../shared/edit-schemas'
 import { spillsDynamicArray, withFutureFunctionMarkers } from './future-functions'
-import { decodeXlsxEscapes, encodeXlsxEscapes } from './xlsx-escapes'
+import { decodeXlsxEscapes, decodeXmlText, encodeXlsxEscapes } from './xlsx-escapes'
 import { MINIMAL_STYLESHEET_XML } from './xlsx-default-styles'
 import { applyChartEdit } from './xlsx-chart'
 import { applyVisualEdits } from './xlsx-drawing-edit'
@@ -78,6 +78,14 @@ import {
   refSheetReferencesInWorksheet,
   worksheetReferencesSheet,
 } from './xlsx-sheets'
+import {
+  applyWorkbookLinkBreak,
+  orderedExternalLinkParts,
+  retargetExternalLinkRels,
+  transformChartForLinkBreak,
+  transformSheetForLinkBreak,
+  transformWorkbookForLinkBreak,
+} from './xlsx-external-links'
 import type { StructuralOp } from './xlsx-structure'
 import { applyCfRules, type CfWireRule } from './xlsx-cf'
 import {
@@ -118,6 +126,8 @@ import {
 import {
   applyStructuralOps,
   isShiftingOp,
+  materializeSharedFormulaGroups,
+  type SharedFormulaCell,
   shiftChartReferences,
   shiftCrossSheetFormulas,
   shiftDefinedNames,
@@ -126,7 +136,6 @@ import {
   shiftVmlObjectAnchors,
   StructuralShiftError,
   type TableColumnInsertion,
-  translateSharedFormula,
 } from './xlsx-structure'
 import { StylesheetEditor } from './xlsx-styles'
 
@@ -704,6 +713,104 @@ export type { PivotRefreshUpdate } from './xlsx-pivot-expand'
 export { PivotExpandError } from './xlsx-pivot-expand'
 export type { SheetSparklineAddition } from './xlsx-sparkline'
 
+/// Breaks and retargets of the workbook's external links, resolved on the
+/// final entry contents this save produces. `broken` lists the 1-based `[n]`
+/// positions in `<externalReferences>`; their formulas become literals, their
+/// parts disappear, surviving `[m]` indices renumber. A `retargets` entry
+/// repoints one link's source path — formulas, sheet names and cached values
+/// stay, so values keep coming from the cache until the next update. Both
+/// lists are read in original index space (a retarget names the link as it
+/// is before any break of this save).
+export interface ExternalLinkOps {
+  readonly broken: readonly number[]
+  readonly retargets: readonly { readonly index: number; readonly target: string }[]
+}
+
+/// Applies the external-link ops to the patched package: retargets rewrite
+/// one link's own rels; breaks turn the sheets' broken-link formulas into
+/// literals, renumber the surviving links in every carrier (sheets, defined
+/// names, chart ranges), then delete the links' parts, references and
+/// content-type overrides. Runs last, on the final XML — the renderer
+/// journals the broken cells as literals, so the sheet transform usually only
+/// renumbers survivors.
+///
+/// The defined-name and chart transforms are the same ones planExternalLinkBreak
+/// runs for the CLI's `sheet links --break`: a name or a chart range that keeps
+/// `[n]` pointing at a link this save removes has no literal form, so the break
+/// is refused here too instead of writing a dangling index.
+async function applyExternalLinkOps(
+  pkg: PackageEditor,
+  ops: ExternalLinkOps,
+  touchedEntries: Set<string>,
+): Promise<void> {
+  const workbookPath = 'xl/workbook.xml'
+  const relsPath = 'xl/_rels/workbook.xml.rels'
+  let workbookXml = await pkg.readText(workbookPath)
+  let relsXml = await pkg.readText(relsPath)
+  const links = orderedExternalLinkParts(workbookXml, relsXml)
+  for (const retarget of ops.retargets) {
+    const link = links.find((entry) => entry.n === retarget.index)
+    if (link === undefined || link.part === null) {
+      throw new Error(`no external link ${retarget.index} to point at a new source`)
+    }
+    const relsPart = `${link.part.replace(/([^/]+)$/, '_rels/$1')}.rels`
+    pkg.write(relsPart, retargetExternalLinkRels(await pkg.readText(relsPart), retarget.target))
+    touchedEntries.add(relsPart)
+  }
+  const broken = [...new Set(ops.broken)]
+  if (broken.length === 0) return
+  for (const n of broken) {
+    const link = links.find((entry) => entry.n === n)
+    if (link === undefined || link.part === null) {
+      throw new Error(`no external link ${n} to break`)
+    }
+  }
+  // The break plan is computed before any part is written, so a refusal here
+  // leaves the package untouched (the plan is discarded whole either way).
+  const next = applyWorkbookLinkBreak(workbookXml, relsXml, broken)
+  // defined names address links through the same [n] indices, so a surviving
+  // name follows the renumbering and a broken one refuses the break
+  workbookXml = transformWorkbookForLinkBreak(next.workbookXml, broken)
+  relsXml = next.relsXml
+  let contentTypesXml: string | null = null
+  if (await pkg.has('[Content_Types].xml')) {
+    contentTypesXml = await pkg.readText('[Content_Types].xml')
+  }
+  for (const part of next.parts) {
+    pkg.remove(part)
+    const relsPart = `${part.replace(/([^/]+)$/, '_rels/$1')}.rels`
+    if (await pkg.has(relsPart)) pkg.remove(relsPart)
+    if (contentTypesXml !== null) contentTypesXml = removePartOverride(contentTypesXml, part)
+  }
+  for (const path of await pkg.paths()) {
+    if (!/^xl\/worksheets\/[^/]+\.xml$/.test(path)) continue
+    const xml = await pkg.readText(path)
+    const transformed = transformSheetForLinkBreak(xml, broken)
+    if (transformed !== xml) {
+      pkg.write(path, transformed)
+      touchedEntries.add(path)
+    }
+  }
+  // chart ranges reference cells — and thus links — outside the sheet part
+  for (const path of await pkg.paths()) {
+    if (!/^xl\/charts\/[^/]+\.xml$/.test(path)) continue
+    const xml = await pkg.readText(path)
+    const transformed = transformChartForLinkBreak(xml, broken)
+    if (transformed !== xml) {
+      pkg.write(path, transformed)
+      touchedEntries.add(path)
+    }
+  }
+  if (contentTypesXml !== null) {
+    pkg.write('[Content_Types].xml', contentTypesXml)
+    touchedEntries.add('[Content_Types].xml')
+  }
+  pkg.write(workbookPath, workbookXml)
+  pkg.write(relsPath, relsXml)
+  touchedEntries.add(workbookPath)
+  touchedEntries.add(relsPath)
+}
+
 /// Assembler-independent planning: computes the patched entry contents for a
 /// set of edits without materializing the output archive.
 export async function planCellEditsToXlsx(
@@ -734,6 +841,7 @@ export async function planCellEditsToXlsx(
   bulkConstantFills: readonly BulkConstantFill[] = [],
   tableStyleAdditions: readonly TableStyleAddition[] = [],
   tableEdits: readonly TableEdit[] = [],
+  externalLinkOps: ExternalLinkOps | null = null,
 ): Promise<MutationPlan> {
   // A pending pivot pins final coordinates for its source and output; shifts
   // on either sheet, and sheet renames (worksheetSource@sheet), would desync
@@ -1467,6 +1575,10 @@ export async function planCellEditsToXlsx(
   if (workbookXml !== originalWorkbookXml) {
     pkg.write(workbookPath, workbookXml)
     touchedEntries.add(workbookPath)
+  }
+
+  if (externalLinkOps !== null) {
+    await applyExternalLinkOps(pkg, externalLinkOps, touchedEntries)
   }
 
   return pkg.toPlan(touchedEntries)
@@ -2488,86 +2600,16 @@ function materializeEditedSharedFormulaGroups(
   }
   if (rewritten.size === 0) return worksheetXml
 
-  interface SharedFragment {
-    start: number
-    end: number
-    address: string
-    row: number
-    column: number
-    si: string
-    isMaster: boolean
-    body: string
-  }
-  const fragments: SharedFragment[] = []
-  // Open tag matched alone: a greedy [^>]* would swallow the `/` of a
-  // self-closing follower and backtrack into pairing it with a later </f>.
-  const sharedOpen = /<f\b[^>]*?\bt="shared"[^>]*?(\/?)>/g
-  let match: RegExpExecArray | null
-  while ((match = sharedOpen.exec(worksheetXml)) !== null) {
-    const openTag = match[0]
-    const si = /\bsi="([^"]+)"/.exec(openTag)?.[1]
-    if (si === undefined) continue
-    const openEnd = match.index + openTag.length
-    let end = openEnd
-    let body = ''
-    if (match[1] !== '/') {
-      const close = worksheetXml.indexOf('</f>', openEnd)
-      if (close === -1) continue
-      body = worksheetXml.slice(openEnd, close)
-      end = close + '</f>'.length
-    }
-    const cellOpen = worksheetXml.lastIndexOf('<c', match.index)
-    const address = /\br="([A-Z]{1,3}[0-9]+)"/.exec(worksheetXml.slice(cellOpen, match.index))?.[1]
-    if (address === undefined) continue
-    const parsed = /^([A-Z]{1,3})([0-9]+)$/.exec(address)
-    if (!parsed) continue
-    fragments.push({
-      start: match.index,
-      end,
-      address,
-      row: Number(parsed[2]) - 1,
-      column: parseA1Column(address),
-      si,
-      isMaster: /\bref="/.test(openTag),
-      body,
-    })
-  }
-
-  const killedMasters = new Map<string, SharedFragment>()
-  for (const fragment of fragments) {
-    if (fragment.isMaster && fragment.body !== '' && rewritten.has(fragment.address)) {
-      killedMasters.set(fragment.si, fragment)
-    }
-  }
-  if (killedMasters.size === 0) return worksheetXml
-
-  const parts: string[] = []
-  let cursor = 0
-  for (const fragment of fragments) {
-    const master = killedMasters.get(fragment.si)
-    if (
-      master === undefined ||
-      fragment.isMaster ||
-      fragment.body !== '' ||
-      rewritten.has(fragment.address)
-    ) {
-      continue
-    }
-    const translated = translateSharedFormula(
-      decodeXmlText(master.body),
-      fragment.row - master.row,
-      fragment.column - master.column,
-    )
-    parts.push(worksheetXml.slice(cursor, fragment.start))
-    // Untranslatable follower (a shifted reference would leave the sheet —
-    // impossible for a group Excel itself wrote, but never leave a bare
-    // shared tag): degrade to its cached static value instead.
-    if (translated !== null) parts.push(`<f>${escapeXmlText(translated)}</f>`)
-    cursor = fragment.end
-  }
-  if (parts.length === 0) return worksheetXml
-  parts.push(worksheetXml.slice(cursor))
-  return parts.join('')
+  const isRewritten = (cell: SharedFormulaCell) => rewritten.has(toA1Address(cell.row, cell.column))
+  // Untranslatable follower (a shifted reference would leave the sheet —
+  // impossible for a group Excel itself wrote, but never leave a bare
+  // shared tag): degrade to its cached static value instead.
+  return materializeSharedFormulaGroups(
+    worksheetXml,
+    ({ anchor }) => isRewritten(anchor),
+    isRewritten,
+    'cached-value',
+  )
 }
 
 function groupCellMutations(
@@ -3185,27 +3227,6 @@ function escapeCellText(input: string): string {
 function decodeCellText(input: string): string {
   const text = decodeXmlText(input).replace(/\r\n?/g, '\n')
   return decodeXlsxEscapes(text).replace(/\r\n?/g, '\n')
-}
-
-const XML_NAMED_ENTITIES: Record<string, string> = {
-  quot: '"',
-  apos: "'",
-  lt: '<',
-  gt: '>',
-  amp: '&',
-}
-
-/// Single-pass decode of the XML named entities plus numeric character
-/// references (&#dd; / &#xhh;), which some producers use for non-ASCII text.
-function decodeXmlText(input: string): string {
-  return input.replace(
-    /&(?:#x([0-9A-Fa-f]+)|#([0-9]+)|(quot|apos|lt|gt|amp));/g,
-    (match, hex: string | undefined, dec: string | undefined, named: string | undefined) => {
-      if (named !== undefined) return XML_NAMED_ENTITIES[named] ?? match
-      const code = hex !== undefined ? Number.parseInt(hex, 16) : Number(dec)
-      return code <= 0x10ffff ? String.fromCodePoint(code) : match
-    },
-  )
 }
 
 function escapeXmlAttribute(input: string): string {

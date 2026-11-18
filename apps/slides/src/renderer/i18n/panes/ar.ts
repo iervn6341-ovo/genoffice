@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const ar = {
+  paneAnimSaveFailed: 'تعذر تحديث الحركة: {error}',
   paneShowSetupTitle: 'إعداد عرض الشرائح',
   paneShowSetupType: 'نوع العرض',
   paneShowTypeSpeaker: 'تقديم بواسطة متحدث (ملء الشاشة)',
@@ -31,6 +32,8 @@ export const ar = {
   paneMoveDown: 'نقل لأسفل',
 
   paneAnimTitle: 'جزء الحركة · الشريحة {n}',
+  paneAnimSelectHint: 'حدد حركة لتعديل تأثيرها وتوقيتها.',
+  paneAnimOrderLabel: 'ترتيب الحركة {n}: {target}',
   paneAnimPreview: 'تشغيل معاينة حركات هذه الشريحة',
   paneAnimCollapse: 'طي جزء الحركة',
   paneAnimEmpty: 'لا توجد حركات على هذه الشريحة بعد',

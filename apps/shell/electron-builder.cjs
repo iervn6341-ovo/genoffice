@@ -275,6 +275,7 @@ const config = {
     output: process.env.BUILD_DIR || 'release',
   },
   files: ['out/**'],
+  asarUnpack: ['out/native/*.node'],
   extraResources: [
     {
       from: 'build/THIRD-PARTY-NOTICES.txt',

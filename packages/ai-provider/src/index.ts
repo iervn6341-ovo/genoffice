@@ -15,10 +15,18 @@ export type {
   AiProviderId,
   AiProviderMeta,
   AiSettings,
+  AiModelProfile,
   AiStreamChunk,
   AiStreamRequest,
   LegacyAiSettings,
 } from './types'
+export {
+  withModelProfiles,
+  saveModelProfile,
+  activateModelProfile,
+  removeModelProfile,
+} from './model-profiles'
+export { registerAiSettingsHandlers } from './settings-ipc'
 export {
   AI_PROVIDERS,
   DEFAULT_MAX_OUTPUT_TOKENS,

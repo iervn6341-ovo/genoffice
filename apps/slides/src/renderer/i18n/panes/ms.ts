@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const ms = {
+  paneAnimSaveFailed: 'Tidak dapat mengemas kini animasi: {error}',
   paneShowSetupTitle: 'Sediakan Persembahan Slaid',
   paneShowSetupType: 'Jenis persembahan',
   paneShowTypeSpeaker: 'Dibentangkan oleh penyampai (skrin penuh)',
@@ -31,6 +32,8 @@ export const ms = {
   paneMoveDown: 'Alih ke Bawah',
 
   paneAnimTitle: 'Anak Tetingkap Animasi · Slaid {n}',
+  paneAnimSelectHint: 'Pilih animasi untuk mengedit kesan dan pemasaannya.',
+  paneAnimOrderLabel: 'Susunan animasi {n}: {target}',
   paneAnimPreview: 'Mainkan pratonton animasi slaid ini',
   paneAnimCollapse: 'Runtuhkan Anak Tetingkap Animasi',
   paneAnimEmpty: 'Tiada animasi pada slaid ini',

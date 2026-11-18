@@ -329,6 +329,14 @@ export function buildCtxItems(ctx: ActionCtx): Array<CtxItem | null> {
             label: t('appCtxCropPicture'),
             onClick: () => pictureEditActions.startCrop(ctx),
           } as CtxItem,
+          ...((node as PictureRenderNode).srcRect
+            ? [
+                {
+                  label: t('appCtxResetCrop'),
+                  onClick: () => void pictureEditActions.resetCrop(ctx),
+                } as CtxItem,
+              ]
+            : []),
           ...(!(node as PictureRenderNode).media
             ? [
                 {

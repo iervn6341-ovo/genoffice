@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const th = {
+  paneAnimSaveFailed: 'ไม่สามารถอัปเดตภาพเคลื่อนไหว: {error}',
   paneShowSetupTitle: 'ตั้งค่าการนำเสนอสไลด์',
   paneShowSetupType: 'ชนิดการนำเสนอ',
   paneShowTypeSpeaker: 'นำเสนอโดยผู้บรรยาย (เต็มจอ)',
@@ -31,6 +32,8 @@ export const th = {
   paneMoveDown: 'ย้ายลง',
 
   paneAnimTitle: 'บานหน้าต่างภาพเคลื่อนไหว · สไลด์ {n}',
+  paneAnimSelectHint: 'เลือกภาพเคลื่อนไหวเพื่อแก้ไขเอฟเฟ็กต์และเวลา',
+  paneAnimOrderLabel: 'ลำดับภาพเคลื่อนไหว {n}: {target}',
   paneAnimPreview: 'เล่นตัวอย่างภาพเคลื่อนไหวของสไลด์นี้',
   paneAnimCollapse: 'ยุบบานหน้าต่างภาพเคลื่อนไหว',
   paneAnimEmpty: 'สไลด์นี้ยังไม่มีภาพเคลื่อนไหว',

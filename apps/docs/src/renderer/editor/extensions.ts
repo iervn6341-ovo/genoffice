@@ -326,6 +326,8 @@ const anchorAttrs = {
       block, restored as storedMarks when the caret re-enters bare — arrow
       navigation must not drop the pending format */
   caretMarks: { default: null as string | null },
+  /** Cursor landing below a final table; discarded from save until authored. */
+  navigationOnly: { default: false },
 }
 
 /** Word lays a space-only paragraph out like an empty one: the mark sizes the line */
@@ -4897,10 +4899,14 @@ export function wireProtectedInteractionMode(
   const handle = dom.querySelector('.doc-move-handle') as HTMLElement | null
   if (!handle && !contentEditor) return null
 
+  dom.setAttribute('tabindex', '-1')
+
   const selectObject = () => {
     const pos = getPos()
     if (typeof pos !== 'number') return
+    contentEditor?.commit()
     view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)))
+    view.focus()
   }
   const setEditing = (editing: boolean) => {
     if (!contentEditor) editing = false
@@ -4925,6 +4931,14 @@ export function wireProtectedInteractionMode(
     }
     const content = target.closest(EDITABLE_PROTECTED_SELECTOR)
     if (content && dom.contains(content)) {
+      const inEditor = !!target.closest('.doc-textbox-editor')
+      const isBorderClick = content.matches('.doc-textbox') && !inEditor
+      if (isBorderClick) {
+        setEditing(false)
+        selectObject()
+        dom.draggable = !!handle
+        return
+      }
       const wasEditing = dom.classList.contains('doc-content-editing')
       if (!wasEditing) selectObject()
       if (
@@ -4936,6 +4950,23 @@ export function wireProtectedInteractionMode(
       ) {
         // the contenteditable flips on before the browser places the caret for this press
         setEditing(true)
+        const field = content.querySelector<HTMLElement>('[contenteditable="true"]')
+        if (field && !field.contains(document.activeElement)) {
+          field.focus()
+          if (typeof document.caretPositionFromPoint === 'function') {
+            const pt = document.caretPositionFromPoint(event.clientX, event.clientY)
+            if (pt && field.contains(pt.offsetNode)) {
+              window.getSelection()?.collapse(pt.offsetNode, pt.offset)
+            }
+          } else if (typeof (document as any).caretRangeFromPoint === 'function') {
+            const range = (document as any).caretRangeFromPoint(event.clientX, event.clientY)
+            if (range && field.contains(range.startContainer)) {
+              const sel = window.getSelection()
+              sel?.removeAllRanges()
+              sel?.addRange(range)
+            }
+          }
+        }
       }
       dom.draggable = !!handle && !dom.classList.contains('doc-content-editing')
       return
@@ -4970,7 +5001,6 @@ export function wireProtectedInteractionMode(
     if (event.key !== 'Escape' || !dom.classList.contains('doc-content-editing')) return
     setEditing(false)
     selectObject()
-    dom.focus()
   }
 
   setEditing(false)
@@ -5461,7 +5491,17 @@ function mountTextboxEditors(
     knownBoxes = boxes
     boxes.forEach((box, i) => {
       const sub = editors[i]
-      if (sub && !sub.isDestroyed) sub.commands.setContent(textboxDocJson(box))
+      if (sub && !sub.isDestroyed) {
+        const currentParas = subEditorParas(sub)
+        const sameParas =
+          currentParas.length === box.paras.length &&
+          currentParas.every(
+            (p, j) => textboxParaSignature(p) === textboxParaSignature(box.paras[j]),
+          )
+        if (!sameParas) {
+          sub.commands.setContent(textboxDocJson(box))
+        }
+      }
       const el = boxEls[i]
       if (el) {
         el.setAttribute('style', textboxBoxStyle(box))
@@ -5553,6 +5593,7 @@ function imageResizePlugin(): Plugin {
               return boxPos === -1
             })
             if (boxPos === -1) return false
+            window.dispatchEvent(new Event('ai-docs-commit-tables'))
             const attrs = view.state.doc.nodeAt(boxPos)?.attrs
             const boxes = attrs?.textboxes as TextboxDisplay[] | null
             const chart = attrs?.chartDisplay as ChartDisplay | null
@@ -5592,6 +5633,7 @@ function imageResizePlugin(): Plugin {
               window.removeEventListener('mousemove', onMove)
               window.removeEventListener('mouseup', onUp)
               const { w, h } = sizeAt(e)
+              window.dispatchEvent(new Event('ai-docs-commit-tables'))
               const node = view.state.doc.nodeAt(boxPos)
               if (!node) return
               if (isChart) {
@@ -5987,6 +6029,7 @@ function floatingObjectDragPlugin(): Plugin {
             return pos === -1
           })
           if (pos === -1) return false
+          window.dispatchEvent(new Event('ai-docs-commit-tables'))
           const node = view.state.doc.nodeAt(pos)
           if (!node) return false
           const isImage = node.attrs.blockType === 'image'
@@ -6135,6 +6178,7 @@ function floatingObjectDragPlugin(): Plugin {
                 : startPxY + dy) * EMU_PER_PX,
             )
 
+            window.dispatchEvent(new Event('ai-docs-commit-tables'))
             const currentNode = view.state.doc.nodeAt(pos)
             if (!currentNode) return
             if (isTextbox) {

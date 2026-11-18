@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { VIEW_IMAGE_CHANNEL, type PrinterJobSettings } from '../shared/ipc'
@@ -80,6 +81,7 @@ const api: DesktopApi = {
     ipcRenderer.invoke('docs:discard-password-intents', throughRevision),
   consumePendingOpenDocx: () => ipcRenderer.invoke('docs:consume-pending-open'),
   consumeNewBlankDoc: () => ipcRenderer.invoke('docs:consume-new-blank'),
+  consumeUntitledRecovery: () => ipcRenderer.invoke('docs:consume-untitled-recovery'),
   consumeAiDocContent: () => ipcRenderer.invoke('docs:consume-ai-doc-content'),
   consumeHeadlessExport: () => ipcRenderer.invoke('docs:consume-headless-export'),
   headlessExportDone: (result: { ok: boolean; error?: string }) =>
@@ -101,6 +103,8 @@ const api: DesktopApi = {
     ipcRenderer.invoke('docs:save', path, data, auto === true),
   writeRecoveryCopy: (path: string, data: ArrayBuffer) =>
     ipcRenderer.invoke('docs:write-recovery', path, data),
+  writeUntitledRecoveryCopy: (data: ArrayBuffer) =>
+    ipcRenderer.invoke('docs:write-untitled-recovery', data),
   onTeardown: (handler) => {
     const listener = () => handler()
     ipcRenderer.on('docs:teardown', listener)
@@ -222,6 +226,7 @@ const api: DesktopApi = {
     return () => ipcRenderer.removeListener('docs:close-save-request', listener)
   },
   reportCloseSaveResult: (ok: boolean) => ipcRenderer.send('docs:close-save-result', ok === true),
+  setDirty: (dirty: boolean) => ipcRenderer.send('docs:dirty-changed', dirty === true),
 }
 
 const projectApi: ProjectApi = {
@@ -236,3 +241,5 @@ contextBridge.exposeInMainWorld('projectApi', projectApi)
 
 // open documents dragged from the OS onto this tab as a new shell tab
 installDropOpenBridge()
+
+installAiSettingsBridge()

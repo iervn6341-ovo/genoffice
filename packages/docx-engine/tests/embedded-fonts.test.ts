@@ -1,6 +1,13 @@
 /** word/fonts/*.odttf: fontTable embed slots, ECMA-376 17.8.1 de-obfuscation, face listing. */
 import { describe, expect, it } from 'vitest'
-import { deobfuscateOdttf, isSfnt, parseDocx, parseFontTable } from '../src/index'
+import {
+  deobfuscateOdttf,
+  isSfnt,
+  isSfntNonBold,
+  isSfntNonItalic,
+  parseDocx,
+  parseFontTable,
+} from '../src/index'
 import { buildDocx } from './helpers/build-docx'
 
 const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
@@ -140,6 +147,90 @@ describe('fontTable embed slots', () => {
     expect(doc.embeddedFonts![0].data).toEqual(regular)
     expect(doc.embeddedFonts![1].data).toEqual(bold)
     expect(doc.embeddedFonts![2].data).toEqual(italic)
+  })
+
+  it('detects SFNT non-bold and non-italic weights from OS/2 table', () => {
+    function makeSfntWithOs2(weight: number, isBold: boolean, isItalic: boolean): Uint8Array {
+      const total = 12 + 16 + 80
+      const b = new Uint8Array(total)
+      const view = new DataView(b.buffer)
+      view.setUint32(0, 0x00010000)
+      view.setUint16(4, 1)
+      view.setUint32(12, 0x4f532f32) // 'OS/2'
+      view.setUint32(16, 0)
+      view.setUint32(20, 28)
+      view.setUint32(24, 80)
+      view.setUint16(28 + 4, weight)
+      view.setUint16(28 + 62, (isBold ? 0x0020 : 0) | (isItalic ? 0x0001 : 0x0040))
+      return b
+    }
+
+    const reg = makeSfntWithOs2(400, false, false)
+    const bold = makeSfntWithOs2(700, true, false)
+    const italic = makeSfntWithOs2(400, false, true)
+
+    expect(isSfntNonBold(reg)).toBe(true)
+    expect(isSfntNonBold(bold)).toBe(false)
+    expect(isSfntNonItalic(reg)).toBe(true)
+    expect(isSfntNonItalic(italic)).toBe(false)
+  })
+
+  it('demotes a regular font file placed in an embedBold slot so faux bold is preserved', async () => {
+    // Single-weight font (like 標楷體) where Word duplicates the 400 font into w:embedBold
+    const total = 12 + 16 + 80
+    const regularSfnt = new Uint8Array(total)
+    const view = new DataView(regularSfnt.buffer)
+    view.setUint32(0, 0x00010000)
+    view.setUint16(4, 1)
+    view.setUint32(12, 0x4f532f32)
+    view.setUint32(16, 0)
+    view.setUint32(20, 28)
+    view.setUint32(24, 80)
+    view.setUint16(28 + 4, 400) // regular weight
+    view.setUint16(28 + 62, 0x0040) // regular selection
+
+    const xml =
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts ${W_NS} ${R_NS}>` +
+      '<w:font w:name="標楷體"><w:altName w:val="DFKai-SB"/>' +
+      `<w:embedRegular r:id="rId1"/>` +
+      `<w:embedBold r:id="rId2"/>` +
+      '</w:font></w:fonts>'
+    const relsXml =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font1.odttf"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font2.odttf"/>' +
+      '</Relationships>'
+    const odttf = 'application/vnd.openxmlformats-officedocument.obfuscatedFont'
+    const bytes = await buildDocx({
+      bodyXml: '<w:p><w:r><w:t>x</w:t></w:r></w:p>',
+      extraParts: [
+        {
+          path: 'word/fontTable.xml',
+          xml,
+          contentType:
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml',
+        },
+        {
+          path: 'word/_rels/fontTable.xml.rels',
+          xml: relsXml,
+          contentType: 'application/vnd.openxmlformats-package.relationships+xml',
+        },
+      ],
+      binaryParts: [
+        { path: 'word/fonts/font1.odttf', base64: b64(regularSfnt), extension: 'odttf', contentType: odttf },
+        { path: 'word/fonts/font2.odttf', base64: b64(regularSfnt), extension: 'odttf', contentType: odttf },
+      ],
+    })
+    const doc = await parseDocx(bytes)
+    // Both entries should have bold: false so FontFace descriptor is 400, allowing synthetic bolding
+    const bolds = doc.embeddedFonts?.map((f) => [f.family, f.bold])
+    expect(bolds).toEqual([
+      ['標楷體', false],
+      ['DFKai-SB', false],
+      ['標楷體', false],
+      ['DFKai-SB', false],
+    ])
   })
 
   it('omits embeddedFonts when the fontTable has no embed slots', async () => {

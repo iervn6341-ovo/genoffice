@@ -112,6 +112,15 @@ export const ko = {
   appStyleCreated: "스타일 '{name}'을(를) 새로 만들어 선택 영역에 적용했습니다",
   // Page number format
   appPgNumFormatSet: '페이지 번호 서식을 설정했습니다',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: '페이지 번호 서식',
   appNumberFormat: '번호 서식',
   appIncludeChapterNumber: '장 번호 포함',

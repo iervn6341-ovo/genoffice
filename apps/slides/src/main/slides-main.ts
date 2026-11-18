@@ -1,3 +1,10 @@
+import {
+  externalFiles,
+  fileContentHash,
+  ExternalFileChangedError,
+} from '@genoffice/electron-utils/external-files'
+import { atomicWriteVia } from '@genoffice/electron-utils/atomic-write'
+import { textLayoutKey } from './text-layout-key'
 /**
  * GenOffice Slides main process — pptx parsing/render-tree building/edit application/saving all live
  * here (Node side). The renderer only gets plain-data RenderSlide; edit intents are sent back
@@ -21,7 +28,7 @@ import {
 } from 'electron'
 import type { WebContents } from 'electron'
 import { execFile } from 'node:child_process'
-import { readFile, writeFile, rm, stat, mkdir, open } from 'node:fs/promises'
+import { readFile, writeFile, rm, stat, mkdir, open, readdir } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { userInfo } from 'node:os'
@@ -66,6 +73,7 @@ import {
   rendererUrl,
   directPrintOptions,
   listSystemPrinters,
+  atomicWriteFile,
 } from '@genoffice/electron-utils'
 import {
   runTxn,
@@ -77,6 +85,8 @@ import {
 } from '@genoffice/pptx-ops'
 import { matchesElementRef } from '@genoffice/pptx-engine/identity'
 import { buildPagePptx, parsePageSpec } from '@genoffice/pipelines/slides'
+import { convertPptToPptx } from '../../../../packages/ppt2pptx/src'
+import { OPENABLE_DECK_EXTENSIONS, deckExtension } from '../shared/deck-open-formats'
 import { sniffImageMime } from './media-mime'
 import { applyTransformBatch, transformPayload } from './batch-transform'
 import {
@@ -451,6 +461,31 @@ async function handleRendererFreeze(wc: WebContents): Promise<void> {
 }
 
 function trackSlidesWebContents(wc: WebContents): void {
+  externalFiles.attach(wc, {
+    language: getUiLang,
+    isDirty: () => slidesIsDirty(wc.id),
+    onConflict: (conflict) => {
+      wc.send('slides:conflict', conflict)
+      return true
+    },
+    reload: async (path) => {
+      const previous = sessions.get(wc.id)
+      const peers = previous ? [...attachedIds(previous)] : [wc.id]
+      const result = await openAndBuild(wc, path, previous?.fitWidthPx ?? 1280, true)
+      const fresh = sessions.get(wc.id)!
+      await rm(autosavePathFor(path), { force: true })
+      for (const id of peers) {
+        const peer = webContents.fromId(id)
+        if (!peer || peer.isDestroyed()) continue
+        sessions.set(id, fresh)
+        await externalFiles.remember(id, path, externalFilesHash(fresh))
+        peer.send('slides:opened', { ...result, isReload: true })
+      }
+    },
+    saveCopy: () => {
+      wc.send('slides:menu', 'save-as')
+    },
+  })
   windowRefs.activeWebContents = wc
   wc.on('unresponsive', () => void handleRendererFreeze(wc))
   // The AI panel opens links via window.open; route them to the system
@@ -508,6 +543,16 @@ function syncAttachedPaths(session: Session, path: string): void {
 }
 
 /**
+ * savePptxToFile streams into whatever path it is given and truncates it
+ * first, so the deck goes out through a sibling temp that is renamed over
+ * `filePath` only once the stream has finished: a save that dies mid-way —
+ * the app killed, power lost — leaves the previous deck on disk, not a
+ * cut-off one.
+ */
+const writeDeckFile = (opened: OpenedPptx, filePath: string) =>
+  atomicWriteVia(filePath, (tmp) => savePptxToFile(opened, tmp))
+
+/**
  * MCP save: write a visible session's deck to an explicit path with no dialogs
  * — the slides:save-as pipeline minus the dialog. Overwrite policy is the
  * caller's (the MCP tool layer guards clobbering); this commits the save side
@@ -517,8 +562,10 @@ export async function saveSessionDeckTo(session: Session, filePath: string): Pro
   // the caller supplies an arbitrary absolute path, so its parent may not exist
   // yet (the dialog-driven paths always land in an existing folder)
   await mkdir(dirname(filePath), { recursive: true })
-  await savePptxToFile(session.opened, filePath)
+  const ownerId = [...attachedIds(session)][0]
+  await externalFiles.write(ownerId, filePath, () => writeDeckFile(session.opened, filePath))
   session.path = filePath
+  await rememberSlidesDisk(session)
   autosaveBackoff.delete(filePath)
   // mirror slides:save-as: a saved deck is no longer an unsaved untitled draft
   for (const id of attachedIds(session)) dropUntitledRecovery(id)
@@ -580,6 +627,7 @@ export async function replaceSlidesRecentFile(oldPath: string, newPath: string):
 /** Shell notification: an open view's file was renamed — sync the session path (subsequent
  *  saves write the new file) and push to the renderer to update the editor title bar. */
 export function slidesFileRenamed(wc: WebContents, oldPath: string, newPath: string): void {
+  void externalFiles.renamed(wc.id, oldPath, newPath)
   const session = sessions.get(wc.id)
   if (session && session.path === oldPath) session.path = newPath
   wc.send('slides:renamed', newPath)
@@ -610,12 +658,48 @@ const autosaveBackoff = new Map<string, number>()
 const AUTOSAVE_BACKOFF_TICKS = 10
 let autosaveRunning = false
 
-/**
- * Recovery drafts for never-saved decks (wcId → visible path in <Documents>/GenOffice):
- * the sha1-keyed recovery copy needs session.path, so before the first save a freeze or
- * crash used to lose everything. Removed on save, explicit discard, or clean close.
- */
+/** Recovery copies for never-saved decks live only under userData. */
 const untitledRecovery = new Map<number, string>()
+
+async function recoverUntitledDeck(wcId: number): Promise<Uint8Array | null> {
+  try {
+    const candidates = await Promise.all(
+      (await readdir(autosaveDir()))
+        .filter((name) => /^untitled-[0-9a-f-]{36}\.pptx$/.test(name))
+        .map(async (name) => {
+          const path = join(autosaveDir(), name)
+          return { path, mtime: (await stat(path)).mtimeMs }
+        }),
+    )
+    const active = new Set(untitledRecovery.values())
+    const latest = candidates
+      .filter((item) => !active.has(item.path))
+      .sort((a, b) => b.mtime - a.mtime)[0]
+    if (!latest) return null
+    untitledRecovery.set(wcId, latest.path)
+    const parent = dialogParent()
+    const options = {
+      type: 'question' as const,
+      message: tm('autosaveFoundTitle'),
+      detail: tm('autosaveFoundBody'),
+      buttons: [tm('autosaveRestore'), tm('autosaveDiscard')],
+      defaultId: 0,
+      cancelId: 1,
+    }
+    const response = parent
+      ? await dialog.showMessageBox(parent, options)
+      : await dialog.showMessageBox(options)
+    if (response.response !== 0) {
+      dropUntitledRecovery(wcId)
+      return null
+    }
+    const bytes = await readFile(latest.path)
+    return bytes
+  } catch {
+    dropUntitledRecovery(wcId)
+    return null
+  }
+}
 
 function dropUntitledRecovery(wcId: number): void {
   const draft = untitledRecovery.get(wcId)
@@ -638,7 +722,7 @@ setInterval(() => {
       } else {
         let draft = untitledRecovery.get(wcId)
         if (!draft) {
-          draft = join(getDraftsDir(), newDraftFilename())
+          draft = join(autosaveDir(), `untitled-${randomUUID()}.pptx`)
           untitledRecovery.set(wcId, draft)
         }
         target = draft
@@ -651,7 +735,7 @@ setInterval(() => {
       }
       try {
         await mkdir(dirname(target), { recursive: true })
-        await savePptxToFile(session.opened, target)
+        await writeDeckFile(session.opened, target)
         autosaveBackoff.delete(backoffKey)
       } catch (error) {
         autosaveBackoff.set(backoffKey, AUTOSAVE_BACKOFF_TICKS)
@@ -670,6 +754,16 @@ const autoSavePrefByWc = new Map<number, boolean>()
 
 ipcMain.on('slides:autosave-pref', (event, on: unknown) => {
   autoSavePrefByWc.set(event.sender.id, on === true)
+})
+
+let slidesDirtyHook: ((wc: WebContents, dirty: boolean) => void) | null = null
+
+export function setSlidesFileDirtyHook(hook: (wc: WebContents, dirty: boolean) => void): void {
+  slidesDirtyHook = hook
+}
+
+ipcMain.on('slides:dirty-changed', (event, dirty: unknown) => {
+  slidesDirtyHook?.(event.sender, dirty === true)
 })
 
 ipcMain.on('slides:close-save-result', (event, ok: unknown) => {
@@ -792,6 +886,62 @@ async function maybeRecoverBytes(
 }
 
 /**
+ * A legacy .ppt opens only as a converted .pptx deck: confirm the lossy
+ * import, pick the destination (the sibling .pptx by default), convert,
+ * write atomically and open the copy. Anything that is not an .ppt passes
+ * through unchanged; null cancels the open.
+ */
+async function preparePresentationForOpen(filePath: string): Promise<string | null> {
+  const extension = deckExtension(filePath)
+  if (extension !== 'ppt') return filePath
+  const parent = dialogParent()
+  const options = {
+    type: 'warning' as const,
+    message: tm('pptImportMsg', { ext: extension }),
+    detail: tm('pptImportDetail'),
+    buttons: [tm('pptImportConvertBtn'), tm('btnCancel')],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  }
+  const { response } = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options)
+  if (response !== 0) return null
+
+  const r = await showSaveDialogWithMemory(
+    dialog,
+    parent,
+    {
+      defaultPath: join(
+        dirname(filePath),
+        basename(filePath).replace(/\.ppt$/i, '.pptx'),
+      ),
+      filters: [{ name: 'PowerPoint', extensions: ['pptx'] }],
+    },
+    getDraftsDir(),
+  )
+  if (r.canceled || !r.filePath) return null
+  try {
+    const source = new Uint8Array(await readFile(filePath))
+    const out = (await convertPptToPptx(source)).bytes
+    // atomic like the Docs and shell copies: a plain write leaves a truncated
+    // .pptx where the user expects a deck if the process dies mid-write
+    await atomicWriteFile(r.filePath, Buffer.from(out))
+  } catch {
+    const errorOptions = {
+      type: 'error' as const,
+      message: tm('pptImportFailedTitle'),
+      detail: tm('pptImportFailedBody'),
+    }
+    if (parent) await dialog.showMessageBox(parent, errorOptions)
+    else await dialog.showMessageBox(errorOptions)
+    return null
+  }
+  return r.filePath
+}
+
+/**
  * .ppt (97-2003 binary compound document) and encrypted OOXML are unsupported: show an actionable message instead of a parse error.
  * Detection uses the magic number rather than the extension -- a binary ppt with a renamed suffix is caught too. A CFB containing an
  * EncryptedPackage stream is a password-protected pptx and gets dedicated copy (instead of being mislabeled as the legacy format).
@@ -852,10 +1002,22 @@ function adoptEmbeddedFonts(opened: OpenedPptx): void {
   }
 }
 
+const slideDiskHashes = new WeakMap<Session, string>()
+function externalFilesHash(session: Session): string | undefined {
+  return slideDiskHashes.get(session)
+}
+async function rememberSlidesDisk(session: Session): Promise<void> {
+  if (!session.path) return
+  const hash = fileContentHash(await readFile(session.path))
+  slideDiskHashes.set(session, hash)
+  for (const id of attachedIds(session)) await externalFiles.remember(id, session.path, hash)
+}
+
 async function openAndBuild(
   wc: WebContents,
   path: string,
   fitWidthPx: number,
+  reloadFromDisk = false,
 ): Promise<OpenResult> {
   // Same file already open in another window: attach to that session instead of
   // opening an independent copy (which would silently lose the loser's edits on
@@ -863,8 +1025,10 @@ async function openAndBuild(
   // scheduleDeckBroadcast. Untitled sessions have path '' and never alias.
   const wanted = resolve(path)
   for (const [id, existing] of sessions) {
-    if (id === wc.id || !existing.path || resolve(existing.path) !== wanted) continue
+    if (reloadFromDisk || id === wc.id || !existing.path || resolve(existing.path) !== wanted)
+      continue
     sessions.set(wc.id, existing)
+    await externalFiles.remember(wc.id, path, slideDiskHashes.get(existing))
     scheduleHistoryNotify(existing)
     await pushRecent(path)
     slidesOpenedHook?.(wc, path)
@@ -876,7 +1040,9 @@ async function openAndBuild(
     }
   }
   const raw = await readFile(path)
-  const { bytes, recovered } = await maybeRecoverBytes(path, new Uint8Array(raw))
+  const { bytes, recovered } = reloadFromDisk
+    ? { bytes: new Uint8Array(raw), recovered: false }
+    : await maybeRecoverBytes(path, new Uint8Array(raw))
   await shapedMetricsReady() // Lay out only after complex-script shaped metrics are ready, avoiding an init race falling back to estimation
   const opened = await openPptx(bytes)
   adoptEmbeddedFonts(opened)
@@ -888,6 +1054,8 @@ async function openAndBuild(
     redoStack: [],
     ...(recovered ? { metaDirty: true } : {}),
   })
+  slideDiskHashes.set(sessions.get(wc.id)!, fileContentHash(raw))
+  await externalFiles.remember(wc.id, path, fileContentHash(raw))
   // Recovery edits are unsaved: Reset Picture still targets the file on disk.
   if (recovered) {
     const diskOpened = await openPptx(new Uint8Array(raw))
@@ -909,7 +1077,7 @@ async function openAndBuild(
   }
 }
 
-/** Directory where AI-generated drafts are saved: the configurable default save folder (falls back to <Documents>/GenOffice) */
+/** Configurable folder for an explicit first Save or Save As. */
 function getDraftsDir(): string {
   return configuredDefaultSaveDir(app)
 }
@@ -951,39 +1119,14 @@ function pickDraftPath(draftsDir: string, deckName?: string): string {
   return join(draftsDir, newDraftFilename())
 }
 
-/**
- * Auto-save the draft to <Documents>/GenOffice/<name>.pptx after AI generation completes.
- * Append mode reuses the session's existing draft path (overwrite); replace mode generates a
- * new filename. On successful write, update session.path, pushRecent, slidesOpenedHook.
- * On write failure, degrade silently (console.warn) without blocking the in-memory session.
- */
-async function saveDraftAfterGenerate(
-  wc: WebContents,
-  session: Session,
-  bytes: Uint8Array,
-  mode: 'replace' | 'append',
-  deckName?: string,
-): Promise<void> {
+/** Persist AI edits only when the deck already has a user-chosen save path. */
+async function saveDraftAfterGenerate(session: Session, bytes: Uint8Array): Promise<void> {
+  if (!session.path) return
   try {
-    const draftsDir = getDraftsDir()
-    // Ensure the directory exists
-    if (!existsSync(draftsDir)) mkdirSync(draftsDir, { recursive: true })
-
-    // Append mode: overwrite if the session already has a draft path; otherwise create a new file too
-    let draftPath: string
-    if (mode === 'append' && session.path && session.path.startsWith(draftsDir)) {
-      draftPath = session.path
-    } else {
-      draftPath = pickDraftPath(draftsDir, deckName)
-    }
-
-    await writeFile(draftPath, Buffer.from(bytes))
-    session.path = draftPath
-    await pushRecent(draftPath)
-    slidesOpenedHook?.(wc, draftPath)
+    await writeFile(session.path, Buffer.from(bytes))
   } catch (err) {
     console.warn(
-      '[slides] Failed to persist AI-generated draft to disk; the in-memory session still works:',
+      '[slides] Failed to update the saved deck after AI generation; the in-memory session still works:',
       err,
     )
   }
@@ -1117,7 +1260,9 @@ export function applySessionTxn(session: Session, req: ApplyTxnOp): ApplyTxnResu
       ...(rec.created ? { created: rec.created } : {}),
     })),
     ...(r.failures?.length ? { failures: compact(r.failures) } : {}),
-    slides: buildAllRenderSlides(session.opened, session.fitWidthPx),
+    ...(Number.isInteger(req.renderSlideIndex) && session.opened.deck.slides[req.renderSlideIndex!]
+      ? { slide: rebuildSlide(session, req.renderSlideIndex!)! }
+      : { slides: buildAllRenderSlides(session.opened, session.fitWidthPx) }),
   }
 }
 
@@ -1220,7 +1365,8 @@ function syncAllTableHeights(session: Session): void {
     })
     if (!rendered) return
     for (const table of tables) {
-      const node = rendered.nodes.find((n) => n.sourceId === table.id) as TableRenderNode | undefined
+      const node = rendered.nodes.find((n) => n.sourceId === table.id) as
+        TableRenderNode | undefined
       if (!node || node.type !== 'table' || !node.gridY || node.gridY.length <= 1) continue
       const nRows = node.gridY.length - 1
       if (table.rowHeights.length !== nRows) continue
@@ -1490,18 +1636,22 @@ export function registerSlidesIpc(): void {
     const parent = dialogParent()
     const options = {
       properties: ['openFile' as const],
-      filters: [{ name: 'PowerPoint', extensions: ['pptx', 'ppsx', 'ppt'] }],
+      filters: [{ name: 'PowerPoint', extensions: [...OPENABLE_DECK_EXTENSIONS] }],
     }
     const r = await showOpenDialogWithMemory(dialog, parent, options)
     if (r.canceled || !r.filePaths[0]) return null
-    if (await rejectLegacyPpt(r.filePaths[0])) return null
-    return openAndBuild(e.sender, r.filePaths[0], fitWidthPx)
+    const prepared = await preparePresentationForOpen(r.filePaths[0])
+    if (!prepared) return null
+    if (await rejectLegacyPpt(prepared)) return null
+    return openAndBuild(e.sender, prepared, fitWidthPx)
   })
 
   ipcMain.handle('slides:open-path', async (e, path: string, fitWidthPx: number) => {
     if (!path || !existsSync(path)) return null
-    if (await rejectLegacyPpt(path)) return null
-    return openAndBuild(e.sender, path, fitWidthPx)
+    const prepared = await preparePresentationForOpen(path)
+    if (!prepared) return null
+    if (await rejectLegacyPpt(prepared)) return null
+    return openAndBuild(e.sender, prepared, fitWidthPx)
   })
 
   ipcMain.handle('slides:consume-pending-open', async (e, fitWidthPx: number) => {
@@ -1516,12 +1666,13 @@ export function registerSlidesIpc(): void {
       }
       // A CFB file (legacy .ppt / encrypted, possibly misnamed .pptx) can never
       // parse: tell the user and drop it, or every relaunch restores a blank tab
-      if (await rejectLegacyPpt(queued)) {
+      const prepared = await preparePresentationForOpen(queued)
+      if (!prepared || (await rejectLegacyPpt(prepared))) {
         dropQueued()
         return null
       }
       // Clear the queue only after a successful open: keep it on parse failure or a mid-flight renderer reload, so a remount can retry
-      const result = await openAndBuild(e.sender, queued, fitWidthPx)
+      const result = await openAndBuild(e.sender, prepared, fitWidthPx)
       dropQueued()
       return result
     }
@@ -1547,6 +1698,10 @@ export function registerSlidesIpc(): void {
   ipcMain.handle('slides:edit-text', (e, op: EditTextOp) => {
     const session = sessions.get(e.sender.id)
     if (!session) return null
+    const originalSlide = session.opened.deck.slides[op.slideIndex]
+    const beforeLayout = textLayoutKey(
+      originalSlide ? findEl(originalSlide, op.sourceId)?.text : undefined,
+    )
     pushHistory(session)
     const r = journaledTxn(session, 'edit', {
       ops: [
@@ -1564,6 +1719,12 @@ export function registerSlidesIpc(): void {
     }
     const levelDirty = (r.records?.[0]?.after as { levelDirty?: boolean } | undefined)?.levelDirty
     if (op.groupId || levelDirty) return rebuildSlide(session, op.slideIndex)
+    const afterSlide = session.opened.deck.slides[op.slideIndex]
+    if (
+      beforeLayout !== null &&
+      beforeLayout === textLayoutKey(afterSlide ? findEl(afterSlide, op.sourceId)?.text : undefined)
+    )
+      return rebuildSlide(session, op.slideIndex)
     const rendered = applyAutofitResize(
       session,
       op.slideIndex,
@@ -1579,6 +1740,13 @@ export function registerSlidesIpc(): void {
   ipcMain.handle('slides:set-element-font', (e, op: SetElementFontOp) => {
     const session = sessions.get(e.sender.id)
     if (!session) return null
+    const originalSlide = session.opened.deck.slides[op.slideIndex]
+    const beforeLayouts = new Map(
+      op.sourceIds.map((id) => [
+        id,
+        textLayoutKey(originalSlide ? findEl(originalSlide, id)?.text : undefined),
+      ]),
+    )
     const font = {
       fontFamily: op.fontFamily,
       fontSizePt: op.fontSizePt,
@@ -1610,6 +1778,13 @@ export function registerSlidesIpc(): void {
     }
     let rendered = rebuildSlide(session, op.slideIndex)
     for (const id of op.sourceIds) {
+      const beforeLayout = beforeLayouts.get(id)
+      const afterSlide = session.opened.deck.slides[op.slideIndex]
+      if (
+        beforeLayout != null &&
+        beforeLayout === textLayoutKey(afterSlide ? findEl(afterSlide, id)?.text : undefined)
+      )
+        continue
       rendered = applyAutofitResize(session, op.slideIndex, id, rendered)
       rendered = syncAutofitScale(session, op.slideIndex, id, rendered)
     }
@@ -1764,6 +1939,12 @@ export function registerSlidesIpc(): void {
     if (!session) return null
     return session.opened.deck.slides.map((_, i) => rebuildSlide(session, i))
   })
+  ipcMain.handle('slides:get-render-slide', (e, slideIndex: number) => {
+    const session = sessions.get(e.sender.id)
+    if (!session || !Number.isInteger(slideIndex) || !session.opened.deck.slides[slideIndex])
+      return null
+    return rebuildSlide(session, slideIndex)
+  })
 
   // The whole selection is one atomic transaction of setTransform ops and ONE undo step
   // (arrow-key nudge, multi-drag/resize/rotate commits, align/distribute). The executor's plan
@@ -1900,7 +2081,6 @@ export function registerSlidesIpc(): void {
       fitWidthPx: number,
       mode?: 'replace' | 'append' | 'replace_at' | 'insert_at',
       atIndex?: number,
-      deckName?: string,
     ): Promise<
       | (OpenResult & {
           appendedFrom?: number
@@ -1974,12 +2154,11 @@ export function registerSlidesIpc(): void {
             return { error: tm('errAppendFailed', { reason: lastErr ?? tm('errUnknown') }) }
           }
           existing.fitWidthPx = fitWidthPx
-          // Save the draft: persist the current complete deck
+          // Keep generation in memory for an untitled deck; update an already saved deck.
           const bytes = await savePptx(opened)
-          await saveDraftAfterGenerate(e.sender, existing, bytes, 'append', deckName)
-          // Draft now matches memory: reopen from the output bytes to clear dirty (same as
-          // slides:save) — otherwise pure AI generation (per-page append merges mark
-          // structureDirty) would trigger the close confirmation even without edits
+          await saveDraftAfterGenerate(existing, bytes)
+          // A saved deck now matches memory; an untitled one remains dirty and
+          // recoverable until the user explicitly saves it.
           if (existing.path) {
             existing.opened = await openPptx(bytes)
             existing.metaDirty = false
@@ -2028,7 +2207,7 @@ export function registerSlidesIpc(): void {
           }
           existing.fitWidthPx = fitWidthPx
           const bytes = await savePptx(opened)
-          await saveDraftAfterGenerate(e.sender, existing, bytes, 'append', deckName)
+          await saveDraftAfterGenerate(existing, bytes)
           if (existing.path) {
             existing.opened = await openPptx(bytes)
             existing.metaDirty = false
@@ -2074,7 +2253,7 @@ export function registerSlidesIpc(): void {
           }
           existing.fitWidthPx = fitWidthPx
           const bytes = await savePptx(opened)
-          await saveDraftAfterGenerate(e.sender, existing, bytes, 'append', deckName)
+          await saveDraftAfterGenerate(existing, bytes)
           if (existing.path) {
             existing.opened = await openPptx(bytes)
             existing.metaDirty = false
@@ -2097,14 +2276,15 @@ export function registerSlidesIpc(): void {
           fitWidthPx,
           undoStack: [],
           redoStack: [],
+          metaDirty: true,
         }
         const old = sessions.get(e.sender.id)
         carryHistoryForReplacement(old, replaceSession)
         sessions.set(e.sender.id, replaceSession)
         // Re-point windows that shared the old session, or they diverge onto a dead deck
         if (old) for (const id of attachedIds(old)) sessions.set(id, replaceSession)
-        // Save the draft: await completion so the real path is returned; on failure degrade silently (session.path stays '')
-        await saveDraftAfterGenerate(e.sender, replaceSession, bytes, 'replace', deckName)
+        // Update only a previously saved path; an AI-created untitled deck stays unsaved.
+        await saveDraftAfterGenerate(replaceSession, bytes)
         scheduleDeckBroadcast(replaceSession)
         return {
           path: replaceSession.path,
@@ -2119,8 +2299,23 @@ export function registerSlidesIpc(): void {
   )
 
   ipcMain.handle('slides:new-blank', async (e, fitWidthPx: number): Promise<OpenResult> => {
-    const opened = await openPptx(await createBlankPptx())
-    sessions.set(e.sender.id, { path: '', opened, fitWidthPx, undoStack: [], redoStack: [] })
+    let recovered = await recoverUntitledDeck(e.sender.id)
+    let opened: OpenedPptx
+    try {
+      opened = await openPptx(recovered ?? (await createBlankPptx()))
+    } catch {
+      dropUntitledRecovery(e.sender.id)
+      recovered = null
+      opened = await openPptx(await createBlankPptx())
+    }
+    sessions.set(e.sender.id, {
+      path: '',
+      opened,
+      fitWidthPx,
+      undoStack: [],
+      redoStack: [],
+      metaDirty: !!recovered,
+    })
     refreshPictureResetBaseline(sessions.get(e.sender.id)!)
     scheduleHistoryNotify(sessions.get(e.sender.id)!)
     return {
@@ -2128,6 +2323,7 @@ export function registerSlidesIpc(): void {
       slides: buildAllRenderSlides(opened, fitWidthPx),
       size: { cx: opened.deck.size.cx, cy: opened.deck.size.cy },
       defaultFont: deckDefaultFont(opened),
+      recovered: !!recovered,
     }
   })
 
@@ -3858,7 +4054,9 @@ export function registerSlidesIpc(): void {
       .map((id) => slide.elements.find((el) => el.id === id))
       .filter((el): el is NonNullable<typeof el> => !!el)
     // A copied placeholder becomes a free shape that keeps its frame and look (PowerPoint does the same)
-    const items = els.map((el) => copyElementData(session.opened, slide, el, { demotePlaceholder: true }))
+    const items = els.map((el) =>
+      copyElementData(session.opened, slide, el, { demotePlaceholder: true }),
+    )
     if (items.length) {
       elementClipboard = {
         items,
@@ -3964,7 +4162,9 @@ export function registerSlidesIpc(): void {
     const baseWidthPx = size.cx / EMU_PER_PX_96
     const scale = op.fitWidthPx / baseWidthPx
     const target = pageKey(e.sender.id, op.slideIndex)
-    const shift = Math.round((pasteShiftPx(externalCascade.cascade, target) / scale) * EMU_PER_PX_96)
+    const shift = Math.round(
+      (pasteShiftPx(externalCascade.cascade, target) / scale) * EMU_PER_PX_96,
+    )
     const dx = Math.round((size.cx - parsed.bbox.cx) / 2 - parsed.bbox.x) + shift
     const dy = Math.round((size.cy - parsed.bbox.cy) / 2 - parsed.bbox.y) + shift
     const r = sessionTxn(session, {
@@ -4453,6 +4653,7 @@ export function registerSlidesIpc(): void {
             dateFormat: op.dateFormat,
             dontShowOnTitleSlide: !!op.dontShowOnTitleSlide,
             ...(op.firstSlideNum != null ? { firstSlideNum: op.firstSlideNum } : {}),
+            ...(op.numbering !== undefined ? { numbering: op.numbering } : {}),
           },
         },
       ],
@@ -4938,19 +5139,22 @@ export function registerSlidesIpc(): void {
   ipcMain.handle('slides:save', async (e) => {
     const session = sessions.get(e.sender.id)
     if (!session) return { ok: false, error: 'no file open' }
-    // Untitled (new blank file): the first save lands silently in the drafts folder (Save As keeps its dialog)
-    if (!session.path) {
-      const draftsDir = getDraftsDir()
-      if (!existsSync(draftsDir)) mkdirSync(draftsDir, { recursive: true })
-      session.path = pickDraftPath(draftsDir, tm('untitledDeck'))
-      await pushRecent(session.path)
-      slidesOpenedHook?.(e.sender, session.path)
-    }
     try {
+      // Only a user Save assigns a path to an untitled deck. Publish it to the
+      // session and recents after the file write succeeds.
+      const firstSave = !session.path
+      const target = session.path || pickDraftPath(getDraftsDir(), tm('untitledDeck'))
+      if (firstSave) await mkdir(dirname(target), { recursive: true })
       syncAllTableHeights(session)
-      await savePptxToFile(session.opened, session.path)
-      autosaveBackoff.delete(session.path)
-      void rm(autosavePathFor(session.path), { force: true }).catch(() => {})
+      await externalFiles.write(e.sender.id, target, () => writeDeckFile(session.opened, target))
+      if (firstSave) {
+        session.path = target
+        await pushRecent(target)
+        slidesOpenedHook?.(e.sender, target)
+      }
+      await rememberSlidesDisk(session)
+      autosaveBackoff.delete(target)
+      void rm(autosavePathFor(target), { force: true }).catch(() => {})
       dropUntitledRecovery(e.sender.id)
       // Bake the saved patches back into the in-memory model (clears dirty, syncs
       // anchor.originalXml with disk) — a full reopen would re-read and unzip the
@@ -4965,7 +5169,58 @@ export function registerSlidesIpc(): void {
         slides: buildAllRenderSlides(session.opened, session.fitWidthPx),
       }
     } catch (err) {
+      if (err instanceof ExternalFileChangedError && session.path) {
+        const stats = await stat(session.path).catch(() => null)
+        e.sender.send('slides:conflict', {
+          path: session.path,
+          fileName: basename(session.path),
+          missing: !stats,
+          mtimeMs: stats?.mtimeMs,
+          size: stats?.size,
+        })
+      }
       return { ok: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('slides:force-save', async (e) => {
+    const session = sessions.get(e.sender.id)
+    if (!session || !session.path) return { ok: false, error: 'no file open' }
+    try {
+      const target = session.path
+      syncAllTableHeights(session)
+      await externalFiles.forceRemember(e.sender.id, target)
+      await externalFiles.write(e.sender.id, target, () => writeDeckFile(session.opened, target))
+      await rememberSlidesDisk(session)
+      autosaveBackoff.delete(target)
+      void rm(autosavePathFor(target), { force: true }).catch(() => {})
+      dropUntitledRecovery(e.sender.id)
+      commitSaved(session.opened)
+      session.metaDirty = false
+      refreshPictureResetBaseline(session)
+      return {
+        ok: true,
+        path: session.path,
+        slides: buildAllRenderSlides(session.opened, session.fitWidthPx),
+      }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('slides:reload', async (e) => {
+    const session = sessions.get(e.sender.id)
+    if (!session || !session.path) return null
+    try {
+      const result = await openAndBuild(e.sender, session.path, session.fitWidthPx ?? 1280, true)
+      const fresh = sessions.get(e.sender.id)!
+      await rm(autosavePathFor(session.path), { force: true }).catch(() => {})
+      await externalFiles.remember(e.sender.id, session.path, externalFilesHash(fresh))
+      const res: OpenResult = { ...result, isReload: true }
+      e.sender.send('slides:opened', res)
+      return res
+    } catch {
+      return null
     }
   })
 
@@ -4989,8 +5244,11 @@ export function registerSlidesIpc(): void {
     if (r.canceled || !r.filePath) return { ok: false }
     try {
       syncAllTableHeights(session)
-      await savePptxToFile(session.opened, r.filePath)
+      await externalFiles.write(e.sender.id, r.filePath, () =>
+        writeDeckFile(session.opened, r.filePath!),
+      )
       session.path = r.filePath
+      await rememberSlidesDisk(session)
       autosaveBackoff.delete(r.filePath)
       dropUntitledRecovery(e.sender.id)
       await pushRecent(r.filePath)

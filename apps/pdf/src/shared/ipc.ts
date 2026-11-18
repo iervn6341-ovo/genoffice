@@ -4,7 +4,9 @@ import type { AiSettings, AiStreamChunk, AiStreamRequest } from '@genoffice/ai-p
 
 export const PDF_CHANNELS = {
   consumePending: 'pdf:consume-pending',
+  requestInitialSave: 'pdf:request-initial-save',
   readFile: 'pdf:read-file',
+  sourceModified: 'pdf:source-modified',
   printNative: 'pdf:print-native',
   save: 'pdf:save',
   requestRedactionCopy: 'pdf:request-redaction-copy',
@@ -20,6 +22,8 @@ export const PDF_CHANNELS = {
   pagePreviewPng: 'pdf:page-preview-png',
   extractPages: 'pdf:extract-pages',
   insertPdf: 'pdf:insert-pdf',
+  compareReadPdf: 'pdf:compare-read-pdf',
+  compareReadOpen: 'pdf:compare-read-open',
   insertBlankPage: 'pdf:insert-blank-page',
   splitPdf: 'pdf:split-pdf',
   mergePdf: 'pdf:merge-pdf',
@@ -568,7 +572,7 @@ export interface InsertBlankPageRequest {
   afterPageIndex: number
 }
 
-export type InsertBlankPageResult = { ok: true } | { ok: false; error: string }
+export type InsertBlankPageResult = { ok: true; undoToken?: string } | { ok: false; error: string }
 
 /** Split the file into chunks of chunkSize pages: main shows a folder picker and writes one PDF per chunk */
 export interface SplitPdfRequest {
@@ -617,7 +621,7 @@ export interface ReplacePagesRequest {
 }
 
 export type ReplacePagesResult =
-  | { ok: true; removed: number; inserted: number }
+  | { ok: true; removed: number; inserted: number; undoToken?: string }
   | { ok: true; canceled: true }
   | { ok: false; error: string }
 
@@ -706,8 +710,12 @@ export type PrintNativeResult =
 export interface PdfApi {
   /** Take the pdf path pending for this view (queued at tab creation); null if none */
   consumePending(): Promise<string | null>
+  /** Open the native save dialog for a memory-only blank PDF; cancel leaves it memory-only. */
+  requestInitialSave(): Promise<boolean>
   /** Read pdf bytes. Only paths granted to this view are allowed */
   readFile(path: string): Promise<ArrayBuffer>
+  /** Whether the memory-only source has changed since this blank PDF was created. */
+  sourceModified(): Promise<boolean>
   /** macOS: show the system print panel (with preview) for the saved file itself, so the PDF prints as vector pages. Path grants same as readFile */
   printNative(path: string): Promise<PrintNativeResult>
   /** Write markups/form values/page ops back to the original file (pdf-lib, content streams untouched); path grants same as readFile. With targetPath set (Save As), the original is only read and the result goes to targetPath */
@@ -749,6 +757,21 @@ export interface PdfApi {
   pagePreviewPng(request: PagePreviewRequest): Promise<string | null>
   extractPages(request: ExtractPagesRequest): Promise<ExtractPagesResult>
   insertPdf(request: InsertPdfRequest): Promise<InsertPdfResult>
+  /** Pick a second document for Compare and read its per-page text (the pick is
+      main-side; no grant and no bytes travel to the render side) */
+  compareReadPdf(): Promise<
+    | { ok: true; name: string; pageCount: number; pages: string[] }
+    | { ok: false; canceled: true }
+    | { ok: false; reason: string }
+  >
+  /** The open document's own per-page text, extracted main-side by the same
+      pdfium engine as the picked side — two engines break lines differently,
+      and the diff would report phantom changes on identical files */
+  compareReadOpen(
+    path: string,
+  ): Promise<
+    { ok: true; name: string; pageCount: number; pages: string[] } | { ok: false; reason: string }
+  >
   insertBlankPage(request: InsertBlankPageRequest): Promise<InsertBlankPageResult>
   splitPdf(request: SplitPdfRequest): Promise<SplitPdfResult>
   mergePdf(request: MergePdfRequest): Promise<MergePdfResult>

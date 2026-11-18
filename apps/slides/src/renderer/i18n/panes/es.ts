@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const es = {
+  paneAnimSaveFailed: 'No se pudo actualizar la animación: {error}',
   paneShowSetupTitle: 'Configurar presentación',
   paneShowSetupType: 'Tipo de presentación',
   paneShowTypeSpeaker: 'Presentada por un orador (pantalla completa)',
@@ -31,6 +32,8 @@ export const es = {
   paneMoveDown: 'Bajar',
 
   paneAnimTitle: 'Panel de animación · Diapositiva {n}',
+  paneAnimSelectHint: 'Selecciona una animación para editar su efecto e intervalos.',
+  paneAnimOrderLabel: 'Orden de animación {n}: {target}',
   paneAnimPreview: 'Reproducir la vista previa de animaciones de esta diapositiva',
   paneAnimCollapse: 'Contraer el panel de animación',
   paneAnimEmpty: 'No hay animaciones en esta diapositiva',

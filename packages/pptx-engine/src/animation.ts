@@ -117,9 +117,11 @@ export function animClassOf(effect: AnimEffectKind): AnimClass {
   }
 }
 
-/** Extract the element's own <p:cNvPr id> from its raw bytes (the first one is the element itself; group children follow). */
+/** Extract the element's own <p:cNvPr id> from its nvId (group children) or raw bytes (top-level elements). */
 export function elementSpid(el: SlideElement): number | null {
-  const m = /<p:cNvPr\s[^>]*\bid="(\d+)"/.exec(el.anchor.originalXml)
+  const nvId = (el as { nvId?: number | string }).nvId
+  if (nvId != null && !Number.isNaN(Number(nvId))) return Number(nvId)
+  const m = /<p:cNvPr\s[^>]*\bid="(\d+)"/.exec(el.anchor?.originalXml ?? '')
   return m ? Number(m[1]) : null
 }
 
@@ -644,24 +646,24 @@ function groupParXml(gen: IdGen, g: { auto: boolean; items: Placed[] }): string 
  * bldP list for a full rebuild (shapes with paragraph animation get a single
  * summarizing build="p" bldP instead of one plain bldP per grpId).
  */
-function bldPsXml(anims: SlideAnimation[]): string {
+function bldPsXml(anims: SlideAnimation[], origAnimBg?: Map<number, string>): string {
   const paraSpids = new Set(anims.filter((a) => a.paragraph != null).map((a) => a.spid))
   const bldSeen = new Set<string>()
   return anims
     .map((a, i) => {
+      const animBgVal = origAnimBg?.get(a.spid)
+      const animBg = animBgVal ? ` animBg="${animBgVal}"` : ''
       if (paraSpids.has(a.spid)) {
         const key = `p:${a.spid}`
         if (bldSeen.has(key)) return ''
         bldSeen.add(key)
-        // grpId=0: on a full rebuild the spid's first animation always has grpId 0
-        return `<p:bldP spid="${a.spid}" grpId="0" uiExpand="1" build="p"/>`
+        return `<p:bldP spid="${a.spid}" grpId="0" uiExpand="1" build="p"${animBg}/>`
       }
-      // grpId matches effect generation: the nth animation of the same spid has grpId=n
       const before = anims.slice(0, i).filter((x) => x.spid === a.spid).length
       const key = `${a.spid}:${before}`
       if (bldSeen.has(key)) return ''
       bldSeen.add(key)
-      return `<p:bldP spid="${a.spid}" grpId="${before}"/>`
+      return `<p:bldP spid="${a.spid}" grpId="${before}"${animBg}/>`
     })
     .join('')
 }
@@ -722,8 +724,26 @@ function rootChildTnLstEmpty(timing: string): boolean {
 
 /** Strip all <p:bldP> from bldLst and write ours; bldDgm/bldOleChart/bldGraphic etc. are kept. */
 function rebuildBldLst(timing: string, anims: SlideAnimation[]): string {
-  const ours = bldPsXml(anims)
   const bldOpen = /<p:bldLst\b[^>]*>/.exec(timing)
+  const origAnimBg = new Map<number, string>()
+  if (bldOpen) {
+    const close = findBalancedClose(timing, bldOpen.index, 'p:bldLst')
+    if (close >= 0) {
+      const inner = timing.slice(bldOpen.index + bldOpen[0].length, close)
+      for (const m of inner.matchAll(/<p:bldP\b([^>]*)\/>|<p:bldP\b([^>]*)>/g)) {
+        const attrsStr = m[1] ?? m[2] ?? ''
+        const spidM = /\bspid="(\d+)"/.exec(attrsStr)
+        if (spidM) {
+          const spid = Number(spidM[1])
+          const animBgM = /\banimBg="([^"]*)"/.exec(attrsStr)
+          if (animBgM) {
+            origAnimBg.set(spid, animBgM[1]!)
+          }
+        }
+      }
+    }
+  }
+  const ours = bldPsXml(anims, origAnimBg)
   if (!bldOpen) {
     if (!ours) return timing
     const tEnd = timing.lastIndexOf('</p:timing>')
@@ -1119,7 +1139,9 @@ export function patchSlideTimingIncrementalXml(
     const grpId =
       origGrpId != null
         ? Number(origGrpId)
-        : anims.slice(0, i).filter((x) => x.spid === a.spid).length
+        : a.paragraph != null
+          ? anims.slice(0, i).filter((x) => x.spid === a.spid).length
+          : 0
     const par = effectParXml(gen, { a, startMs: absStarts(anims)[i]!, grpId })
     return splice(timing.slice(0, span.start) + par + timing.slice(span.end))
   }

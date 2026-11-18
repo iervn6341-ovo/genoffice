@@ -10,11 +10,11 @@
 import { Extension } from '@tiptap/core'
 import {
   DOMParser as PmDOMParser,
-  type Fragment,
+  Fragment,
   type Node as PmNode,
   type Slice,
 } from '@tiptap/pm/model'
-import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import {
   CLIP_SLICE_ATTR,
@@ -214,6 +214,9 @@ export const ClipboardTransferExtension = Extension.create<object, ClipboardTran
   addProseMirrorPlugins() {
     const getHost = (): ClipHost | null => this.storage.host
     const copyHandler = (view: EditorView, event: ClipboardEvent, cut: boolean): boolean => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('ai-docs-commit-tables'))
+      }
       const sel = view.state.selection
       const data = event.clipboardData
       if (sel.empty || !data) return false
@@ -280,6 +283,68 @@ export const ClipboardTransferExtension = Extension.create<object, ClipboardTran
             parseSlice: (dom: Node, options: Parameters<PmDOMParser['parseSlice']>[1]) =>
               parseClipboardDom(editor.view, dom, getHost(), options),
           } as unknown as PmDOMParser,
+          handlePaste: (view, _event, slice) => {
+            const sel = view.state.selection
+            if (sel instanceof NodeSelection && sel.node.type.name === 'docProtected') {
+              let hasProtected = false
+              slice.content.forEach((child) => {
+                if (child.type.name === 'docProtected') hasProtected = true
+              })
+              if (hasProtected) {
+                const tr = view.state.tr
+                const insertPos = sel.to
+                const newNodes: PmNode[] = []
+                const EMU_PER_PX = 9525
+                slice.content.forEach((child) => {
+                  if (child.type.name === 'docProtected') {
+                    const attrs: Record<string, unknown> = { ...child.attrs, docxIndex: null }
+                    if (attrs.imageOffsetXEmu != null && attrs.imageOffsetYEmu != null) {
+                      attrs.imageOffsetXEmu = Number(attrs.imageOffsetXEmu) + 20 * EMU_PER_PX
+                      attrs.imageOffsetYEmu = Number(attrs.imageOffsetYEmu) + 20 * EMU_PER_PX
+                    }
+                    if (typeof attrs.genXml === 'string') {
+                      const newId = Math.floor(Math.random() * 900000) + 100000
+                      attrs.genXml = attrs.genXml
+                        .replace(/id="\d+"/g, `id="${newId}"`)
+                        .replace(/name="(?:TextBox|Shape)\s*\d+"/g, `name="TextBox ${newId}"`)
+                    }
+                    newNodes.push(child.type.create(attrs, child.content, child.marks))
+                  } else {
+                    newNodes.push(child)
+                  }
+                })
+                tr.insert(insertPos, Fragment.from(newNodes))
+                tr.setSelection(NodeSelection.create(tr.doc, insertPos))
+                view.dispatch(tr.scrollIntoView().setMeta('uiEvent', 'paste'))
+                view.focus()
+                return true
+              }
+              const boxes = sel.node.attrs.textboxes as Array<{ readOnly?: boolean }> | null
+              if (Array.isArray(boxes) && boxes.length > 0 && !boxes[0].readOnly) {
+                const text = clipboardPlainText(slice.content)
+                if (text) {
+                  const dom = view.nodeDOM(sel.from)
+                  if (dom instanceof HTMLElement) {
+                    const box = dom.querySelector<HTMLElement>('.doc-textbox')
+                    if (box) {
+                      if (!dom.classList.contains('doc-content-editing')) {
+                        box.dispatchEvent(
+                          new MouseEvent('dblclick', { bubbles: true, cancelable: true }),
+                        )
+                      }
+                      const field = box.querySelector<HTMLElement>('[contenteditable="true"]')
+                      if (field) {
+                        field.focus()
+                        document.execCommand('insertText', false, text)
+                        return true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            return false
+          },
         },
       }),
     ]

@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import {
@@ -13,10 +14,7 @@ import type {
 } from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 import { normalizeAiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
-import {
-  normalizeFontSubstitutions,
-  type FontSubstitutionRule,
-} from '@genoffice/ui'
+import { normalizeFontSubstitutions, type FontSubstitutionRule } from '@genoffice/ui'
 import type {
   FolderListing,
   FolderRoot,
@@ -313,6 +311,13 @@ const homeApi: HomeApi = {
   async setFontSubstitutions(rules: FontSubstitutionRule[]) {
     await ipcRenderer.invoke(HOME_CHANNELS.setFontSubstitutions, rules)
   },
+  async acquireOfficeFont(fontFamily: string) {
+    const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.acquireOfficeFont, fontFamily)
+    return result as import('../shared/home-api').AcquireOfficeFontResult
+  },
+  async openFontsFolder() {
+    await ipcRenderer.invoke(HOME_CHANNELS.openFontsFolder)
+  },
   onThemeChanged(handler) {
     const listener = (_event: Electron.IpcRendererEvent, theme: unknown) => {
       if (theme === 'light' || theme === 'dark' || theme === 'gray' || theme === 'system')
@@ -437,6 +442,21 @@ const integrationsApi: IntegrationsApi = {
 contextBridge.exposeInMainWorld('aiOfficeIntegrations', integrationsApi)
 
 const tabsApi: TabsApi = {
+  frameReady(id) {
+    ipcRenderer.send(TABS_CHANNELS.frameReady, id)
+  },
+  previewDrag(id, x, y) {
+    ipcRenderer.send(TABS_CHANNELS.previewDrag, id, x, y)
+  },
+  endPreview() {
+    ipcRenderer.send(TABS_CHANNELS.endPreview)
+  },
+  onDropHint(handler) {
+    const listener = (_event: IpcRendererEvent, hint: { x: number; label: string } | null) =>
+      handler(hint)
+    ipcRenderer.on(TABS_CHANNELS.dropHint, listener)
+    return () => ipcRenderer.removeListener(TABS_CHANNELS.dropHint, listener)
+  },
   async list() {
     const result: unknown = await ipcRenderer.invoke(TABS_CHANNELS.list)
     return Array.isArray(result) ? (result as TabSummary[]) : []
@@ -459,6 +479,9 @@ const tabsApi: TabsApi = {
   async reorder(id, toIndex) {
     await ipcRenderer.invoke(TABS_CHANNELS.reorder, id, toIndex)
   },
+  async drop(id, screenX, screenY) {
+    return await ipcRenderer.invoke(TABS_CHANNELS.drop, id, screenX, screenY)
+  },
   onChanged(handler) {
     const listener = (_event: IpcRendererEvent, tabs: TabSummary[]) => handler(tabs)
     ipcRenderer.on(TABS_CHANNELS.changed, listener)
@@ -478,3 +501,5 @@ contextBridge.exposeInMainWorld('aiOfficeTabs', tabsApi)
 
 // open documents dragged from the OS anywhere over Home or the tab strip
 installDropOpenBridge()
+
+installAiSettingsBridge()

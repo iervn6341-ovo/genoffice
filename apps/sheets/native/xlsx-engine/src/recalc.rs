@@ -333,7 +333,7 @@ enum PinnedValue {
 /// unreachable, so pin those cells to the value the file carries and let the
 /// dependents compute against it. The renderer never sees the cell as a
 /// formula afterwards, so its own cached copy stays on screen.
-fn pin_unparsable_formulas(model: &mut Model) {
+pub(crate) fn pin_unparsable_formulas(model: &mut Model) {
     use ironcalc::base::expressions::parser::Node;
     use ironcalc::base::types::Cell;
     let mut pins = Vec::new();
@@ -387,6 +387,75 @@ fn raw_number(model: &Model, sheet: u32, row: i32, column: i32) -> Option<f64> {
         Ok(CellValue::Number(value)) => Some(value),
         _ => None,
     }
+}
+
+pub(crate) fn references_an_external_workbook(formula: &str) -> bool {
+    let code = blank_text_literals(formula);
+    let bytes = code.as_bytes();
+    for (at, byte) in bytes.iter().enumerate() {
+        if *byte != b'[' {
+            continue;
+        }
+        let mut end = at + 1;
+        while end < bytes.len() && bytes[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end == at + 1 || end >= bytes.len() || bytes[end] != b']' {
+            continue;
+        }
+        // `'[1]Sheet Name'!A1` — the opening quote precedes the bracket, so
+        // the sheet name runs to the closing quote: spaces, CJK, anything
+        if at > 0 && bytes[at - 1] == b'\'' {
+            let mut close = end + 1;
+            while close < bytes.len() && bytes[close] != b'\'' {
+                close += 1;
+            }
+            if bytes.get(close + 1) == Some(&b'!') {
+                return true;
+            }
+            continue;
+        }
+        let mut after = end + 1;
+        if bytes.get(after) == Some(&b'\'') {
+            after += 1;
+        }
+        let name_start = after;
+        // word characters, or any non-ASCII byte: a CJK sheet name needs no
+        // quotes (`[1]<cjk-name>!A1`), while a space does and lands in the branch above
+        while after < bytes.len()
+            && (bytes[after].is_ascii_alphanumeric()
+                || bytes[after] == b'_'
+                || bytes[after] >= 0x80)
+        {
+            after += 1;
+        }
+        if after > name_start && bytes.get(after) == Some(&b'\'') {
+            after += 1;
+        }
+        if bytes.get(after) == Some(&b'!') {
+            return true;
+        }
+    }
+    false
+}
+
+/// The formula with every `"..."` literal replaced by spaces of the same byte
+/// length, so a sheet name mentioned inside text does not count as a reference
+/// and byte offsets still line up with the original.
+pub(crate) fn blank_text_literals(formula: &str) -> String {
+    let mut out = String::with_capacity(formula.len());
+    let mut in_text = false;
+    for char in formula.chars() {
+        if char == '"' {
+            in_text = !in_text;
+            out.push(char);
+        } else if in_text {
+            out.extend(std::iter::repeat_n(' ', char.len_utf8()));
+        } else {
+            out.push(char);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

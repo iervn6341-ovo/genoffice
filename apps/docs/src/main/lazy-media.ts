@@ -193,8 +193,8 @@ export async function materializeLazyDocx(
   return { bytes: full, hashes }
 }
 
-/** after a save landed a full copy at `filePath`, serve those hashes from it;
- *  an encrypted save passes the plain bytes instead, since the file cannot be read by range */
+/** Serve an immutable materialized source after saving. Plain bytes also protect lazy
+ *  URLs when another program replaces the saved file (and support encrypted files). */
 export function pointLazyMediaAt(
   hashes: Set<string>,
   filePath: string,

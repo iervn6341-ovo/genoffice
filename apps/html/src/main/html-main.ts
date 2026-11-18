@@ -1,3 +1,4 @@
+import { externalFiles, fileContentHash } from '@genoffice/electron-utils/external-files'
 import {
   existsSync,
   mkdirSync,
@@ -826,6 +827,18 @@ export function setHtmlFileSavedHook(hook: (wc: WebContents, path: string) => vo
   fileSavedHook = hook
 }
 
+let fileOpenedHook: ((wc: WebContents, path: string) => void) | null = null
+
+export function setHtmlFileOpenedHook(hook: (wc: WebContents, path: string) => void): void {
+  fileOpenedHook = hook
+}
+
+let htmlDirtyHook: ((wc: WebContents, dirty: boolean) => void) | null = null
+
+export function setHtmlFileDirtyHook(hook: (wc: WebContents, dirty: boolean) => void): void {
+  htmlDirtyHook = hook
+}
+
 /** An untitled document got a provisional name from the user's first AI request — the shell titles its tab */
 let provisionalTitleHook: ((wc: WebContents, title: string) => void) | null = null
 
@@ -954,6 +967,7 @@ export function htmlFilePath(webContentsId: number): string | undefined {
 /** The file was renamed on disk — re-grant the new path and tell the renderer */
 export function htmlFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
+  void externalFiles.renamed(wcId, oldPath, newPath)
   if (savePathByWc.get(wcId) === oldPath) savePathByWc.set(wcId, newPath)
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
   const allowed = allowedByWc.get(wcId)
@@ -1147,21 +1161,10 @@ function fileNameBase(name: string | undefined): string {
 async function resolveSaveTarget(
   e: Electron.IpcMainInvokeEvent,
   mode: SaveMode,
-  suggestedName?: string,
   defaultName?: string,
 ): Promise<string | null | 'canceled'> {
   const current = savePathByWc.get(e.sender.id)
   if (mode === 'save' && current) return current
-  // AI auto-naming: silent first save of an untitled document
-  if (mode === 'save' && !current && suggestedName) {
-    const base = fileNameBase(suggestedName)
-    if (base) {
-      const dir = configuredDefaultSaveDir(app)
-      let target = join(dir, `${base}.html`)
-      for (let n = 1; existsSync(target); n++) target = join(dir, `${base}-${n}.html`)
-      return target
-    }
-  }
   const win =
     BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow() ?? undefined
   const defaultPath = current
@@ -1331,7 +1334,10 @@ function registerHtmlIpc(): void {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       throw new Error('html: path not granted to this view')
     }
-    return await readFile(path, 'utf8')
+    const text = await readFile(path, 'utf8')
+    await externalFiles.remember(e.sender.id, path, fileContentHash(text))
+    fileOpenedHook?.(e.sender, path)
+    return text
   })
 
   ipcMain.handle(
@@ -1359,11 +1365,9 @@ function registerHtmlIpc(): void {
         ? await pendingOwnedAssetsForDocument(pathAtRequest)
         : []
       try {
-        const suggestedName =
-          typeof request.suggestedName === 'string' ? request.suggestedName : undefined
         const defaultName =
           typeof request.defaultName === 'string' ? request.defaultName : undefined
-        const target = await resolveSaveTarget(e, mode, suggestedName, defaultName)
+        const target = await resolveSaveTarget(e, mode, defaultName)
         if (target === 'canceled') return done({ ok: true, canceled: true })
         if (!target) return done({ ok: false, error: 'html: no save target' })
         const currentPath = pathAtRequest
@@ -1382,11 +1386,12 @@ function registerHtmlIpc(): void {
         const textToWrite = prepared?.text ?? request.text
         const savedImageSources = prepared?.imageSources ?? imageSources
         try {
-          await writeTextAtomic(target, textToWrite)
+          await externalFiles.write(e.sender.id, target, () => writeTextAtomic(target, textToWrite))
         } catch (error) {
           if (prepared) await rollbackPreparedSaveAsAssets(prepared).catch(() => {})
           throw error
         }
+        await externalFiles.remember(e.sender.id, target, fileContentHash(textToWrite))
         savePathByWc.set(e.sender.id, target)
         // keep the reload path in sync — a stale openPathByWc would make a
         // reloaded renderer load the OLD file and then save it over the new one
@@ -1775,8 +1780,10 @@ function registerHtmlIpc(): void {
   })
 
   ipcMain.on(HTML_CHANNELS.dirtyChanged, (e, dirty: unknown) => {
-    if (dirty === true) dirtyByWc.add(e.sender.id)
+    const isDirty = dirty === true
+    if (isDirty) dirtyByWc.add(e.sender.id)
     else dirtyByWc.delete(e.sender.id)
+    htmlDirtyHook?.(e.sender, isDirty)
   })
 
   ipcMain.on(HTML_CHANNELS.closeSaveResult, (e, ok: unknown) => {
@@ -1810,6 +1817,20 @@ function registerHtmlIpc(): void {
 }
 
 function grantAndTrack(wc: WebContents, openPath?: string | null): void {
+  externalFiles.attach(wc, {
+    language: getUiLang,
+    isDirty: () => htmlIsDirty(wc.id),
+    reload: async (path) => {
+      await readFile(path) // Keep the live editor if the source is no longer readable.
+      await htmlDiscardPendingAssets(wc)
+      dirtyByWc.delete(wc.id)
+      openPathByWc.set(wc.id, path)
+      wc.reload()
+    },
+    saveCopy: () => {
+      void requestHtmlSave(wc, 'saveAs')
+    },
+  })
   const wcId = wc.id
   if (openPath && existsSync(openPath)) {
     openPathByWc.set(wcId, openPath)

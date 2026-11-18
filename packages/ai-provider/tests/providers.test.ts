@@ -74,7 +74,10 @@ describe('provider model catalog', () => {
 describe('resolveAiSettings', () => {
   it('returns fresh defaults when nothing is stored', () => {
     const defaults = defaultAiSettings({ anthropic: 'sk-ant-preset' })
-    expect(resolveAiSettings({}, defaults)).toEqual({ ...defaults, provider: 'anthropic' })
+    const { modelProfiles, activeModelProfileId, ...resolved } = resolveAiSettings({}, defaults)
+    expect(resolved).toEqual({ ...defaults, provider: 'anthropic' })
+    expect(modelProfiles).toHaveLength(1)
+    expect(activeModelProfileId).toBe('default')
   })
 
   it('migrates the pre-provider single-endpoint shape into the custom provider', () => {

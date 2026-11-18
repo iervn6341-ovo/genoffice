@@ -1,3 +1,9 @@
+import { useAiSettingsSync } from '@genoffice/ui'
+import {
+  captureCellSaveCheckpoint,
+  invalidateCellSaveCheckpoints,
+  reconcileCellSaveCheckpoint,
+} from './cell-save-checkpoint'
 import { IRenderManagerService } from '@univerjs/engine-render'
 import type { Observable } from 'rxjs'
 import { decoupleUniverUiTheme, useContentDark } from './content-theme'
@@ -189,6 +195,8 @@ import { ATTACHMENT_IMAGE_EXTS } from '../shared/desktop-api'
 import type {
   AttachmentAddResult,
   AttachmentMeta,
+  ExternalLinkOps,
+  ExternalLinkRow,
   MenuAction,
   RecoveryPromptPayload,
   WorkbookFile,
@@ -305,6 +313,7 @@ import {
   pasteVisualPayload,
 } from './visual-clipboard-actions'
 import { installFilteredCopyHook } from './filtered-copy'
+import { installSortFormulaRefs } from './sort-formula-refs'
 import { installFilterRangeOutlineSuppression } from './filter-range-outline'
 import { installFormulaBarAutosize } from './formula-bar-autosize'
 import {
@@ -381,6 +390,7 @@ import { installForceStringMarkGate, installLongTextRender } from './long-text-r
 import { installAutofitWrapBudget } from './autofit-wrap-budget'
 import { installAutofitLinePitch } from './autofit-line-pitch'
 import { installHeaderUnhideDebounce } from './load-perf-patches'
+import { installCanvasResizeCoalescing } from './canvas-resize'
 import { installHeaderResizeTooltip } from './header-resize-tooltip'
 import { installCopyAnimationIdle } from './copy-animation-idle'
 import { installNumberAsTextAlertSeverity } from './number-as-text-alert'
@@ -536,6 +546,11 @@ import {
 } from './formula-values'
 import { SlicerFieldPicker, SlicerPanels, type SlicerUiState } from './SlicerPanel'
 import { WatchWindowPanel, watchKey, type WatchCell, type WatchRowValue } from './WatchWindowPanel'
+import { ExternalLinksPanel } from './ExternalLinksPanel'
+import { breakExternalLinkFlow, updateExternalLinksFlow } from './external-links-flow'
+import { externalFileTarget } from './external-link-target'
+import { applyExternalLinkValues, journalExternalLinkLiterals } from './univer-sync'
+import { installWorkbookPickRelay } from './function-arguments-runtime'
 import { TimelineFieldPicker, TimelinePanels, type TimelineUiState } from './TimelinePanel'
 import type { DefinedNameAction, DefinedNameRow } from './NameManagerDialog'
 import {
@@ -835,6 +850,56 @@ export function App(): React.JSX.Element {
   /// SlicerPanel).
   const [slicers, setSlicers] = useState<readonly SlicerUiState[]>([])
   const [watchOpen, setWatchOpen] = useState(false)
+  const [linksOpen, setLinksOpen] = useState(false)
+  const [linkStatuses, setLinkStatuses] = useState<ExternalLinkRow[]>([])
+  const [linksBusy, setLinksBusy] = useState(false)
+  const [linksNotice, setLinksNotice] = useState<'unsaved' | null>(null)
+  // Load the workbook's links when the panel opens: the listing carries
+  // identity fields only and never probes the sources on disk, so it is cheap
+  // and reachability stays unknown (the panel's "—") until Update answers it.
+  useEffect(() => {
+    if (!linksOpen) return
+    const file = lazyWorkbookRef.current?.file
+    if (file === undefined || file.needsSaveAs) {
+      // a never-saved workbook has no file for the sidecar to list
+      setLinkStatuses([])
+      setLinksNotice('unsaved')
+      return
+    }
+    setLinksNotice(null)
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await window.desktopApi.listExternalLinks({ sessionId: file.sessionId })
+        if (!cancelled) setLinkStatuses(result.links)
+      } catch {
+        // an unreadable workbook keeps the panel empty instead of throwing
+        if (!cancelled) setLinkStatuses([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [linksOpen])
+  /// Re-reads the panel's rows from the session that is open *now*: a save
+  /// reopens the workbook, so the session id captured before it is gone.
+  function refreshLinkStatuses(): void {
+    const sessionId = lazyWorkbookRef.current?.file.sessionId
+    if (sessionId === undefined) {
+      setLinkStatuses([])
+      return
+    }
+    void window.desktopApi
+      .listExternalLinks({ sessionId })
+      .then((fresh) => {
+        setLinksNotice(null)
+        setLinkStatuses(fresh.links)
+      })
+      .catch(() => setLinkStatuses([]))
+  }
+  /// External-link breaks/retargets the links panel queued for the next save;
+  /// cleared once the save settles (see saveContext).
+  const pendingExternalLinkOpsRef = useRef<ExternalLinkOps | null>(null)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentFocus, setCommentFocus] = useState<string | null>(null)
   const [commentAuthorName, setCommentAuthorName] = useState(commentAuthor)
@@ -1023,6 +1088,7 @@ export function App(): React.JSX.Element {
       setMessage,
       openLazyWorkbook,
       readCells: (addresses, sheetId) => readCellsImpl(readContext(), addresses, sheetId),
+      externalLinkOps: () => pendingExternalLinkOpsRef.current,
       stashViewRestore: (view) => {
         viewRestoreRef.current = view
       },
@@ -1669,9 +1735,7 @@ export function App(): React.JSX.Element {
     }
   }
 
-  useEffect(() => {
-    void window.desktopApi.getAiSettings().then(setAiSettingsState)
-  }, [])
+  useAiSettingsSync(setAiSettingsState)
 
   useEffect(() => {
     // Univer paints the grid on canvas, so it can't follow the CSS tokens —
@@ -1806,6 +1870,9 @@ export function App(): React.JSX.Element {
     // canvas line box (Calibri 10: 12.75 pt per line, not ~10 pt).
     installAutofitLinePitch()
     installHeaderUnhideDebounce()
+    const disposeCanvasResize = installCanvasResizeCoalescing(
+      runtime.univer.__getInjector().get(IRenderManagerService),
+    )
     installHeaderResizeTooltip()
     // The dashed border on a copied range is a per-frame animation. It must
     // not keep repainting the scene while nobody is looking at it.
@@ -1815,9 +1882,24 @@ export function App(): React.JSX.Element {
     // Hold the formula engine's per-chunk recalculation while file data streams
     // in; one merged cycle follows once the chunks stop.
     installFormulaStreamHold(runtime)
-    // The window always starts blank now; still consume the one-shot
-    // new-blank flag so it doesn't leak into the next workbook open.
-    void window.desktopApi?.consumeNewBlankWorkbook?.()
+    // A new tab starts as a preview grid; the shell's per-view blank request
+    // replaces it with a private unsaved sidecar session. No user file or
+    // recent entry exists until Save commits the first real destination.
+    void window.desktopApi
+      ?.consumeNewBlankWorkbook?.()
+      .then(async (requested) => {
+        if (!requested) return
+        const opened = await window.desktopApi.openNewBlankWorkbook()
+        if (!opened) return
+        if (univerRef.current !== runtime) {
+          await window.desktopApi.closeWorkbook(opened.sessionId)
+          return
+        }
+        openLazyWorkbook(opened)
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : t('appOpenFailed'))
+      })
     // Pull any shell-queued workbook ourselves: the shell's 'open' nudge loop
     // gives up after 30s, and on slow dev cold starts Univer mounts later than
     // that — the tab would strand as a blank in-memory workbook (no save, no
@@ -1846,6 +1928,8 @@ export function App(): React.JSX.Element {
     // Copying in a filtered sheet must skip hidden rows;
     // see filtered-copy.ts for why the built-in hook is not enough.
     const filteredCopyDisposable = installFilteredCopyHook(runtime)
+    // A sort that cuts a shared formula group keeps the rest of the group (sort-formula-refs.ts).
+    const sortFormulaRefsDisposable = installSortFormulaRefs(runtime)
     // Excel-compatible TSV plain text (TRUE/FALSE, quoted newlines).
     const tsvClipboardDisposable = installTsvClipboardFix(runtime)
     // Copies carry the block (formulas, formats, merges, sheet features) to other workbook
@@ -1861,6 +1945,9 @@ export function App(): React.JSX.Element {
     const formulaTextDisposable = installFormulaTextInterceptor(runtime, lazyWorkbookRef)
     // The fx bar grows to fit a wrapped formula instead of clipping it.
     const formulaBarAutosizeDisposable = installFormulaBarAutosize(runtime)
+    // The picking side of the cross-workbook range picker (#2109): another
+    // tab's dialog can arm a pick against this workbook's grid.
+    const pickRelayDisposable = installWorkbookPickRelay(runtime)
     // A file formula the engine re-computes into an error shows the file's
     // cached result instead; display-only.
     const cachedValueDisposable = installCachedValueFallbackInterceptor(runtime, lazyWorkbookRef)
@@ -2746,6 +2833,23 @@ export function App(): React.JSX.Element {
                 sharedFormulaResolverFor(runtime, params.subUnitId),
               )
         if (recorded.length === 0) return
+        const checkpointSheet = runtime.univerAPI
+          .getActiveWorkbook()
+          ?.getSheetBySheetId(params.subUnitId)
+        if (checkpointSheet)
+          for (const entry of recorded) {
+            try {
+              reconcileCellSaveCheckpoint(
+                state.editJournal,
+                params.subUnitId,
+                entry.row,
+                entry.column,
+                checkpointSheet.getRange(entry.row, entry.column, 1, 1).getCellData(),
+              )
+            } catch {
+              /* Uninstalled cells keep their journal entry conservatively. */
+            }
+          }
         setPendingEdits(journalSize(state.editJournal))
         const contentEdited = recorded.some(
           (entry) => entry.hasValue || entry.formula !== undefined,
@@ -2827,6 +2931,42 @@ export function App(): React.JSX.Element {
       (event) => {
         const state = lazyWorkbookRef.current
         if (journalSuppression.active || !state) return
+        if (
+          ROW_COLUMN_MUTATIONS[event.id] ||
+          event.id === REORDER_RANGE_MUTATION ||
+          event.id === MOVE_RANGE_MUTATION ||
+          event.id === MOVE_ROWS_MUTATION
+        )
+          invalidateCellSaveCheckpoints(state.editJournal)
+        if (event.id === SET_RANGE_VALUES_MUTATION) {
+          const options = event.options as { fromFormula?: boolean } | undefined
+          const params = event.params as
+            { subUnitId?: string; cellValue?: Record<string, Record<string, unknown>> } | undefined
+          const sheet = params?.subUnitId
+            ? runtime.univerAPI.getActiveWorkbook()?.getSheetBySheetId(params.subUnitId)
+            : null
+          if (!options?.fromFormula && params?.subUnitId && sheet && params.cellValue) {
+            for (const [row, columns] of Object.entries(params.cellValue)) {
+              if (!columns || typeof columns !== 'object') continue
+              for (const column of Object.keys(columns)) {
+                const r = Number(row),
+                  c = Number(column)
+                if (Number.isInteger(r) && r >= 0 && Number.isInteger(c) && c >= 0)
+                  try {
+                    captureCellSaveCheckpoint(
+                      state.editJournal,
+                      params.subUnitId,
+                      r,
+                      c,
+                      sheet.getRange(r, c, 1, 1).getCellData(),
+                    )
+                  } catch {
+                    /* A failed checkpoint must never block an edit. */
+                  }
+              }
+            }
+          }
+        }
         if (event.id === SET_RANGE_VALUES_COMMAND || event.id === SET_RANGE_VALUES_MUTATION) {
           // Quadratic array-criteria formulas (distinct-count COUNTIF idioms
           // over 80k+ rows) freeze the main-thread formula engine for
@@ -3308,11 +3448,13 @@ export function App(): React.JSX.Element {
       wrapMeasureDisposable.dispose()
       dateTextDisposable.dispose()
       filteredCopyDisposable.dispose()
+      sortFormulaRefsDisposable.dispose()
       clipboardBridgeDisposable.dispose()
       tsvClipboardDisposable.dispose()
       formulaViewDisposable.dispose()
       formulaTextDisposable.dispose()
       formulaBarAutosizeDisposable.dispose()
+      pickRelayDisposable.dispose()
       cachedValueDisposable.dispose()
       formulaNewlineDisposable.dispose()
       functionProbeDisposable.dispose()
@@ -3332,6 +3474,7 @@ export function App(): React.JSX.Element {
       contextSubmenuReopenDisposable.dispose()
       contextSubmenuExclusiveDisposable.dispose()
       contextMenuResizeCloseDisposable.dispose()
+      disposeCanvasResize()
       selectionGrabGuardDisposable.dispose()
       macCommandMultiSelectOff()
       multiRowAutofitDisposable.dispose()
@@ -4077,6 +4220,10 @@ export function App(): React.JSX.Element {
       setWatchOpen((open) => !open)
       return
     }
+    if (command === 'external-links-panel') {
+      setLinksOpen((open) => !open)
+      return
+    }
     if (command === 'toggle-page-break-preview') {
       togglePageBreakPreview()
       return
@@ -4714,6 +4861,8 @@ export function App(): React.JSX.Element {
         engineOverBudget: recalcOverBudgetAtOpen(selected.fileBytes, gridCellCount),
         formulaCells: new Map(),
         overlay: new Map(),
+        externalOverlay: new Map(),
+        incompleteRuns: new Set(),
         follow: new Map(),
         running: false,
         lastRunAt: 0,
@@ -5836,6 +5985,115 @@ export function App(): React.JSX.Element {
           onAddSelection={addWatchSelection}
           onRemove={(key) => setWatchCells(watchCells.filter((cell) => watchKey(cell) !== key))}
           onClose={() => setWatchOpen(false)}
+        />
+      )}
+      {linksOpen && (
+        <ExternalLinksPanel
+          links={linkStatuses}
+          busy={linksBusy}
+          notice={linksNotice}
+          onUpdate={() => {
+            void (async () => {
+              const file = lazyWorkbookRef.current?.file
+              if (!file || file.needsSaveAs || linksBusy) return
+              setLinksBusy(true)
+              try {
+                await updateExternalLinksFlow({
+                  // quiet: a no-op first save is expected here, not a toast.
+                  // Real failures still land in the message bar.
+                  save: () => handleSave('save', true),
+                  update: () => {
+                    // the first save swaps the workbook session, so the id is
+                    // read here rather than captured before the flow ran
+                    const current = lazyWorkbookRef.current?.file
+                    if (!current) return Promise.reject(new Error('Workbook is not open.'))
+                    return window.desktopApi.updateExternalLinks({
+                      sessionId: current.sessionId,
+                    })
+                  },
+                  apply: (report) => {
+                    const linkRuntime = univerRef.current
+                    const linkState = lazyWorkbookRef.current
+                    if (linkRuntime && linkState) {
+                      applyExternalLinkValues(linkState, linkRuntime, report)
+                    }
+                  },
+                  onStatuses: (report) => {
+                    setLinksNotice(null)
+                    setLinkStatuses(report.links)
+                  },
+                })
+              } finally {
+                setLinksBusy(false)
+              }
+            })()
+          }}
+          onBreak={(index) => {
+            void (async () => {
+              const file = lazyWorkbookRef.current?.file
+              const sessionId = file && !file.needsSaveAs ? file.sessionId : null
+              if (sessionId === null || linksBusy) return
+              setLinksBusy(true)
+              try {
+                await breakExternalLinkFlow({
+                  index,
+                  readUsage: () => window.desktopApi.readExternalLinkUsage({ sessionId }),
+                  journal: async (cells) => {
+                    const runtime = univerRef.current
+                    if (!runtime) return async () => {}
+                    const restore = (await journalExternalLinkLiterals(runtime, cells)).restore
+                    const stateAtJournal = lazyWorkbookRef.current
+                    return async () => {
+                      // a split save can land phase one (which carried the ops)
+                      // and then fail phase two after reopening the workbook:
+                      // the file has the break, so putting the formulas back
+                      // would now contradict it
+                      if (lazyWorkbookRef.current !== stateAtJournal) return
+                      await restore()
+                    }
+                  },
+                  queue: (ops) => {
+                    pendingExternalLinkOpsRef.current = ops
+                  },
+                  clear: () => {
+                    pendingExternalLinkOpsRef.current = null
+                  },
+                  save: () => handleSave('save'),
+                })
+              } finally {
+                setLinksBusy(false)
+                refreshLinkStatuses()
+              }
+            })()
+          }}
+          onChangeSource={(index) => {
+            void (async () => {
+              const file = lazyWorkbookRef.current?.file
+              const sessionId = file && !file.needsSaveAs ? file.sessionId : null
+              if (sessionId === null || linksBusy) return
+              // a web source has no local file to point at
+              if (linkStatuses.find((link) => link.index === index)?.source === null) return
+              const picked = await window.desktopApi.selectExternalLinkSource()
+              if (!picked) return
+              setLinksBusy(true)
+              try {
+                pendingExternalLinkOpsRef.current = {
+                  broken: [],
+                  retargets: [{ index, target: externalFileTarget(picked) }],
+                }
+                await handleSave('save')
+              } finally {
+                pendingExternalLinkOpsRef.current = null
+                setLinksBusy(false)
+                refreshLinkStatuses()
+              }
+            })()
+          }}
+          onReveal={(index) => {
+            const file = lazyWorkbookRef.current?.file
+            if (file) window.desktopApi.revealLinkSource({ sessionId: file.sessionId, index })
+          }}
+          onClose={() => setLinksOpen(false)}
         />
       )}
     </>

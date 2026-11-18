@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { aiProfileStrings } from '@genoffice/ui'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   AI_CUSTOM_FONT_MAX_PX,
@@ -7,6 +8,7 @@ import {
   Dropdown,
   aiPanelFontPx,
   applyUiTheme,
+  syncUiTheme,
   clampAiCustomFontSize,
 } from '@genoffice/ui'
 import type { AiFontSize, AiPanelPrefs, AiPanelSide, ContentTheme, RibbonFold } from '@genoffice/ui'
@@ -258,7 +260,16 @@ function Field({
 }
 
 /** AI model pane: provider / model / key / base URL, saved to userData/ai-settings.json */
+const CUSTOM_MODEL_OPTION = '__genoffice_custom_model__'
+
 function AiModelPane({ t }: { t: TFunc }) {
+  const { lang } = useI18n()
+  const labels = aiProfileStrings(lang)
+  const [persisted, setPersisted] = useState<AiSettings | null>(null)
+  const [profileId, setProfileId] = useState('default')
+  const [profileName, setProfileName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const testEpoch = useRef(0)
   const [catalog, setCatalog] = useState<AiCatalogEntry[]>(
     () => window.aiOffice.getAiProviders?.() ?? [],
   )
@@ -293,6 +304,11 @@ function AiModelPane({ t }: { t: TFunc }) {
     void window.aiOffice.getAiSettings?.().then((s) => {
       if (!alive || !s) return
       setSettings(s)
+      setPersisted(s)
+      setProfileId(s.activeModelProfileId ?? 'default')
+      setProfileName(
+        s.modelProfiles?.find((p) => p.id === s.activeModelProfileId)?.name ?? 'Default',
+      )
       const codex = s.providers.codex
       if (codex) {
         void refreshCodexModels(codex.cliPath ?? '', codex.model).catch(() => undefined)
@@ -302,6 +318,27 @@ function AiModelPane({ t }: { t: TFunc }) {
       alive = false
     }
   }, [refreshCodexModels])
+
+  useEffect(
+    () =>
+      window.aiModelSettings?.onChanged((next) => {
+        setPersisted(next)
+        if (dirty) return
+        const selected =
+          next.modelProfiles?.find((p) => p.id === profileId) ??
+          next.modelProfiles?.find((p) => p.id === next.activeModelProfileId)
+        if (!selected) return
+        setSettings({
+          ...next,
+          provider: selected.provider,
+          providers: { ...next.providers, [selected.provider]: { ...selected.config } },
+          maxOutputTokens: selected.maxOutputTokens,
+        })
+        setProfileId(selected.id)
+        setProfileName(selected.name)
+      }),
+    [dirty, profileId],
+  )
 
   // Models the configured OpenAI-compatible server (Ollama, LM Studio, a gateway) says it serves
   const pickerBase = (() => {
@@ -346,8 +383,12 @@ function AiModelPane({ t }: { t: TFunc }) {
 
   const isCodex = provider === 'codex'
   const isOllama = provider === 'ollama'
+  const customModel =
+    config.customModel === true ||
+    (!!config.model && !!meta?.models.length && !meta.models.includes(config.model))
 
   const touch = () => {
+    testEpoch.current++
     setDirty(true)
     setSaved(false)
     setTestResult(null)
@@ -375,233 +416,382 @@ function AiModelPane({ t }: { t: TFunc }) {
     })
     touch()
   }
-  const save = () => {
-    window.aiOffice
-      .setAiSettings?.(settings)
-      .then(() => {
-        setDirty(false)
-        setSaved(true)
-      })
+  const accept = (next: AiSettings) => {
+    setPersisted(next)
+    setSettings(next)
+    setProfileId(next.activeModelProfileId!)
+    setProfileName(next.modelProfiles!.find((p) => p.id === next.activeModelProfileId)!.name)
+    setDirty(false)
+    setSaved(true)
+    setTestResult(null)
+    setMaxTokensDraft(null)
+  }
+  const runChange = (operation: Promise<AiSettings>) => {
+    setSaving(true)
+    void operation
+      .then(accept)
       .catch((error) => {
-        window.alert(error instanceof Error ? error.message : String(error))
+        window.alert(error instanceof Error ? error.message : labels.error)
       })
+      .finally(() => setSaving(false))
+  }
+  const save = () => {
+    const next =
+      maxTokensDraft === null
+        ? settings
+        : {
+            ...settings,
+            maxOutputTokens: clampMaxOutputTokens(Number.parseInt(maxTokensDraft, 10)),
+          }
+    runChange(window.aiModelSettings!.saveProfile(next, profileId, profileName))
+  }
+  const pickProfile = (id: string) => {
+    if (dirty && !window.confirm(labels.discard)) return
+    const profile = persisted?.modelProfiles?.find((p) => p.id === id)
+    if (!profile || !persisted) return
+    setSettings({
+      ...persisted,
+      provider: profile.provider,
+      providers: { ...persisted.providers, [profile.provider]: { ...profile.config } },
+      maxOutputTokens: profile.maxOutputTokens,
+    })
+    setProfileId(id)
+    setProfileName(profile.name)
+    setDirty(false)
+    setSaved(false)
+    setTestResult(null)
+    setMaxTokensDraft(null)
+    testEpoch.current++
+  }
+  const addProfile = () => {
+    setProfileId(crypto.randomUUID())
+    setProfileName(labels.draft)
+    touch()
+    setMaxTokensDraft(null)
+  }
+  const removeProfile = () => {
+    if (!window.confirm(labels.confirmRemove)) return
+    runChange(window.aiModelSettings!.remove(profileId))
   }
   const test = () => {
+    const epoch = ++testEpoch.current
     setTesting(true)
     setTestResult(null)
     window.aiOffice
       .testAiSettings?.(settings)
       .then((r) => {
+        if (epoch !== testEpoch.current) return
         setTestResult(r ?? { ok: false })
         if (r?.ok && isCodex) {
           void refreshCodexModels(config.cliPath ?? '', config.model).catch(() => undefined)
         }
       })
-      .catch((error) =>
-        setTestResult({ ok: false, error: error instanceof Error ? error.message : String(error) }),
-      )
+      .catch((error) => {
+        if (epoch === testEpoch.current)
+          setTestResult({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+      })
       .finally(() => setTesting(false))
   }
 
   return (
-    <>
-      <h3 className="set-pane-title">{t('setSecAiModel')}</h3>
-      <div className="set-field">
-        <div className="set-field-text">
-          <label className="set-field-label">{t('setAiProvider')}</label>
+    <div className="set-ai-profile-layout">
+      <aside className="set-ai-profile-list" aria-label={labels.profiles}>
+        <h4>{labels.profiles}</h4>
+        {persisted?.modelProfiles?.map((profile) => (
+          <button
+            key={profile.id}
+            className={`set-ai-profile-row${profileId === profile.id ? ' selected' : ''}`}
+            aria-pressed={profileId === profile.id}
+            disabled={saving || testing}
+            onClick={() => pickProfile(profile.id)}
+          >
+            <span>
+              {profile.name === 'Default' && profile.id === 'default'
+                ? labels.default
+                : profile.name}
+            </span>
+            <small>{profile.config.model || profile.provider}</small>
+            {persisted.activeModelProfileId === profile.id && (
+              <small className="set-ai-profile-active">{labels.active}</small>
+            )}
+          </button>
+        ))}
+        {!persisted?.modelProfiles?.some((p) => p.id === profileId) && (
+          <div className="set-ai-profile-row selected">{profileName}</div>
+        )}
+        <button className="set-btn" onClick={addProfile} disabled={saving || testing}>
+          {labels.add}
+        </button>
+      </aside>
+      <div className="set-ai-profile-editor">
+        <h3 className="set-pane-title">{t('setSecAiModel')}</h3>
+        <div className="set-field">
+          <label className="set-field-label" htmlFor="set-ai-profile-name">
+            {labels.name}
+          </label>
+          <input
+            id="set-ai-profile-name"
+            className="set-input"
+            value={profileName}
+            maxLength={80}
+            onChange={(e) => {
+              setProfileName(e.target.value)
+              touch()
+            }}
+          />
         </div>
-        <Dropdown
-          className="set-dd"
-          value={provider}
-          ariaLabel={t('setAiProvider')}
-          options={catalog.map((c) => ({
-            value: c.id,
-            label: c.label,
-            render: (
-              <>
-                <ProviderLogo id={c.id} />
-                {c.label}
-              </>
-            ),
-          }))}
-          onPick={(v) => selectProvider(v as AiSettings['provider'])}
-        />
-      </div>
-      <div className="set-field-desc set-ai-note">
-        {isCodex ? t('setAiCodexHint') : isOllama ? t('setAiOllamaHint') : t('setAiByokNote')}
-      </div>
-      <div className="set-field">
-        <div className="set-field-text">
-          <label className="set-field-label">{t('setAiModelId')}</label>
-        </div>
-        {meta && meta.models.length > 0 ? (
+        <p className="set-field-desc">{labels.hint}</p>
+        <div className="set-field">
+          <div className="set-field-text">
+            <label className="set-field-label">{t('setAiProvider')}</label>
+          </div>
           <Dropdown
             className="set-dd"
-            value={config.model || meta.defaultModel}
-            ariaLabel={t('setAiModelId')}
-            options={meta.models.map((m) => ({ value: m, label: m }))}
-            onPick={(m) => updateConfig({ model: m })}
+            value={provider}
+            ariaLabel={t('setAiProvider')}
+            options={catalog.map((c) => ({
+              value: c.id,
+              label: c.label,
+              render: (
+                <>
+                  <ProviderLogo id={c.id} />
+                  {c.label}
+                </>
+              ),
+            }))}
+            onPick={(v) => selectProvider(v as AiSettings['provider'])}
           />
-        ) : meta?.needsBaseUrl ? (
-          // a local / self-hosted server: suggest what it reports, but any id can be typed
-          <div className="set-input-row">
+        </div>
+        <div className="set-field-desc set-ai-note">
+          {isCodex ? t('setAiCodexHint') : isOllama ? t('setAiOllamaHint') : t('setAiByokNote')}
+        </div>
+        <div className="set-field">
+          <div className="set-field-text">
+            <label className="set-field-label">{t('setAiModelId')}</label>
+          </div>
+          {meta && meta.models.length > 0 ? (
+            <div className="set-model-picker">
+              <Dropdown
+                className="set-dd"
+                value={customModel ? CUSTOM_MODEL_OPTION : config.model || meta.defaultModel}
+                ariaLabel={t('setAiModelId')}
+                options={[
+                  ...meta.models.map((m) => ({ value: m, label: m })),
+                  { value: CUSTOM_MODEL_OPTION, label: t('setAiCustomModel') },
+                ]}
+                onPick={(model) =>
+                  updateConfig(
+                    model === CUSTOM_MODEL_OPTION
+                      ? { customModel: true }
+                      : { model, customModel: false },
+                  )
+                }
+              />
+              {customModel && (
+                <input
+                  id="set-ai-model"
+                  className="set-input"
+                  type="text"
+                  aria-label={t('setAiModelId')}
+                  value={config.model}
+                  placeholder="model-id"
+                  spellCheck={false}
+                  onChange={(e) => updateConfig({ model: e.target.value, customModel: true })}
+                />
+              )}
+            </div>
+          ) : meta?.needsBaseUrl ? (
+            // a local / self-hosted server: suggest what it reports, but any id can be typed
+            <div className="set-input-row">
+              <input
+                id="set-ai-model"
+                className="set-input"
+                type="text"
+                list="set-ai-model-list"
+                value={config.model}
+                placeholder={isOllama ? 'llama3.2' : 'model-id'}
+                spellCheck={false}
+                onChange={(e) => updateConfig({ model: e.target.value })}
+              />
+              <datalist id="set-ai-model-list">
+                {serverModels.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <button
+                className="set-btn"
+                type="button"
+                disabled={modelsBusy || !config.baseUrl}
+                onClick={() => void fetchServerModels(config.baseUrl ?? '', config.apiKey)}
+              >
+                {t('setAiFetchModels')}
+              </button>
+            </div>
+          ) : (
             <input
               id="set-ai-model"
               className="set-input"
               type="text"
-              list="set-ai-model-list"
               value={config.model}
-              placeholder={isOllama ? 'llama3.2' : 'model-id'}
+              placeholder="model-id"
               spellCheck={false}
               onChange={(e) => updateConfig({ model: e.target.value })}
             />
-            <datalist id="set-ai-model-list">
-              {serverModels.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-            <button
-              className="set-btn"
-              type="button"
-              disabled={modelsBusy || !config.baseUrl}
-              onClick={() => void fetchServerModels(config.baseUrl ?? '', config.apiKey)}
-            >
-              {t('setAiFetchModels')}
-            </button>
+          )}
+        </div>
+        {meta?.needsBaseUrl &&
+          (modelsError ||
+            (isOllama && config.baseUrl && !modelsBusy && serverModels.length === 0)) && (
+            <div className="set-field-desc set-ai-note">{modelsError || t('setAiOllamaEmpty')}</div>
+          )}
+        {isCodex ? (
+          <div className="set-field">
+            <div className="set-field-text">
+              <div className="set-field-stack">
+                <label className="set-field-label" htmlFor="set-ai-cli-path">
+                  {t('setAiCodexPath')}
+                </label>
+                <div className="set-field-desc">{t('setAiCodexPathHint')}</div>
+              </div>
+            </div>
+            <input
+              id="set-ai-cli-path"
+              className="set-input"
+              type="text"
+              value={config.cliPath ?? ''}
+              placeholder={t('setAiCodexAutoPlaceholder')}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => updateConfig({ cliPath: e.target.value.trim() })}
+              onBlur={(e) => {
+                const cliPath = e.target.value.trim()
+                void refreshCodexModels(cliPath, config.model).catch(() => undefined)
+              }}
+            />
           </div>
         ) : (
-          <input
-            id="set-ai-model"
-            className="set-input"
-            type="text"
-            value={config.model}
-            placeholder="model-id"
-            spellCheck={false}
-            onChange={(e) => updateConfig({ model: e.target.value })}
-          />
+          <>
+            <div className="set-field">
+              <div className="set-field-text">
+                <div className="set-field-stack">
+                  <label className="set-field-label" htmlFor="set-ai-key">
+                    {t('setAiApiKey')}
+                  </label>
+                  <div className="set-field-desc">{t('setAiKeyHint')}</div>
+                </div>
+              </div>
+              <input
+                id="set-ai-key"
+                className="set-input"
+                type="password"
+                value={config.apiKey}
+                placeholder={meta?.keyPlaceholder ?? 'API Key'}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => updateConfig({ apiKey: e.target.value.trim() })}
+              />
+            </div>
+            <div className="set-field">
+              <div className="set-field-text">
+                <div className="set-field-stack">
+                  <label className="set-field-label" htmlFor="set-ai-base-url">
+                    {t('setAiBaseUrl')}
+                  </label>
+                  {!meta?.needsBaseUrl && (
+                    <div className="set-field-desc">{t('setAiBaseUrlHint')}</div>
+                  )}
+                </div>
+              </div>
+              <input
+                id="set-ai-base-url"
+                className="set-input"
+                type="text"
+                value={config.baseUrl ?? ''}
+                placeholder={meta?.needsBaseUrl ? 'https://…/v1' : meta?.defaultBaseUrl}
+                spellCheck={false}
+                onChange={(e) => updateConfig({ baseUrl: e.target.value.trim() })}
+              />
+            </div>
+          </>
         )}
-      </div>
-      {meta?.needsBaseUrl &&
-        (modelsError ||
-          (isOllama && config.baseUrl && !modelsBusy && serverModels.length === 0)) && (
-          <div className="set-field-desc set-ai-note">{modelsError || t('setAiOllamaEmpty')}</div>
-        )}
-      {isCodex ? (
         <div className="set-field">
           <div className="set-field-text">
             <div className="set-field-stack">
-              <label className="set-field-label" htmlFor="set-ai-cli-path">
-                {t('setAiCodexPath')}
+              <label className="set-field-label" htmlFor="set-ai-max-tokens">
+                {t('setAiMaxTokens')}
               </label>
-              <div className="set-field-desc">{t('setAiCodexPathHint')}</div>
+              <div className="set-field-desc">
+                {t('setAiMaxTokensDesc')} {t('setAiMaxTokensZero')}
+              </div>
             </div>
           </div>
           <input
-            id="set-ai-cli-path"
+            id="set-ai-max-tokens"
             className="set-input"
-            type="text"
-            value={config.cliPath ?? ''}
-            placeholder={t('setAiCodexAutoPlaceholder')}
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => updateConfig({ cliPath: e.target.value.trim() })}
-            onBlur={(e) => {
-              const cliPath = e.target.value.trim()
-              void refreshCodexModels(cliPath, config.model).catch(() => undefined)
-            }}
+            type="number"
+            min={0}
+            max={MAX_MAX_OUTPUT_TOKENS}
+            step={1024}
+            value={maxTokensDraft ?? String(settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS)}
+            onChange={(e) => setMaxTokensDraft(e.target.value)}
+            onBlur={commitMaxTokens}
           />
         </div>
-      ) : (
-        <>
-          <div className="set-field">
-            <div className="set-field-text">
-              <div className="set-field-stack">
-                <label className="set-field-label" htmlFor="set-ai-key">
-                  {t('setAiApiKey')}
-                </label>
-                <div className="set-field-desc">{t('setAiKeyHint')}</div>
-              </div>
-            </div>
-            <input
-              id="set-ai-key"
-              className="set-input"
-              type="password"
-              value={config.apiKey}
-              placeholder={meta?.keyPlaceholder ?? 'API Key'}
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => updateConfig({ apiKey: e.target.value.trim() })}
-            />
-          </div>
-          <div className="set-field">
-            <div className="set-field-text">
-              <div className="set-field-stack">
-                <label className="set-field-label" htmlFor="set-ai-base-url">
-                  {t('setAiBaseUrl')}
-                </label>
-                {!meta?.needsBaseUrl && (
-                  <div className="set-field-desc">{t('setAiBaseUrlHint')}</div>
-                )}
-              </div>
-            </div>
-            <input
-              id="set-ai-base-url"
-              className="set-input"
-              type="text"
-              value={config.baseUrl ?? ''}
-              placeholder={meta?.needsBaseUrl ? 'https://…/v1' : meta?.defaultBaseUrl}
-              spellCheck={false}
-              onChange={(e) => updateConfig({ baseUrl: e.target.value.trim() })}
-            />
-          </div>
-        </>
-      )}
-      <div className="set-field">
-        <div className="set-field-text">
-          <div className="set-field-stack">
-            <label className="set-field-label" htmlFor="set-ai-max-tokens">
-              {t('setAiMaxTokens')}
-            </label>
-            <div className="set-field-desc">
-              {t('setAiMaxTokensDesc')} {t('setAiMaxTokensZero')}
-            </div>
-          </div>
-        </div>
-        <input
-          id="set-ai-max-tokens"
-          className="set-input"
-          type="number"
-          min={0}
-          max={MAX_MAX_OUTPUT_TOKENS}
-          step={1024}
-          value={maxTokensDraft ?? String(settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS)}
-          onChange={(e) => setMaxTokensDraft(e.target.value)}
-          onBlur={commitMaxTokens}
-        />
-      </div>
 
-      <div className="set-pane-footer">
-        <AiStatusPill
-          status={
-            testing
-              ? { kind: 'testing', text: t('setAiTesting') }
-              : testResult
-                ? testResult.ok
-                  ? { kind: 'ok', text: t('setAiTestOk') }
-                  : { kind: 'err', text: testResult.error || t('setAiTestFail') }
-                : saved
-                  ? { kind: 'ok', text: t('setAiSaved') }
-                  : null
-          }
-        />
-        <button className="set-btn" disabled={testing} onClick={test}>
-          {t('setAiTest')}
-        </button>
-        <button className="set-btn primary" disabled={!dirty} onClick={save}>
-          {t('setAiSave')}
-        </button>
+        <div className="set-ai-profile-tools">
+          {persisted?.modelProfiles?.some((p) => p.id === profileId) && (
+            <>
+              <button
+                className="set-btn"
+                disabled={
+                  saving || testing || dirty || persisted.activeModelProfileId === profileId
+                }
+                onClick={() => runChange(window.aiModelSettings!.activate(profileId))}
+              >
+                {labels.use}
+              </button>
+              <button
+                className="set-btn"
+                disabled={saving || testing || (persisted.modelProfiles?.length ?? 0) <= 1}
+                onClick={removeProfile}
+              >
+                {labels.remove}
+              </button>
+            </>
+          )}
+        </div>
+        <div className="set-pane-footer">
+          <AiStatusPill
+            status={
+              testing
+                ? { kind: 'testing', text: t('setAiTesting') }
+                : testResult
+                  ? testResult.ok
+                    ? { kind: 'ok', text: t('setAiTestOk') }
+                    : { kind: 'err', text: testResult.error || t('setAiTestFail') }
+                  : saved
+                    ? { kind: 'ok', text: t('setAiSaved') }
+                    : null
+            }
+          />
+          <button className="set-btn" disabled={testing || saving} onClick={test}>
+            {t('setAiTest')}
+          </button>
+          <button
+            className="set-btn primary"
+            disabled={
+              saving || testing || (!dirty && maxTokensDraft === null) || !profileName.trim()
+            }
+            onClick={save}
+          >
+            {labels.save}
+          </button>
+        </div>
       </div>
-    </>
+    </div>
   )
 }
 
@@ -675,7 +865,14 @@ function AiMediaPane({ t }: { t: TFunc }) {
 
   const save = () => {
     window.aiOffice
-      .setAiSettings?.(settings)
+      .getAiSettings()
+      .then((current) =>
+        window.aiOffice.setAiSettings({
+          ...current,
+          media: settings.media,
+          search: settings.search,
+        }),
+      )
       .then(() => {
         setDirty(false)
         setSaved(true)
@@ -1043,9 +1240,7 @@ export function SettingsModal({
 
   useEffect(() => {
     let alive = true
-    void window.aiOffice.getTheme?.().then((th) => {
-      if (alive) setTheme(th)
-    })
+    const themeSync = syncUiTheme(window.aiOffice, setTheme)
     void window.aiOffice.getDefaultSaveDir?.().then((dir) => {
       if (alive && dir) setSaveDir(dir)
     })
@@ -1066,6 +1261,7 @@ export function SettingsModal({
     })
     return () => {
       alive = false
+      themeSync.dispose()
     }
   }, [])
 
@@ -1248,7 +1444,7 @@ export function SettingsModal({
                   {aiPrefs.fontSize === 'custom' && (
                     <CustomFontSizeInput
                       value={aiPrefs.customFontSize}
-                      label={t('aiFontSizeCustom')}
+                      label={t('setAiCustomModel')}
                       onCommit={(px) => updateAiPrefs({ customFontSize: px })}
                     />
                   )}

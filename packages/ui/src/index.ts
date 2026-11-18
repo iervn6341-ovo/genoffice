@@ -1,4 +1,8 @@
 export { AiPanelSideButton } from './AiPanelSideButton'
+export { FloatingOutline, type FloatingOutlineItem } from './FloatingOutline'
+export { floatingOutlineLabels } from './strings-floating-outline'
+export { useOutlineScrollSpy, type OutlineAnchor } from './outline-scroll'
+export { AiModelProfilePicker, useAiSettingsSync, aiProfileStrings } from './ai-model-profiles'
 export { AiComposer } from './AiComposer'
 export { AiScopeQuote, type AiScopeQuoteData } from './AiScopeQuote'
 export {
@@ -57,12 +61,19 @@ export { AiTypingIndicator } from './AiTypingIndicator'
 export { IconSend, IconStop, type IconProps } from './icons'
 export { Markdown, type MarkdownNav } from './Markdown'
 export { isSymbolFontFamily } from './symbol-fonts'
-export { BUILTIN_FONT_FAMILIES, fontFamiliesFor, sortFontFamilies } from './font-list'
+export {
+  BUILTIN_FONT_FAMILIES,
+  RECOMMENDED_SUBSTITUTE_FONTS,
+  fontFamiliesFor,
+  sortFontFamilies,
+  type SubstituteFontOption,
+} from './font-list'
 export {
   DEFAULT_FONT_SUBSTITUTIONS,
   fontNameEquivalents,
   isAppBundledFamily,
   isFontInstalled,
+  isOfficeFamily,
   normalizeFontSubstitutions,
   substituteIsUnavailable,
   type FontSubstitutionRule,
@@ -165,6 +176,6 @@ export {
   type MathWorkbenchLabels,
 } from './MathWorkbench'
 export { SymbolPicker, type SymbolPickerLabels } from './SymbolPicker'
-export { applyUiTheme, type UiThemeName } from './ui-theme'
+export { applyUiTheme, syncUiTheme, type UiThemeName } from './ui-theme'
 export { setSmoothScroll, isNotchedWheel, easeStep, wheelPixels } from './smooth-scroll'
 export { resolveContentDark, useContentDarkPref } from './content-theme'

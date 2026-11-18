@@ -52,6 +52,32 @@ describe('session temporary resources', () => {
     expect(existsSync(importDir)).toBe(false)
   })
 
+  it('removes a never-saved blank staging workbook without touching its suggested user path', async () => {
+    const root = await tempRoot()
+    const importDir = join(root, 'genoffice-imports', randomUUID())
+    const stagedPath = join(importDir, 'blank.xlsx')
+    const suggestedPath = join(root, 'Documents', 'Untitled Spreadsheet.xlsx')
+    const snapshotDir = join(root, 'genoffice-sheets-sessions')
+    const snapshotPath = join(snapshotDir, `${randomUUID()}.xlsx`)
+    await mkdir(importDir, { recursive: true })
+    await mkdir(snapshotDir, { recursive: true })
+    await writeFile(stagedPath, 'private blank bytes')
+    await writeFile(snapshotPath, 'snapshot bytes')
+    expect(existsSync(suggestedPath)).toBe(false)
+
+    await cleanupSessionResources({
+      tempRoot: root,
+      snapshotPath,
+      importTempDir: importDir,
+      closeSidecar: async () => undefined,
+    })
+
+    expect(existsSync(stagedPath)).toBe(false)
+    expect(existsSync(importDir)).toBe(false)
+    expect(existsSync(snapshotPath)).toBe(false)
+    expect(existsSync(suggestedPath)).toBe(false)
+  })
+
   it('never recursively deletes an unowned import path', async () => {
     const root = await tempRoot()
     const arbitrary = join(root, 'user-data')

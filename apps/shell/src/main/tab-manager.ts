@@ -33,10 +33,10 @@ import {
 import {
   createSheetsView,
   nudgeQueuedWorkbook,
+  queueNewBlankWorkbookForView,
   queueWorkbookForView,
   requestSheetsClose,
   setActiveSheetsWebContents,
-  setSheetsNewBlank,
   sheetsPendingEditCount,
 } from '../../../sheets/src/main/sheets-main'
 import {
@@ -56,11 +56,13 @@ interface TabRecord {
   filePath?: string
   /** chrome-free Present tab: no file, no editor menu or save/export targets */
   present?: boolean
+  dirty?: boolean
 }
 
 /** must match the tab strip's rendered height (apps/shell/src/renderer/src/TabBar.tsx) */
 const TAB_STRIP_HEIGHT = 40
 const HOME_ID = 'home'
+const viewOwners = new WeakMap<WebContentsView, TabManager>()
 
 /**
  * Owns every open tab (Home + docs + sheets) inside the shell's single
@@ -82,11 +84,18 @@ export class TabManager {
   private readonly bleedWcIds = new Set<number>()
   /** tabs mid unsaved-changes prompt, so a second close click doesn't stack dialogs */
   private readonly closingIds = new Set<string>()
+  private windowClosing = false
+
+  setWindowClosing(value: boolean): void {
+    this.windowClosing = value
+  }
   /** Sheets renderer mounted ahead of the next open: parsing its bundle and
    *  booting Univer is the bulk of a workbook's open time, and the shell hands
    *  the path over after mount anyway. */
   private spareSheetsView: WebContentsView | null = null
   private spareSheetsTimer: ReturnType<typeof setTimeout> | null = null
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly layoutBounds = new WeakMap<WebContentsView, Rectangle>()
 
   constructor(
     private readonly shellWindow: BrowserWindow,
@@ -94,15 +103,20 @@ export class TabManager {
     private readonly applyMenuFor: (kind: TabKind) => void,
     /** localized placeholder title for a tab that has no file yet */
     private readonly untitledTitleFor?: (kind: TabKind) => string,
+    private readonly idPrefix = '',
   ) {
-    // Layout once synchronously for macOS/Windows (bounds are already correct),
-    // then once more on the next tick. On Linux/X11, `resize` fires before the
-    // window manager applies the new size, so getContentBounds() is still the
-    // pre-maximize size inside the handler and a follow-up layout is required.
-
+    // A resize burst needs at most one native child-view update per frame.
+    // Deferring also lets Linux/X11 commit its new content bounds first.
     shellWindow.on('resize', () => {
-      this.layout()
-      setImmediate(() => this.layout())
+      if (this.resizeTimer) return
+      this.resizeTimer = setTimeout(() => {
+        this.resizeTimer = null
+        this.layout()
+      }, 16)
+    })
+    shellWindow.on('resized', () => this.layout())
+    shellWindow.once('closed', () => {
+      if (this.resizeTimer) clearTimeout(this.resizeTimer)
     })
     shellWindow.webContents.once('did-finish-load', () => this.scheduleSpareSheetsView(1500))
   }
@@ -112,6 +126,9 @@ export class TabManager {
     this.spareSheetsTimer = setTimeout(() => {
       this.spareSheetsTimer = null
       if (this.spareSheetsView || this.shellWindow.isDestroyed()) return
+      // Parsing Univer's renderer is expensive. Opening a real document takes
+      // priority over speculative work; try again when Home becomes active.
+      if (this.activeId !== HOME_ID) return
       const view = createSheetsView({ includeAiHandlers: false })
       // registering the session made the spare the menu-action target
       const active = this.tabs.find((t) => t.id === this.activeId)
@@ -170,15 +187,20 @@ export class TabManager {
    * restore the normal bounds on leave.
    */
   private trackHtmlFullScreen(id: string, view: WebContentsView): void {
+    viewOwners.set(view, this)
     view.webContents.on('enter-html-full-screen', () => {
-      this.htmlFullScreenId = id
-      this.layout()
-      this.onChanged()
+      const owner = viewOwners.get(view)
+      if (!owner) return
+      owner.htmlFullScreenId = id
+      owner.layout()
+      owner.onChanged()
     })
     view.webContents.on('leave-html-full-screen', () => {
-      if (this.htmlFullScreenId === id) this.htmlFullScreenId = null
-      this.layout()
-      this.onChanged()
+      const owner = viewOwners.get(view)
+      if (!owner) return
+      if (owner.htmlFullScreenId === id) owner.htmlFullScreenId = null
+      owner.layout()
+      owner.onChanged()
     })
   }
 
@@ -187,7 +209,19 @@ export class TabManager {
     // Deferred resize layouts can land after the shell window was closed.
     if (this.shellWindow.isDestroyed()) return
     const active = this.tabs.find((t) => t.id === this.activeId)
-    if (active?.view) active.view.setBounds(this.contentBounds())
+    if (!active?.view) return
+    const bounds = this.contentBounds()
+    const previous = this.layoutBounds.get(active.view)
+    if (
+      previous &&
+      previous.x === bounds.x &&
+      previous.y === bounds.y &&
+      previous.width === bounds.width &&
+      previous.height === bounds.height
+    )
+      return
+    active.view.setBounds(bounds)
+    this.layoutBounds.set(active.view, bounds)
   }
 
   /** files open in any tab, for the open-documents registry */
@@ -202,6 +236,7 @@ export class TabManager {
       title: t.title,
       closable: t.id !== HOME_ID,
       active: t.id === this.activeId,
+      ...(t.dirty ? { dirty: true } : {}),
       ...(t.id === this.activeId &&
       t.view &&
       (this.htmlFullScreenId === t.id || this.bleedWcIds.has(t.view.webContents.id))
@@ -265,7 +300,7 @@ export class TabManager {
     options?: { newBlank?: boolean; aiContent?: AiDocContent },
   ): string {
     const view = createDocsView(openPath)
-    const id = `t${this.nextId++}`
+    const id = `${this.idPrefix}t${this.nextId++}`
     if (options?.newBlank) markDocsNewBlank(view.webContents.id)
     if (options?.aiContent) queueDocsAiContent(view.webContents.id, options.aiContent)
     this.shellWindow.contentView.addChildView(view)
@@ -282,9 +317,8 @@ export class TabManager {
     return id
   }
 
-  openSheetsTab(openPath?: string, options?: { newBlank?: boolean }): string {
-    if (options?.newBlank) setSheetsNewBlank()
-    const spare = this.takeSpareSheetsView()
+  openSheetsTab(openPath?: string, options?: { newBlank: true; suggestedPath: string }): string {
+    const spare = options?.newBlank ? null : this.takeSpareSheetsView()
     const view = spare ?? createSheetsView({ includeAiHandlers: false })
     // bind the path to this tab's webContents: a multi-select Open creates
     // several sheets tabs in one loop, so a single global path would be
@@ -293,7 +327,8 @@ export class TabManager {
       queueWorkbookForView(view.webContents, openPath)
       if (spare) nudgeQueuedWorkbook(view.webContents)
     }
-    const id = `t${this.nextId++}`
+    if (options?.newBlank) queueNewBlankWorkbookForView(view.webContents, options.suggestedPath)
+    const id = `${this.idPrefix}t${this.nextId++}`
     if (!spare) {
       this.shellWindow.contentView.addChildView(view)
       view.setVisible(false)
@@ -313,7 +348,7 @@ export class TabManager {
 
   openSlidesTab(openPath?: string): string {
     const view = createSlidesView(openPath)
-    const id = `t${this.nextId++}`
+    const id = `${this.idPrefix}t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
     this.trackHtmlFullScreen(id, view)
@@ -330,11 +365,24 @@ export class TabManager {
 
   openPdfTab(openPath: string): string {
     const view = createPdfView(openPath)
-    const id = `t${this.nextId++}`
+    const id = `${this.idPrefix}t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
     this.trackHtmlFullScreen(id, view)
     this.tabs.push({ id, kind: 'pdf', view, title: basename(openPath), filePath: openPath })
+    this.activateTab(id)
+    return id
+  }
+
+  /** A new PDF stays in memory until the user explicitly saves it. */
+  openBlankPdfTab(saveDir?: string): string {
+    const title = this.untitled('pdf', 'AI PDF')
+    const view = createPdfView(undefined, { blank: true, saveDir, untitledName: title })
+    const id = `${this.idPrefix}t${this.nextId++}`
+    this.shellWindow.contentView.addChildView(view)
+    view.setVisible(false)
+    this.trackHtmlFullScreen(id, view)
+    this.tabs.push({ id, kind: 'pdf', view, title })
     this.activateTab(id)
     return id
   }
@@ -350,7 +398,7 @@ export class TabManager {
 
   openMarkdownTab(openPath?: string): string {
     const view = createMarkdownView(openPath)
-    const id = `t${this.nextId++}`
+    const id = `${this.idPrefix}t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
     this.trackHtmlFullScreen(id, view)
@@ -367,7 +415,7 @@ export class TabManager {
 
   openHtmlTab(openPath?: string): string {
     const view = createHtmlView(openPath)
-    const id = `t${this.nextId++}`
+    const id = `${this.idPrefix}t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
     this.trackHtmlFullScreen(id, view)
@@ -385,7 +433,7 @@ export class TabManager {
   /** Present → New tab: a chrome-free html tab showing the owner tab's live preview */
   openHtmlPresentTab(owner: WebContents, title: string): string {
     const view = createHtmlPresentView(owner, title)
-    const id = `t${this.nextId++}`
+    const id = `${this.idPrefix}t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
     this.trackHtmlFullScreen(id, view)
@@ -405,7 +453,8 @@ export class TabManager {
     if (!target) return
     for (const t of this.tabs) t.view?.setVisible(t.id === id)
     this.activeId = id
-    if (target.view) target.view.setBounds(this.contentBounds())
+    if (id === HOME_ID) this.scheduleSpareSheetsView(1500)
+    this.layout()
     this.refreshActiveTargets()
     this.onChanged()
   }
@@ -435,6 +484,51 @@ export class TabManager {
     this.onChanged()
   }
 
+  /** Reparent the live editor. Never close/reload it: unsaved edits, DOM focus,
+   * undo stacks and pending AI requests belong to this same WebContents. */
+  moveTabTo(id: string, target: TabManager, toIndex = target.tabs.length): boolean {
+    if (target === this) {
+      this.reorderTab(id, toIndex)
+      return id !== HOME_ID
+    }
+    const index = this.tabs.findIndex((t) => t.id === id)
+    const tab = this.tabs[index]
+    if (
+      !tab?.view ||
+      tab.present ||
+      this.windowClosing ||
+      target.windowClosing ||
+      this.closingIds.has(id) ||
+      this.htmlFullScreenId === id ||
+      this.bleedWcIds.has(tab.view.webContents.id) ||
+      tab.view.webContents.isDestroyed() ||
+      target.shellWindow.isDestroyed() ||
+      target.tabs.some((t) => t.id === id)
+    )
+      return false
+    const view = tab.view
+    // Hide before reparenting so the old native host receives its visibility
+    // transition before the destination makes the same editor visible again.
+    const wasActive = this.activeId === id
+    view.setVisible(false)
+    this.shellWindow.contentView.removeChildView(view)
+    try {
+      target.shellWindow.contentView.addChildView(view)
+    } catch (error) {
+      this.shellWindow.contentView.addChildView(view)
+      view.setVisible(wasActive)
+      throw error
+    }
+    this.tabs.splice(index, 1)
+    this.layoutBounds.delete(view)
+    viewOwners.set(view, target)
+    target.tabs.splice(Math.min(Math.max(Math.trunc(toIndex), 1), target.tabs.length), 0, tab)
+    if (this.activeId === id) this.activateTab((this.tabs[index - 1] ?? this.tabs[0]).id)
+    else this.onChanged()
+    target.activateTab(id)
+    return true
+  }
+
   tabIdForWebContents(webContentsId: number): string | undefined {
     return this.tabs.find((t) => t.view?.webContents.id === webContentsId)?.id
   }
@@ -445,6 +539,14 @@ export class TabManager {
     if (!tab) return
     tab.filePath = filePath
     tab.title = basename(filePath)
+    tab.dirty = false
+    this.onChanged()
+  }
+
+  setTabDirtyFor(webContentsId: number, dirty: boolean): void {
+    const tab = this.tabs.find((t) => t.view?.webContents.id === webContentsId)
+    if (!tab || !!tab.dirty === dirty) return
+    tab.dirty = dirty
     this.onChanged()
   }
 

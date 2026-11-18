@@ -7,12 +7,13 @@
  *     never reaches this document — closes it via the app:chrome-pressed IPC
  *     relay (the shell main process also broadcasts it on window drag)
  *
- * Apps whose ribbon tab row doubles as the frameless-window drag region must
- * additionally suspend that region while a popover is open (drag regions
+ * Standalone ribbon rows can additionally suspend their drag region while a popover is open (drag regions
  * swallow mouse events, so no listener can see presses on the blank band).
  * While any popover installed here is open, `<html>` carries the
  * `genoffice-popover-open` class — suspend the drag region with
  * `html.genoffice-popover-open .your-drag-row { -webkit-app-region: no-drag; }`.
+ * The shell title bar stays draggable and dismisses via native frame events;
+ * suspending it would consume the first window drag just to close the menu.
  */
 import { useEffect, useRef } from 'react'
 

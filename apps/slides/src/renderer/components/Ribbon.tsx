@@ -1116,6 +1116,7 @@ export function Ribbon({
   onAnimTiming,
   animPaneOpen,
   onToggleAnimPane,
+  onAnimationTabActive,
   animCount,
   onAnimPreview,
   onSlideShow,
@@ -1200,6 +1201,11 @@ export function Ribbon({
   contextShapeFill,
   onPictureCrop,
   cropActive,
+  onCropAspectRatio,
+  onCropFill,
+  onCropFit,
+  onCropReset,
+  contextPictureHasCrop,
   onPictureOpacity,
   onPictureAdjustments,
   onPictureCutout,
@@ -1233,6 +1239,9 @@ export function Ribbon({
   const autoContextTab = autoContextTabForElement(contextElementType ?? null)
 
   const [tab, setTab] = useState<MainTab | ContextTab>('home')
+  useEffect(() => {
+    onAnimationTabActive?.(tab === 'animations')
+  }, [tab, onAnimationTabActive])
   const [colorOpen, setColorOpen] = useState(false)
   const [fontOpen, setFontOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
@@ -1282,6 +1291,7 @@ export function Ribbon({
   const [fontDraft, setFontDraft] = useState<string | null>(null)
   const [tableOpen, setTableOpen] = useState(false)
   const [tableHover, setTableHover] = useState({ r: 0, c: 0 })
+  const [cropMenuOpen, setCropMenuOpen] = useState(false)
   const [tableDialogOpen, setTableDialogOpen] = useState(false)
   const [layoutOpen, setLayoutOpen] = useState(false)
   // responsive-collapse state (see the collapse effect below)
@@ -1343,6 +1353,7 @@ export function Ribbon({
     if (!keep.includes('collapse')) setCollapseOpen(null)
     if (!keep.includes('pen')) setPenFlyout(null)
     if (!keep.includes('slideShow')) setSlideShowOpen(false)
+    if (!keep.includes('cropMenu')) setCropMenuOpen(false)
   }, [])
 
   // Any ribbon popup open? Drives outside-press dismissal AND suspends the
@@ -1350,6 +1361,7 @@ export function Ribbon({
   // press there could never dismiss otherwise)
   const anyPanelOpen =
     tableOpen ||
+    cropMenuOpen ||
     colorOpen ||
     translateOpen ||
     insertDrop != null ||
@@ -2348,2132 +2360,2248 @@ export function Ribbon({
 
       <div className="ribbon-body" data-ribbon-body="" ref={bodyRef}>
         <div key={tab} className="ribbon-tab-pane">
-        {tab === 'home' ? (
-          <RibbonHomeTab rb={tabCtx} />
-        ) : tab === 'insert' ? (
-          <RibbonInsertTab rb={tabCtx} />
-        ) : tab === 'draw' ? (
-          (() => {
-            // Draw tab: tool buttons, then a tray of ready pens.
-            // Clicking a pen picks it up; clicking the held pen opens its
-            // color/width flyout; customisations stick to that pen preset.
-            const applyPenPreset = (preset: PenPreset) => {
-              // onInkTool toggles back to 'select' when the active tool is re-picked;
-              // only switch when it actually differs so editing color/width (or swapping
-              // to another pen of the same kind) never drops the pen
-              if (inkTool !== preset.kind) onInkTool(preset.kind)
-              if (preset.kind === 'pen')
-                onInkPen({ ...inkPen, color: preset.color, width: preset.width })
-              else onInkHighlighter({ ...inkHighlighter, color: preset.color, width: preset.width })
-            }
-            const updatePenPreset = (
-              index: number,
-              patch: Partial<Pick<PenPreset, 'color' | 'width'>>,
-            ) => {
-              const next = penPresets.map((p, i) => (i === index ? { ...p, ...patch } : p))
-              setPenPresets(next)
-              applyPenPreset(next[index])
-            }
-            // Color swatches + width dots editing one pen preset (same controls as
-            // apps/docs DrawTab); shown inline for the selected pen and reused by the
-            // held-pen flyout
-            const renderInkSettings = (index: number) => {
-              const preset = penPresets[index]!
-              const widths = preset.kind === 'highlighter' ? HIGHLIGHTER_WIDTHS : PEN_WIDTHS
-              return (
-                <div className="ink-settings">
-                  <div className="ink-swatches">
-                    {INK_COLORS.map((hex) => (
-                      <button
-                        key={hex}
-                        className={`ink-swatch ${preset.color === hex ? 'active' : ''}`}
-                        style={{ background: `#${hex}` }}
-                        data-tip={`#${hex}`}
-                        aria-label={`#${hex}`}
-                        disabled={!hasDoc}
-                        onClick={() => updatePenPreset(index, { color: hex })}
-                      />
-                    ))}
-                  </div>
-                  <div className="ink-widths">
-                    {widths.map((w) => (
-                      <button
-                        key={w}
-                        className={`ink-width ${preset.width === w ? 'active' : ''}`}
-                        data-tip={t('ribbonInkWidthTip', { w })}
-                        aria-label={t('ribbonInkWidthTip', { w })}
-                        disabled={!hasDoc}
-                        onClick={() => updatePenPreset(index, { width: w })}
-                      >
-                        <span
-                          className="ink-width-dot"
-                          style={{
-                            width: Math.min(16, w * 2 + 2),
-                            height: Math.min(16, w * 2 + 2),
-                            background: `#${preset.color}`,
-                          }}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )
-            }
-            return (
-              <>
-                <Group
-                  label={t('ribbonGroupDrawTools')}
-                  fold={{ icon: <IconPen size={BIG} />, priority: 3 }}
-                >
-                  <button
-                    className={`rb-big ${inkTool === 'select' ? 'active' : ''}`}
-                    disabled={!hasDoc}
-                    data-tip={t('ribbonSelectTip')}
-                    onClick={() => {
-                      setPenFlyout(null)
-                      onInkTool('select')
-                    }}
-                  >
-                    <span className="rb-big-icon">
-                      <IconCursor size={BIG} />
-                    </span>
-                    <span>{t('ribbonGroupSelect')}</span>
-                  </button>
-                  <button
-                    className={`rb-big ${inkTool === 'eraser' ? 'active' : ''}`}
-                    disabled={!hasDoc}
-                    data-tip={t('ribbonEraserTip')}
-                    onClick={() => {
-                      setPenFlyout(null)
-                      onInkTool('eraser')
-                    }}
-                  >
-                    <span className="rb-big-icon">
-                      <IconEraser size={BIG} />
-                    </span>
-                    <span>{t('ribbonEraser')}</span>
-                  </button>
-                </Group>
-                <div className="ribbon-sep" />
-                <Group
-                  label={t('ribbonGroupPenStyle')}
-                  fold={{ icon: <IconHighlighterPen size={BIG} />, priority: 2 }}
-                >
-                  <div className="pen-tray">
-                    {penPresets.map((preset, i) => {
-                      const held = selectedPen === i && inkTool === preset.kind
-                      return (
+          {tab === 'home' ? (
+            <RibbonHomeTab rb={tabCtx} />
+          ) : tab === 'insert' ? (
+            <RibbonInsertTab rb={tabCtx} />
+          ) : tab === 'draw' ? (
+            (() => {
+              // Draw tab: tool buttons, then a tray of ready pens.
+              // Clicking a pen picks it up; clicking the held pen opens its
+              // color/width flyout; customisations stick to that pen preset.
+              const applyPenPreset = (preset: PenPreset) => {
+                // onInkTool toggles back to 'select' when the active tool is re-picked;
+                // only switch when it actually differs so editing color/width (or swapping
+                // to another pen of the same kind) never drops the pen
+                if (inkTool !== preset.kind) onInkTool(preset.kind)
+                if (preset.kind === 'pen')
+                  onInkPen({ ...inkPen, color: preset.color, width: preset.width })
+                else
+                  onInkHighlighter({ ...inkHighlighter, color: preset.color, width: preset.width })
+              }
+              const updatePenPreset = (
+                index: number,
+                patch: Partial<Pick<PenPreset, 'color' | 'width'>>,
+              ) => {
+                const next = penPresets.map((p, i) => (i === index ? { ...p, ...patch } : p))
+                setPenPresets(next)
+                applyPenPreset(next[index])
+              }
+              // Color swatches + width dots editing one pen preset (same controls as
+              // apps/docs DrawTab); shown inline for the selected pen and reused by the
+              // held-pen flyout
+              const renderInkSettings = (index: number) => {
+                const preset = penPresets[index]!
+                const widths = preset.kind === 'highlighter' ? HIGHLIGHTER_WIDTHS : PEN_WIDTHS
+                return (
+                  <div className="ink-settings">
+                    <div className="ink-swatches">
+                      {INK_COLORS.map((hex) => (
                         <button
-                          key={i}
-                          className={`pen-btn ${held ? 'down' : ''}`}
+                          key={hex}
+                          className={`ink-swatch ${preset.color === hex ? 'active' : ''}`}
+                          style={{ background: `#${hex}` }}
+                          data-tip={`#${hex}`}
+                          aria-label={`#${hex}`}
                           disabled={!hasDoc}
-                          data-tip={
-                            preset.kind === 'pen' ? t('ribbonPenTip') : t('ribbonHighlighterTip')
-                          }
-                          aria-label={
-                            preset.kind === 'pen' ? t('ribbonPenTip') : t('ribbonHighlighterTip')
-                          }
-                          onClick={(event) => {
-                            if (held) {
-                              const rect = event.currentTarget.getBoundingClientRect()
-                              setPenFlyout(
-                                penFlyout?.index === i
-                                  ? null
-                                  : {
-                                      index: i,
-                                      x: Math.round(rect.left),
-                                      y: Math.round(rect.bottom + 6),
-                                    },
-                              )
-                            } else {
-                              setSelectedPen(i)
-                              setPenFlyout(null)
-                              applyPenPreset(preset)
-                            }
-                          }}
-                        >
-                          <PenThumb kind={preset.kind} color={preset.color} />
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {renderInkSettings(selectedPen)}
-                </Group>
-                <div className="ribbon-sep" />
-                <Group
-                  label={t('ribbonGroupClear')}
-                  fold={{ icon: <IconEraser size={BIG} />, priority: 1 }}
-                >
-                  <button
-                    className="rb-big"
-                    disabled={!hasDoc || inkCount === 0}
-                    data-tip={t('ribbonEraseAllTip')}
-                    onClick={onInkClearAll}
-                  >
-                    <span className="rb-big-icon">
-                      <IconEraser size={BIG} />
-                    </span>
-                    <span>{t('ribbonEraseAll')}</span>
-                  </button>
-                </Group>
-                {penFlyout && (
-                  <>
-                    <div className="pen-flyout-backdrop" onClick={() => setPenFlyout(null)} />
-                    <div className="pen-flyout" style={{ left: penFlyout.x, top: penFlyout.y }}>
-                      {renderInkSettings(penFlyout.index)}
-                    </div>
-                  </>
-                )}
-              </>
-            )
-          })()
-        ) : tab === 'design' ? (
-          <>
-            <Group
-              label={t('ribbonGroupThemes')}
-              fold={{ icon: <IconTheme size={BIG} />, priority: 3 }}
-            >
-              <div className="theme-gallery">
-                {THEME_PRESETS.map((tp) => (
-                  <button
-                    key={tp.id}
-                    className="theme-card"
-                    disabled={!hasDoc}
-                    data-tip={t('ribbonApplyThemeTip', { name: themeDisplayName(tp, t) })}
-                    onClick={() => onApplyTheme(tp)}
-                    style={{ background: `#${tp.colors.lt1}`, color: `#${tp.colors.dk1}` }}
-                  >
-                    <span className="theme-card-aa" style={{ fontFamily: tp.majorFont }}>
-                      Aa
-                    </span>
-                    <span className="theme-card-dots">
-                      {['accent1', 'accent2', 'accent3', 'accent4'].map((k) => (
-                        <span
-                          key={k}
-                          className="theme-card-dot"
-                          style={{ background: `#${tp.colors[k]}` }}
+                          onClick={() => updatePenPreset(index, { color: hex })}
                         />
                       ))}
-                    </span>
-                    <span className="theme-card-name">{themeDisplayName(tp, t)}</span>
-                  </button>
-                ))}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupBackground')}
-              fold={{ icon: <IconPageColor size={BIG} />, priority: 2 }}
-            >
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onFormatBackground}
-                data-tip={t('ribbonFormatBackgroundTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconPageColor size={BIG} />
-                </span>
-                <span>{t('ribbonFormatBackground')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupCustomize')}
-              fold={{ icon: <IconPageSize size={BIG} />, priority: 1 }}
-            >
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${slideSizeOpen ? 'active' : ''}`}
-                  disabled={!hasDoc}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'slideSize')
-                  }}
-                  onClick={() => setSlideSizeOpen((v) => !v)}
-                  data-tip={t('ribbonSlideSizeTip')}
-                >
-                  <span className="rb-big-icon">
-                    <IconPageSize size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonSlideSize')}</span>
-                </button>
-                {slideSizeOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {(
-                      [
-                        ['16:9', t('ribbonSlideSize169'), 12192000, 6858000],
-                        ['4:3', t('ribbonSlideSize43'), 9144000, 6858000],
-                      ] as const
-                    ).map(([key, label, cx, cy]) => (
-                      <button
-                        key={key}
-                        className={slideSizeKey === key ? 'on' : ''}
-                        onClick={() => {
-                          setSlideSizeOpen(false)
-                          onSlideSize(cx, cy)
-                        }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <button
-                      data-testid="slide-size-custom"
-                      onClick={() => {
-                        setSlideSizeOpen(false)
-                        onCustomSlideSize()
-                      }}
-                    >
-                      {t('paneSlideSizeTitle')}
-                    </button>
+                    </div>
+                    <div className="ink-widths">
+                      {widths.map((w) => (
+                        <button
+                          key={w}
+                          className={`ink-width ${preset.width === w ? 'active' : ''}`}
+                          data-tip={t('ribbonInkWidthTip', { w })}
+                          aria-label={t('ribbonInkWidthTip', { w })}
+                          disabled={!hasDoc}
+                          onClick={() => updatePenPreset(index, { width: w })}
+                        >
+                          <span
+                            className="ink-width-dot"
+                            style={{
+                              width: Math.min(16, w * 2 + 2),
+                              height: Math.min(16, w * 2 + 2),
+                              background: `#${preset.color}`,
+                            }}
+                          />
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                )}
-              </div>
-            </Group>
-          </>
-        ) : tab === 'transitions' ? (
-          <>
-            <Group
-              label={t('ribbonGroupTransitionToThis')}
-              fold={{ icon: <IconTransFade size={BIG} />, priority: 3 }}
-            >
-              {TRANSITIONS.map((tr) => (
-                <button
-                  key={tr.kind}
-                  className={`rb-big ${transition === tr.kind ? 'active' : ''}`}
-                  disabled={!hasDoc}
-                  onClick={() => onTransition(tr.kind, false)}
-                  data-tip={
-                    tr.kind === 'none'
-                      ? t('ribbonTransNoneTip')
-                      : t('ribbonTransApplyTip', { name: t(tr.label) })
-                  }
-                >
-                  <span className="rb-big-icon rb-trans-glyph">{tr.icon}</span>
-                  <span>{t(tr.label)}</span>
-                </button>
-              ))}
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonTransEffectOptions')}
-              fold={{ icon: <IconTransPush size={BIG} />, priority: 2 }}
-            >
-              {dropBig(
-                'transOptions',
-                <IconTransPush size={BIG} />,
-                t('ribbonTransEffectOptions'),
-                t('ribbonTransEffectOptions'),
-                <div className="rb-menu">
-                  {transitionOptions.map((o) => (
+                )
+              }
+              return (
+                <>
+                  <Group
+                    label={t('ribbonGroupDrawTools')}
+                    fold={{ icon: <IconPen size={BIG} />, priority: 3 }}
+                  >
                     <button
-                      key={o.key}
-                      className={o.active ? 'active' : ''}
+                      className={`rb-big ${inkTool === 'select' ? 'active' : ''}`}
+                      disabled={!hasDoc}
+                      data-tip={t('ribbonSelectTip')}
                       onClick={() => {
-                        setInsertDrop(null)
-                        onTransitionDetail(o.patch)
+                        setPenFlyout(null)
+                        onInkTool('select')
                       }}
                     >
-                      {t(o.label)}
+                      <span className="rb-big-icon">
+                        <IconCursor size={BIG} />
+                      </span>
+                      <span>{t('ribbonGroupSelect')}</span>
                     </button>
-                  ))}
-                </div>,
-                !hasDoc || transitionOptions.length === 0,
-              )}
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupTiming')}
-              fold={{ icon: <IconClock size={BIG} />, priority: 1 }}
-            >
-              <div className="rb-anim-timing">
-                <label>
-                  {t('ribbonAnimDuration')}
-                  <input
-                    key={`tdur-${contextSlideIndex}-${transitionDetail?.kind}-${transitionDetail?.durationMs ?? ''}`}
-                    type="number"
-                    min={0}
-                    step={0.25}
-                    disabled={!hasDoc || !transitionDetail || transitionDetail.kind === 'none'}
-                    defaultValue={((transitionDetail?.durationMs ?? 700) / 1000).toFixed(2)}
-                    title={t('ribbonTransDurationTip')}
-                    onBlur={(e) => {
-                      const v = parseFloat(e.target.value)
-                      if (!Number.isFinite(v) || v < 0) return
-                      const ms = Math.round(v * 1000)
-                      if (ms !== (transitionDetail?.durationMs ?? 700))
-                        onTransitionDetail({ durationMs: ms })
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                    }}
-                  />
-                  {t('ribbonSecondsUnit')}
-                </label>
-                <label className="rb-anim-check">
-                  <input
-                    type="checkbox"
-                    disabled={!hasDoc || !transitionDetail}
-                    checked={transitionDetail?.advClick ?? true}
-                    onChange={(e) => onTransitionDetail({ advClick: e.target.checked })}
-                  />
-                  {t('ribbonTransOnClick')}
-                </label>
-                <label className="rb-anim-check">
-                  <input
-                    type="checkbox"
-                    disabled={!hasDoc || !transitionDetail}
-                    checked={transitionDetail?.advTm != null}
-                    onChange={(e) => onTransitionDetail({ advTm: e.target.checked ? 5000 : null })}
-                  />
-                  {t('ribbonTransAfter')}
-                  <input
-                    key={`tadv-${contextSlideIndex}-${transitionDetail?.advTm ?? ''}`}
-                    type="number"
-                    min={0}
-                    step={1}
-                    disabled={!hasDoc || transitionDetail?.advTm == null}
-                    defaultValue={
-                      transitionDetail?.advTm != null
-                        ? (transitionDetail.advTm / 1000).toFixed(2)
-                        : ''
-                    }
-                    onBlur={(e) => {
-                      const v = parseFloat(e.target.value)
-                      if (
-                        Number.isFinite(v) &&
-                        v >= 0 &&
-                        Math.round(v * 1000) !== transitionDetail?.advTm
-                      )
-                        onTransitionDetail({ advTm: Math.round(v * 1000) })
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                    }}
-                  />
-                  {t('ribbonSecondsUnit')}
-                </label>
-              </div>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={() => {
-                  onTransition(transition, true)
-                  if (transitionDetail) {
-                    const { dir, orient, thruBlk, durationMs, advClick, advTm } = transitionDetail
-                    onTransitionDetail(
-                      {
-                        ...(dir !== undefined ? { dir } : {}),
-                        ...(orient !== undefined ? { orient } : {}),
-                        ...(thruBlk !== undefined ? { thruBlk } : {}),
-                        durationMs,
-                        advClick,
-                        advTm,
-                      },
-                      true,
-                    )
-                  }
-                }}
-                data-tip={t('ribbonTransApplyAllTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconApplyAll size={BIG} />
-                </span>
-                <span>{t('ribbonApplyToAll')}</span>
-              </button>
-            </Group>
-          </>
-        ) : tab === 'animations' ? (
-          <>
-            <Group
-              label={t('ribbonPreview')}
-              fold={{ icon: <IconPlayCurrent size={BIG} />, priority: 1 }}
-            >
-              <button
-                className="rb-big"
-                disabled={!hasDoc || animCount === 0}
-                onClick={onAnimPreview}
-                data-tip={t('ribbonAnimPreviewTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconPlayCurrent size={BIG} />
-                </span>
-                <span>{t('ribbonPreview')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupAnimation')}
-              groupId="animation"
-              collapse={{
-                collapsed: collapsedGroups.includes('animation'),
-                open: collapseOpen === 'animation',
-                onToggle: () => {
-                  closePanels(['collapse'])
-                  setCollapseOpen((v) => (v === 'animation' ? null : 'animation'))
-                },
-                icon: (
-                  <span className="rb-anim-glyph rb-anim-entr">
-                    <IconAnimStar size={20} />
-                  </span>
-                ),
-              }}
-            >
-              <button
-                className="rb-big"
-                disabled={!hasDoc || !hasSelection}
-                onClick={() => onApplyAnimation('none')}
-                data-tip={t('ribbonAnimNoneTip')}
-              >
-                <span className="rb-big-icon rb-anim-glyph">
-                  <IconAnimNone size={BIG} />
-                </span>
-                <span>{t('ribbonNone')}</span>
-              </button>
-              {ANIM_EFFECTS.map((a) => (
-                <button
-                  key={a.kind}
-                  className={`rb-big ${selectedAnimEffect === a.kind ? 'active' : ''}`}
-                  disabled={!hasDoc || !hasSelection}
-                  onClick={() => onApplyAnimation(a.kind)}
-                  onMouseEnter={() => {
-                    if (hasDoc && hasSelection) animHoverStart(a.kind)
-                  }}
-                  onMouseLeave={animHoverStop}
-                  data-tip={t('ribbonAnimApplyTip', {
-                    cls: t(ANIM_CLS_TITLE[a.cls]),
-                    name: t(a.label),
-                  })}
-                >
-                  <span className={`rb-big-icon rb-anim-glyph rb-anim-${a.cls}`}>
-                    <AnimEffectIcon kind={a.kind} size={BIG} />
-                  </span>
-                  <span>{t(a.label)}</span>
-                </button>
-              ))}
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupMotionPaths')}
-              groupId="motionPaths"
-              collapse={{
-                collapsed: collapsedGroups.includes('motionPaths'),
-                open: collapseOpen === 'motionPaths',
-                onToggle: () => {
-                  closePanels(['collapse'])
-                  setCollapseOpen((v) => (v === 'motionPaths' ? null : 'motionPaths'))
-                },
-                icon: (
-                  <span className="rb-anim-glyph rb-anim-path">
-                    <IconPathDiagonal size={20} />
-                  </span>
-                ),
-              }}
-            >
-              {MOTION_PATHS.map((mp) => (
-                <button
-                  key={mp.label}
-                  className="rb-big"
-                  disabled={!hasDoc || !hasSelection}
-                  onClick={() => onApplyMotionPath(mp.path)}
-                  onMouseEnter={() => {
-                    if (hasDoc && hasSelection) animHoverStart('motionPath', mp.path)
-                  }}
-                  onMouseLeave={animHoverStop}
-                  data-tip={t('ribbonMotionPathTip', { name: t(mp.label) })}
-                >
-                  <span className="rb-big-icon rb-anim-glyph rb-anim-path">{mp.icon}</span>
-                  <span>{t(mp.label)}</span>
-                </button>
-              ))}
-              {dropBig(
-                'morepaths',
-                <IconPathCircle size={BIG} />,
-                t('ribbonPathMore'),
-                t('ribbonGroupMotionPaths'),
-                <div className="rb-menu rb-anim-menu" data-testid="more-motion-paths">
-                  {(['basic', 'complex'] as const).map((group) => (
-                    <React.Fragment key={group}>
-                      <div className="rb-drop-title">
-                        {t(group === 'basic' ? 'ribbonPathBasic' : 'ribbonPathComplex')}
+                    <button
+                      className={`rb-big ${inkTool === 'eraser' ? 'active' : ''}`}
+                      disabled={!hasDoc}
+                      data-tip={t('ribbonEraserTip')}
+                      onClick={() => {
+                        setPenFlyout(null)
+                        onInkTool('eraser')
+                      }}
+                    >
+                      <span className="rb-big-icon">
+                        <IconEraser size={BIG} />
+                      </span>
+                      <span>{t('ribbonEraser')}</span>
+                    </button>
+                  </Group>
+                  <div className="ribbon-sep" />
+                  <Group
+                    label={t('ribbonGroupPenStyle')}
+                    fold={{ icon: <IconHighlighterPen size={BIG} />, priority: 2 }}
+                  >
+                    <div className="pen-tray">
+                      {penPresets.map((preset, i) => {
+                        const held = selectedPen === i && inkTool === preset.kind
+                        return (
+                          <button
+                            key={i}
+                            className={`pen-btn ${held ? 'down' : ''}`}
+                            disabled={!hasDoc}
+                            data-tip={
+                              preset.kind === 'pen' ? t('ribbonPenTip') : t('ribbonHighlighterTip')
+                            }
+                            aria-label={
+                              preset.kind === 'pen' ? t('ribbonPenTip') : t('ribbonHighlighterTip')
+                            }
+                            onClick={(event) => {
+                              if (held) {
+                                const rect = event.currentTarget.getBoundingClientRect()
+                                setPenFlyout(
+                                  penFlyout?.index === i
+                                    ? null
+                                    : {
+                                        index: i,
+                                        x: Math.round(rect.left),
+                                        y: Math.round(rect.bottom + 6),
+                                      },
+                                )
+                              } else {
+                                setSelectedPen(i)
+                                setPenFlyout(null)
+                                applyPenPreset(preset)
+                              }
+                            }}
+                          >
+                            <PenThumb kind={preset.kind} color={preset.color} />
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {renderInkSettings(selectedPen)}
+                  </Group>
+                  <div className="ribbon-sep" />
+                  <Group
+                    label={t('ribbonGroupClear')}
+                    fold={{ icon: <IconEraser size={BIG} />, priority: 1 }}
+                  >
+                    <button
+                      className="rb-big"
+                      disabled={!hasDoc || inkCount === 0}
+                      data-tip={t('ribbonEraseAllTip')}
+                      onClick={onInkClearAll}
+                    >
+                      <span className="rb-big-icon">
+                        <IconEraser size={BIG} />
+                      </span>
+                      <span>{t('ribbonEraseAll')}</span>
+                    </button>
+                  </Group>
+                  {penFlyout && (
+                    <>
+                      <div className="pen-flyout-backdrop" onClick={() => setPenFlyout(null)} />
+                      <div className="pen-flyout" style={{ left: penFlyout.x, top: penFlyout.y }}>
+                        {renderInkSettings(penFlyout.index)}
                       </div>
-                      {MORE_MOTION_PATHS.filter((mp) => mp.group === group).map((mp) => (
-                        <button
-                          key={mp.label}
-                          data-testid={`motion-path-${mp.label}`}
-                          onClick={() => {
-                            onApplyMotionPath(mp.path)
-                            setInsertDrop(null)
-                          }}
-                          onMouseEnter={() => {
-                            if (hasDoc && hasSelection) animHoverStart('motionPath', mp.path)
-                          }}
-                          onMouseLeave={animHoverStop}
-                        >
-                          <span className="rb-anim-glyph rb-anim-path">{mp.icon}</span>{' '}
-                          {t(mp.label)}
-                        </button>
-                      ))}
-                    </React.Fragment>
+                    </>
+                  )}
+                </>
+              )
+            })()
+          ) : tab === 'design' ? (
+            <>
+              <Group
+                label={t('ribbonGroupThemes')}
+                fold={{ icon: <IconTheme size={BIG} />, priority: 3 }}
+              >
+                <div className="theme-gallery">
+                  {THEME_PRESETS.map((tp) => (
+                    <button
+                      key={tp.id}
+                      className="theme-card"
+                      disabled={!hasDoc}
+                      data-tip={t('ribbonApplyThemeTip', { name: themeDisplayName(tp, t) })}
+                      onClick={() => onApplyTheme(tp)}
+                      style={{ background: `#${tp.colors.lt1}`, color: `#${tp.colors.dk1}` }}
+                    >
+                      <span className="theme-card-aa" style={{ fontFamily: tp.majorFont }}>
+                        Aa
+                      </span>
+                      <span className="theme-card-dots">
+                        {['accent1', 'accent2', 'accent3', 'accent4'].map((k) => (
+                          <span
+                            key={k}
+                            className="theme-card-dot"
+                            style={{ background: `#${tp.colors[k]}` }}
+                          />
+                        ))}
+                      </span>
+                      <span className="theme-card-name">{themeDisplayName(tp, t)}</span>
+                    </button>
                   ))}
-                </div>,
-                !hasDoc || !hasSelection,
-              )}
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupAdvancedAnim')}
-              fold={{ icon: <IconAnimStar size={BIG} />, priority: 2 }}
-            >
-              {dropBig(
-                'addanim',
-                <IconSparkle size={BIG} />,
-                t('ribbonAddAnimation'),
-                t('ribbonAddAnimationTip'),
-                <div className="rb-menu rb-anim-menu">
-                  {(['entr', 'emph', 'exit'] as const).map((cls) => (
-                    <React.Fragment key={cls}>
-                      <div className="rb-drop-title">{t(ANIM_CLS_TITLE[cls])}</div>
-                      {ANIM_EFFECTS.filter((a) => a.cls === cls).map((a) => (
-                        <button
-                          key={a.kind}
-                          onClick={() => {
-                            onAddAnimation(a.kind)
-                            setInsertDrop(null)
-                          }}
-                          onMouseEnter={() => {
-                            if (hasDoc && hasSelection) animHoverStart(a.kind)
-                          }}
-                          onMouseLeave={animHoverStop}
-                        >
-                          <span className={`rb-anim-glyph rb-anim-${a.cls}`}>
-                            <AnimEffectIcon kind={a.kind} size={15} />
-                          </span>{' '}
-                          {t(a.label)}
-                        </button>
-                      ))}
-                    </React.Fragment>
-                  ))}
-                </div>,
-                !hasDoc || !hasSelection,
-              )}
-              <button
-                className={`rb-big ${animPaneOpen ? 'active' : ''}`}
-                disabled={!hasDoc}
-                onClick={onToggleAnimPane}
-                data-tip={t('ribbonAnimPaneTip')}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupBackground')}
+                fold={{ icon: <IconPageColor size={BIG} />, priority: 2 }}
               >
-                <span className="rb-big-icon">
-                  <IconNavPane size={BIG} />
-                </span>
-                <span>{t('ribbonAnimPane')}</span>
-              </button>
-              <button
-                className={`rb-big ${animByParagraph ? 'active' : ''}`}
-                disabled={!hasDoc}
-                onClick={onToggleAnimByParagraph}
-                data-tip={t('ribbonAnimByParaTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconBullets size={BIG} />
-                </span>
-                <span>{t('ribbonAnimByPara')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupTiming')}
-              fold={{ icon: <IconClock size={BIG} />, priority: 1 }}
-            >
-              <div className="rb-anim-timing">
-                <label data-testid="anim-effect-direction">
-                  {t('ribbonTransEffectOptions')}
-                  <Dropdown
-                    disabled={
-                      !timingAnim ||
-                      timingAnim.customPreset ||
-                      !(['flyIn', 'flyOut', 'wipe', 'wipeOut'] as AnimEffectKind[]).includes(
-                        timingAnim.effect,
-                      )
-                    }
-                    value={timingAnim?.direction ?? 'bottom'}
-                    ariaLabel={t('ribbonTransEffectOptions')}
-                    options={(
-                      [
-                        ['top', t('ribbonTransFromTop')],
-                        ['bottom', t('ribbonTransFromBottom')],
-                        ['left', t('ribbonTransFromLeft')],
-                        ['right', t('ribbonTransFromRight')],
-                      ] as const
-                    ).map(([value, label]) => ({ value, label }))}
-                    onPick={(direction) => onAnimTiming({ direction })}
-                  />
-                </label>
-                <label data-testid="anim-start">
-                  {t('ribbonAnimStart')}
-                  <Dropdown
-                    disabled={!timingAnim}
-                    value={timingAnim?.trigger ?? 'onClick'}
-                    tip={t('ribbonAnimTriggerTip')}
-                    options={(
-                      [
-                        ['onClick', t('ribbonAnimOnClick')],
-                        ['withPrev', t('ribbonAnimWithPrev')],
-                        ['afterPrev', t('ribbonAnimAfterPrev')],
-                      ] as const
-                    ).map(([k, label]) => ({ value: k, label }))}
-                    onPick={(trigger) => onAnimTiming({ trigger })}
-                  />
-                </label>
-                <label data-testid="anim-duration">
-                  {t('ribbonAnimDuration')}
-                  <input
-                    key={`dur-${timingAnim?.sourceId ?? ''}-${timingAnim?.durationMs ?? ''}`}
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    disabled={!timingAnim}
-                    defaultValue={timingAnim ? (timingAnim.durationMs / 1000).toFixed(2) : ''}
-                    onBlur={(e) => {
-                      const v = parseFloat(e.target.value)
-                      if (
-                        timingAnim &&
-                        Number.isFinite(v) &&
-                        Math.round(v * 1000) !== timingAnim.durationMs
-                      )
-                        onAnimTiming({ durationMs: Math.max(0, Math.round(v * 1000)) })
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                    }}
-                    title={t('ribbonAnimDurationTip')}
-                  />
-                  {t('ribbonSecondsUnit')}
-                </label>
-                <label data-testid="anim-delay">
-                  {t('ribbonAnimDelay')}
-                  <input
-                    key={`delay-${timingAnim?.sourceId ?? ''}-${timingAnim?.delayMs ?? ''}`}
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    disabled={!timingAnim}
-                    defaultValue={timingAnim ? (timingAnim.delayMs / 1000).toFixed(2) : ''}
-                    onBlur={(e) => {
-                      const v = parseFloat(e.target.value)
-                      if (
-                        timingAnim &&
-                        Number.isFinite(v) &&
-                        Math.round(v * 1000) !== timingAnim.delayMs
-                      )
-                        onAnimTiming({ delayMs: Math.max(0, Math.round(v * 1000)) })
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                    }}
-                    title={t('ribbonAnimDelayTip')}
-                  />
-                  {t('ribbonSecondsUnit')}
-                </label>
-                <label data-testid="anim-after-effect">
-                  {t('ribbonAnimAfterEffect')}
-                  <Dropdown
-                    disabled={!timingAnim || timingAnim.customPreset}
-                    value={timingAnim?.after ?? 'stay'}
-                    ariaLabel={t('ribbonAnimAfterEffect')}
-                    options={(
-                      [
-                        ['stay', t('ribbonAnimStayVisible')],
-                        ['hideAfter', t('ribbonAnimHideAfter')],
-                        ['hideOnNextClick', t('ribbonAnimHideNextClick')],
-                      ] as const
-                    ).map(([value, label]) => ({ value, label }))}
-                    onPick={(after) => onAnimTiming({ after: after === 'stay' ? null : after })}
-                  />
-                </label>
-              </div>
-            </Group>
-          </>
-        ) : tab === 'slideShow' ? (
-          <>
-            <Group
-              label={t('ribbonGroupStartShow')}
-              fold={{ icon: <IconPlayFromStart size={BIG} />, priority: 3 }}
-            >
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={() => onSlideShow(true)}
-                data-tip={t('ribbonFromBeginningTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconPlayFromStart size={BIG} />
-                </span>
-                <span>{t('ribbonFromBeginning')}</span>
-              </button>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={() => onSlideShow(false)}
-                data-tip={t('ribbonFromCurrentTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconPlayCurrent size={BIG} />
-                </span>
-                <span>{t('ribbonFromCurrent')}</span>
-              </button>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={() => onPresenterView(true)}
-                data-tip={t('ribbonPresenterViewTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconPresenterView size={BIG} />
-                </span>
-                <span>{t('ribbonPresenterView')}</span>
-              </button>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onCustomShow}
-                data-testid="ribbon-custom-show"
-                data-tip={t('ribbonCustomShowTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconCustomShow size={BIG} />
-                </span>
-                <span>{t('ribbonCustomShow')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupSetUp')}
-              fold={{ icon: <IconSetupShow size={BIG} />, priority: 2 }}
-            >
-              <button
-                className="rb-big"
-                data-testid="ribbon-show-setup"
-                disabled={!hasDoc}
-                onClick={onShowSetup}
-                data-tip={t('ribbonSetUpShow')}
-              >
-                <span className="rb-big-icon">
-                  <IconSetupShow size={BIG} />
-                </span>
-                <span>{t('ribbonSetUpShow')}</span>
-              </button>
-              <button
-                className={`rb-big ${currentHidden ? 'active' : ''}`}
-                disabled={!hasDoc}
-                onClick={onToggleHidden}
-                data-tip={currentHidden ? t('ribbonUnhideSlideTip') : t('ribbonHideSlideTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconHideSlide size={BIG} />
-                </span>
-                <span>{t('ribbonHideSlide')}</span>
-              </button>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onRehearse}
-                data-tip={t('ribbonRehearseTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconRehearse size={BIG} />
-                </span>
-                <span>{t('ribbonRehearse')}</span>
-              </button>
-              <button
-                className={`rb-big ${narrationRecording ? 'active rb-recording' : ''}`}
-                disabled={!hasDoc || !onRecordNarration}
-                onClick={onRecordNarration}
-                data-testid="record-narration"
-                data-tip={t('ribbonRecordNarrationTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconRecord size={BIG} />
-                </span>
-                <span>
-                  {narrationRecording ? t('ribbonStopNarration') : t('ribbonRecordNarration')}
-                </span>
-              </button>
-              <button
-                className="rb-big"
-                disabled={!hasDoc || !hasNarration || !!narrationRecording}
-                onClick={onClearNarration}
-                data-testid="clear-narration"
-              >
-                <span className="rb-big-icon">
-                  <IconRecord size={BIG} />
-                </span>
-                <span>{t('ribbonClearNarration')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupMonitors')}
-              fold={{ icon: <IconPresenterView size={BIG} />, priority: 1 }}
-            >
-              <div className="rb-check-grid">
-                <label className="rb-monitor" data-tip={t('ribbonShowMonitorTip')}>
-                  <span>{t('ribbonShowMonitor')}</span>
-                  <select
-                    value={showMonitor ?? ''}
-                    disabled={!hasDoc}
-                    onChange={(e) => onShowMonitor(e.target.value || null)}
-                  >
-                    <option value="">{t('ribbonMonitorAutomatic')}</option>
-                    {/* a remembered screen that is unplugged right now stays selectable */}
-                    {showMonitor && !monitors.some((m) => m.label === showMonitor) && (
-                      <option value={showMonitor}>{showMonitor}</option>
-                    )}
-                    {monitors.map((m) => (
-                      <option key={m.id} value={m.label}>
-                        {m.primary ? `${m.label} (${t('ribbonMonitorPrimary')})` : m.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <RbCheck
-                  label={t('ribbonUsePresenterView')}
-                  on={usePresenterView}
-                  title={t('ribbonUsePresenterViewTip')}
-                  onClick={onToggleUsePresenterView}
-                />
-              </div>
-            </Group>
-          </>
-        ) : tab === 'review' ? (
-          <>
-            <Group
-              label={t('ribbonGroupProofing')}
-              fold={{ icon: <IconSpellcheck size={BIG} />, priority: 2 }}
-            >
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                data-tip={`${t('ribbonSpellCheckTip')} — ${t('ribbonAiCreditNote')}`}
-                onClick={() => {
-                  if (confirmAiRewrite()) onAiPreset(t('ribbonSpellCheckPrompt'))
-                }}
-              >
-                <span className="rb-big-icon">
-                  <span className="ai-feature-icon" aria-hidden="true">
-                    <img src={iconSpelling} width={22} height={22} alt="" />
-                  </span>
-                </span>
-                <span>{t('ribbonSpellCheck')}</span>
-              </button>
-              <div className="rb-drop-wrap">
                 <button
-                  className={`rb-big ${translateOpen ? 'active' : ''}`}
+                  className="rb-big"
                   disabled={!hasDoc}
-                  data-tip={`${t('ribbonTranslateTip')} — ${t('ribbonAiCreditNote')}`}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'translate')
-                  }}
-                  onClick={() => setTranslateOpen((v) => !v)}
+                  onClick={onFormatBackground}
+                  data-tip={t('ribbonFormatBackgroundTip')}
                 >
                   <span className="rb-big-icon">
-                    <span className="ai-feature-icon" aria-hidden="true">
-                      <img src={iconTranslate} width={22} height={22} alt="" />
-                    </span>
-                    <RbCaret />
+                    <IconPageColor size={BIG} />
                   </span>
-                  <span>{t('ribbonTranslate')}</span>
+                  <span>{t('ribbonFormatBackground')}</span>
                 </button>
-                {translateOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {TRANSLATE_TARGETS.map((lang) => (
-                      <button
-                        key={lang}
-                        onClick={() => {
-                          setTranslateOpen(false)
-                          if (confirmAiRewrite()) {
-                            onAiPreset(t('ribbonTranslatePrompt', { lang: t(lang) }))
-                          }
-                        }}
-                      >
-                        {t(lang)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupComments')}
-              fold={{ icon: <IconComment size={BIG} />, priority: 1 }}
-            >
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onNewComment}
-                data-tip={t('ribbonNewCommentTip')}
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupCustomize')}
+                fold={{ icon: <IconPageSize size={BIG} />, priority: 1 }}
               >
-                <span className="rb-big-icon">
-                  <IconComment size={BIG} />
-                </span>
-                <span>{t('ribbonNewComment')}</span>
-              </button>
-              <button
-                className={`rb-big ${commentsOpen ? 'active' : ''}`}
-                disabled={!hasDoc}
-                onClick={onToggleComments}
-                data-tip={t('ribbonCommentsPaneTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconNavPane size={BIG} />
-                </span>
-                <span>
-                  {t('ribbonCommentsPane')}
-                  {commentCount > 0 ? t('ribbonCountSuffix', { n: commentCount }) : ''}
-                </span>
-              </button>
-            </Group>
-          </>
-        ) : tab === 'view' ? (
-          <>
-            <Group
-              label={t('ribbonGroupPresentationViews')}
-              fold={{ icon: <IconReadMode size={BIG} />, priority: 3 }}
-            >
-              {(
-                [
-                  [
-                    'normal',
-                    <IconPrintLayout key="n" size={BIG} />,
-                    t('ribbonViewNormal'),
-                    t('ribbonViewNormalTip'),
-                  ],
-                  [
-                    'outline',
-                    <IconOutlineView key="o" size={BIG} />,
-                    t('ribbonViewOutline'),
-                    t('ribbonViewOutlineTip'),
-                  ],
-                  [
-                    'sorter',
-                    <IconArrangeAll key="s" size={BIG} />,
-                    t('ribbonViewSorter'),
-                    t('ribbonViewSorterTip'),
-                  ],
-                  [
-                    'reading',
-                    <IconReadMode key="r" size={BIG} />,
-                    t('ribbonViewReading'),
-                    t('ribbonViewReadingTip'),
-                  ],
-                ] as const
-              ).map(([mode, icon, label, title]) => (
-                <button
-                  key={mode}
-                  className={`rb-big ${viewMode === mode ? 'active' : ''}`}
-                  disabled={!hasDoc}
-                  onClick={() => onViewMode(mode)}
-                  data-tip={title}
-                >
-                  <span className="rb-big-icon">{icon}</span>
-                  <span>{label}</span>
-                </button>
-              ))}
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onSlideMaster}
-                data-tip={t('ribbonViewMasterTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconSlideMaster size={BIG} />
-                </span>
-                <span>{t('ribbonViewMaster')}</span>
-              </button>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onNotesMaster}
-                data-testid="view-notes-master"
-              >
-                <span className="rb-big-icon">
-                  <IconSlideMaster size={BIG} />
-                </span>
-                <span>{t('appNotesMasterTitle')}</span>
-              </button>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onHandoutMaster}
-                data-testid="view-handout-master"
-              >
-                <span className="rb-big-icon">
-                  <IconSlideMaster size={BIG} />
-                </span>
-                <span>{t('appHandoutMasterTitle')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupShow')}
-              fold={{ icon: <IconRuler size={BIG} />, priority: 2 }}
-            >
-              <div className="rb-check-grid">
-                <RbCheck
-                  label={t('ribbonRuler')}
-                  on={showRuler}
-                  disabled={!hasDoc}
-                  title={t('ribbonRulerTip')}
-                  onClick={onToggleRuler}
-                />
-                <RbCheck
-                  label={t('ribbonGridlines')}
-                  on={showGrid}
-                  disabled={!hasDoc}
-                  title={t('ribbonGridlinesTip')}
-                  onClick={onToggleGrid}
-                />
-                <RbCheck
-                  label={t('ribbonGuides')}
-                  on={showGuides}
-                  disabled={!hasDoc}
-                  title={t('ribbonGuidesTip')}
-                  onClick={onToggleGuides}
-                />
-                <RbCheck
-                  label={t('ribbonNotes')}
-                  on={showNotes}
-                  disabled={!hasDoc}
-                  title={t('ribbonNotesTip')}
-                  onClick={onToggleNotes}
-                />
-                <RbCheck
-                  label={t('ribbonThumbnailPane')}
-                  on={showThumbs}
-                  title={t('ribbonThumbnailPaneTip')}
-                  onClick={onToggleThumbs}
-                />
-              </div>
-              <button
-                className={`rb-big${darkContent ? ' active' : ''}`}
-                disabled={!hasDoc}
-                data-tip={t('ribbonDarkContentTip')}
-                data-testid="view-dark-content"
-                aria-pressed={darkContent}
-                onClick={onToggleDarkContent}
-              >
-                <span className="rb-big-icon">
-                  <IconMoon size={BIG} />
-                </span>
-                <span>{t('ribbonDarkContent')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupZoom')}
-              fold={{ icon: <IconZoomIn size={BIG} />, priority: 1 }}
-            >
-              <div className="rb-col">
-                <button
-                  className="rb-small"
-                  disabled={!hasDoc}
-                  onClick={() => onZoom((z) => Math.min(z * 1.15, 3))}
-                >
-                  <IconZoomIn size={18} />
-                  <span>{t('ribbonZoomIn')}</span>
-                </button>
-                <button
-                  className="rb-small"
-                  disabled={!hasDoc}
-                  onClick={() => onZoom((z) => Math.max(z / 1.15, 0.25))}
-                >
-                  <IconZoomOut size={18} />
-                  <span>{t('ribbonZoomOut')}</span>
-                </button>
-                <button className="rb-small" disabled={!hasDoc} onClick={() => onZoom(1)}>
-                  <IconZoom100 size={18} />
-                  <span>100%</span>
-                </button>
-              </div>
-              <button
-                className="rb-big"
-                disabled={!hasDoc}
-                onClick={onZoomFit}
-                data-tip={t('ribbonFitWindowTip')}
-              >
-                <span className="rb-big-icon">
-                  <IconFitWindow size={BIG} />
-                </span>
-                <span>{t('ribbonFitWindow')}</span>
-              </button>
-            </Group>
-          </>
-        ) : tab === 'tableDesign' && tableTabInfo && tableTabActions ? (
-          <TableDesignTab info={tableTabInfo} actions={tableTabActions} />
-        ) : tab === 'tableLayout' && tableTabInfo && tableTabActions ? (
-          <TableLayoutTab info={tableTabInfo} actions={tableTabActions} />
-        ) : tab === 'chartDesign' ? (
-          <>
-            {/* Chart Design group order: chart layout | chart styles | data | type */}
-            <Group label={t('ribbonGroupChartLayouts')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${chartDrop === 'elements' ? 'active' : ''}`}
-                  disabled={!onEditChart}
-                  data-tip={t('ribbonAddChartElementTip')}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'chart')
-                  }}
-                  onClick={() => setChartDrop((v) => (v === 'elements' ? null : 'elements'))}
-                >
-                  <span className="rb-big-icon" style={{ fontSize: 20 }}>
-                    ➕<RbCaret />
-                  </span>
-                  <span>{t('ribbonAddChartElement')}</span>
-                </button>
-                {chartDrop === 'elements' && (
-                  <div
-                    className="rb-drop rb-chart-elem-drop"
-                    onMouseDown={(e) => e.stopPropagation()}
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${slideSizeOpen ? 'active' : ''}`}
+                    disabled={!hasDoc}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'slideSize')
+                    }}
+                    onClick={() => setSlideSizeOpen((v) => !v)}
+                    data-tip={t('ribbonSlideSizeTip')}
                   >
-                    <div className="rb-drop-title">{t('ribbonChartTitle')}</div>
-                    <div className="rb-row">
-                      <input
-                        ref={chartTitleRef}
-                        className="rb-input-sm"
-                        defaultValue={contextChartStyle?.title ?? ''}
-                        placeholder={t('ribbonEmptyHidden')}
-                      />
-                      <button
-                        className="rb-icon"
-                        onClick={() =>
-                          onEditChart?.({ title: chartTitleRef.current?.value.trim() ?? '' })
-                        }
-                      >
-                        {t('ribbonApply')}
-                      </button>
-                    </div>
-                    <div className="rb-drop-title">{t('ribbonAxisTitles')}</div>
-                    <label className="rb-row">
-                      <span className="rb-label">{t('ribbonCatAxis')}</span>
-                      <input
-                        ref={catAxisRef}
-                        className="rb-input-sm"
-                        defaultValue={contextChartStyle?.catAxisTitle ?? ''}
-                        placeholder={t('ribbonEmptyHidden')}
-                      />
-                    </label>
-                    <label className="rb-row">
-                      <span className="rb-label">{t('ribbonValAxis')}</span>
-                      <input
-                        ref={valAxisRef}
-                        className="rb-input-sm"
-                        defaultValue={contextChartStyle?.valAxisTitle ?? ''}
-                        placeholder={t('ribbonEmptyHidden')}
-                      />
-                    </label>
-                    <div className="rb-row">
-                      <button
-                        className="rb-icon"
-                        onClick={() =>
-                          onEditChart?.({
-                            catAxisTitle: catAxisRef.current?.value.trim() ?? '',
-                            valAxisTitle: valAxisRef.current?.value.trim() ?? '',
-                          })
-                        }
-                      >
-                        {t('ribbonApply')}
-                      </button>
-                    </div>
-                    <div className="rb-drop-title">{t('ribbonLegend')}</div>
-                    <div className="rb-row">
+                    <span className="rb-big-icon">
+                      <IconPageSize size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonSlideSize')}</span>
+                  </button>
+                  {slideSizeOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
                       {(
                         [
-                          ['none', t('ribbonNone')],
-                          ['b', t('ribbonLegendBottom')],
-                          ['t', t('ribbonLegendTop')],
-                          ['r', t('ribbonLegendRight')],
-                          ['l', t('ribbonLegendLeft')],
+                          ['16:9', t('ribbonSlideSize169'), 12192000, 6858000],
+                          ['4:3', t('ribbonSlideSize43'), 9144000, 6858000],
                         ] as const
-                      ).map(([pos, label]) => (
+                      ).map(([key, label, cx, cy]) => (
                         <button
-                          key={pos}
-                          data-testid={`chart-legend-${pos}`}
-                          className={`rb-icon ${(contextChartStyle?.legendPos ?? 'b') === pos ? 'active' : ''}`}
-                          onClick={() => onEditChart?.({ legendPos: pos })}
+                          key={key}
+                          className={slideSizeKey === key ? 'on' : ''}
+                          onClick={() => {
+                            setSlideSizeOpen(false)
+                            onSlideSize(cx, cy)
+                          }}
                         >
                           {label}
                         </button>
                       ))}
-                    </div>
-                    <div className="rb-drop-title">{t('ribbonElementToggles')}</div>
-                    <div className="rb-row">
                       <button
-                        className={`rb-icon ${contextChartStyle?.dataLabels ? 'active' : ''}`}
-                        onClick={() =>
-                          onEditChart?.({ dataLabels: !contextChartStyle?.dataLabels })
-                        }
+                        data-testid="slide-size-custom"
+                        onClick={() => {
+                          setSlideSizeOpen(false)
+                          onCustomSlideSize()
+                        }}
                       >
-                        {t('ribbonDataLabels')}
-                      </button>
-                      <button
-                        className={`rb-icon ${contextChartStyle?.gridlines ? 'active' : ''}`}
-                        onClick={() => onEditChart?.({ gridlines: !contextChartStyle?.gridlines })}
-                      >
-                        {t('ribbonGridlines')}
+                        {t('paneSlideSizeTitle')}
                       </button>
                     </div>
-                    <div className="rb-drop-title">{t('ribbonAxesVisibility')}</div>
-                    <div className="rb-row">
-                      <button
-                        data-testid="chart-axis-cat"
-                        disabled={contextChartStyle?.hasAxes === false}
-                        className={`rb-icon ${contextChartStyle?.catAxisHidden ? '' : 'active'}`}
-                        onClick={() =>
-                          onEditChart?.({ catAxisVisible: !!contextChartStyle?.catAxisHidden })
-                        }
-                      >
-                        {t('ribbonCatAxis')}
-                      </button>
-                      <button
-                        data-testid="chart-axis-val"
-                        disabled={contextChartStyle?.hasAxes === false}
-                        className={`rb-icon ${contextChartStyle?.valAxisHidden ? '' : 'active'}`}
-                        onClick={() =>
-                          onEditChart?.({ valAxisVisible: !!contextChartStyle?.valAxisHidden })
-                        }
-                      >
-                        {t('ribbonValAxis')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${chartDrop === 'quickLayout' ? 'active' : ''}`}
-                  data-testid="chart-quick-layout"
-                  disabled={
-                    !onEditChart || !['bar', 'line', 'pie'].includes(contextChartStyle?.kind ?? '')
-                  }
-                  data-tip={
-                    ['bar', 'line', 'pie'].includes(contextChartStyle?.kind ?? '')
-                      ? t('ribbonQuickLayout')
-                      : t('ribbonQuickLayoutUnavailable')
-                  }
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'chart')
-                  }}
-                  onClick={() => setChartDrop((v) => (v === 'quickLayout' ? null : 'quickLayout'))}
-                >
-                  <span className="rb-big-icon">
-                    ▥<RbCaret />
-                  </span>
-                  <span>{t('ribbonQuickLayout')}</span>
-                </button>
-                {chartDrop === 'quickLayout' && (
-                  <div
-                    className="rb-drop rb-chart-style-row"
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    {(
-                      [
-                        ['mac-1', 'r', 'ribbonLegendRight', 1],
-                        ['mac-2', 't', 'ribbonLegendTop', 2],
-                        ['mac-3', 'b', 'ribbonLegendBottom', 3],
-                        ['mac-4', 'b', 'ribbonLegendBottom', 4],
-                        ['mac-5', 'none', 'ribbonNone', 5],
-                        ['mac-6', 'none', 'ribbonNone', 6],
-                        ['mac-7', 'r', 'ribbonLegendRight', 7],
-                        ['mac-8', 'none', 'ribbonNone', 8],
-                        ['mac-9', 'r', 'ribbonLegendRight', 9],
-                        ['mac-10', 'r', 'ribbonLegendRight', 10],
-                        ['mac-11', 'r', 'ribbonLegendRight', 11],
-                      ] as const
-                    ).map(([layout, legendPos, legendLabel, number]) => (
-                      <button
-                        key={layout}
-                        className={`rb-chart-style-card ${contextChartStyle?.legendPos === legendPos && Boolean(contextChartStyle?.dataLabels) === (layout === 'mac-2' || layout === 'mac-4' || layout === 'mac-10') && Boolean(contextChartStyle?.gridlines) === (layout !== 'mac-2' && layout !== 'mac-4' && layout !== 'mac-8') && contextChartStyle?.gapWidthPct === (layout === 'mac-8' ? 0 : layout === 'mac-7' ? 300 : layout === 'mac-3' || layout === 'mac-4' || layout === 'mac-10' ? 75 : 150) && Boolean(contextChartStyle?.title) === (layout !== 'mac-4' && layout !== 'mac-11' && layout !== 'mac-7') && Boolean(contextChartStyle?.catAxisTitle) === (layout === 'mac-9' || layout === 'mac-7' || layout === 'mac-8') && Boolean(contextChartStyle?.valAxisTitle) === (layout === 'mac-9' || layout === 'mac-7' || layout === 'mac-8' || layout === 'mac-5' || layout === 'mac-6') && Boolean(contextChartStyle?.dataTable) === (layout === 'mac-5') && Boolean(contextChartStyle?.pointValueLabels) === (layout === 'mac-6') && Boolean(contextChartStyle?.valAxisHidden) === (layout === 'mac-2') ? 'active' : ''}`}
-                        data-testid={`chart-quick-${layout}`}
-                        data-tip={`${t('ribbonQuickLayout')} ${number} · ${t(legendLabel)}`}
-                        disabled={
-                          contextChartStyle?.kind !== 'bar' ||
-                          (layout !== 'mac-11' &&
-                            layout !== 'mac-7' &&
-                            layout !== 'mac-4' &&
-                            !contextChartStyle.title) ||
-                          (layout !== 'mac-2' && contextChartStyle.valAxisHidden) ||
-                          (layout !== 'mac-8' &&
-                            layout !== 'mac-4' &&
-                            layout !== 'mac-2' &&
-                            !contextChartStyle.gridlines) ||
-                          (layout !== 'mac-9' &&
-                            layout !== 'mac-7' &&
-                            layout !== 'mac-8' &&
-                            (!!contextChartStyle.catAxisTitle || !!contextChartStyle.valAxisTitle))
-                        }
-                        onClick={() => {
-                          setChartDrop(null)
-                          onEditChart?.({ quickLayout: layout })
-                        }}
-                      >
-                        <ChartStyleThumb
-                          kind="bar"
-                          style={{
-                            legendPos,
-                            dataLabels:
-                              layout === 'mac-2' || layout === 'mac-4' || layout === 'mac-10',
-                            gridlines:
-                              layout !== 'mac-2' && layout !== 'mac-4' && layout !== 'mac-8',
-                            gapWidthPct:
-                              layout === 'mac-8'
-                                ? 0
-                                : layout === 'mac-7'
-                                  ? 300
-                                  : layout === 'mac-3' || layout === 'mac-4' || layout === 'mac-10'
-                                    ? 75
-                                    : 150,
-                            overlapPct:
-                              layout === 'mac-2' || layout === 'mac-3'
-                                ? -25
-                                : layout === 'mac-10'
-                                  ? 40
-                                  : 0,
-                          }}
-                        />
-                        <span className="rb-chart-scheme-label">
-                          {t('ribbonQuickLayout')} {number}
-                        </span>
-                      </button>
-                    ))}
-                    {(
-                      [
-                        ['bottom-values', 'b', 'ribbonLegendBottom'],
-                        ['right-values', 'r', 'ribbonLegendRight'],
-                        ['values-only', 'none', 'ribbonNone'],
-                      ] as const
-                    ).map(([layout, legendPos, label]) => (
-                      <button
-                        key={layout}
-                        className={`rb-chart-style-card ${contextChartStyle?.legendPos === legendPos && contextChartStyle?.dataLabels ? 'active' : ''}`}
-                        data-testid={`chart-quick-${layout}`}
-                        data-tip={`${t(label)} · ${t('ribbonDataLabels')}`}
-                        onClick={() => {
-                          setChartDrop(null)
-                          onEditChart?.({ quickLayout: layout })
-                        }}
-                      >
-                        <ChartStyleThumb
-                          kind={contextChartStyle?.kind}
-                          style={{
-                            legendPos,
-                            dataLabels: true,
-                            gridlines: contextChartStyle?.gridlines ?? false,
-                            gapWidthPct: contextChartStyle?.gapWidthPct ?? 150,
-                          }}
-                        />
-                        <span className="rb-chart-scheme-label">
-                          {t(label)} · {t('ribbonDataLabels')}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupChartStyles')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${chartDrop === 'colors' ? 'active' : ''}`}
-                  disabled={!onEditChart}
-                  data-tip={t('ribbonChangeColorsTip')}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'chart')
-                  }}
-                  onClick={() => setChartDrop((v) => (v === 'colors' ? null : 'colors'))}
-                >
-                  <span className="rb-big-icon" style={{ fontSize: 20 }}>
-                    🎨
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonChangeColors')}</span>
-                </button>
-                {chartDrop === 'colors' && (
-                  <div
-                    className="rb-drop rb-chart-colors-drop"
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    {(
-                      chartColorSchemes ??
-                      CHART_COLOR_SCHEME_UI.map((s) => ({ ...s, label: t(s.label) }))
-                    ).map((s) => (
-                      <button
-                        key={s.key}
-                        className="rb-chart-scheme-card"
-                        data-tip={s.label}
-                        onClick={() => {
-                          setChartDrop(null)
-                          onEditChart?.({ colorScheme: s.key })
-                        }}
-                      >
-                        <span className="rb-chart-scheme-swatches">
-                          {s.colors.slice(0, 4).map((c) => (
-                            <span
-                              key={c}
-                              className="rb-chart-scheme-dot"
-                              style={{ background: c }}
-                            />
-                          ))}
-                        </span>
-                        <span className="rb-chart-scheme-label">{s.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="rb-chart-style-row">
-                {CHART_STYLE_PRESETS.map((p) => (
+                  )}
+                </div>
+              </Group>
+            </>
+          ) : tab === 'transitions' ? (
+            <>
+              <Group
+                label={t('ribbonGroupTransitionToThis')}
+                fold={{ icon: <IconTransFade size={BIG} />, priority: 3 }}
+              >
+                {TRANSITIONS.map((tr) => (
                   <button
-                    key={p.key}
-                    className={`rb-chart-style-card ${chartPresetActive(contextChartStyle, p) ? 'active' : ''}`}
-                    data-tip={t(p.label)}
-                    disabled={!onEditChart}
-                    onClick={() => onEditChart?.({ ...p.style })}
+                    key={tr.kind}
+                    className={`rb-big ${transition === tr.kind ? 'active' : ''}`}
+                    disabled={!hasDoc}
+                    onClick={() => onTransition(tr.kind, false)}
+                    data-tip={
+                      tr.kind === 'none'
+                        ? t('ribbonTransNoneTip')
+                        : t('ribbonTransApplyTip', { name: t(tr.label) })
+                    }
                   >
-                    <ChartStyleThumb kind={contextChartStyle?.kind} style={p.style} />
-                    <span className="rb-chart-scheme-label">{t(p.label)}</span>
+                    <span className="rb-big-icon rb-trans-glyph">{tr.icon}</span>
+                    <span>{t(tr.label)}</span>
                   </button>
                 ))}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupData')}>
-              <button
-                className="rb-big"
-                data-tip={t('ribbonSwitchRowColTip')}
-                disabled={!onEditChart}
-                onClick={() => onEditChart?.({ switchRowCol: true })}
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonTransEffectOptions')}
+                fold={{ icon: <IconTransPush size={BIG} />, priority: 2 }}
               >
-                <span className="rb-big-icon">
-                  <IconSwitchRowCol size={BIG} />
-                </span>
-                <span>{t('ribbonSwitchRowCol')}</span>
-              </button>
-              <button
-                className="rb-big"
-                data-tip={t('ribbonEditDataTip')}
-                disabled={!onOpenChartDataDialog}
-                onClick={onOpenChartDataDialog}
-              >
-                <span className="rb-big-icon">
-                  <IconEditChartData size={BIG} />
-                </span>
-                <span>{t('ribbonEditData')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupType')}>
-              <button
-                className="rb-big"
-                disabled={!onEditChart}
-                data-tip={t('ribbonChangeChartType')}
-                onClick={() => setChartTypeDlgOpen(true)}
-              >
-                <span className="rb-big-icon">
-                  <IconChangeChartType size={BIG} />
-                </span>
-                <span>{t('ribbonChangeChartType')}</span>
-              </button>
-            </Group>
-            {chartTypeDlgOpen && (
-              <ChartTypeDialog
-                current={
-                  contextChartStyle && contextChartStyle.kind !== 'unknown'
-                    ? contextChartStyle.kind
-                    : undefined
-                }
-                onClose={() => setChartTypeDlgOpen(false)}
-                onConfirm={(kind) => {
-                  setChartTypeDlgOpen(false)
-                  onEditChart?.({ kind })
-                }}
-              />
-            )}
-          </>
-        ) : tab === 'chartFormat' ? (
-          <>
-            <Group label={t('ribbonChartElement')}>
-              <label className="rb-chart-format-target">
-                <span>{t('ribbonChartElement')}</span>
-                <select
-                  data-testid="chart-format-element"
-                  value={chartFormatElement}
-                  disabled={contextElementType !== 'chart'}
-                  onChange={(e) => {
-                    setChartDrop(null)
-                    setChartFormatElement(e.target.value as 'chart' | 'plot')
-                  }}
-                >
-                  <option value="chart">{t('ribbonChartArea')}</option>
-                  <option value="plot">{t('ribbonPlotArea')}</option>
-                </select>
-              </label>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('paneFormatFill')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${chartDrop === 'formatFill' ? 'active' : ''}`}
-                  data-testid="chart-area-fill"
-                  disabled={!onChartAreaFormat || contextElementType !== 'chart'}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'chart')
-                  }}
-                  onClick={() => setChartDrop((v) => (v === 'formatFill' ? null : 'formatFill'))}
-                >
-                  <span className="rb-big-icon">
-                    <IconPageColor size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('paneFormatFill')}</span>
-                </button>
-                {chartDrop === 'formatFill' && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {['#FFFFFF', '#F2F2F2', '#D9EAF7', '#FCE4D6', '#D9EAD3'].map((color) => (
+                {dropBig(
+                  'transOptions',
+                  <IconTransPush size={BIG} />,
+                  t('ribbonTransEffectOptions'),
+                  t('ribbonTransEffectOptions'),
+                  <div className="rb-menu">
+                    {transitionOptions.map((o) => (
                       <button
-                        key={color}
-                        data-testid={`chart-fill-${color.slice(1)}`}
-                        className={selectedChartAreaFormat?.fill === color ? 'active' : ''}
+                        key={o.key}
+                        className={o.active ? 'active' : ''}
                         onClick={() => {
-                          setChartDrop(null)
-                          onChartAreaFormat?.({ area: chartFormatElement, fill: color })
+                          setInsertDrop(null)
+                          onTransitionDetail(o.patch)
                         }}
                       >
-                        <span className="rb-chart-scheme-dot" style={{ background: color }} />
-                        {color}
+                        {t(o.label)}
                       </button>
                     ))}
-                    <label className="rb-row">
-                      <span>{t('ribbonMoreColors')}</span>
-                      <input
-                        type="color"
-                        aria-label={t('ribbonMoreColors')}
-                        defaultValue={
-                          toPickerHex(selectedChartAreaFormat?.fill ?? undefined) ?? '#FFFFFF'
-                        }
-                        onChange={(e) =>
-                          onChartAreaFormat?.({ area: chartFormatElement, fill: e.target.value })
-                        }
-                      />
-                    </label>
-                    <button
-                      data-testid="chart-fill-none"
-                      className={selectedChartAreaFormat?.fill === null ? 'active' : ''}
-                      onClick={() => {
-                        setChartDrop(null)
-                        onChartAreaFormat?.({ area: chartFormatElement, fill: null })
+                  </div>,
+                  !hasDoc || transitionOptions.length === 0,
+                )}
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupTiming')}
+                fold={{ icon: <IconClock size={BIG} />, priority: 1 }}
+              >
+                <div className="rb-anim-timing">
+                  <label>
+                    {t('ribbonAnimDuration')}
+                    <input
+                      key={`tdur-${contextSlideIndex}-${transitionDetail?.kind}-${transitionDetail?.durationMs ?? ''}`}
+                      type="number"
+                      min={0}
+                      step={0.25}
+                      disabled={!hasDoc || !transitionDetail || transitionDetail.kind === 'none'}
+                      defaultValue={((transitionDetail?.durationMs ?? 700) / 1000).toFixed(2)}
+                      title={t('ribbonTransDurationTip')}
+                      onBlur={(e) => {
+                        const v = parseFloat(e.target.value)
+                        if (!Number.isFinite(v) || v < 0) return
+                        const ms = Math.round(v * 1000)
+                        if (ms !== (transitionDetail?.durationMs ?? 700))
+                          onTransitionDetail({ durationMs: ms })
                       }}
-                    >
-                      {t('paneFormatNoFill')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('paneFormatOutline')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${chartDrop === 'formatOutline' ? 'active' : ''}`}
-                  data-testid="chart-area-outline"
-                  disabled={!onChartAreaFormat || contextElementType !== 'chart'}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'chart')
-                  }}
-                  onClick={() =>
-                    setChartDrop((v) => (v === 'formatOutline' ? null : 'formatOutline'))
-                  }
-                >
-                  <span className="rb-big-icon">
-                    <IconPageBorders size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('paneFormatOutline')}</span>
-                </button>
-                {chartDrop === 'formatOutline' && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {([0.75, 1.5, 3] as const).map((pt) => (
-                      <button
-                        key={pt}
-                        data-testid={`chart-outline-${pt}`}
-                        className={selectedChartAreaFormat?.stroke?.widthPt === pt ? 'active' : ''}
-                        onClick={() => {
-                          setChartDrop(null)
-                          onChartAreaFormat?.({
-                            area: chartFormatElement,
-                            stroke: {
-                              color: selectedChartAreaFormat?.stroke?.color ?? '#4472C4',
-                              widthEmu: pt * 12700,
-                            },
-                          })
-                        }}
-                      >
-                        {pt} pt
-                      </button>
-                    ))}
-                    <label className="rb-row">
-                      <span>{t('ribbonMoreColors')}</span>
-                      <input
-                        type="color"
-                        aria-label={t('ribbonMoreColors')}
-                        defaultValue={
-                          toPickerHex(selectedChartAreaFormat?.stroke?.color) ?? '#4472C4'
-                        }
-                        onChange={(e) =>
-                          onChartAreaFormat?.({
-                            area: chartFormatElement,
-                            stroke: {
-                              color: e.target.value,
-                              widthEmu: Math.round(
-                                (selectedChartAreaFormat?.stroke?.widthPt ?? 1.5) * 12700,
-                              ),
-                            },
-                          })
-                        }
-                      />
-                    </label>
-                    <button
-                      data-testid="chart-outline-none"
-                      className={!selectedChartAreaFormat?.stroke ? 'active' : ''}
-                      onClick={() => {
-                        setChartDrop(null)
-                        onChartAreaFormat?.({ area: chartFormatElement, stroke: null })
-                      }}
-                    >
-                      {t('paneFormatNoOutline')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </Group>
-          </>
-        ) : tab === 'equationTools' ? (
-          <RibbonEquationTab
-            latex={equationLatex ?? ''}
-            editable={!!equationLatex}
-            onEdit={onOpenEquation}
-            onApply={(latex) => onEquationApply?.(latex)}
-          />
-        ) : tab === 'pictureFormat' ? (
-          <>
-            <Group label={t('ribbonGroupAdjust')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${pictureCorrectionsOpen ? 'active' : ''}`}
-                  data-testid="picture-corrections"
-                  disabled={!onPictureAdjustments || contextElementType !== 'picture'}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'pictureCorrections')
-                  }}
-                  onClick={() => setPictureCorrectionsOpen((v) => !v)}
-                >
-                  <span className="rb-big-icon">
-                    <IconSparkle size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonPictureCorrections')}</span>
-                </button>
-                {pictureCorrectionsOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {(
-                      [
-                        ['ribbonPictureResetCorrections', 0, 0],
-                        ['ribbonPictureBrighten', 0.2, 0],
-                        ['ribbonPictureDarken', -0.2, 0],
-                        ['ribbonPictureMoreContrast', 0, 0.2],
-                        ['ribbonPictureLessContrast', 0, -0.2],
-                      ] as const
-                    ).map(([label, bright, contrast]) => (
-                      <button
-                        key={label}
-                        data-testid={`picture-correction-${bright}-${contrast}`}
-                        className={
-                          (contextPictureAdjustments?.lum?.bright ?? 0) === bright &&
-                          (contextPictureAdjustments?.lum?.contrast ?? 0) === contrast
-                            ? 'active'
-                            : ''
-                        }
-                        onClick={() => {
-                          setPictureCorrectionsOpen(false)
-                          onPictureAdjustments?.({ lum: { bright, contrast } })
-                        }}
-                      >
-                        {t(label)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${pictureColorOpen ? 'active' : ''}`}
-                  data-testid="picture-color"
-                  disabled={!onPictureAdjustments || contextElementType !== 'picture'}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'pictureColor')
-                  }}
-                  onClick={() => setPictureColorOpen((v) => !v)}
-                >
-                  <span className="rb-big-icon">
-                    <IconPageColor size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonPictureColor')}</span>
-                </button>
-                {pictureColorOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {(
-                      [
-                        ['original', 'ribbonPictureOriginal'],
-                        ['grayscale', 'ribbonPictureGrayscale'],
-                        ['blackWhite', 'ribbonPictureBlackWhite'],
-                        ['sepia', 'ribbonPictureSepia'],
-                        ['blue', 'ribbonPictureBlue'],
-                      ] as const
-                    ).map(([color, label]) => (
-                      <button
-                        key={color}
-                        data-testid={`picture-color-${color}`}
-                        onClick={() => {
-                          setPictureColorOpen(false)
-                          onPictureAdjustments?.({ color })
-                        }}
-                      >
-                        {t(label)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                className="rb-big"
-                data-tip={
-                  contextPictureCanCutout ? t('ribbonRemoveBgTip') : t('ribbonRemoveBgDisabledTip')
-                }
-                disabled={!onPictureCutout || !contextPictureCanCutout}
-                onClick={onPictureCutout}
-              >
-                <span className="rb-big-icon">
-                  {/* BIG, not BIG+2: the shared 28px glyph size keeps this button's
-                      icon-row height (and label line) identical to its neighbors */}
-                  <IconRemoveBg size={BIG} />
-                </span>
-                <span>{t('ribbonRemoveBg')}</span>
-              </button>
-              <button
-                className="rb-big"
-                data-tip={t('ribbonReplacePicture')}
-                disabled={!onPictureReplace || contextElementType !== 'picture'}
-                onClick={onPictureReplace}
-              >
-                <span className="rb-big-icon">
-                  <IconReplacePicture size={BIG} />
-                </span>
-                <span>{t('ribbonReplacePicture')}</span>
-              </button>
-              <button
-                className="rb-big"
-                data-testid="picture-reset"
-                disabled={!onPictureReset || contextElementType !== 'picture'}
-                onClick={onPictureReset}
-              >
-                <span className="rb-big-icon">
-                  <IconReplacePicture size={BIG} />
-                </span>
-                <span>{t('ribbonPictureReset')}</span>
-              </button>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${transparencyOpen ? 'active' : ''}`}
-                  disabled={!onPictureOpacity || contextElementType !== 'picture'}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'transparency')
-                  }}
-                  onClick={() => setTransparencyOpen((v) => !v)}
-                  data-tip={t('ribbonTransparency')}
-                >
-                  <span className="rb-big-icon">
-                    {/* 28px box around the 22px art so the icon row matches the SVG glyphs' height */}
-                    <span className="ai-feature-icon" aria-hidden="true">
-                      <img src={iconTransparency} width={22} height={22} alt="" />
-                    </span>
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonTransparency')}</span>
-                </button>
-                {transparencyOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {[0, 15, 30, 50, 65, 80, 95].map((pct) => (
-                      <button
-                        key={pct}
-                        onClick={() => {
-                          setTransparencyOpen(false)
-                          onPictureOpacity?.(1 - pct / 100)
-                        }}
-                      >
-                        {pct}%
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('paneFormatOutline')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${pictureBorderOpen ? 'active' : ''}`}
-                  disabled={!onPictureStroke}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'pictureBorder')
-                  }}
-                  onClick={() => {
-                    pictureBorderDraft.current = null
-                    setPictureBorderOpen((v) => !v)
-                  }}
-                  data-tip={t('paneFormatOutline')}
-                >
-                  <span className="rb-big-icon">
-                    <IconPageBorders size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('paneFormatOutline')}</span>
-                </button>
-                {pictureBorderOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    <label className="rb-menu-input">
-                      {t('paneFormatOutlineColor')}
-                      <input
-                        type="color"
-                        defaultValue={toPickerHex(contextPictureStroke?.color) ?? '#000000'}
-                        onPointerDown={(e) => armColorInput(e.currentTarget)}
-                        onChange={(e) => commitPictureBorder({ color: e.target.value })}
-                      />
-                    </label>
-                    <div className="rb-menu-sep" />
-                    {[0.5, 1, 1.5, 2.25, 3, 4.5, 6].map((pt) => (
-                      <button
-                        key={pt}
-                        className={contextPictureStroke?.widthPt === pt ? 'active' : ''}
-                        onClick={() => {
-                          setPictureBorderOpen(false)
-                          commitPictureBorder({ widthPt: pt }, true)
-                        }}
-                      >
-                        {pt} pt
-                      </button>
-                    ))}
-                    <div className="rb-menu-sep" />
-                    <button
-                      className={!contextPictureStroke ? 'active' : ''}
-                      onClick={() => {
-                        setPictureBorderOpen(false)
-                        // A pending debounced color commit still holds the prior draft
-                        // in its closure and would re-apply the border after the clear
-                        if (pictureBorderTimer.current) {
-                          window.clearTimeout(pictureBorderTimer.current)
-                          pictureBorderTimer.current = null
-                        }
-                        pictureBorderDraft.current = null
-                        onPictureStroke?.(null)
-                      }}
-                    >
-                      {t('paneFormatNoOutline')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonPictureEffects')}>
-              {renderShapeEffects('big', t('ribbonPictureEffects'), true)}
-            </Group>
-            <div className="ribbon-sep" />
-            <Group
-              label={t('ribbonGroupPictureTools')}
-              fold={{ icon: <IconReplacePicture size={BIG} />, priority: 2 }}
-            >
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${pictureStyleOpen ? 'active' : ''}`}
-                  data-testid="picture-styles"
-                  data-tip={t('ribbonPictureStyles')}
-                  disabled={!onPictureStyle || contextElementType !== 'picture'}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'pictureStyle')
-                  }}
-                  onClick={() => setPictureStyleOpen((v) => !v)}
-                >
-                  <span className="rb-big-icon">
-                    <IconShapes size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonPictureStyles')}</span>
-                </button>
-                {pictureStyleOpen && (
-                  <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
-                    {PICTURE_STYLES.map((style) => (
-                      <button
-                        key={style.id}
-                        data-testid={`picture-style-${style.id}`}
-                        onClick={() => {
-                          setPictureStyleOpen(false)
-                          onPictureStyle?.(style.id)
-                        }}
-                      >
-                        {t(style.labelKey)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                className="rb-big"
-                data-testid="picture-quality"
-                data-tip={t('ribbonPictureQuality')}
-                disabled={!onPictureQuality || contextElementType !== 'picture'}
-                onClick={onPictureQuality}
-              >
-                <span className="rb-big-icon">
-                  <IconPicture size={BIG} />
-                </span>
-                <span>{t('ribbonPictureQuality')}</span>
-              </button>
-              <button
-                className="rb-big"
-                data-testid="picture-alt-text"
-                data-tip={t('ribbonAltText')}
-                disabled={!onPictureAltText || contextElementType !== 'picture'}
-                onClick={onPictureAltText}
-              >
-                <span className="rb-big-icon">
-                  <IconComment size={BIG} />
-                </span>
-                <span>{t('ribbonAltText')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupSize')}>
-              <button
-                className={`rb-big ${cropActive ? 'active' : ''}`}
-                data-tip={t('ribbonCropTip')}
-                disabled={!onPictureCrop || contextElementType !== 'picture'}
-                onClick={onPictureCrop}
-              >
-                <span className="rb-big-icon">
-                  <span className="ai-feature-icon" aria-hidden="true">
-                    <img src={iconCrop} width={22} height={22} alt="" />
-                  </span>
-                </span>
-                <span>{t('ribbonCrop')}</span>
-              </button>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupArrange')}>
-              <div className="rb-col">
-                {(
-                  [
-                    [90, 'ribbonRotateRight', IconRotateRight],
-                    [-90, 'ribbonRotateLeft', IconRotateLeft],
-                  ] as const
-                ).map(([delta, key, Icon]) => (
-                  <button
-                    key={key}
-                    className="rb-small"
-                    disabled={!onPictureRotate || contextElementType !== 'picture'}
-                    onClick={() => onPictureRotate?.(delta)}
-                  >
-                    <Icon size={18} />
-                    <span>{t(key)}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="rb-col">
-                {(
-                  [
-                    ['h', 'ribbonFlipH', IconObjFlipH],
-                    ['v', 'ribbonFlipV', IconObjFlipV],
-                  ] as const
-                ).map(([axis, key, Icon]) => (
-                  <button
-                    key={key}
-                    className="rb-small"
-                    disabled={!onFlip || contextElementType !== 'picture'}
-                    onClick={() => onFlip?.(axis)}
-                  >
-                    <Icon size={18} />
-                    <span>{t(key)}</span>
-                  </button>
-                ))}
-              </div>
-            </Group>
-          </>
-        ) : tab === 'shapeFormat' ? (
-          <>
-            <Group label={t('ribbonShapes')}>
-              <div className="rb-drop-wrap">
-                <button
-                  className={`rb-big ${changeShapeOpen ? 'active' : ''}`}
-                  disabled={!onChangeShape}
-                  data-tip={t('ribbonChangeShape')}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    closeSiblingPanels(e, closePanels, 'changeShape')
-                  }}
-                  onClick={() => setChangeShapeOpen((v) => !v)}
-                >
-                  <span className="rb-big-icon">
-                    <IconShapes size={BIG} />
-                    <RbCaret />
-                  </span>
-                  <span>{t('ribbonChangeShape')}</span>
-                </button>
-                {changeShapeOpen && (
-                  <div className="rb-drop" onMouseDown={(e) => e.stopPropagation()}>
-                    <ShapeGalleryContent
-                      onPick={(prst) => {
-                        setChangeShapeOpen(false)
-                        onChangeShape?.(prst)
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
                       }}
                     />
-                  </div>
+                    {t('ribbonSecondsUnit')}
+                  </label>
+                  <label className="rb-anim-check">
+                    <input
+                      type="checkbox"
+                      disabled={!hasDoc || !transitionDetail}
+                      checked={transitionDetail?.advClick ?? true}
+                      onChange={(e) => onTransitionDetail({ advClick: e.target.checked })}
+                    />
+                    {t('ribbonTransOnClick')}
+                  </label>
+                  <label className="rb-anim-check">
+                    <input
+                      type="checkbox"
+                      disabled={!hasDoc || !transitionDetail}
+                      checked={transitionDetail?.advTm != null}
+                      onChange={(e) =>
+                        onTransitionDetail({ advTm: e.target.checked ? 5000 : null })
+                      }
+                    />
+                    {t('ribbonTransAfter')}
+                    <input
+                      key={`tadv-${contextSlideIndex}-${transitionDetail?.advTm ?? ''}`}
+                      type="number"
+                      min={0}
+                      step={1}
+                      disabled={!hasDoc || transitionDetail?.advTm == null}
+                      defaultValue={
+                        transitionDetail?.advTm != null
+                          ? (transitionDetail.advTm / 1000).toFixed(2)
+                          : ''
+                      }
+                      onBlur={(e) => {
+                        const v = parseFloat(e.target.value)
+                        if (
+                          Number.isFinite(v) &&
+                          v >= 0 &&
+                          Math.round(v * 1000) !== transitionDetail?.advTm
+                        )
+                          onTransitionDetail({ advTm: Math.round(v * 1000) })
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                    {t('ribbonSecondsUnit')}
+                  </label>
+                </div>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={() => {
+                    onTransition(transition, true)
+                    if (transitionDetail) {
+                      const { dir, orient, thruBlk, durationMs, advClick, advTm } = transitionDetail
+                      onTransitionDetail(
+                        {
+                          ...(dir !== undefined ? { dir } : {}),
+                          ...(orient !== undefined ? { orient } : {}),
+                          ...(thruBlk !== undefined ? { thruBlk } : {}),
+                          durationMs,
+                          advClick,
+                          advTm,
+                        },
+                        true,
+                      )
+                    }
+                  }}
+                  data-tip={t('ribbonTransApplyAllTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconApplyAll size={BIG} />
+                  </span>
+                  <span>{t('ribbonApplyToAll')}</span>
+                </button>
+              </Group>
+            </>
+          ) : tab === 'animations' ? (
+            <>
+              <Group
+                label={t('ribbonPreview')}
+                fold={{ icon: <IconPlayCurrent size={BIG} />, priority: 1 }}
+              >
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc || animCount === 0}
+                  onClick={onAnimPreview}
+                  data-tip={t('ribbonAnimPreviewTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconPlayCurrent size={BIG} />
+                  </span>
+                  <span>{t('ribbonPreview')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupAnimation')}
+                groupId="animation"
+                collapse={{
+                  collapsed: collapsedGroups.includes('animation'),
+                  open: collapseOpen === 'animation',
+                  onToggle: () => {
+                    closePanels(['collapse'])
+                    setCollapseOpen((v) => (v === 'animation' ? null : 'animation'))
+                  },
+                  icon: (
+                    <span className="rb-anim-glyph rb-anim-entr">
+                      <IconAnimStar size={20} />
+                    </span>
+                  ),
+                }}
+              >
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc || !hasSelection}
+                  onClick={() => onApplyAnimation('none')}
+                  data-tip={t('ribbonAnimNoneTip')}
+                >
+                  <span className="rb-big-icon rb-anim-glyph">
+                    <IconAnimNone size={BIG} />
+                  </span>
+                  <span>{t('ribbonNone')}</span>
+                </button>
+                {ANIM_EFFECTS.map((a) => (
+                  <button
+                    key={a.kind}
+                    className={`rb-big ${selectedAnimEffect === a.kind ? 'active' : ''}`}
+                    disabled={!hasDoc || !hasSelection}
+                    onClick={() => onApplyAnimation(a.kind)}
+                    onMouseEnter={() => {
+                      if (hasDoc && hasSelection) animHoverStart(a.kind)
+                    }}
+                    onMouseLeave={animHoverStop}
+                    data-tip={t('ribbonAnimApplyTip', {
+                      cls: t(ANIM_CLS_TITLE[a.cls]),
+                      name: t(a.label),
+                    })}
+                  >
+                    <span className={`rb-big-icon rb-anim-glyph rb-anim-${a.cls}`}>
+                      <AnimEffectIcon kind={a.kind} size={BIG} />
+                    </span>
+                    <span>{t(a.label)}</span>
+                  </button>
+                ))}
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupMotionPaths')}
+                groupId="motionPaths"
+                collapse={{
+                  collapsed: collapsedGroups.includes('motionPaths'),
+                  open: collapseOpen === 'motionPaths',
+                  onToggle: () => {
+                    closePanels(['collapse'])
+                    setCollapseOpen((v) => (v === 'motionPaths' ? null : 'motionPaths'))
+                  },
+                  icon: (
+                    <span className="rb-anim-glyph rb-anim-path">
+                      <IconPathDiagonal size={20} />
+                    </span>
+                  ),
+                }}
+              >
+                {MOTION_PATHS.map((mp) => (
+                  <button
+                    key={mp.label}
+                    className="rb-big"
+                    disabled={!hasDoc || !hasSelection}
+                    onClick={() => onApplyMotionPath(mp.path)}
+                    onMouseEnter={() => {
+                      if (hasDoc && hasSelection) animHoverStart('motionPath', mp.path)
+                    }}
+                    onMouseLeave={animHoverStop}
+                    data-tip={t('ribbonMotionPathTip', { name: t(mp.label) })}
+                  >
+                    <span className="rb-big-icon rb-anim-glyph rb-anim-path">{mp.icon}</span>
+                    <span>{t(mp.label)}</span>
+                  </button>
+                ))}
+                {dropBig(
+                  'morepaths',
+                  <IconPathCircle size={BIG} />,
+                  t('ribbonPathMore'),
+                  t('ribbonGroupMotionPaths'),
+                  <div className="rb-menu rb-anim-menu" data-testid="more-motion-paths">
+                    {(['basic', 'complex'] as const).map((group) => (
+                      <React.Fragment key={group}>
+                        <div className="rb-drop-title">
+                          {t(group === 'basic' ? 'ribbonPathBasic' : 'ribbonPathComplex')}
+                        </div>
+                        {MORE_MOTION_PATHS.filter((mp) => mp.group === group).map((mp) => (
+                          <button
+                            key={mp.label}
+                            data-testid={`motion-path-${mp.label}`}
+                            onClick={() => {
+                              onApplyMotionPath(mp.path)
+                              setInsertDrop(null)
+                            }}
+                            onMouseEnter={() => {
+                              if (hasDoc && hasSelection) animHoverStart('motionPath', mp.path)
+                            }}
+                            onMouseLeave={animHoverStop}
+                          >
+                            <span className="rb-anim-glyph rb-anim-path">{mp.icon}</span>{' '}
+                            {t(mp.label)}
+                          </button>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>,
+                  !hasDoc || !hasSelection,
                 )}
-              </div>
-            </Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonGroupShapeStyle')}>{renderQuickStyles()}</Group>
-            <div className="ribbon-sep" />
-            <Group label={t('paneFormatFill')}>{renderShapeFill()}</Group>
-            <div className="ribbon-sep" />
-            <Group label={t('paneFormatOutline')}>{renderShapeOutline()}</Group>
-            <div className="ribbon-sep" />
-            <Group label={t('ribbonShapeEffects')}>{renderShapeEffects()}</Group>
-          </>
-        ) : null}
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupAdvancedAnim')}
+                fold={{ icon: <IconAnimStar size={BIG} />, priority: 2 }}
+              >
+                {dropBig(
+                  'addanim',
+                  <IconSparkle size={BIG} />,
+                  t('ribbonAddAnimation'),
+                  t('ribbonAddAnimationTip'),
+                  <div className="rb-menu rb-anim-menu">
+                    {(['entr', 'emph', 'exit'] as const).map((cls) => (
+                      <React.Fragment key={cls}>
+                        <div className="rb-drop-title">{t(ANIM_CLS_TITLE[cls])}</div>
+                        {ANIM_EFFECTS.filter((a) => a.cls === cls).map((a) => (
+                          <button
+                            key={a.kind}
+                            onClick={() => {
+                              onAddAnimation(a.kind)
+                              setInsertDrop(null)
+                            }}
+                            onMouseEnter={() => {
+                              if (hasDoc && hasSelection) animHoverStart(a.kind)
+                            }}
+                            onMouseLeave={animHoverStop}
+                          >
+                            <span className={`rb-anim-glyph rb-anim-${a.cls}`}>
+                              <AnimEffectIcon kind={a.kind} size={15} />
+                            </span>{' '}
+                            {t(a.label)}
+                          </button>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>,
+                  !hasDoc || !hasSelection,
+                )}
+                <button
+                  className={`rb-big ${animPaneOpen ? 'active' : ''}`}
+                  disabled={!hasDoc}
+                  onClick={onToggleAnimPane}
+                  data-tip={t('ribbonAnimPaneTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconNavPane size={BIG} />
+                  </span>
+                  <span>{t('ribbonAnimPane')}</span>
+                </button>
+                <button
+                  className={`rb-big ${animByParagraph ? 'active' : ''}`}
+                  disabled={!hasDoc}
+                  onClick={onToggleAnimByParagraph}
+                  data-tip={t('ribbonAnimByParaTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconBullets size={BIG} />
+                  </span>
+                  <span>{t('ribbonAnimByPara')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupTiming')}
+                fold={{ icon: <IconClock size={BIG} />, priority: 1 }}
+              >
+                <div className="rb-anim-timing">
+                  <label data-testid="anim-effect-direction">
+                    {t('ribbonTransEffectOptions')}
+                    <Dropdown
+                      disabled={
+                        !timingAnim ||
+                        timingAnim.customPreset ||
+                        !(['flyIn', 'flyOut', 'wipe', 'wipeOut'] as AnimEffectKind[]).includes(
+                          timingAnim.effect,
+                        )
+                      }
+                      value={timingAnim?.direction ?? 'bottom'}
+                      ariaLabel={t('ribbonTransEffectOptions')}
+                      options={(
+                        [
+                          ['top', t('ribbonTransFromTop')],
+                          ['bottom', t('ribbonTransFromBottom')],
+                          ['left', t('ribbonTransFromLeft')],
+                          ['right', t('ribbonTransFromRight')],
+                        ] as const
+                      ).map(([value, label]) => ({ value, label }))}
+                      onPick={(direction) => onAnimTiming({ direction })}
+                    />
+                  </label>
+                  <label data-testid="anim-start">
+                    {t('ribbonAnimStart')}
+                    <Dropdown
+                      disabled={!timingAnim}
+                      value={timingAnim?.trigger ?? 'onClick'}
+                      tip={t('ribbonAnimTriggerTip')}
+                      options={(
+                        [
+                          ['onClick', t('ribbonAnimOnClick')],
+                          ['withPrev', t('ribbonAnimWithPrev')],
+                          ['afterPrev', t('ribbonAnimAfterPrev')],
+                        ] as const
+                      ).map(([k, label]) => ({ value: k, label }))}
+                      onPick={(trigger) => onAnimTiming({ trigger })}
+                    />
+                  </label>
+                  <label data-testid="anim-duration">
+                    {t('ribbonAnimDuration')}
+                    <input
+                      key={`dur-${timingAnim?.sourceId ?? ''}-${timingAnim?.durationMs ?? ''}`}
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      disabled={!timingAnim}
+                      defaultValue={timingAnim ? (timingAnim.durationMs / 1000).toFixed(2) : ''}
+                      onBlur={(e) => {
+                        const v = parseFloat(e.target.value)
+                        if (
+                          timingAnim &&
+                          Number.isFinite(v) &&
+                          Math.round(v * 1000) !== timingAnim.durationMs
+                        )
+                          onAnimTiming({ durationMs: Math.max(0, Math.round(v * 1000)) })
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                      title={t('ribbonAnimDurationTip')}
+                    />
+                    {t('ribbonSecondsUnit')}
+                  </label>
+                  <label data-testid="anim-delay">
+                    {t('ribbonAnimDelay')}
+                    <input
+                      key={`delay-${timingAnim?.sourceId ?? ''}-${timingAnim?.delayMs ?? ''}`}
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      disabled={!timingAnim}
+                      defaultValue={timingAnim ? (timingAnim.delayMs / 1000).toFixed(2) : ''}
+                      onBlur={(e) => {
+                        const v = parseFloat(e.target.value)
+                        if (
+                          timingAnim &&
+                          Number.isFinite(v) &&
+                          Math.round(v * 1000) !== timingAnim.delayMs
+                        )
+                          onAnimTiming({ delayMs: Math.max(0, Math.round(v * 1000)) })
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                      title={t('ribbonAnimDelayTip')}
+                    />
+                    {t('ribbonSecondsUnit')}
+                  </label>
+                  <label data-testid="anim-after-effect">
+                    {t('ribbonAnimAfterEffect')}
+                    <Dropdown
+                      disabled={!timingAnim || timingAnim.customPreset}
+                      value={timingAnim?.after ?? 'stay'}
+                      ariaLabel={t('ribbonAnimAfterEffect')}
+                      options={(
+                        [
+                          ['stay', t('ribbonAnimStayVisible')],
+                          ['hideAfter', t('ribbonAnimHideAfter')],
+                          ['hideOnNextClick', t('ribbonAnimHideNextClick')],
+                        ] as const
+                      ).map(([value, label]) => ({ value, label }))}
+                      onPick={(after) => onAnimTiming({ after: after === 'stay' ? null : after })}
+                    />
+                  </label>
+                </div>
+              </Group>
+            </>
+          ) : tab === 'slideShow' ? (
+            <>
+              <Group
+                label={t('ribbonGroupStartShow')}
+                fold={{ icon: <IconPlayFromStart size={BIG} />, priority: 3 }}
+              >
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={() => onSlideShow(true)}
+                  data-tip={t('ribbonFromBeginningTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconPlayFromStart size={BIG} />
+                  </span>
+                  <span>{t('ribbonFromBeginning')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={() => onSlideShow(false)}
+                  data-tip={t('ribbonFromCurrentTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconPlayCurrent size={BIG} />
+                  </span>
+                  <span>{t('ribbonFromCurrent')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={() => onPresenterView(true)}
+                  data-tip={t('ribbonPresenterViewTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconPresenterView size={BIG} />
+                  </span>
+                  <span>{t('ribbonPresenterView')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={onCustomShow}
+                  data-testid="ribbon-custom-show"
+                  data-tip={t('ribbonCustomShowTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconCustomShow size={BIG} />
+                  </span>
+                  <span>{t('ribbonCustomShow')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupSetUp')}
+                fold={{ icon: <IconSetupShow size={BIG} />, priority: 2 }}
+              >
+                <button
+                  className="rb-big"
+                  data-testid="ribbon-show-setup"
+                  disabled={!hasDoc}
+                  onClick={onShowSetup}
+                  data-tip={t('ribbonSetUpShow')}
+                >
+                  <span className="rb-big-icon">
+                    <IconSetupShow size={BIG} />
+                  </span>
+                  <span>{t('ribbonSetUpShow')}</span>
+                </button>
+                <button
+                  className={`rb-big ${currentHidden ? 'active' : ''}`}
+                  disabled={!hasDoc}
+                  onClick={onToggleHidden}
+                  data-tip={currentHidden ? t('ribbonUnhideSlideTip') : t('ribbonHideSlideTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconHideSlide size={BIG} />
+                  </span>
+                  <span>{t('ribbonHideSlide')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={onRehearse}
+                  data-tip={t('ribbonRehearseTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconRehearse size={BIG} />
+                  </span>
+                  <span>{t('ribbonRehearse')}</span>
+                </button>
+                <button
+                  className={`rb-big ${narrationRecording ? 'active rb-recording' : ''}`}
+                  disabled={!hasDoc || !onRecordNarration}
+                  onClick={onRecordNarration}
+                  data-testid="record-narration"
+                  data-tip={t('ribbonRecordNarrationTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconRecord size={BIG} />
+                  </span>
+                  <span>
+                    {narrationRecording ? t('ribbonStopNarration') : t('ribbonRecordNarration')}
+                  </span>
+                </button>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc || !hasNarration || !!narrationRecording}
+                  onClick={onClearNarration}
+                  data-testid="clear-narration"
+                >
+                  <span className="rb-big-icon">
+                    <IconRecord size={BIG} />
+                  </span>
+                  <span>{t('ribbonClearNarration')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupMonitors')}
+                fold={{ icon: <IconPresenterView size={BIG} />, priority: 1 }}
+              >
+                <div className="rb-check-grid">
+                  <label className="rb-monitor" data-tip={t('ribbonShowMonitorTip')}>
+                    <span>{t('ribbonShowMonitor')}</span>
+                    <select
+                      value={showMonitor ?? ''}
+                      disabled={!hasDoc}
+                      onChange={(e) => onShowMonitor(e.target.value || null)}
+                    >
+                      <option value="">{t('ribbonMonitorAutomatic')}</option>
+                      {/* a remembered screen that is unplugged right now stays selectable */}
+                      {showMonitor && !monitors.some((m) => m.label === showMonitor) && (
+                        <option value={showMonitor}>{showMonitor}</option>
+                      )}
+                      {monitors.map((m) => (
+                        <option key={m.id} value={m.label}>
+                          {m.primary ? `${m.label} (${t('ribbonMonitorPrimary')})` : m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <RbCheck
+                    label={t('ribbonUsePresenterView')}
+                    on={usePresenterView}
+                    title={t('ribbonUsePresenterViewTip')}
+                    onClick={onToggleUsePresenterView}
+                  />
+                </div>
+              </Group>
+            </>
+          ) : tab === 'review' ? (
+            <>
+              <Group
+                label={t('ribbonGroupProofing')}
+                fold={{ icon: <IconSpellcheck size={BIG} />, priority: 2 }}
+              >
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  data-tip={`${t('ribbonSpellCheckTip')} — ${t('ribbonAiCreditNote')}`}
+                  onClick={() => {
+                    if (confirmAiRewrite()) onAiPreset(t('ribbonSpellCheckPrompt'))
+                  }}
+                >
+                  <span className="rb-big-icon">
+                    <span className="ai-feature-icon" aria-hidden="true">
+                      <img src={iconSpelling} width={22} height={22} alt="" />
+                    </span>
+                  </span>
+                  <span>{t('ribbonSpellCheck')}</span>
+                </button>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${translateOpen ? 'active' : ''}`}
+                    disabled={!hasDoc}
+                    data-tip={`${t('ribbonTranslateTip')} — ${t('ribbonAiCreditNote')}`}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'translate')
+                    }}
+                    onClick={() => setTranslateOpen((v) => !v)}
+                  >
+                    <span className="rb-big-icon">
+                      <span className="ai-feature-icon" aria-hidden="true">
+                        <img src={iconTranslate} width={22} height={22} alt="" />
+                      </span>
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonTranslate')}</span>
+                  </button>
+                  {translateOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      {TRANSLATE_TARGETS.map((lang) => (
+                        <button
+                          key={lang}
+                          onClick={() => {
+                            setTranslateOpen(false)
+                            if (confirmAiRewrite()) {
+                              onAiPreset(t('ribbonTranslatePrompt', { lang: t(lang) }))
+                            }
+                          }}
+                        >
+                          {t(lang)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupComments')}
+                fold={{ icon: <IconComment size={BIG} />, priority: 1 }}
+              >
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={onNewComment}
+                  data-tip={t('ribbonNewCommentTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconComment size={BIG} />
+                  </span>
+                  <span>{t('ribbonNewComment')}</span>
+                </button>
+                <button
+                  className={`rb-big ${commentsOpen ? 'active' : ''}`}
+                  disabled={!hasDoc}
+                  onClick={onToggleComments}
+                  data-tip={t('ribbonCommentsPaneTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconNavPane size={BIG} />
+                  </span>
+                  <span>
+                    {t('ribbonCommentsPane')}
+                    {commentCount > 0 ? t('ribbonCountSuffix', { n: commentCount }) : ''}
+                  </span>
+                </button>
+              </Group>
+            </>
+          ) : tab === 'view' ? (
+            <>
+              <Group
+                label={t('ribbonGroupPresentationViews')}
+                fold={{ icon: <IconReadMode size={BIG} />, priority: 3 }}
+              >
+                {(
+                  [
+                    [
+                      'normal',
+                      <IconPrintLayout key="n" size={BIG} />,
+                      t('ribbonViewNormal'),
+                      t('ribbonViewNormalTip'),
+                    ],
+                    [
+                      'outline',
+                      <IconOutlineView key="o" size={BIG} />,
+                      t('ribbonViewOutline'),
+                      t('ribbonViewOutlineTip'),
+                    ],
+                    [
+                      'sorter',
+                      <IconArrangeAll key="s" size={BIG} />,
+                      t('ribbonViewSorter'),
+                      t('ribbonViewSorterTip'),
+                    ],
+                    [
+                      'reading',
+                      <IconReadMode key="r" size={BIG} />,
+                      t('ribbonViewReading'),
+                      t('ribbonViewReadingTip'),
+                    ],
+                  ] as const
+                ).map(([mode, icon, label, title]) => (
+                  <button
+                    key={mode}
+                    className={`rb-big ${viewMode === mode ? 'active' : ''}`}
+                    disabled={!hasDoc}
+                    onClick={() => onViewMode(mode)}
+                    data-tip={title}
+                  >
+                    <span className="rb-big-icon">{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={onSlideMaster}
+                  data-tip={t('ribbonViewMasterTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconSlideMaster size={BIG} />
+                  </span>
+                  <span>{t('ribbonViewMaster')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={onNotesMaster}
+                  data-testid="view-notes-master"
+                >
+                  <span className="rb-big-icon">
+                    <IconSlideMaster size={BIG} />
+                  </span>
+                  <span>{t('appNotesMasterTitle')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={onHandoutMaster}
+                  data-testid="view-handout-master"
+                >
+                  <span className="rb-big-icon">
+                    <IconSlideMaster size={BIG} />
+                  </span>
+                  <span>{t('appHandoutMasterTitle')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupShow')}
+                fold={{ icon: <IconRuler size={BIG} />, priority: 2 }}
+              >
+                <div className="rb-check-grid">
+                  <RbCheck
+                    label={t('ribbonRuler')}
+                    on={showRuler}
+                    disabled={!hasDoc}
+                    title={t('ribbonRulerTip')}
+                    onClick={onToggleRuler}
+                  />
+                  <RbCheck
+                    label={t('ribbonGridlines')}
+                    on={showGrid}
+                    disabled={!hasDoc}
+                    title={t('ribbonGridlinesTip')}
+                    onClick={onToggleGrid}
+                  />
+                  <RbCheck
+                    label={t('ribbonGuides')}
+                    on={showGuides}
+                    disabled={!hasDoc}
+                    title={t('ribbonGuidesTip')}
+                    onClick={onToggleGuides}
+                  />
+                  <RbCheck
+                    label={t('ribbonNotes')}
+                    on={showNotes}
+                    disabled={!hasDoc}
+                    title={t('ribbonNotesTip')}
+                    onClick={onToggleNotes}
+                  />
+                  <RbCheck
+                    label={t('ribbonThumbnailPane')}
+                    on={showThumbs}
+                    title={t('ribbonThumbnailPaneTip')}
+                    onClick={onToggleThumbs}
+                  />
+                </div>
+                <button
+                  className={`rb-big${darkContent ? ' active' : ''}`}
+                  disabled={!hasDoc}
+                  data-tip={t('ribbonDarkContentTip')}
+                  data-testid="view-dark-content"
+                  aria-pressed={darkContent}
+                  onClick={onToggleDarkContent}
+                >
+                  <span className="rb-big-icon">
+                    <IconMoon size={BIG} />
+                  </span>
+                  <span>{t('ribbonDarkContent')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupZoom')}
+                fold={{ icon: <IconZoomIn size={BIG} />, priority: 1 }}
+              >
+                <div className="rb-col">
+                  <button
+                    className="rb-small"
+                    disabled={!hasDoc}
+                    onClick={() => onZoom((z) => Math.min(z * 1.15, 3))}
+                  >
+                    <IconZoomIn size={18} />
+                    <span>{t('ribbonZoomIn')}</span>
+                  </button>
+                  <button
+                    className="rb-small"
+                    disabled={!hasDoc}
+                    onClick={() => onZoom((z) => Math.max(z / 1.15, 0.25))}
+                  >
+                    <IconZoomOut size={18} />
+                    <span>{t('ribbonZoomOut')}</span>
+                  </button>
+                  <button className="rb-small" disabled={!hasDoc} onClick={() => onZoom(1)}>
+                    <IconZoom100 size={18} />
+                    <span>100%</span>
+                  </button>
+                </div>
+                <button
+                  className="rb-big"
+                  disabled={!hasDoc}
+                  onClick={onZoomFit}
+                  data-tip={t('ribbonFitWindowTip')}
+                >
+                  <span className="rb-big-icon">
+                    <IconFitWindow size={BIG} />
+                  </span>
+                  <span>{t('ribbonFitWindow')}</span>
+                </button>
+              </Group>
+            </>
+          ) : tab === 'tableDesign' && tableTabInfo && tableTabActions ? (
+            <TableDesignTab info={tableTabInfo} actions={tableTabActions} />
+          ) : tab === 'tableLayout' && tableTabInfo && tableTabActions ? (
+            <TableLayoutTab info={tableTabInfo} actions={tableTabActions} />
+          ) : tab === 'chartDesign' ? (
+            <>
+              {/* Chart Design group order: chart layout | chart styles | data | type */}
+              <Group label={t('ribbonGroupChartLayouts')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${chartDrop === 'elements' ? 'active' : ''}`}
+                    disabled={!onEditChart}
+                    data-tip={t('ribbonAddChartElementTip')}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'chart')
+                    }}
+                    onClick={() => setChartDrop((v) => (v === 'elements' ? null : 'elements'))}
+                  >
+                    <span className="rb-big-icon" style={{ fontSize: 20 }}>
+                      ➕<RbCaret />
+                    </span>
+                    <span>{t('ribbonAddChartElement')}</span>
+                  </button>
+                  {chartDrop === 'elements' && (
+                    <div
+                      className="rb-drop rb-chart-elem-drop"
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <div className="rb-drop-title">{t('ribbonChartTitle')}</div>
+                      <div className="rb-row">
+                        <input
+                          ref={chartTitleRef}
+                          className="rb-input-sm"
+                          defaultValue={contextChartStyle?.title ?? ''}
+                          placeholder={t('ribbonEmptyHidden')}
+                        />
+                        <button
+                          className="rb-icon"
+                          onClick={() =>
+                            onEditChart?.({ title: chartTitleRef.current?.value.trim() ?? '' })
+                          }
+                        >
+                          {t('ribbonApply')}
+                        </button>
+                      </div>
+                      <div className="rb-drop-title">{t('ribbonAxisTitles')}</div>
+                      <label className="rb-row">
+                        <span className="rb-label">{t('ribbonCatAxis')}</span>
+                        <input
+                          ref={catAxisRef}
+                          className="rb-input-sm"
+                          defaultValue={contextChartStyle?.catAxisTitle ?? ''}
+                          placeholder={t('ribbonEmptyHidden')}
+                        />
+                      </label>
+                      <label className="rb-row">
+                        <span className="rb-label">{t('ribbonValAxis')}</span>
+                        <input
+                          ref={valAxisRef}
+                          className="rb-input-sm"
+                          defaultValue={contextChartStyle?.valAxisTitle ?? ''}
+                          placeholder={t('ribbonEmptyHidden')}
+                        />
+                      </label>
+                      <div className="rb-row">
+                        <button
+                          className="rb-icon"
+                          onClick={() =>
+                            onEditChart?.({
+                              catAxisTitle: catAxisRef.current?.value.trim() ?? '',
+                              valAxisTitle: valAxisRef.current?.value.trim() ?? '',
+                            })
+                          }
+                        >
+                          {t('ribbonApply')}
+                        </button>
+                      </div>
+                      <div className="rb-drop-title">{t('ribbonLegend')}</div>
+                      <div className="rb-row">
+                        {(
+                          [
+                            ['none', t('ribbonNone')],
+                            ['b', t('ribbonLegendBottom')],
+                            ['t', t('ribbonLegendTop')],
+                            ['r', t('ribbonLegendRight')],
+                            ['l', t('ribbonLegendLeft')],
+                          ] as const
+                        ).map(([pos, label]) => (
+                          <button
+                            key={pos}
+                            data-testid={`chart-legend-${pos}`}
+                            className={`rb-icon ${(contextChartStyle?.legendPos ?? 'b') === pos ? 'active' : ''}`}
+                            onClick={() => onEditChart?.({ legendPos: pos })}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="rb-drop-title">{t('ribbonElementToggles')}</div>
+                      <div className="rb-row">
+                        <button
+                          className={`rb-icon ${contextChartStyle?.dataLabels ? 'active' : ''}`}
+                          onClick={() =>
+                            onEditChart?.({ dataLabels: !contextChartStyle?.dataLabels })
+                          }
+                        >
+                          {t('ribbonDataLabels')}
+                        </button>
+                        <button
+                          className={`rb-icon ${contextChartStyle?.gridlines ? 'active' : ''}`}
+                          onClick={() =>
+                            onEditChart?.({ gridlines: !contextChartStyle?.gridlines })
+                          }
+                        >
+                          {t('ribbonGridlines')}
+                        </button>
+                      </div>
+                      <div className="rb-drop-title">{t('ribbonAxesVisibility')}</div>
+                      <div className="rb-row">
+                        <button
+                          data-testid="chart-axis-cat"
+                          disabled={contextChartStyle?.hasAxes === false}
+                          className={`rb-icon ${contextChartStyle?.catAxisHidden ? '' : 'active'}`}
+                          onClick={() =>
+                            onEditChart?.({ catAxisVisible: !!contextChartStyle?.catAxisHidden })
+                          }
+                        >
+                          {t('ribbonCatAxis')}
+                        </button>
+                        <button
+                          data-testid="chart-axis-val"
+                          disabled={contextChartStyle?.hasAxes === false}
+                          className={`rb-icon ${contextChartStyle?.valAxisHidden ? '' : 'active'}`}
+                          onClick={() =>
+                            onEditChart?.({ valAxisVisible: !!contextChartStyle?.valAxisHidden })
+                          }
+                        >
+                          {t('ribbonValAxis')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${chartDrop === 'quickLayout' ? 'active' : ''}`}
+                    data-testid="chart-quick-layout"
+                    disabled={
+                      !onEditChart ||
+                      !['bar', 'line', 'pie'].includes(contextChartStyle?.kind ?? '')
+                    }
+                    data-tip={
+                      ['bar', 'line', 'pie'].includes(contextChartStyle?.kind ?? '')
+                        ? t('ribbonQuickLayout')
+                        : t('ribbonQuickLayoutUnavailable')
+                    }
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'chart')
+                    }}
+                    onClick={() =>
+                      setChartDrop((v) => (v === 'quickLayout' ? null : 'quickLayout'))
+                    }
+                  >
+                    <span className="rb-big-icon">
+                      ▥<RbCaret />
+                    </span>
+                    <span>{t('ribbonQuickLayout')}</span>
+                  </button>
+                  {chartDrop === 'quickLayout' && (
+                    <div
+                      className="rb-drop rb-chart-style-row"
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      {(
+                        [
+                          ['mac-1', 'r', 'ribbonLegendRight', 1],
+                          ['mac-2', 't', 'ribbonLegendTop', 2],
+                          ['mac-3', 'b', 'ribbonLegendBottom', 3],
+                          ['mac-4', 'b', 'ribbonLegendBottom', 4],
+                          ['mac-5', 'none', 'ribbonNone', 5],
+                          ['mac-6', 'none', 'ribbonNone', 6],
+                          ['mac-7', 'r', 'ribbonLegendRight', 7],
+                          ['mac-8', 'none', 'ribbonNone', 8],
+                          ['mac-9', 'r', 'ribbonLegendRight', 9],
+                          ['mac-10', 'r', 'ribbonLegendRight', 10],
+                          ['mac-11', 'r', 'ribbonLegendRight', 11],
+                        ] as const
+                      ).map(([layout, legendPos, legendLabel, number]) => (
+                        <button
+                          key={layout}
+                          className={`rb-chart-style-card ${contextChartStyle?.legendPos === legendPos && Boolean(contextChartStyle?.dataLabels) === (layout === 'mac-2' || layout === 'mac-4' || layout === 'mac-10') && Boolean(contextChartStyle?.gridlines) === (layout !== 'mac-2' && layout !== 'mac-4' && layout !== 'mac-8') && contextChartStyle?.gapWidthPct === (layout === 'mac-8' ? 0 : layout === 'mac-7' ? 300 : layout === 'mac-3' || layout === 'mac-4' || layout === 'mac-10' ? 75 : 150) && Boolean(contextChartStyle?.title) === (layout !== 'mac-4' && layout !== 'mac-11' && layout !== 'mac-7') && Boolean(contextChartStyle?.catAxisTitle) === (layout === 'mac-9' || layout === 'mac-7' || layout === 'mac-8') && Boolean(contextChartStyle?.valAxisTitle) === (layout === 'mac-9' || layout === 'mac-7' || layout === 'mac-8' || layout === 'mac-5' || layout === 'mac-6') && Boolean(contextChartStyle?.dataTable) === (layout === 'mac-5') && Boolean(contextChartStyle?.pointValueLabels) === (layout === 'mac-6') && Boolean(contextChartStyle?.valAxisHidden) === (layout === 'mac-2') ? 'active' : ''}`}
+                          data-testid={`chart-quick-${layout}`}
+                          data-tip={`${t('ribbonQuickLayout')} ${number} · ${t(legendLabel)}`}
+                          disabled={
+                            contextChartStyle?.kind !== 'bar' ||
+                            (layout !== 'mac-11' &&
+                              layout !== 'mac-7' &&
+                              layout !== 'mac-4' &&
+                              !contextChartStyle.title) ||
+                            (layout !== 'mac-2' && contextChartStyle.valAxisHidden) ||
+                            (layout !== 'mac-8' &&
+                              layout !== 'mac-4' &&
+                              layout !== 'mac-2' &&
+                              !contextChartStyle.gridlines) ||
+                            (layout !== 'mac-9' &&
+                              layout !== 'mac-7' &&
+                              layout !== 'mac-8' &&
+                              (!!contextChartStyle.catAxisTitle ||
+                                !!contextChartStyle.valAxisTitle))
+                          }
+                          onClick={() => {
+                            setChartDrop(null)
+                            onEditChart?.({ quickLayout: layout })
+                          }}
+                        >
+                          <ChartStyleThumb
+                            kind="bar"
+                            style={{
+                              legendPos,
+                              dataLabels:
+                                layout === 'mac-2' || layout === 'mac-4' || layout === 'mac-10',
+                              gridlines:
+                                layout !== 'mac-2' && layout !== 'mac-4' && layout !== 'mac-8',
+                              gapWidthPct:
+                                layout === 'mac-8'
+                                  ? 0
+                                  : layout === 'mac-7'
+                                    ? 300
+                                    : layout === 'mac-3' ||
+                                        layout === 'mac-4' ||
+                                        layout === 'mac-10'
+                                      ? 75
+                                      : 150,
+                              overlapPct:
+                                layout === 'mac-2' || layout === 'mac-3'
+                                  ? -25
+                                  : layout === 'mac-10'
+                                    ? 40
+                                    : 0,
+                            }}
+                          />
+                          <span className="rb-chart-scheme-label">
+                            {t('ribbonQuickLayout')} {number}
+                          </span>
+                        </button>
+                      ))}
+                      {(
+                        [
+                          ['bottom-values', 'b', 'ribbonLegendBottom'],
+                          ['right-values', 'r', 'ribbonLegendRight'],
+                          ['values-only', 'none', 'ribbonNone'],
+                        ] as const
+                      ).map(([layout, legendPos, label]) => (
+                        <button
+                          key={layout}
+                          className={`rb-chart-style-card ${contextChartStyle?.legendPos === legendPos && contextChartStyle?.dataLabels ? 'active' : ''}`}
+                          data-testid={`chart-quick-${layout}`}
+                          data-tip={`${t(label)} · ${t('ribbonDataLabels')}`}
+                          onClick={() => {
+                            setChartDrop(null)
+                            onEditChart?.({ quickLayout: layout })
+                          }}
+                        >
+                          <ChartStyleThumb
+                            kind={contextChartStyle?.kind}
+                            style={{
+                              legendPos,
+                              dataLabels: true,
+                              gridlines: contextChartStyle?.gridlines ?? false,
+                              gapWidthPct: contextChartStyle?.gapWidthPct ?? 150,
+                            }}
+                          />
+                          <span className="rb-chart-scheme-label">
+                            {t(label)} · {t('ribbonDataLabels')}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonGroupChartStyles')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${chartDrop === 'colors' ? 'active' : ''}`}
+                    disabled={!onEditChart}
+                    data-tip={t('ribbonChangeColorsTip')}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'chart')
+                    }}
+                    onClick={() => setChartDrop((v) => (v === 'colors' ? null : 'colors'))}
+                  >
+                    <span className="rb-big-icon" style={{ fontSize: 20 }}>
+                      🎨
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonChangeColors')}</span>
+                  </button>
+                  {chartDrop === 'colors' && (
+                    <div
+                      className="rb-drop rb-chart-colors-drop"
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      {(
+                        chartColorSchemes ??
+                        CHART_COLOR_SCHEME_UI.map((s) => ({ ...s, label: t(s.label) }))
+                      ).map((s) => (
+                        <button
+                          key={s.key}
+                          className="rb-chart-scheme-card"
+                          data-tip={s.label}
+                          onClick={() => {
+                            setChartDrop(null)
+                            onEditChart?.({ colorScheme: s.key })
+                          }}
+                        >
+                          <span className="rb-chart-scheme-swatches">
+                            {s.colors.slice(0, 4).map((c) => (
+                              <span
+                                key={c}
+                                className="rb-chart-scheme-dot"
+                                style={{ background: c }}
+                              />
+                            ))}
+                          </span>
+                          <span className="rb-chart-scheme-label">{s.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="rb-chart-style-row">
+                  {CHART_STYLE_PRESETS.map((p) => (
+                    <button
+                      key={p.key}
+                      className={`rb-chart-style-card ${chartPresetActive(contextChartStyle, p) ? 'active' : ''}`}
+                      data-tip={t(p.label)}
+                      disabled={!onEditChart}
+                      onClick={() => onEditChart?.({ ...p.style })}
+                    >
+                      <ChartStyleThumb kind={contextChartStyle?.kind} style={p.style} />
+                      <span className="rb-chart-scheme-label">{t(p.label)}</span>
+                    </button>
+                  ))}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonGroupData')}>
+                <button
+                  className="rb-big"
+                  data-tip={t('ribbonSwitchRowColTip')}
+                  disabled={!onEditChart}
+                  onClick={() => onEditChart?.({ switchRowCol: true })}
+                >
+                  <span className="rb-big-icon">
+                    <IconSwitchRowCol size={BIG} />
+                  </span>
+                  <span>{t('ribbonSwitchRowCol')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  data-tip={t('ribbonEditDataTip')}
+                  disabled={!onOpenChartDataDialog}
+                  onClick={onOpenChartDataDialog}
+                >
+                  <span className="rb-big-icon">
+                    <IconEditChartData size={BIG} />
+                  </span>
+                  <span>{t('ribbonEditData')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonGroupType')}>
+                <button
+                  className="rb-big"
+                  disabled={!onEditChart}
+                  data-tip={t('ribbonChangeChartType')}
+                  onClick={() => setChartTypeDlgOpen(true)}
+                >
+                  <span className="rb-big-icon">
+                    <IconChangeChartType size={BIG} />
+                  </span>
+                  <span>{t('ribbonChangeChartType')}</span>
+                </button>
+              </Group>
+              {chartTypeDlgOpen && (
+                <ChartTypeDialog
+                  current={
+                    contextChartStyle && contextChartStyle.kind !== 'unknown'
+                      ? contextChartStyle.kind
+                      : undefined
+                  }
+                  onClose={() => setChartTypeDlgOpen(false)}
+                  onConfirm={(kind) => {
+                    setChartTypeDlgOpen(false)
+                    onEditChart?.({ kind })
+                  }}
+                />
+              )}
+            </>
+          ) : tab === 'chartFormat' ? (
+            <>
+              <Group label={t('ribbonChartElement')}>
+                <label className="rb-chart-format-target">
+                  <span>{t('ribbonChartElement')}</span>
+                  <select
+                    data-testid="chart-format-element"
+                    value={chartFormatElement}
+                    disabled={contextElementType !== 'chart'}
+                    onChange={(e) => {
+                      setChartDrop(null)
+                      setChartFormatElement(e.target.value as 'chart' | 'plot')
+                    }}
+                  >
+                    <option value="chart">{t('ribbonChartArea')}</option>
+                    <option value="plot">{t('ribbonPlotArea')}</option>
+                  </select>
+                </label>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('paneFormatFill')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${chartDrop === 'formatFill' ? 'active' : ''}`}
+                    data-testid="chart-area-fill"
+                    disabled={!onChartAreaFormat || contextElementType !== 'chart'}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'chart')
+                    }}
+                    onClick={() => setChartDrop((v) => (v === 'formatFill' ? null : 'formatFill'))}
+                  >
+                    <span className="rb-big-icon">
+                      <IconPageColor size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('paneFormatFill')}</span>
+                  </button>
+                  {chartDrop === 'formatFill' && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      {['#FFFFFF', '#F2F2F2', '#D9EAF7', '#FCE4D6', '#D9EAD3'].map((color) => (
+                        <button
+                          key={color}
+                          data-testid={`chart-fill-${color.slice(1)}`}
+                          className={selectedChartAreaFormat?.fill === color ? 'active' : ''}
+                          onClick={() => {
+                            setChartDrop(null)
+                            onChartAreaFormat?.({ area: chartFormatElement, fill: color })
+                          }}
+                        >
+                          <span className="rb-chart-scheme-dot" style={{ background: color }} />
+                          {color}
+                        </button>
+                      ))}
+                      <label className="rb-row">
+                        <span>{t('ribbonMoreColors')}</span>
+                        <input
+                          type="color"
+                          aria-label={t('ribbonMoreColors')}
+                          defaultValue={
+                            toPickerHex(selectedChartAreaFormat?.fill ?? undefined) ?? '#FFFFFF'
+                          }
+                          onChange={(e) =>
+                            onChartAreaFormat?.({ area: chartFormatElement, fill: e.target.value })
+                          }
+                        />
+                      </label>
+                      <button
+                        data-testid="chart-fill-none"
+                        className={selectedChartAreaFormat?.fill === null ? 'active' : ''}
+                        onClick={() => {
+                          setChartDrop(null)
+                          onChartAreaFormat?.({ area: chartFormatElement, fill: null })
+                        }}
+                      >
+                        {t('paneFormatNoFill')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('paneFormatOutline')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${chartDrop === 'formatOutline' ? 'active' : ''}`}
+                    data-testid="chart-area-outline"
+                    disabled={!onChartAreaFormat || contextElementType !== 'chart'}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'chart')
+                    }}
+                    onClick={() =>
+                      setChartDrop((v) => (v === 'formatOutline' ? null : 'formatOutline'))
+                    }
+                  >
+                    <span className="rb-big-icon">
+                      <IconPageBorders size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('paneFormatOutline')}</span>
+                  </button>
+                  {chartDrop === 'formatOutline' && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      {([0.75, 1.5, 3] as const).map((pt) => (
+                        <button
+                          key={pt}
+                          data-testid={`chart-outline-${pt}`}
+                          className={
+                            selectedChartAreaFormat?.stroke?.widthPt === pt ? 'active' : ''
+                          }
+                          onClick={() => {
+                            setChartDrop(null)
+                            onChartAreaFormat?.({
+                              area: chartFormatElement,
+                              stroke: {
+                                color: selectedChartAreaFormat?.stroke?.color ?? '#4472C4',
+                                widthEmu: pt * 12700,
+                              },
+                            })
+                          }}
+                        >
+                          {pt} pt
+                        </button>
+                      ))}
+                      <label className="rb-row">
+                        <span>{t('ribbonMoreColors')}</span>
+                        <input
+                          type="color"
+                          aria-label={t('ribbonMoreColors')}
+                          defaultValue={
+                            toPickerHex(selectedChartAreaFormat?.stroke?.color) ?? '#4472C4'
+                          }
+                          onChange={(e) =>
+                            onChartAreaFormat?.({
+                              area: chartFormatElement,
+                              stroke: {
+                                color: e.target.value,
+                                widthEmu: Math.round(
+                                  (selectedChartAreaFormat?.stroke?.widthPt ?? 1.5) * 12700,
+                                ),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                      <button
+                        data-testid="chart-outline-none"
+                        className={!selectedChartAreaFormat?.stroke ? 'active' : ''}
+                        onClick={() => {
+                          setChartDrop(null)
+                          onChartAreaFormat?.({ area: chartFormatElement, stroke: null })
+                        }}
+                      >
+                        {t('paneFormatNoOutline')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </Group>
+            </>
+          ) : tab === 'equationTools' ? (
+            <RibbonEquationTab
+              latex={equationLatex ?? ''}
+              editable={!!equationLatex}
+              onEdit={onOpenEquation}
+              onApply={(latex) => onEquationApply?.(latex)}
+            />
+          ) : tab === 'pictureFormat' ? (
+            <>
+              <Group label={t('ribbonGroupAdjust')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${pictureCorrectionsOpen ? 'active' : ''}`}
+                    data-testid="picture-corrections"
+                    disabled={!onPictureAdjustments || contextElementType !== 'picture'}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'pictureCorrections')
+                    }}
+                    onClick={() => setPictureCorrectionsOpen((v) => !v)}
+                  >
+                    <span className="rb-big-icon">
+                      <IconSparkle size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonPictureCorrections')}</span>
+                  </button>
+                  {pictureCorrectionsOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      {(
+                        [
+                          ['ribbonPictureResetCorrections', 0, 0],
+                          ['ribbonPictureBrighten', 0.2, 0],
+                          ['ribbonPictureDarken', -0.2, 0],
+                          ['ribbonPictureMoreContrast', 0, 0.2],
+                          ['ribbonPictureLessContrast', 0, -0.2],
+                        ] as const
+                      ).map(([label, bright, contrast]) => (
+                        <button
+                          key={label}
+                          data-testid={`picture-correction-${bright}-${contrast}`}
+                          className={
+                            (contextPictureAdjustments?.lum?.bright ?? 0) === bright &&
+                            (contextPictureAdjustments?.lum?.contrast ?? 0) === contrast
+                              ? 'active'
+                              : ''
+                          }
+                          onClick={() => {
+                            setPictureCorrectionsOpen(false)
+                            onPictureAdjustments?.({ lum: { bright, contrast } })
+                          }}
+                        >
+                          {t(label)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${pictureColorOpen ? 'active' : ''}`}
+                    data-testid="picture-color"
+                    disabled={!onPictureAdjustments || contextElementType !== 'picture'}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'pictureColor')
+                    }}
+                    onClick={() => setPictureColorOpen((v) => !v)}
+                  >
+                    <span className="rb-big-icon">
+                      <IconPageColor size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonPictureColor')}</span>
+                  </button>
+                  {pictureColorOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      {(
+                        [
+                          ['original', 'ribbonPictureOriginal'],
+                          ['grayscale', 'ribbonPictureGrayscale'],
+                          ['blackWhite', 'ribbonPictureBlackWhite'],
+                          ['sepia', 'ribbonPictureSepia'],
+                          ['blue', 'ribbonPictureBlue'],
+                        ] as const
+                      ).map(([color, label]) => (
+                        <button
+                          key={color}
+                          data-testid={`picture-color-${color}`}
+                          onClick={() => {
+                            setPictureColorOpen(false)
+                            onPictureAdjustments?.({ color })
+                          }}
+                        >
+                          {t(label)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="rb-big"
+                  data-tip={
+                    contextPictureCanCutout
+                      ? t('ribbonRemoveBgTip')
+                      : t('ribbonRemoveBgDisabledTip')
+                  }
+                  disabled={!onPictureCutout || !contextPictureCanCutout}
+                  onClick={onPictureCutout}
+                >
+                  <span className="rb-big-icon">
+                    {/* BIG, not BIG+2: the shared 28px glyph size keeps this button's
+                      icon-row height (and label line) identical to its neighbors */}
+                    <IconRemoveBg size={BIG} />
+                  </span>
+                  <span>{t('ribbonRemoveBg')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  data-tip={t('ribbonReplacePicture')}
+                  disabled={!onPictureReplace || contextElementType !== 'picture'}
+                  onClick={onPictureReplace}
+                >
+                  <span className="rb-big-icon">
+                    <IconReplacePicture size={BIG} />
+                  </span>
+                  <span>{t('ribbonReplacePicture')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  data-testid="picture-reset"
+                  disabled={!onPictureReset || contextElementType !== 'picture'}
+                  onClick={onPictureReset}
+                >
+                  <span className="rb-big-icon">
+                    <IconReplacePicture size={BIG} />
+                  </span>
+                  <span>{t('ribbonPictureReset')}</span>
+                </button>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${transparencyOpen ? 'active' : ''}`}
+                    disabled={!onPictureOpacity || contextElementType !== 'picture'}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'transparency')
+                    }}
+                    onClick={() => setTransparencyOpen((v) => !v)}
+                    data-tip={t('ribbonTransparency')}
+                  >
+                    <span className="rb-big-icon">
+                      {/* 28px box around the 22px art so the icon row matches the SVG glyphs' height */}
+                      <span className="ai-feature-icon" aria-hidden="true">
+                        <img src={iconTransparency} width={22} height={22} alt="" />
+                      </span>
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonTransparency')}</span>
+                  </button>
+                  {transparencyOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      {[0, 15, 30, 50, 65, 80, 95].map((pct) => (
+                        <button
+                          key={pct}
+                          onClick={() => {
+                            setTransparencyOpen(false)
+                            onPictureOpacity?.(1 - pct / 100)
+                          }}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('paneFormatOutline')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${pictureBorderOpen ? 'active' : ''}`}
+                    disabled={!onPictureStroke}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'pictureBorder')
+                    }}
+                    onClick={() => {
+                      pictureBorderDraft.current = null
+                      setPictureBorderOpen((v) => !v)
+                    }}
+                    data-tip={t('paneFormatOutline')}
+                  >
+                    <span className="rb-big-icon">
+                      <IconPageBorders size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('paneFormatOutline')}</span>
+                  </button>
+                  {pictureBorderOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      <label className="rb-menu-input">
+                        {t('paneFormatOutlineColor')}
+                        <input
+                          type="color"
+                          defaultValue={toPickerHex(contextPictureStroke?.color) ?? '#000000'}
+                          onPointerDown={(e) => armColorInput(e.currentTarget)}
+                          onChange={(e) => commitPictureBorder({ color: e.target.value })}
+                        />
+                      </label>
+                      <div className="rb-menu-sep" />
+                      {[0.5, 1, 1.5, 2.25, 3, 4.5, 6].map((pt) => (
+                        <button
+                          key={pt}
+                          className={contextPictureStroke?.widthPt === pt ? 'active' : ''}
+                          onClick={() => {
+                            setPictureBorderOpen(false)
+                            commitPictureBorder({ widthPt: pt }, true)
+                          }}
+                        >
+                          {pt} pt
+                        </button>
+                      ))}
+                      <div className="rb-menu-sep" />
+                      <button
+                        className={!contextPictureStroke ? 'active' : ''}
+                        onClick={() => {
+                          setPictureBorderOpen(false)
+                          // A pending debounced color commit still holds the prior draft
+                          // in its closure and would re-apply the border after the clear
+                          if (pictureBorderTimer.current) {
+                            window.clearTimeout(pictureBorderTimer.current)
+                            pictureBorderTimer.current = null
+                          }
+                          pictureBorderDraft.current = null
+                          onPictureStroke?.(null)
+                        }}
+                      >
+                        {t('paneFormatNoOutline')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonPictureEffects')}>
+                {renderShapeEffects('big', t('ribbonPictureEffects'), true)}
+              </Group>
+              <div className="ribbon-sep" />
+              <Group
+                label={t('ribbonGroupPictureTools')}
+                fold={{ icon: <IconReplacePicture size={BIG} />, priority: 2 }}
+              >
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${pictureStyleOpen ? 'active' : ''}`}
+                    data-testid="picture-styles"
+                    data-tip={t('ribbonPictureStyles')}
+                    disabled={!onPictureStyle || contextElementType !== 'picture'}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'pictureStyle')
+                    }}
+                    onClick={() => setPictureStyleOpen((v) => !v)}
+                  >
+                    <span className="rb-big-icon">
+                      <IconShapes size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonPictureStyles')}</span>
+                  </button>
+                  {pictureStyleOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      {PICTURE_STYLES.map((style) => (
+                        <button
+                          key={style.id}
+                          data-testid={`picture-style-${style.id}`}
+                          onClick={() => {
+                            setPictureStyleOpen(false)
+                            onPictureStyle?.(style.id)
+                          }}
+                        >
+                          {t(style.labelKey)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="rb-big"
+                  data-testid="picture-quality"
+                  data-tip={t('ribbonPictureQuality')}
+                  disabled={!onPictureQuality || contextElementType !== 'picture'}
+                  onClick={onPictureQuality}
+                >
+                  <span className="rb-big-icon">
+                    <IconPicture size={BIG} />
+                  </span>
+                  <span>{t('ribbonPictureQuality')}</span>
+                </button>
+                <button
+                  className="rb-big"
+                  data-testid="picture-alt-text"
+                  data-tip={t('ribbonAltText')}
+                  disabled={!onPictureAltText || contextElementType !== 'picture'}
+                  onClick={onPictureAltText}
+                >
+                  <span className="rb-big-icon">
+                    <IconComment size={BIG} />
+                  </span>
+                  <span>{t('ribbonAltText')}</span>
+                </button>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonGroupSize')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big rb-split ${cropActive ? 'active' : ''}`}
+                    data-tip={t('ribbonCropTip')}
+                    disabled={!onPictureCrop || contextElementType !== 'picture'}
+                    onClick={onPictureCrop}
+                  >
+                    <span className="rb-big-icon">
+                      <span className="rb-split-main">
+                        <span className="ai-feature-icon" aria-hidden="true">
+                          <img src={iconCrop} width={22} height={22} alt="" />
+                        </span>
+                      </span>
+                      <span
+                        className={`rb-caret-hit${cropMenuOpen ? ' active' : ''}`}
+                        data-tip={t('ribbonCropMenu')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                          closeSiblingPanels(e, closePanels, 'cropMenu')
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (contextElementType === 'picture') setCropMenuOpen((v) => !v)
+                        }}
+                      >
+                        <RbCaret />
+                      </span>
+                    </span>
+                    <span>{t('ribbonCrop')}</span>
+                  </button>
+                  {cropMenuOpen && (
+                    <div className="rb-drop rb-menu" onMouseDown={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onPictureCrop?.()
+                        }}
+                      >
+                        {t('ribbonCrop')}
+                      </button>
+                      <div className="rb-menu-sep" />
+                      <div className="rb-menu-group-label">{t('ribbonCropAspectRatio')}</div>
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropAspectRatio?.(1, 1)
+                        }}
+                      >
+                        {t('ribbonCropSquare')}
+                      </button>
+                      <div className="rb-menu-group-label">{t('ribbonCropLandscape')}</div>
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropAspectRatio?.(4, 3)
+                        }}
+                      >
+                        4:3
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropAspectRatio?.(16, 9)
+                        }}
+                      >
+                        16:9
+                      </button>
+                      <div className="rb-menu-group-label">{t('ribbonCropPortrait')}</div>
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropAspectRatio?.(3, 4)
+                        }}
+                      >
+                        3:4
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropAspectRatio?.(9, 16)
+                        }}
+                      >
+                        9:16
+                      </button>
+                      <div className="rb-menu-sep" />
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropFill?.()
+                        }}
+                      >
+                        {t('ribbonCropFill')}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropFit?.()
+                        }}
+                      >
+                        {t('ribbonCropFit')}
+                      </button>
+                      <div className="rb-menu-sep" />
+                      <button
+                        disabled={!contextPictureHasCrop}
+                        onClick={() => {
+                          setCropMenuOpen(false)
+                          onCropReset?.()
+                        }}
+                      >
+                        {t('ribbonCropReset')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonGroupArrange')}>
+                <div className="rb-col">
+                  {(
+                    [
+                      [90, 'ribbonRotateRight', IconRotateRight],
+                      [-90, 'ribbonRotateLeft', IconRotateLeft],
+                    ] as const
+                  ).map(([delta, key, Icon]) => (
+                    <button
+                      key={key}
+                      className="rb-small"
+                      disabled={!onPictureRotate || contextElementType !== 'picture'}
+                      onClick={() => onPictureRotate?.(delta)}
+                    >
+                      <Icon size={18} />
+                      <span>{t(key)}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="rb-col">
+                  {(
+                    [
+                      ['h', 'ribbonFlipH', IconObjFlipH],
+                      ['v', 'ribbonFlipV', IconObjFlipV],
+                    ] as const
+                  ).map(([axis, key, Icon]) => (
+                    <button
+                      key={key}
+                      className="rb-small"
+                      disabled={!onFlip || contextElementType !== 'picture'}
+                      onClick={() => onFlip?.(axis)}
+                    >
+                      <Icon size={18} />
+                      <span>{t(key)}</span>
+                    </button>
+                  ))}
+                </div>
+              </Group>
+            </>
+          ) : tab === 'shapeFormat' ? (
+            <>
+              <Group label={t('ribbonShapes')}>
+                <div className="rb-drop-wrap">
+                  <button
+                    className={`rb-big ${changeShapeOpen ? 'active' : ''}`}
+                    disabled={!onChangeShape}
+                    data-tip={t('ribbonChangeShape')}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closeSiblingPanels(e, closePanels, 'changeShape')
+                    }}
+                    onClick={() => setChangeShapeOpen((v) => !v)}
+                  >
+                    <span className="rb-big-icon">
+                      <IconShapes size={BIG} />
+                      <RbCaret />
+                    </span>
+                    <span>{t('ribbonChangeShape')}</span>
+                  </button>
+                  {changeShapeOpen && (
+                    <div className="rb-drop" onMouseDown={(e) => e.stopPropagation()}>
+                      <ShapeGalleryContent
+                        onPick={(prst) => {
+                          setChangeShapeOpen(false)
+                          onChangeShape?.(prst)
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonGroupShapeStyle')}>{renderQuickStyles()}</Group>
+              <div className="ribbon-sep" />
+              <Group label={t('paneFormatFill')}>{renderShapeFill()}</Group>
+              <div className="ribbon-sep" />
+              <Group label={t('paneFormatOutline')}>{renderShapeOutline()}</Group>
+              <div className="ribbon-sep" />
+              <Group label={t('ribbonShapeEffects')}>{renderShapeEffects()}</Group>
+            </>
+          ) : null}
         </div>
       </div>
       <RibbonCollapseButton

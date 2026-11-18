@@ -6,7 +6,13 @@ export default defineConfig({
   // Bundle everything into the shell main (same policy as apps/docs): the
   // imported docs/sheets main modules are TS source with no build artifacts,
   // so externalizing them would break Node ESM resolution at runtime.
-  main: {},
+  main: {
+    resolve: {
+      alias: {
+        '@genoffice/compound-file': resolve(__dirname, '../../packages/compound-file/src/index.ts'),
+      },
+    },
+  },
   preload: {
     build: {
       rollupOptions: {

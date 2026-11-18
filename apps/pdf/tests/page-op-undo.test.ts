@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
 import { PageOpHistory, sameBytes } from '../src/main/page-op-history'
-import { cropPagesBytes, setPageSizeBytes } from '../src/main/save-pdf'
+import { cropPagesBytes, insertBlankPageBytes, setPageSizeBytes } from '../src/main/save-pdf'
 import { isPageOpUndo, type UndoEntry } from '../src/renderer/edit-state'
 
 async function makePdf(sizes: [number, number][]): Promise<Uint8Array> {
@@ -47,6 +47,20 @@ describe('PageOpHistory (C8)', () => {
       width: 612,
       height: 792,
     })
+  })
+
+  it('insert blank page step round-trips page count (B6)', async () => {
+    const history = new PageOpHistory()
+    const before = await makePdf([[612, 792]])
+    const after = await insertBlankPageBytes(before, 0)
+    expect((await PDFDocument.load(after)).getPageCount()).toBe(2)
+    const token = history.record('/blank.pdf', before, after)!
+    const undo = history.resolve('/blank.pdf', token, 'undo', after)
+    expect(undo.ok).toBe(true)
+    expect((await PDFDocument.load((undo as { bytes: Uint8Array }).bytes)).getPageCount()).toBe(1)
+    const redo = history.resolve('/blank.pdf', token, 'redo', before)
+    expect(redo.ok).toBe(true)
+    expect((await PDFDocument.load((redo as { bytes: Uint8Array }).bytes)).getPageCount()).toBe(2)
   })
 
   it('refuses when the file changed on disk or the step is unknown', async () => {

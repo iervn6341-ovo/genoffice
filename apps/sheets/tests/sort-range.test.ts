@@ -74,6 +74,22 @@ describe('computeSortChanges', () => {
     })
   })
 
+  it('B8: keeps empty strings last regardless of direction (Excel behavior)', () => {
+    const cells: Record<string, CellState> = {
+      A1: { value: 20 },
+      A2: { value: 3 },
+      A3: { value: 3 },
+      A4: { value: '' },
+      A5: { value: '' },
+    }
+    const desc = computeSortChanges(
+      { range: 'A1:A5', byColumn: 'A', ascending: false, hasHeader: false },
+      reader(cells),
+    )
+    // 20, 3, 3, '', '' is already in descending order! If empty strings jumped to top, desc would emit changes.
+    expect(desc).toEqual([])
+  })
+
   it('rejects ranges containing formulas', () => {
     const cells: Record<string, CellState> = {
       A1: { value: 2 },

@@ -1,5 +1,5 @@
 export * from './types'
-export { deobfuscateOdttf, isSfnt, parseFontTable, readEmbeddedFonts } from './font-table'
+export { deobfuscateOdttf, isSfnt, isSfntNonBold, isSfntNonItalic, parseFontTable, readEmbeddedFonts } from './font-table'
 export { decodeEntities } from './parse-xml-text'
 export { sdtCheckboxGlyphs, sdtCheckboxIsChecked } from './checkbox-control'
 export { parseDocx, styleRunFormat, type ParseExtras, type ParseOptions } from './parse'
@@ -43,6 +43,7 @@ export {
   generateCaptionXml,
   generateIndexFieldXml,
   generateParagraphXml,
+  mergeRPrModel,
   generateTableModelXml,
   generateTableXml,
   generateTocFieldXml,

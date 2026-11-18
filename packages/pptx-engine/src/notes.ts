@@ -10,11 +10,11 @@
  * main process's snapshot-style undo (shallow copy of entries) covers them.
  */
 import type { OpenedPptx } from './index'
-import { patchTextElementXml } from './generate'
+import { patchParagraphPPrXml, patchTextElementXml } from './generate'
 import { parseSlide, type ParseContext } from './parse'
 import { parseMasterTextStyles, parsePlaceholderMap } from './placeholder'
 import { parseClrMap, parseTheme } from './theme'
-import type { Paragraph, TextElement } from './types'
+import type { Paragraph, PPrDirty, TextElement } from './types'
 import { relsPathFor, resolveTarget, type PackageArchive } from './zip'
 import { escapeXmlText } from './xml-utils'
 
@@ -207,6 +207,7 @@ export function setSlideNotesParagraphs(
   opened: OpenedPptx,
   slideIndex: number,
   paragraphs: Paragraph[],
+  paragraphFormats: ReadonlyMap<number, PPrDirty> = new Map(),
 ): boolean {
   const slide = opened.deck.slides[slideIndex]
   if (!slide) return false
@@ -228,7 +229,15 @@ export function setSlideNotesParagraphs(
   if (!body || !el?.text) return false
   // CT_TextBody requires at least one <a:p>
   const paras = paragraphs.length ? paragraphs : [{ runs: [] }]
-  const patched = patchTextElementXml({ ...el, text: { ...el.text, paragraphs: paras } }, body.xml)
+  let patched = patchTextElementXml({ ...el, text: { ...el.text, paragraphs: paras } }, body.xml)
+  // The aligned text writer intentionally leaves pPr untouched. Apply only the
+  // notes ribbon's marked paragraphs, retaining every unedited paragraph/run.
+  let paragraphIndex = 0
+  patched = patched.replace(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g, (xml) => {
+    const index = paragraphIndex++
+    const dirty = paragraphFormats.get(index)
+    return dirty && paras[index] ? patchParagraphPPrXml(xml, paras[index]!, dirty) : xml
+  })
   setEntry(archive, notesPath, xml.slice(0, body.start) + patched + xml.slice(body.end))
   return true
 }

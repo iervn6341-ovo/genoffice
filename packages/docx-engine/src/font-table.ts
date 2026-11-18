@@ -28,6 +28,10 @@ export function parseFontTable(xml: string): FontTableEntry[] {
     if (panose) entry.panose = panose
     const family = val('w:family')
     if (family) entry.family = family
+    const charset = val('w:charset')
+    if (charset) entry.charset = charset
+    const csb0 = attrsOf(findChild(node, 'w:sig') ?? {})['w:csb0']
+    if (csb0) entry.csb0 = csb0
     const pitch = val('w:pitch')
     if (pitch) entry.pitch = pitch
     const embedded = parseEmbedSlots(node)
@@ -63,6 +67,55 @@ export function isSfnt(bytes: Uint8Array): boolean {
   if (bytes.length < 12) return false
   const magic = ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0
   return SFNT_MAGICS.has(magic)
+}
+
+/**
+ * Test whether the SFNT font file's OS/2 table explicitly declares a non-bold weight (< 600).
+ * Word embeds regular fonts under w:embedBold for fonts that lack a real bold variant (e.g. 標楷體).
+ * Calling code must not register such faces with descriptor weight: '700', or the browser
+ * will treat the face as an exact match and suppress synthetic (faux) bolding.
+ */
+export function isSfntNonBold(bytes: Uint8Array): boolean {
+  if (bytes.length < 12) return false
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const numTables = view.getUint16(4)
+  if (bytes.length < 12 + numTables * 16) return false
+  for (let i = 0; i < numTables; i++) {
+    const o = 12 + i * 16
+    if (view.getUint32(o) === 0x4f532f32) {
+      // 'OS/2'
+      const tableOffset = view.getUint32(o + 8)
+      if (tableOffset + 64 <= bytes.length) {
+        const usWeightClass = view.getUint16(tableOffset + 4)
+        const fsSelection = view.getUint16(tableOffset + 62)
+        const isBoldSelection = (fsSelection & 0x0020) !== 0
+        if (!isBoldSelection && usWeightClass > 0 && usWeightClass < 600) return true
+      }
+      return false
+    }
+  }
+  return false
+}
+
+export function isSfntNonItalic(bytes: Uint8Array): boolean {
+  if (bytes.length < 12) return false
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const numTables = view.getUint16(4)
+  if (bytes.length < 12 + numTables * 16) return false
+  for (let i = 0; i < numTables; i++) {
+    const o = 12 + i * 16
+    if (view.getUint32(o) === 0x4f532f32) {
+      // 'OS/2'
+      const tableOffset = view.getUint32(o + 8)
+      if (tableOffset + 64 <= bytes.length) {
+        const fsSelection = view.getUint16(tableOffset + 62)
+        const isItalicSelection = (fsSelection & 0x0001) !== 0
+        if (!isItalicSelection) return true
+      }
+      return false
+    }
+  }
+  return false
 }
 
 /**
@@ -102,12 +155,20 @@ export async function readEmbeddedFonts(
       if (!file) continue
       const data = deobfuscateOdttf(await file.async('uint8array'), ref.fontKey)
       if (!isSfnt(data)) continue
-      out.push({
-        family: entry.name,
-        bold: slot === 'bold' || slot === 'boldItalic',
-        italic: slot === 'italic' || slot === 'boldItalic',
-        data,
-      })
+      const isBoldSlot = slot === 'bold' || slot === 'boldItalic'
+      const isItalicSlot = slot === 'italic' || slot === 'boldItalic'
+      const bold = isBoldSlot && !isSfntNonBold(data)
+      const italic = isItalicSlot && !isSfntNonItalic(data)
+      const families = [entry.name]
+      if (entry.altName && entry.altName !== entry.name) families.push(entry.altName)
+      for (const family of families) {
+        out.push({
+          family,
+          bold,
+          italic,
+          data,
+        })
+      }
     }
   }
   return out

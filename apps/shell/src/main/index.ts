@@ -19,11 +19,18 @@ import {
   ipcMain,
   nativeImage,
   nativeTheme,
+  screen,
   shell,
   webContents,
 } from 'electron'
 import type { MenuItemConstructorOptions, NativeImage, WebContents } from 'electron'
 import { tabStripOverlay } from './title-bar-overlay'
+import { installNativeFrameEvents } from './native-frame-events'
+import { TabStripReady } from './tab-strip-ready'
+import { TabDragPreview } from './tab-drag-preview'
+import { installWindowGestureGuard } from './window-gesture-guard'
+import { tabDragStrings } from '../shared/tab-drag-strings'
+import { handleAcquireOfficeFont, handleOpenFontsFolder } from './office-fonts'
 import menuDocxIcon1x from './assets/menu-docx.png?asset'
 import menuDocxIcon2x from './assets/menu-docx@2x.png?asset'
 import menuXlsxIcon1x from './assets/menu-xlsx.png?asset'
@@ -41,6 +48,7 @@ import menuHomeIcon2x from './assets/menu-home@2x.png?asset'
 import { createI18n, isLang, normalizeLang, setUiLang, type Lang } from '@genoffice/i18n'
 import {
   DEFAULT_SAVE_DIR_KEY,
+  configuredDefaultSaveDirAsync,
   DROP_OPEN_CHANNEL,
   GITHUB_REPO_URL,
   appMenuLabels,
@@ -118,13 +126,13 @@ import {
   setDocsShellWindow,
   setDocsFileSavedHook,
   setDocsFileOpenedHook,
+  setDocsFileDirtyHook,
   setSessionPathResolver,
   defaultSaveDir,
   uniquePathIn,
   authorizeMcpDocWrite,
 } from '../../../docs/src/main/docs-main'
 import { blankXlsxBuffer } from '@genoffice/xlsx-gateway/gateway/csv-import'
-import { blankPdfBuffer } from '../../../pdf/src/main/blank-pdf'
 import {
   applyMcpSettings,
   clearMcpLogs,
@@ -151,14 +159,15 @@ import {
   markSheetsShuttingDown,
   requestSheetsClose,
   resolveSheetsSessionPath,
-  markSheetsUntitledPath,
   authorizeMcpSheetWrite,
   sendSheetsMenuAction,
   sheetsFileRenamed,
   setSheetsCloseTabHook,
   setSheetsExtraFileMenuItems,
+  setSheetsActivateTabHook,
   setSheetsShellWindow,
   setSheetsWorkbookOpenedHook,
+  setSheetsFileDirtyHook,
   startSheetsCaptureServer,
   stopSheetsSidecar,
 } from '../../../sheets/src/main/sheets-main'
@@ -174,18 +183,21 @@ import {
   setSlidesOpenedHook,
   setSlidesShellWindow,
   setSlidesShowBleed,
+  setSlidesFileDirtyHook,
   slidesFileRenamed,
 } from '../../../slides/src/main/slides-main'
 import {
   configurePdfRuntime,
   flushPdfSave,
-  markPdfUntitledPath,
   pdfFileRenamed,
   pdfIsDirty,
   requestPdfClose,
   requestPdfSaveAs,
   sendPdfPrintRequest,
+  setPdfFileOpenedHook,
   setPdfRenamedHook,
+  setPdfMaterializedHook,
+  setPdfFileDirtyHook,
   setPdfSaveAsInFlight,
 } from '../../../pdf/src/main/pdf-main'
 import { PDF_CHANNELS } from '../../../pdf/src/shared/ipc'
@@ -205,7 +217,9 @@ import {
   sendMarkdownExportRequest,
   sendMarkdownPrintRequest,
   setMarkdownDocxExportedHook,
+  setMarkdownFileOpenedHook,
   setMarkdownFileSavedHook,
+  setMarkdownFileDirtyHook,
 } from '../../../markdown/src/main/markdown-main'
 import {
   configureHtmlRuntime,
@@ -221,7 +235,9 @@ import {
   sendHtmlPrintRequest,
   setHtmlDocxExportPrepareHook,
   setHtmlDocxExportedHook,
+  setHtmlFileOpenedHook,
   setHtmlFileSavedHook,
+  setHtmlFileDirtyHook,
   setHtmlPresentHooks,
   setHtmlProvisionalTitleHook,
 } from '../../../html/src/main/html-main'
@@ -244,10 +260,7 @@ import {
   sameAiPanelPrefs,
   type AiPanelPrefs,
 } from '@genoffice/ui/ai-panel-prefs'
-import {
-  normalizeFontSubstitutions,
-  type FontSubstitutionRule,
-} from '@genoffice/ui'
+import { normalizeFontSubstitutions, type FontSubstitutionRule } from '@genoffice/ui'
 import type { TabKind } from '../shared/tabs-api'
 import { TABS_CHANNELS } from '../shared/tabs-api'
 import { showErrorDialog } from './error-dialog'
@@ -273,6 +286,7 @@ import {
 } from './folder-tree'
 import { runHeadlessExport, type HeadlessExporters } from './headless-export'
 import { TabManager } from './tab-manager'
+import { externalFiles } from '@genoffice/electron-utils/external-files'
 import { applyUpdateChannel, checkForUpdatesNow, initAutoUpdater } from './updater'
 import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
 
@@ -2382,14 +2396,102 @@ const tm = (key: Parameters<typeof tMain>[1], params?: Parameters<typeof tMain>[
 
 let shellWindow: BrowserWindow | null = null
 let tabManager: TabManager | null = null
+let shellFocusOrder = 0
+type ShellHost = {
+  win: BrowserWindow
+  manager: TabManager
+  detached: boolean
+  order: number
+  ready: TabStripReady
+}
+const shellHosts = new Map<number, ShellHost>()
+const tabDragPreview = new TabDragPreview()
+let previewSequence = 0
+let hintedWindow: BrowserWindow | null = null
+
+function clearDropHint(): void {
+  if (hintedWindow && !hintedWindow.isDestroyed())
+    hintedWindow.webContents.send(TABS_CHANNELS.dropHint, null)
+  hintedWindow = null
+}
+
+function endTabPreview(): void {
+  previewSequence++
+  clearDropHint()
+  tabDragPreview.end()
+}
+
+/** The preview and commit must resolve the same destination. */
+function tabDropTarget(source: ShellHost, x: number, y: number): ShellHost | 'source' | null {
+  const contains = (h: ShellHost, tolerance = 0) => {
+    const b = h.win.getContentBounds()
+    return x >= b.x && x <= b.x + b.width && y >= b.y - tolerance && y <= b.y + 40 + tolerance
+  }
+  const target = [...shellHosts.values()]
+    .sort((a, b) => b.order - a.order)
+    .find(
+      (h) =>
+        h !== source &&
+        !h.win.isDestroyed() &&
+        h.win.isVisible() &&
+        !h.win.isMinimized() &&
+        !h.manager.list().some((t) => t.active && t.coversTabStrip) &&
+        contains(h),
+    )
+  return target ?? (contains(source, 20) ? 'source' : null)
+}
+
+async function tabDropSlot(
+  target: ShellHost,
+  x: number,
+): Promise<{ index: number; marker: number }> {
+  const rects: Array<{ left: number; right: number }> =
+    await target.win.webContents.executeJavaScript(
+      "Array.from(document.querySelectorAll('.tab-strip .tab-item'), e => {const r=e.getBoundingClientRect();return {left:r.left,right:r.right}})",
+    )
+  const b = target.win.getContentBounds()
+  const at = rects.findIndex((r, i) => i > 0 && x - b.x < (r.left + r.right) / 2)
+  const index = at >= 0 ? at : target.manager.list().length
+  return {
+    index,
+    marker: Math.max(78, Math.min(rects[index]?.left ?? rects.at(-1)?.right ?? 78, b.width - 44)),
+  }
+}
+function managerForContents(id: number): TabManager | undefined {
+  return [...shellHosts.values()].find(
+    (h) => h.win.webContents.id === id || h.manager.tabIdForWebContents(id),
+  )?.manager
+}
+function managerForTab(id: string): TabManager | undefined {
+  return [...shellHosts.values()].find((h) => h.manager.webContentsForTab(id))?.manager
+}
+externalFiles.setForegroundTabCheck((id) => {
+  const manager = managerForContents(id)
+  // Standalone editor windows have no shell tab manager.
+  if (!manager) return true
+  const tabId = manager.tabIdForWebContents(id)
+  return !!tabId && manager.list().some((tab) => tab.id === tabId && tab.active)
+})
+function selectShellHost(contents: WebContents): void {
+  const manager = managerForContents(contents.id)
+  const host = [...shellHosts.values()].find((h) => h.manager === manager)
+  if (!host) return
+  host.order = ++shellFocusOrder
+  shellWindow = host.win
+  tabManager = host.manager
+  setDocsShellWindow(host.win)
+  setSheetsShellWindow(host.win)
+  setSlidesShellWindow(host.win)
+  host.manager.refreshActiveTargets()
+}
 
 /**
  * New file from a folder view: the click remembers the folder per kind, the
- * new-tab code consumes it right away. Sheets / PDF write their blank file
- * straight into that folder; the editors that save untitled files themselves
- * (docs, slides, markdown, html) get the folder bound to the tab that was just
- * created, and the tab's first save moves the fresh file there.
- * key: 'doc' | 'sheet' | 'slide' | 'markdown' | 'html' | 'pdf'
+ * new-tab code consumes it right away. Editors that save untitled files
+ * themselves get the folder bound to the tab, and the first save moves the
+ * fresh file there. Sheets and PDF pass the selected folder to their first
+ * Save dialog without creating a file on New.
+ * key: 'doc' | 'slide' | 'markdown' | 'html'
  */
 const pendingNewFileDir = new Map<string, { dir: string; setAt: number }>()
 /** folder bound to a freshly created editor tab, keyed by its webContents id; consumed by the first save */
@@ -2414,11 +2516,6 @@ function takePendingDir(kind: string): { dir: string; setAt: number } | null {
   if (!pending) return null
   if (Date.now() - pending.setAt > PENDING_DIR_TTL_MS) return null
   return existsSync(pending.dir) ? pending : null
-}
-
-/** where a shell-created blank file (sheet, pdf) lands: the remembered folder, else the root */
-function newFileDir(kind: string): string {
-  return takePendingDir(kind)?.dir ?? defaultSaveDir()
 }
 
 /** hand the remembered folder to the tab that was just opened for it */
@@ -2472,7 +2569,9 @@ function afterFileMoved(oldPath: string, newPath: string): void {
   replaceRecentFile(oldPath, newPath)
   projectFileRenamed(oldPath, newPath)
   if (/\.(pptx|ppsx)$/i.test(newPath)) void replaceSlidesRecentFile(oldPath, newPath)
-  const affected = tabManager?.renameTabFile(oldPath, newPath) ?? []
+  const affected = [...shellHosts.values()].flatMap((h) =>
+    h.manager.renameTabFile(oldPath, newPath),
+  )
   for (const t of affected) {
     if (t.kind === 'slides') slidesFileRenamed(t.webContents, oldPath, newPath)
     else if (t.kind === 'docs') docsFileRenamed(t.webContents, oldPath, newPath)
@@ -2531,21 +2630,25 @@ function applyMenuFor(kind: TabKind): void {
 }
 
 function refreshTitleBarOverlay(): void {
-  if (process.platform === 'darwin' || !shellWindow || shellWindow.isDestroyed()) return
-  const presenting = tabManager
-    ?.list()
-    .some((tab) => tab.active && tab.kind === 'slides' && tab.coversTabStrip)
-  shellWindow.setTitleBarOverlay(
-    tabStripOverlay(nativeTheme.shouldUseDarkColors, presenting, currentTheme() === 'gray'),
-  )
+  if (process.platform === 'darwin') return
+  for (const { win, manager } of shellHosts.values()) {
+    if (win.isDestroyed()) continue
+    const presenting = manager
+      .list()
+      .some((tab) => tab.active && tab.kind === 'slides' && tab.coversTabStrip)
+    win.setTitleBarOverlay(
+      tabStripOverlay(nativeTheme.shouldUseDarkColors, presenting, currentTheme() === 'gray'),
+    )
+  }
 }
 
-function createShellWindow(): void {
+function createShellWindow(position?: { x: number; y: number; detached?: boolean }): BrowserWindow {
   const win = new BrowserWindow({
     // background e2e: a window created visible activates the app — show it inactive below
-    ...(E2E_BACKGROUND ? { show: false } : {}),
+    ...(E2E_BACKGROUND || position?.detached ? { show: false } : {}),
     width: 1360,
     height: 900,
+    ...(position ? { x: position.x, y: position.y } : {}),
     minWidth: 720,
     minHeight: 550,
     title: 'GenOffice',
@@ -2572,16 +2675,20 @@ function createShellWindow(): void {
       sandbox: true,
     },
   })
+  const shellContents = win.webContents
   shellWindow = win
-  if (E2E_BACKGROUND) win.showInactive()
+  if (E2E_BACKGROUND && !position?.detached) win.showInactive()
   nativeTheme.on('updated', refreshTitleBarOverlay)
   win.once('closed', () => nativeTheme.off('updated', refreshTitleBarOverlay))
-  // dragging the window by the tab strip's blank (draggable) area produces no
-  // DOM event anywhere — will-move is the only signal to dismiss popovers
-  win.on('will-move', () => broadcastChromePressed())
+  // Keep native drag regions stable while moving/resizing; dismiss only this
+  // window's popovers, once per gesture burst rather than once per frame.
+  installNativeFrameEvents(win, () => broadcastChromePressed(undefined, win))
+  // A transferred tab can stall the next native drag in an existing window as
+  // well as a newly detached one. Install once on every shell, including Home.
+  installWindowGestureGuard(win)
   // A detached editor window claims the process-global menu/active-editor targets
   // while focused; take them back when the shell window regains focus
-  win.on('focus', () => tabManager?.refreshActiveTargets())
+  win.on('focus', () => selectShellHost(win.webContents))
 
   const manager = new TabManager(
     win,
@@ -2589,10 +2696,18 @@ function createShellWindow(): void {
       // late tab events (title, fullscreen release timers) can outlive the window
       if (win.isDestroyed()) return
       win.webContents.send(TABS_CHANNELS.changed, manager.list())
+      const active = manager.list().find((t) => t.active)
+      win.setTitle(
+        active?.kind !== 'home' && active?.title ? `${active.title} — GenOffice` : 'GenOffice',
+      )
       refreshTitleBarOverlay()
-      publishOpenDocumentsIfOwner(manager.openFilePaths())
+      publishOpenDocumentsIfOwner(
+        [...shellHosts.values()].flatMap((h) => h.manager.openFilePaths()),
+      )
     },
-    applyMenuFor,
+    (kind) => {
+      if (tabManager === manager) applyMenuFor(kind)
+    },
     // no extension: these tabs have no file on disk yet; the title becomes the
     // real filename (the localized untitled default + .docx etc.) once the first save lands
     (kind) =>
@@ -2604,65 +2719,82 @@ function createShellWindow(): void {
             ? tm('untitledMarkdown')
             : kind === 'html'
               ? tm('untitledHtml')
-              : tm('untitledSheet'),
+              : kind === 'pdf'
+                ? tm('untitledPdf')
+                : tm('untitledSheet'),
+    `${win.id}-`,
   )
+  const ready = new TabStripReady()
+  shellHosts.set(win.id, {
+    win,
+    manager,
+    ready,
+    detached: !!position?.detached,
+    order: ++shellFocusOrder,
+  })
   tabManager = manager
 
   // pushRecent-triggered docs menu rebuilds must not clobber the active tab's menu
-  setDocsMenuGate(() => manager.list().some((t) => t.active && t.kind === 'docs'))
+  setDocsMenuGate(() => !!tabManager?.list().some((t) => t.active && t.kind === 'docs'))
 
   setDocsShellWindow(win)
   setSheetsShellWindow(win)
+  // the cross-workbook range picker returns focus to the editing tab
+  setSheetsActivateTabHook((wcId) => {
+    const tabId = tabManager?.tabIdForWebContents(wcId)
+    if (tabId !== undefined) tabManager?.activateTab(tabId)
+  })
   setSlidesShellWindow(win)
-  setSlidesShowBleed((wc, on) => manager.setContentBleed(wc, on))
+  setSlidesShowBleed((wc, on) => managerForContents(wc.id)?.setContentBleed(wc, on))
   setHtmlPresentHooks({
-    setBleed: (wc, on) => manager.setContentBleed(wc, on),
-    hostWindow: () => win,
+    setBleed: (wc, on) => managerForContents(wc.id)?.setContentBleed(wc, on),
+    hostWindow: () => shellWindow,
     openTab: (owner, title) => {
-      manager.openHtmlPresentTab(owner, title)
+      ;(managerForContents(owner.id) ?? tabManager)?.openHtmlPresentTab(owner, title)
       return true
     },
     closeTab: (wc) => {
-      const id = manager.tabIdForWebContents(wc.id)
-      if (id) void manager.closeTab(id)
+      const owner = managerForContents(wc.id)
+      const id = owner?.tabIdForWebContents(wc.id)
+      if (id) void owner?.closeTab(id)
       return !!id
     },
   })
   setDocsShellHooks({
-    openTab: (openPath, options) => manager.openDocsTab(openPath, options),
+    openTab: (openPath, options) => tabManager!.openDocsTab(openPath, options),
     openAiDocTab: (content) =>
-      manager.openDocsTab(undefined, { newBlank: true, aiContent: content }),
+      tabManager!.openDocsTab(undefined, { newBlank: true, aiContent: content }),
     listTabs: () =>
-      manager
+      tabManager!
         .list()
         .filter((t) => t.kind === 'docs')
         .map((t) => ({ id: t.id, title: t.title, focused: t.active })),
-    focusTab: (id) => manager.activateTab(id),
-    closeActiveTab: () => manager.closeActiveTab(),
+    focusTab: (id) => (managerForTab(id) ?? tabManager)?.activateTab(id),
+    closeActiveTab: () => tabManager?.closeActiveTab(),
     openGeneratedPath: (path) => openGeneratedDocument(path),
   })
-  setSheetsCloseTabHook(() => manager.closeActiveTab())
+  setSheetsCloseTabHook(() => tabManager?.closeActiveTab())
   // ⌘W targets the focused window: in a detached slides editor window it closes
   // that window (running its own close guard), not the shell's active tab
   setSlidesCloseTabHook(() => {
     const focused = BrowserWindow.getFocusedWindow()
-    if (focused && focused !== win) focused.close()
-    else manager.closeActiveTab()
+    if (focused && !shellHosts.has(focused.id)) focused.close()
+    else tabManager?.closeActiveTab()
   })
   // When ⌘O opens a file inside a tab, sync the tab title/path (used for de-dup by path) and record it as recent.
   // The first save / save-as fires this too, so applyPendingDir also runs here.
   setSheetsWorkbookOpenedHook((wc, path) => {
-    manager.setTabFileFor(wc.id, path)
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
     recordRecentFile(path)
   })
   setSlidesOpenedHook((wc, path) => {
-    manager.setTabFileFor(wc.id, path)
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
     recordRecentFile(path)
     applyPendingDir(wc.id, path)
   })
   // docs' save-as / silent first save lands on a new path → sync the tab title too
   setDocsFileSavedHook((wc, path) => {
-    manager.setTabFileFor(wc.id, path)
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
     recordRecentFile(path)
     applyPendingDir(wc.id, path)
   })
@@ -2670,38 +2802,69 @@ function createShellWindow(): void {
   // contract as the sheets/slides opened hooks (a plain save to the original
   // path never renames the tab, so the open must — r115)
   setDocsFileOpenedHook((wcId, path) => {
-    manager.setTabFileFor(wcId, path)
+    managerForContents(wcId)?.setTabFileFor(wcId, path)
     recordRecentFile(path)
     applyPendingDir(wcId, path)
   })
   // markdown untitled first save / Save As lands on a new path
   setMarkdownFileSavedHook((wc, path) => {
-    manager.setTabFileFor(wc.id, path)
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
+    recordRecentFile(path)
+    applyPendingDir(wc.id, path)
+  })
+  setMarkdownFileOpenedHook((wc, path) => {
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
     recordRecentFile(path)
     applyPendingDir(wc.id, path)
   })
   setHtmlFileSavedHook((wc, path) => {
-    manager.setTabFileFor(wc.id, path)
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
     recordRecentFile(path)
     applyPendingDir(wc.id, path)
   })
-  setHtmlProvisionalTitleHook((wc, title) => manager.setTabTitleFor(wc.id, title))
+  setHtmlFileOpenedHook((wc, path) => {
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
+    recordRecentFile(path)
+    applyPendingDir(wc.id, path)
+  })
+  setHtmlProvisionalTitleHook((wc, title) =>
+    managerForContents(wc.id)?.setTabTitleFor(wc.id, title),
+  )
   // pdf content-derived auto-rename: the file moved on disk, follow it everywhere
   setPdfRenamedHook((wc, oldPath, newPath) => {
-    manager.setTabFileFor(wc.id, newPath)
+    managerForContents(wc.id)?.setTabFileFor(wc.id, newPath)
     replaceRecentFile(oldPath, newPath)
     projectFileRenamed(oldPath, newPath)
+  })
+  setPdfFileOpenedHook((wc, path) => {
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
+    recordRecentFile(path)
+  })
+  setPdfMaterializedHook((wc, path) => {
+    managerForContents(wc.id)?.setTabFileFor(wc.id, path)
+    recordRecentFile(path)
+    if (tabManager?.activePdfTab()?.webContents.id === wc.id) buildPdfMenu()
   })
   // markdown "convert & open in Docs" → route the fresh .docx to a docs tab
   setMarkdownDocxExportedHook((path) => {
     openDocumentPath(path)
   })
+  // Sync unsaved-changes dirty state with shell tabs
+  setDocsFileDirtyHook((wc, dirty) => managerForContents(wc.id)?.setTabDirtyFor(wc.id, dirty))
+  setSheetsFileDirtyHook((wc, dirty) => managerForContents(wc.id)?.setTabDirtyFor(wc.id, dirty))
+  setSlidesFileDirtyHook((wc, dirty) => managerForContents(wc.id)?.setTabDirtyFor(wc.id, dirty))
+  setPdfFileDirtyHook((wc, dirty) => managerForContents(wc.id)?.setTabDirtyFor(wc.id, dirty))
+  setMarkdownFileDirtyHook((wc, dirty) => managerForContents(wc.id)?.setTabDirtyFor(wc.id, dirty))
+  setHtmlFileDirtyHook((wc, dirty) => managerForContents(wc.id)?.setTabDirtyFor(wc.id, dirty))
   // Word export to a path already open in a docs tab: close that tab before the file is
   // written (its unsaved-changes prompt applies, and a later save of the stale document
   // could otherwise overwrite the export); a cancelled close aborts the export.
   setHtmlDocxExportPrepareHook(async (path) => {
-    const stale = manager.findDocsTabByPath(path)
-    if (!stale) return true
+    const manager = [...shellHosts.values()]
+      .map((h) => h.manager)
+      .find((m) => m.findDocsTabByPath(path))
+    const stale = manager?.findDocsTabByPath(path)
+    if (!stale || !manager) return true
     const active = manager.list().find((t) => t.active)?.id
     await manager.closeTab(stale)
     if (active && active !== stale) manager.activateTab(active)
@@ -2716,8 +2879,13 @@ function createShellWindow(): void {
   // docs dirtiness lives renderer-side, so any live docs tab forces the async path
   // and gets queried there (clean tabs pass through without activation).
   let closeConfirmed = false
+  let closeChecking = false
   win.on('close', (event) => {
     if (closeConfirmed) return
+    if (closeChecking) {
+      event.preventDefault()
+      return
+    }
     const dirtySheets = manager.dirtySheetsTabs()
     const dirtyPdf = manager.dirtyPdfTabs()
     const dirtyMarkdown = manager.dirtyMarkdownTabs()
@@ -2734,6 +2902,8 @@ function createShellWindow(): void {
     )
       return
     event.preventDefault()
+    closeChecking = true
+    manager.setWindowClosing(true)
     void (async () => {
       for (const tab of dirtySheets) {
         manager.activateTab(tab.id)
@@ -2762,15 +2932,24 @@ function createShellWindow(): void {
       }
       closeConfirmed = true
       if (!win.isDestroyed()) win.close()
-    })()
+    })().finally(() => {
+      closeChecking = false
+      manager.setWindowClosing(false)
+    })
   })
 
   win.on('closed', () => {
-    if (shellWindow === win) shellWindow = null
+    ready.dispose()
+    if (tabDragPreview.belongsTo(shellContents)) endTabPreview()
+    if (hintedWindow === win) hintedWindow = null
+    shellHosts.delete(win.id)
     if (tabManager === manager) {
-      tabManager = null
-      publishOpenDocumentsIfOwner([])
+      const fallback = [...shellHosts.values()].at(-1)
+      shellWindow = fallback?.win ?? null
+      tabManager = fallback?.manager ?? null
+      if (fallback) selectShellHost(fallback.win.webContents)
     }
+    publishOpenDocumentsIfOwner([...shellHosts.values()].flatMap((h) => h.manager.openFilePaths()))
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -2778,11 +2957,12 @@ function createShellWindow(): void {
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  return win
 }
 
 // ---- routing: one dispatch function for every open path ----
 
-const DOCX_RE = /\.docx$/i
+const DOCX_RE = /\.(docx|doc|dot)$/i
 const XLSX_RE = /\.(xlsx|xlsm|xls|csv)$/i
 const PPTX_RE = /\.(pptx|ppsx)$/i
 const PDF_RE = /\.pdf$/i
@@ -2790,7 +2970,7 @@ const MD_RE = /\.(md|markdown)$/i
 const HTML_RE = /\.html?$/i
 
 /** document formats we recognize but don't open — surfaced as a dialog, not silently dropped */
-const UNSUPPORTED_DOC_RE = /\.(doc|rtf|odt|ppt|pps|odp|ods|xlsb|pages|key|numbers)$/i
+const UNSUPPORTED_DOC_RE = /\.(rtf|odt|ppt|pps|odp|ods|xlsb|pages|key|numbers)$/i
 
 /**
  * Single source of truth for the open-dialog filter. Includes the
@@ -2800,6 +2980,7 @@ const UNSUPPORTED_DOC_RE = /\.(doc|rtf|odt|ppt|pps|odp|ods|xlsb|pages|key|number
 const OPEN_DIALOG_EXTENSIONS = [
   'docx',
   'doc',
+  'dot',
   'xlsx',
   'xlsm',
   'xls',
@@ -2898,18 +3079,31 @@ function openGeneratedDocument(filePath: string): boolean {
 
 function routeDocumentPath(filePath: string): boolean {
   if (!existsSync(filePath) || !tabManager) return false
-  if (DOCX_RE.test(filePath)) {
+  for (const host of shellHosts.values()) {
+    const existing = host.manager.findTabByPath(filePath)
+    if (!existing) continue
+    selectShellHost(host.win.webContents)
+    host.manager.activateTab(existing.id)
+    host.win.show()
+    host.win.focus()
     recordRecentFile(filePath)
+    return true
+  }
+  if (DOCX_RE.test(filePath)) {
     const existing = tabManager.findDocsTabByPath(filePath)
-    if (existing) tabManager.activateTab(existing)
-    else tabManager.openDocsTab(filePath)
+    if (existing) {
+      tabManager.activateTab(existing)
+      recordRecentFile(filePath)
+    } else {
+      tabManager.openDocsTab(filePath)
+    }
     return true
   }
   if (XLSX_RE.test(filePath)) {
-    recordRecentFile(filePath)
     const existing = tabManager.findSheetsTabByPath(filePath)
     if (existing) {
       tabManager.activateTab(existing)
+      recordRecentFile(filePath)
     } else {
       tabManager.openSheetsTab(filePath)
       startQueuedWorkbookNudge()
@@ -2917,10 +3111,10 @@ function routeDocumentPath(filePath: string): boolean {
     return true
   }
   if (PPTX_RE.test(filePath)) {
-    recordRecentFile(filePath)
     const existing = tabManager.findSlidesTabByPath(filePath)
     if (existing) {
       tabManager.activateTab(existing)
+      recordRecentFile(filePath)
     } else {
       // For a new tab the path goes through the pending queue; the renderer consumes it after mounting
       tabManager.openSlidesTab(filePath)
@@ -2928,53 +3122,54 @@ function routeDocumentPath(filePath: string): boolean {
     return true
   }
   if (PDF_RE.test(filePath)) {
-    recordRecentFile(filePath)
     const existing = tabManager.findPdfTabByPath(filePath)
-    if (existing) tabManager.activateTab(existing)
-    else tabManager.openPdfTab(filePath)
+    if (existing) {
+      tabManager.activateTab(existing)
+      recordRecentFile(filePath)
+    } else {
+      tabManager.openPdfTab(filePath)
+    }
     return true
   }
   if (MD_RE.test(filePath)) {
-    recordRecentFile(filePath)
     const existing = tabManager.findMarkdownTabByPath(filePath)
-    if (existing) tabManager.activateTab(existing)
-    else tabManager.openMarkdownTab(filePath)
+    if (existing) {
+      tabManager.activateTab(existing)
+      recordRecentFile(filePath)
+    } else {
+      tabManager.openMarkdownTab(filePath)
+    }
     return true
   }
   if (HTML_RE.test(filePath)) {
-    recordRecentFile(filePath)
     const existing = tabManager.findHtmlTabByPath(filePath)
-    if (existing) tabManager.activateTab(existing)
-    else tabManager.openHtmlTab(filePath)
+    if (existing) {
+      tabManager.activateTab(existing)
+      recordRecentFile(filePath)
+    } else {
+      tabManager.openHtmlTab(filePath)
+    }
     return true
   }
   notifyUnsupportedFile(filePath)
   return false
 }
 
-/**
- * "New spreadsheet" creates the backing .xlsx in the default folder up front and
- * opens it as a regular file tab — the blank in-memory demo mode has no save
- * pipeline, so the file must exist before edits. Falls back to the old blank
- * tab if the write fails.
- */
-async function newSheetTab(): Promise<void> {
+/** Open a blank workbook without creating a user document before Save. */
+async function newSheetTab(opts?: NewFileOpts): Promise<void> {
+  const owner = tabManager
   try {
-    const filePath = uniquePathIn(newFileDir('sheet'), `${tm('untitledSheet')}.xlsx`)
-    writeFileSync(filePath, await blankXlsxBuffer())
-    // eligible for content-derived auto-rename after the first AI generation
-    markSheetsUntitledPath(filePath)
-    // route directly (not via openDocumentPath) so creating a sheet emits
-    // only file_new — the file_open event is reserved for opening existing files
-    if (routeDocumentPath(filePath)) recordStarPromptDocOpen()
+    const root = await configuredDefaultSaveDirAsync(app)
+    const requestedDir = opts?.dir
+    const dir = requestedDir && isInsideRoot(root, requestedDir) ? requestedDir : root
+    owner?.openSheetsTab(undefined, {
+      newBlank: true,
+      suggestedPath: join(dir, `${tm('untitledSheet')}.xlsx`),
+    })
+    recordStarPromptDocOpen()
     analytics.track('file_new', { kind: 'xlsx' })
   } catch (err) {
-    console.warn('[shell] blank workbook create failed, opening in-memory blank tab:', err)
-    try {
-      tabManager?.openSheetsTab(undefined, { newBlank: true })
-    } catch (fallbackErr) {
-      surfaceNewTabError(fallbackErr)
-    }
+    surfaceNewTabError(err)
   }
 }
 
@@ -3129,20 +3324,15 @@ function newHtmlTab(): void {
   }
 }
 
-/**
- * "New PDF" creates a blank single-page .pdf in the default folder up front and
- * opens it as a regular file tab — the PDF module has no in-memory blank mode
- * (openPdfTab requires a path), same pattern as the blank workbook above.
- */
-async function newPdfTab(): Promise<void> {
+/** "New PDF" opens an in-memory single-page document. */
+async function newPdfTab(opts?: NewFileOpts): Promise<void> {
+  const owner = tabManager
   try {
-    const filePath = uniquePathIn(newFileDir('pdf'), `${tm('untitledPdf')}.pdf`)
-    writeFileSync(filePath, await blankPdfBuffer())
-    // Opt the file into content-derived auto-naming on its first save
-    markPdfUntitledPath(filePath)
-    // route directly (not via openDocumentPath) so creating a pdf emits only
-    // file_new and counts one doc-open — same as the blank workbook above
-    if (routeDocumentPath(filePath)) recordStarPromptDocOpen()
+    const root = await configuredDefaultSaveDirAsync(app)
+    const requestedDir = opts?.dir
+    const dir = requestedDir && isInsideRoot(root, requestedDir) ? requestedDir : root
+    owner?.openBlankPdfTab(dir)
+    recordStarPromptDocOpen()
     analytics.track('file_new', { kind: 'pdf' })
   } catch (err) {
     surfaceNewTabError(err)
@@ -3212,17 +3402,21 @@ function registerHomeIpc(): void {
   })
 
   ipcMain.handle(HOME_CHANNELS.openPath, (_event, path: unknown) => {
-    if (typeof path === 'string') openDocumentPath(path)
+    if (typeof path === 'string') {
+      selectShellHost(_event.sender)
+      openDocumentPath(path)
+    }
   })
 
   ipcMain.handle(HOME_CHANNELS.browse, async (event) => {
+    selectShellHost(event.sender)
     const win = BrowserWindow.fromWebContents(event.sender) ?? shellWindow
     if (!win) return
     const result = await showOpenDialogWithMemory(dialog, win, {
       title: tm('dlgOpenTitle'),
       filters: [
         { name: tm('filterSupported'), extensions: OPEN_DIALOG_EXTENSIONS },
-        { name: tm('filterWord'), extensions: ['docx', 'doc'] },
+        { name: tm('filterWord'), extensions: ['docx', 'doc', 'dot'] },
         { name: tm('filterExcel'), extensions: ['xlsx', 'xlsm', 'xls', 'csv'] },
         { name: tm('filterPpt'), extensions: ['pptx', 'ppsx', 'ppt'] },
         { name: tm('filterPdf'), extensions: ['pdf'] },
@@ -3235,33 +3429,37 @@ function registerHomeIpc(): void {
   })
 
   ipcMain.handle(HOME_CHANNELS.newDoc, (_event, opts?: NewFileOpts) => {
+    selectShellHost(_event.sender)
     rememberPendingDir('doc', opts)
     newDocTab()
   })
 
   ipcMain.handle(HOME_CHANNELS.newSheet, (_event, opts?: NewFileOpts) => {
-    rememberPendingDir('sheet', opts)
-    void newSheetTab()
+    selectShellHost(_event.sender)
+    void newSheetTab(opts)
   })
 
   ipcMain.handle(HOME_CHANNELS.newSlide, (_event, opts?: NewFileOpts) => {
+    selectShellHost(_event.sender)
     rememberPendingDir('slide', opts)
     newSlideTab()
   })
 
   ipcMain.handle(HOME_CHANNELS.newMarkdown, (_event, opts?: NewFileOpts) => {
+    selectShellHost(_event.sender)
     rememberPendingDir('markdown', opts)
     newMarkdownTab()
   })
 
   ipcMain.handle(HOME_CHANNELS.newHtml, (_event, opts?: NewFileOpts) => {
+    selectShellHost(_event.sender)
     rememberPendingDir('html', opts)
     newHtmlTab()
   })
 
   ipcMain.handle(HOME_CHANNELS.newPdf, (_event, opts?: NewFileOpts) => {
-    rememberPendingDir('pdf', opts)
-    void newPdfTab()
+    selectShellHost(_event.sender)
+    void newPdfTab(opts)
   })
 
   ipcMain.handle(HOME_CHANNELS.removeRecent, (_event, paths: unknown) => {
@@ -3499,13 +3697,11 @@ function registerHomeIpc(): void {
   ipcMain.handle(HOME_CHANNELS.setAiPanelPrefs, (_event, patch) => setAiPanelPrefs(patch))
   ipcMain.handle('app:set-ai-panel-prefs', (_event, patch) => setAiPanelPrefs(patch))
 
-  ipcMain.handle(
-    HOME_CHANNELS.getFontSubstitutions,
-    (): FontSubstitutionRule[] => currentFontSubstitutions(),
+  ipcMain.handle(HOME_CHANNELS.getFontSubstitutions, (): FontSubstitutionRule[] =>
+    currentFontSubstitutions(),
   )
-  ipcMain.handle(
-    'app:get-font-substitutions',
-    (): FontSubstitutionRule[] => currentFontSubstitutions(),
+  ipcMain.handle('app:get-font-substitutions', (): FontSubstitutionRule[] =>
+    currentFontSubstitutions(),
   )
 
   ipcMain.handle(HOME_CHANNELS.setFontSubstitutions, (_event, rawRules: unknown) => {
@@ -3515,6 +3711,13 @@ function registerHomeIpc(): void {
     for (const wc of webContents.getAllWebContents()) {
       if (!wc.isDestroyed()) wc.send('app:font-substitutions-changed', rules)
     }
+  })
+
+  ipcMain.handle(HOME_CHANNELS.acquireOfficeFont, async (_event, fontFamily: unknown) => {
+    return await handleAcquireOfficeFont(typeof fontFamily === 'string' ? fontFamily : '')
+  })
+  ipcMain.handle(HOME_CHANNELS.openFontsFolder, async () => {
+    await handleOpenFontsFolder()
   })
 
   // effective folder where new/untitled files land; the editor mains resolve
@@ -3751,23 +3954,157 @@ const TAB_MENU_ICON: Record<TabKind, keyof MenuIconSet> = {
 // round-trip would otherwise close a popover that very press just opened
 // (home row menus died this way: pointerdown → broadcast → menu unmounts
 // before the click event ever reached the menu item).
-function broadcastChromePressed(exclude?: WebContents): void {
+function broadcastChromePressed(exclude?: WebContents, owner?: BrowserWindow): void {
   for (const wc of webContents.getAllWebContents()) {
-    if (wc !== exclude) wc.send('app:chrome-pressed')
+    if (
+      wc !== exclude &&
+      !wc.isDestroyed() &&
+      (!owner || BrowserWindow.fromWebContents(wc) === owner)
+    )
+      wc.send('app:chrome-pressed')
   }
 }
 
 function registerTabsIpc(): void {
-  ipcMain.on(TABS_CHANNELS.chromePressed, (event) => broadcastChromePressed(event.sender))
-  ipcMain.handle(TABS_CHANNELS.list, () => tabManager?.list() ?? [])
-  ipcMain.handle(TABS_CHANNELS.activate, (_event, id: string) => tabManager?.activateTab(id))
-  ipcMain.handle(TABS_CHANNELS.close, (_event, id: string) => tabManager?.closeTab(id))
-  ipcMain.handle(TABS_CHANNELS.reorder, (_event, id: string, toIndex: number) => {
-    if (typeof id === 'string' && Number.isInteger(toIndex)) tabManager?.reorderTab(id, toIndex)
+  ipcMain.on(TABS_CHANNELS.frameReady, (event, id: unknown) => {
+    const host = [...shellHosts.values()].find((h) => h.win.webContents === event.sender)
+    if (host && typeof id === 'string' && host.manager.list().some((t) => t.id === id && t.active))
+      host.ready.acknowledge(id)
+  })
+  ipcMain.on(TABS_CHANNELS.endPreview, (event) => {
+    if (tabDragPreview.belongsTo(event.sender)) endTabPreview()
+  })
+  ipcMain.on(TABS_CHANNELS.previewDrag, (event, id: unknown, x: unknown, y: unknown) => {
+    const source = [...shellHosts.values()].find((h) => h.win.webContents === event.sender)
+    if (
+      !source ||
+      typeof id !== 'string' ||
+      typeof x !== 'number' ||
+      typeof y !== 'number' ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y)
+    )
+      return
+    const editor = source.manager.webContentsForTab(id)
+    const tab = source.manager.list().find((t) => t.id === id && t.closable)
+    if (!editor || !tab) return
+    const sequence = ++previewSequence
+    const target = tabDropTarget(source, x, y)
+    if (target === 'source') {
+      clearDropHint()
+      tabDragPreview.hide()
+      return
+    }
+    const words = tabDragStrings[currentLang()]
+    const label = target
+      ? words.joinWindow.replace('{name}', target.win.getTitle())
+      : words.newWindow
+    tabDragPreview.show(event.sender, editor, id, tab.title, label, x, y)
+    if (!target) {
+      clearDropHint()
+      return
+    }
+    void tabDropSlot(target, x)
+      .then(({ marker }) => {
+        if (sequence !== previewSequence || target.win.isDestroyed()) return
+        if (hintedWindow !== target.win) clearDropHint()
+        hintedWindow = target.win
+        target.win.webContents.send(TABS_CHANNELS.dropHint, { x: marker, label })
+      })
+      .catch(() => {})
+  })
+  ipcMain.on(TABS_CHANNELS.chromePressed, (event) =>
+    broadcastChromePressed(event.sender, BrowserWindow.fromWebContents(event.sender) ?? undefined),
+  )
+  ipcMain.handle(TABS_CHANNELS.list, (event) => managerForContents(event.sender.id)?.list() ?? [])
+  ipcMain.handle(TABS_CHANNELS.activate, (event, id: string) => {
+    const manager = managerForContents(event.sender.id)
+    manager?.activateTab(id)
+    const contents = manager?.webContentsForTab(id)
+    if (contents) externalFiles.checkForeground(contents.id)
+  })
+  ipcMain.handle(TABS_CHANNELS.close, (event, id: string) =>
+    managerForContents(event.sender.id)?.closeTab(id),
+  )
+  ipcMain.handle(TABS_CHANNELS.reorder, (event, id: string, toIndex: number) => {
+    if (typeof id === 'string' && Number.isInteger(toIndex))
+      managerForContents(event.sender.id)?.reorderTab(id, toIndex)
+  })
+  ipcMain.handle(TABS_CHANNELS.drop, async (event, id: unknown, x: unknown, y: unknown) => {
+    if (tabDragPreview.belongsTo(event.sender)) endTabPreview()
+    const source = [...shellHosts.values()].find((h) => h.win.webContents === event.sender)
+    if (
+      !source ||
+      typeof id !== 'string' ||
+      !source.manager.webContentsForTab(id) ||
+      typeof x !== 'number' ||
+      typeof y !== 'number' ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y)
+    )
+      return false
+    const destination = tabDropTarget(source, x, y)
+    if (destination === 'source') return false
+    let target = destination
+    let created: BrowserWindow | undefined
+    if (!target) {
+      const area = screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) }).workArea
+      created = createShellWindow({
+        x: Math.round(Math.max(area.x, Math.min(x - 150, area.x + Math.max(0, area.width - 1360)))),
+        y: Math.round(Math.max(area.y, Math.min(y - 20, area.y + Math.max(0, area.height - 900)))),
+        detached: true,
+      })
+      target = shellHosts.get(created.id)!
+    }
+    const slot = created ? target.manager.list().length : (await tabDropSlot(target, x)).index
+    const sourceSlot = source.manager.list().findIndex((t) => t.id === id)
+    try {
+      // A new native frame must first have a painted shell title bar. Showing
+      // and focusing the child view before this creates an input handoff race.
+      if (created && !(await target.ready.wait('home'))) {
+        created.close()
+        return false
+      }
+      if (!source.manager.moveTabTo(id, target.manager, slot)) {
+        created?.close()
+        return false
+      }
+      if (created && !(await target.ready.wait(id))) {
+        // Keep the same live session if the renderer failed to paint the tab.
+        target.manager.moveTabTo(id, source.manager, sourceSlot)
+        created.close()
+        return false
+      }
+      selectShellHost(target.win.webContents)
+      target.win.show()
+      target.win.focus()
+      target.manager.webContentsForTab(id)?.focus()
+      if (source.detached && source.manager.list().length === 1) {
+        // Let the source renderer receive its IPC reply before disposing the
+        // now-empty window. The document view already belongs to the target.
+        setTimeout(() => {
+          if (!source.win.isDestroyed() && source.manager.list().length === 1) source.win.close()
+        }, 100)
+      }
+      return true
+    } catch (error) {
+      if (created) {
+        if (target.manager.webContentsForTab(id))
+          target.manager.moveTabTo(id, source.manager, sourceSlot)
+        // Never destroy an editor if rollback could not reclaim its live view.
+        if (!target.manager.webContentsForTab(id)) created.close()
+        else {
+          created.show()
+          created.focus()
+        }
+      }
+      throw error
+    }
   })
   // "all tabs" overflow menu — native popup because the editors' WebContentsView
   // would cover any DOM dropdown the shell renderer draws below the tab strip
   ipcMain.handle(TABS_CHANNELS.showAppMenu, (_event, x: unknown, y: unknown) => {
+    selectShellHost(_event.sender)
     if (!shellWindow) return
     Menu.getApplicationMenu()?.popup({
       window: shellWindow,
@@ -3777,6 +4114,7 @@ function registerTabsIpc(): void {
     })
   })
   ipcMain.handle(TABS_CHANNELS.showMenu, (_event, x: unknown, y: unknown) => {
+    selectShellHost(_event.sender)
     if (!tabManager || !shellWindow) return
     const menu = Menu.buildFromTemplate(
       tabManager.list().map((tab) => ({
@@ -3796,6 +4134,7 @@ function registerTabsIpc(): void {
   })
   // "+" new-file menu — native for the same reason as the tab list above
   ipcMain.handle(TABS_CHANNELS.showNewMenu, (_event, x: unknown, y: unknown) => {
+    selectShellHost(_event.sender)
     if (!tabManager || !shellWindow) return
     const menu = Menu.buildFromTemplate([
       // enabled:false so pre-Sonoma macOS / Windows (no 'header' support) degrade
@@ -3940,16 +4279,19 @@ function buildPdfMenu(): void {
         // local pdf2docx (P4): in-process PDFium wasm, no cloud counterpart
         {
           label: tm('menuExportDocx'),
+          enabled: Boolean(tabManager?.activePdfTab()?.filePath),
           click: () => void exportPdfAsDocxLocal(),
         },
         // local pdf2pptx (P25): one slide per page, no cloud counterpart
         {
           label: tm('menuExportPptx'),
+          enabled: Boolean(tabManager?.activePdfTab()?.filePath),
           click: () => void exportPdfAsPptxLocal(),
         },
         // local pdf2xlsx (P26): one worksheet per page, no cloud counterpart
         {
           label: tm('menuExportXlsx'),
+          enabled: Boolean(tabManager?.activePdfTab()?.filePath),
           click: () => void exportPdfAsXlsxLocal(),
         },
         { type: 'separator' },
@@ -4181,7 +4523,11 @@ let savingPdfAs = false
 
 async function savePdfAs(): Promise<void> {
   const tab = tabManager?.activePdfTab()
-  if (!tab?.filePath || !shellWindow || savingPdfAs) return
+  if (!tab || !shellWindow || savingPdfAs) return
+  if (!tab.filePath) {
+    await flushPdfSave(tab.webContents)
+    return
+  }
   savingPdfAs = true
   // Pause renderer autosave for the whole flow: the dialog blurs the window, and a
   // blur-triggered autosave would write the pending edits into the original file
@@ -4574,7 +4920,8 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
 // flows as the File menu items (dialogs, password prompt, in-flight guard included)
 ipcMain.handle(PDF_CHANNELS.convertOffice, async (e, format: unknown) => {
   // only the active pdf tab may trigger a conversion (its file is the source)
-  if (tabManager?.activePdfTab()?.webContents.id !== e.sender.id) return
+  const tab = tabManager?.activePdfTab()
+  if (!tab?.filePath || tab.webContents.id !== e.sender.id) return
   if (format === 'docx') await exportPdfAsDocxLocal()
   else if (format === 'xlsx') await exportPdfAsXlsxLocal()
   else if (format === 'pptx') await exportPdfAsPptxLocal()
@@ -4877,12 +5224,14 @@ app.whenReady().then(async () => {
     // documents the user has open: the tab list plus each family's own bridge,
     // so an agent reaches a tab nobody but the user opened
     openDocumentsControl: createOpenDocumentsControl({
-      list: () => {
+      list: async () => {
         if (!tabManager) throw new Error('the tab manager is not ready')
-        return tabManager.openDocuments()
+        return (
+          await Promise.all([...shellHosts.values()].map((h) => h.manager.openDocuments()))
+        ).flat()
       },
-      webContentsFor: (tabId) => tabManager?.webContentsForTab(tabId),
-      closeTab: (tabId) => tabManager?.closeTabWithoutPrompt(tabId) ?? false,
+      webContentsFor: (tabId) => managerForTab(tabId)?.webContentsForTab(tabId),
+      closeTab: (tabId) => managerForTab(tabId)?.closeTabWithoutPrompt(tabId) ?? false,
       defaultSaveDir: () => defaultSaveDir(),
       docs: mcpDocsControl,
       sheets: mcpSheetsControl,
@@ -4911,14 +5260,16 @@ app.whenReady().then(async () => {
     // lets the content tools take a `document` argument (tab id or path) and edit
     // a tab the *user* has open, with no create_session involved
     resolveTarget: createOpenTargetResolver({
-      list: () => {
+      list: async () => {
         if (!tabManager) throw new Error('the tab manager is not ready')
-        return tabManager.openDocuments()
+        return (
+          await Promise.all([...shellHosts.values()].map((h) => h.manager.openDocuments()))
+        ).flat()
       },
-      webContentsFor: (tabId) => tabManager?.webContentsForTab(tabId),
+      webContentsFor: (tabId) => managerForTab(tabId)?.webContentsForTab(tabId),
       // an agent editing a background tab would otherwise work where nobody can
       // see it: switch to that tab and bring the window forward first
-      activate: (tabId) => tabManager?.activateTab(tabId),
+      activate: (tabId) => managerForTab(tabId)?.activateTab(tabId),
       revealWindow: revealShellWindow,
     }),
     logFilePath: join(app.getPath('userData'), 'mcp-log.txt'),

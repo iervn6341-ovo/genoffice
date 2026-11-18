@@ -14,6 +14,7 @@ import {
   applyHeaderFooter,
   applyNotesHandoutsHeaderFooter,
   applyThemeToArchive,
+  applyParagraphFormat,
   commitSaved,
   materializeSlide,
   remapDeckColors,
@@ -69,8 +70,9 @@ import {
   type SlideTransitionDetailPatch,
   type SlideTransitionKind,
   type TextElement,
+  type PPrDirty,
 } from '@genoffice/pptx-engine'
-import { applyEditParagraphs } from '../edit-text'
+import { applyEditParagraphs, collectParagraphFormatPatches } from '../edit-text'
 import type { EditParagraph } from '../types'
 import {
   coerceBytes,
@@ -651,13 +653,33 @@ register({
         .filter((a) => a.nativeId)
         .map((a) => [a.nativeId!, a]),
     )
+    const findElementDeep = (elements: typeof slide.elements, ref: string): (typeof slide.elements)[number] | null => {
+      for (const el of elements) {
+        if (matchesElementRef(el, ref)) return el
+        if (el.type === 'group' && Array.isArray((el as unknown as { children?: typeof slide.elements }).children)) {
+          const child = findElementDeep((el as unknown as { children: typeof slide.elements }).children, ref)
+          if (child) return child
+        }
+      }
+      return null
+    }
+    const collectAllIds = (elements: typeof slide.elements): string[] => {
+      const ids: string[] = []
+      for (const el of elements) {
+        ids.push(el.id)
+        if (el.type === 'group' && Array.isArray((el as unknown as { children?: typeof slide.elements }).children)) {
+          ids.push(...collectAllIds((el as unknown as { children: typeof slide.elements }).children))
+        }
+      }
+      return ids
+    }
     const anims: SlideAnimation[] = []
     const unresolved: string[] = []
     for (const raw of op.items as Array<Record<string, unknown>>) {
       // Refs resolve like every other op — durable e_<guid8>/e_<cNvPr id> included.
       // Silent dropping is not an option: a full-replace op that drops every item
       // would wipe the slide's existing animations while reporting success.
-      const el = slide.elements.find((x) => matchesElementRef(x, String(raw.sourceId)))
+      const el = findElementDeep(slide.elements, String(raw.sourceId))
       const spid = el ? elementSpid(el) : null
       if (spid == null) {
         unresolved.push(String(raw.sourceId))
@@ -706,7 +728,7 @@ register({
     }
     if (unresolved.length) {
       throw new GuidedError(
-        `op "setAnimations": no element ${unresolved.map((u) => `"${u}"`).join(', ')} on the slide. Available: [${slide.elements.map((x) => x.id).join(', ')}].`,
+        `op "setAnimations": no element ${unresolved.map((u) => `"${u}"`).join(', ')} on the slide. Available: [${collectAllIds(slide.elements).join(', ')}].`,
       )
     }
     setSlideAnimations(slide, anims)
@@ -893,11 +915,21 @@ register({
         ...p,
         runs: p.runs.map(({ link: _link, ...r }) => r),
       }))
-      const merged = applyEditParagraphs(
-        getSlideNotesParagraphs(ctx.opened.archive, slide.path),
-        edited,
-      )
-      if (!setSlideNotesParagraphs(ctx.opened, index, merged)) {
+      const old = getSlideNotesParagraphs(ctx.opened.archive, slide.path)
+      const merged = applyEditParagraphs(old, edited)
+      const paragraphFormats = new Map<number, PPrDirty>()
+      for (const { index: pi, patch } of collectParagraphFormatPatches(edited)) {
+        const paragraph = merged[pi]
+        if (paragraph) paragraphFormats.set(pi, applyParagraphFormat([paragraph], patch))
+      }
+      edited.forEach((p, pi) => {
+        const before = old[p.srcPara ?? pi] ?? old.at(-1)
+        if (p.align != null && p.align !== before?.align && merged[pi]) {
+          const dirty = applyParagraphFormat([merged[pi]!], { align: p.align })
+          paragraphFormats.set(pi, { ...paragraphFormats.get(pi), ...dirty })
+        }
+      })
+      if (!setSlideNotesParagraphs(ctx.opened, index, merged, paragraphFormats)) {
         throw new GuidedError(`op "setNotes": notes for slide ${index} could not be written.`)
       }
       return { op, after: getSlideNotes(ctx.opened.archive, slide.path) }

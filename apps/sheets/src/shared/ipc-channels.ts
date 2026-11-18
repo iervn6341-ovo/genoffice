@@ -47,6 +47,8 @@ export const HEADER_FOOTER_PICTURE_POSITION = /^[LCR][HF](EVEN|FIRST)?$/
 
 export const IPC_CHANNELS = {
   selectWorkbook: 'workbook:select',
+  /** New unsaved tab: create a private sidecar session without publishing a file. */
+  openNewBlankWorkbook: 'workbook:open-new-blank',
   /** Multi-file picker + sidecar sessions for merging into the current workbook */
   selectWorkbooksForMerge: 'workbook:select-for-merge',
   /** Open explicit paths (chat attachments) as merge-source sessions — no dialog */
@@ -54,6 +56,21 @@ export const IPC_CHANNELS = {
   readWorkbookRange: 'workbook:read-range',
   readWorkbookFormulas: 'workbook:read-formulas',
   recalcWorkbook: 'workbook:recalc',
+  listExternalLinks: 'workbook:list-external-links',
+  updateExternalLinks: 'workbook:update-external-links',
+  readExternalLinkUsage: 'workbook:read-external-link-usage',
+  selectExternalLinkSource: 'workbook:select-external-link-source',
+  /// Cross-workbook range picking (genoffice#2109): the tab editing a formula
+  /// arms a pick, the user clicks a range in another workbook's tab, main
+  /// relays the selection back and re-activates the editing tab.
+  listWorkbookTabs: 'workbook:list-tabs',
+  armWorkbookPick: 'workbook:pick-arm',
+  sendWorkbookPickSelection: 'workbook:pick-select',
+  cancelWorkbookPick: 'workbook:pick-cancel',
+  workbookPickArmed: 'workbook:pick-armed',
+  workbookPickSelected: 'workbook:pick-selected',
+  workbookPickCancelled: 'workbook:pick-cancelled',
+  revealLinkSource: 'shell:reveal-link-source',
   readWorkbookMedia: 'workbook:read-media',
   readPivotDefinition: 'workbook:read-pivot-definition',
   readTableInfo: 'workbook:read-table-info',

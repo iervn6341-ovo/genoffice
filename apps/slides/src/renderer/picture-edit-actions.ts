@@ -69,8 +69,230 @@ export async function commitCrop(
   }
 }
 
+export interface CropRect {
+  l: number
+  t: number
+  r: number
+  b: number
+}
+
+/** Reconstruct the full original image bounding box from displayed box and srcRect */
+export function reconstructFullBox(
+  box: { x: number; y: number; w: number; h: number },
+  sr?: CropRect | null,
+): { x: number; y: number; w: number; h: number } {
+  const kw = sr ? Math.max(1 - sr.l - sr.r, 0.01) : 1
+  const kh = sr ? Math.max(1 - sr.t - sr.b, 0.01) : 1
+  const fullW = box.w / kw
+  const fullH = box.h / kh
+  return {
+    x: box.x - (sr?.l ?? 0) * fullW,
+    y: box.y - (sr?.t ?? 0) * fullH,
+    w: fullW,
+    h: fullH,
+  }
+}
+
+/** Compute center-crop fractions and fitted box for an aspect ratio preset */
+export function computeAspectRatioCrop(
+  box: { x: number; y: number; w: number; h: number },
+  fullBox: { x: number; y: number; w: number; h: number },
+  aspectW: number,
+  aspectH: number,
+): { srcRect: CropRect; boxPx: { x: number; y: number; w: number; h: number } } {
+  const targetAspect = aspectW / aspectH
+  const fullAspect = fullBox.w / fullBox.h
+
+  let srcRect: CropRect
+  if (fullAspect > targetAspect) {
+    const fraction = targetAspect / fullAspect
+    const crop = (1 - fraction) / 2
+    srcRect = { l: crop, t: 0, r: crop, b: 0 }
+  } else {
+    const fraction = fullAspect / targetAspect
+    const crop = (1 - fraction) / 2
+    srcRect = { l: 0, t: crop, r: 0, b: crop }
+  }
+
+  const cx = box.x + box.w / 2
+  const cy = box.y + box.h / 2
+  let nw = box.w
+  let nh = box.w / targetAspect
+  if (nh > box.h) {
+    nh = box.h
+    nw = box.h * targetAspect
+  }
+  const boxPx = {
+    x: cx - nw / 2,
+    y: cy - nh / 2,
+    w: Math.max(1, nw),
+    h: Math.max(1, nh),
+  }
+  return { srcRect, boxPx }
+}
+
+/** Compute Fill crop: centers the image so it covers the existing frame without distortion */
+export function computeFillCrop(
+  box: { x: number; y: number; w: number; h: number },
+  fullBox: { x: number; y: number; w: number; h: number },
+): { srcRect: CropRect | null; boxPx: { x: number; y: number; w: number; h: number } } {
+  const frameAspect = box.w / box.h
+  const fullAspect = fullBox.w / fullBox.h
+
+  let srcRect: CropRect | null = null
+  if (Math.abs(frameAspect - fullAspect) > 0.001) {
+    if (fullAspect > frameAspect) {
+      const fraction = frameAspect / fullAspect
+      const crop = (1 - fraction) / 2
+      srcRect = { l: crop, t: 0, r: crop, b: crop }
+    } else {
+      const fraction = fullAspect / frameAspect
+      const crop = (1 - fraction) / 2
+      srcRect = { l: 0, t: crop, r: 0, b: crop }
+    }
+  }
+  return { srcRect, boxPx: { ...box } }
+}
+
+/** Compute Fit: fits the uncropped image entirely inside the current frame with original proportions */
+export function computeFitCrop(
+  box: { x: number; y: number; w: number; h: number },
+  fullBox: { x: number; y: number; w: number; h: number },
+): { srcRect: null; boxPx: { x: number; y: number; w: number; h: number } } {
+  const fullAspect = fullBox.w / fullBox.h
+  let nw = box.w
+  let nh = box.w / fullAspect
+  if (nh > box.h) {
+    nh = box.h
+    nw = box.h * fullAspect
+  }
+  const cx = box.x + box.w / 2
+  const cy = box.y + box.h / 2
+  return {
+    srcRect: null,
+    boxPx: {
+      x: cx - nw / 2,
+      y: cy - nh / 2,
+      w: Math.max(1, nw),
+      h: Math.max(1, nh),
+    },
+  }
+}
+
+/** Cancel crop mode: dismisses the overlay without applying pending adjustments */
 export function cancelCrop(ctx: ActionCtx): void {
   ctx.setCropTarget(null)
+}
+
+/** Crop the selected picture to a specific aspect ratio */
+export async function cropToAspectRatio(
+  ctx: ActionCtx,
+  aspectW: number,
+  aspectH: number,
+): Promise<void> {
+  if (!ctx.slide || ctx.selectedIds.length !== 1) return
+  const id = ctx.selectedIds[0]!
+  const node = ctx.slide.nodes.find((n) => n.sourceId === id)
+  if (!node || node.type !== 'picture') return
+  const pic = node as PictureRenderNode
+
+  if (ctx.cropTarget) ctx.setCropTarget(null)
+
+  const fullBox = reconstructFullBox(pic.box, pic.srcRect)
+  const { srcRect, boxPx } = computeAspectRatioCrop(pic.box, fullBox, aspectW, aspectH)
+
+  const updated = await window.slidesApi.editPictureSrcRect({
+    slideIndex: ctx.current,
+    sourceId: id,
+    srcRect,
+    boxPx,
+    fitWidthPx: FIT_WIDTH,
+  })
+  if (updated) {
+    ctx.applySlide(ctx.current, updated)
+    ctx.setDirty(true)
+    ctx.setStatus(t('appStatusCropApplied'))
+  }
+}
+
+/** Fill the picture frame (object-fit: cover) */
+export async function cropFill(ctx: ActionCtx): Promise<void> {
+  if (!ctx.slide || ctx.selectedIds.length !== 1) return
+  const id = ctx.selectedIds[0]!
+  const node = ctx.slide.nodes.find((n) => n.sourceId === id)
+  if (!node || node.type !== 'picture') return
+  const pic = node as PictureRenderNode
+
+  if (ctx.cropTarget) ctx.setCropTarget(null)
+
+  const fullBox = reconstructFullBox(pic.box, pic.srcRect)
+  const { srcRect, boxPx } = computeFillCrop(pic.box, fullBox)
+
+  const updated = await window.slidesApi.editPictureSrcRect({
+    slideIndex: ctx.current,
+    sourceId: id,
+    srcRect,
+    boxPx,
+    fitWidthPx: FIT_WIDTH,
+  })
+  if (updated) {
+    ctx.applySlide(ctx.current, updated)
+    ctx.setDirty(true)
+    ctx.setStatus(t('appStatusCropApplied'))
+  }
+}
+
+/** Fit the picture inside its frame (object-fit: contain) */
+export async function cropFit(ctx: ActionCtx): Promise<void> {
+  if (!ctx.slide || ctx.selectedIds.length !== 1) return
+  const id = ctx.selectedIds[0]!
+  const node = ctx.slide.nodes.find((n) => n.sourceId === id)
+  if (!node || node.type !== 'picture') return
+  const pic = node as PictureRenderNode
+
+  if (ctx.cropTarget) ctx.setCropTarget(null)
+
+  const fullBox = reconstructFullBox(pic.box, pic.srcRect)
+  const { srcRect, boxPx } = computeFitCrop(pic.box, fullBox)
+
+  const updated = await window.slidesApi.editPictureSrcRect({
+    slideIndex: ctx.current,
+    sourceId: id,
+    srcRect,
+    boxPx,
+    fitWidthPx: FIT_WIDTH,
+  })
+  if (updated) {
+    ctx.applySlide(ctx.current, updated)
+    ctx.setDirty(true)
+    ctx.setStatus(t('appStatusCropApplied'))
+  }
+}
+
+/** Reset crop: remove srcRect and restore full original picture extent */
+export async function resetCrop(ctx: ActionCtx): Promise<void> {
+  if (!ctx.slide || ctx.selectedIds.length !== 1) return
+  const id = ctx.selectedIds[0]!
+  const node = ctx.slide.nodes.find((n) => n.sourceId === id)
+  if (!node || node.type !== 'picture') return
+  const pic = node as PictureRenderNode
+
+  if (ctx.cropTarget) ctx.setCropTarget(null)
+
+  const fullBox = reconstructFullBox(pic.box, pic.srcRect)
+
+  const updated = await window.slidesApi.editPictureSrcRect({
+    slideIndex: ctx.current,
+    sourceId: id,
+    srcRect: null,
+    boxPx: fullBox,
+    fitWidthPx: FIT_WIDTH,
+  })
+  if (updated) {
+    ctx.applySlide(ctx.current, updated)
+    ctx.setDirty(true)
+    ctx.setStatus(t('appStatusCropRemoved'))
+  }
 }
 
 // ── Picture cutout (background removal) ───────────────────────────────────────

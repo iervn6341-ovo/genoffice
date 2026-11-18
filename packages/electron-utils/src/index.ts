@@ -34,6 +34,7 @@ export {
 export {
   DEFAULT_SAVE_DIR_KEY,
   configuredDefaultSaveDir,
+  configuredDefaultSaveDirAsync,
   isUsableSaveDir,
   readDefaultSaveDirSetting,
   resolveDefaultSaveDir,
@@ -107,3 +108,5 @@ export {
   type HelperPlan,
   type SystemPrintOutcome,
 } from './mac-print'
+export { atomicCopyFile, atomicWriteFile, atomicWriteVia, writeJsonAtomic } from './atomic-write'
+

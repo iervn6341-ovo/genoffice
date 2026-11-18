@@ -15,15 +15,31 @@ import type {
   RenderNode,
   RenderFill,
 } from '@genoffice/pptx-render'
-import type { EditParagraph, EditRun } from '../shared/ipc'
+import type {
+  EditFillOp,
+  EditStrokeOp,
+  SetElementFontOp,
+  SetElementParagraphFormatOp,
+  SetEffectsPatch,
+  SlidesApi,
+} from '../shared/ipc'
+import type { Op } from '@genoffice/pptx-ops'
 
 /** Format container captured by the render layer (pure data, serializable) */
 export interface BrushFormat {
-  sourceType: 'shape' | 'text' | 'picture'
+  sourceType: 'shape' | 'text' | 'picture' | 'group'
+  children?: Array<BrushFormat | null>
+  effects?: SetEffectsPatch
+  body?: {
+    anchor: 'top' | 'middle' | 'bottom'
+    props: Parameters<SlidesApi['setTextBodyProps']>[0]['props']
+  }
+  paragraph?: Omit<SetElementParagraphFormatOp, 'slideIndex' | 'sourceIds'>
   /** solid fill color (#RRGGBB) or 'none'; undefined = no fill info */
   fillColor?: string
+  fill?: EditFillOp['fill']
   /** stroke; undefined = no stroke info */
-  stroke?: { color: string; widthPt: number }
+  stroke?: EditStrokeOp['stroke']
   /** Default text run format (extracted from text.lines[0].runs[0]) */
   run?: {
     fontFamily?: string
@@ -32,6 +48,10 @@ export interface BrushFormat {
     italic?: boolean
     underline?: boolean
     color?: string
+    strike?: boolean
+    highlight?: string | null
+    baseline?: number
+    letterSpacingPt?: number
   }
   /** Paragraph alignment (first paragraph) */
   align?: 'left' | 'center' | 'right' | 'justify'
@@ -46,24 +66,42 @@ function pxToPt(px: number): number {
 function renderFillToColor(fill: RenderFill | undefined): string | undefined {
   if (!fill || fill.kind === 'none') return 'none'
   if (fill.kind === 'solid') return fill.color
-  // gradient/image: not carried over (the format painter only handles solid colors)
+  // Non-solid fills are handled separately.
   return undefined
 }
 
 /** Extract format from a ShapeRenderNode / text node */
-export function extractBrushFormat(node: RenderNode): BrushFormat | null {
+export function extractBrushFormat(node: RenderNode, scale = 1): BrushFormat | null {
+  if (node.type === 'group') {
+    const children = node.children.map((child) => extractBrushFormat(child, scale))
+    return children.some(Boolean) ? { sourceType: 'group', children } : null
+  }
   if (node.type === 'shape' || node.type === 'text') {
     const shape = node as ShapeRenderNode
     const fmt: BrushFormat = { sourceType: node.type as 'shape' | 'text' }
+    fmt.effects = brushEffects(shape, scale)
 
     // fill
     const fc = renderFillToColor(shape.fill)
     if (fc !== undefined) fmt.fillColor = fc
+    if (shape.fill?.kind === 'gradient') {
+      const g = shape.fill
+      fmt.fill = {
+        gradient: {
+          from: g.stops[0]?.color ?? '#000000',
+          to: g.stops.at(-1)?.color ?? '#000000',
+          stops: g.stops.map((s) => ({ ...s })),
+          angleDeg: g.angleDeg,
+          ...(g.path ? { path: g.path } : g.radial ? { radial: true } : {}),
+          ...(g.center ? { center: { ...g.center } } : {}),
+        },
+      }
+    }
 
     // stroke
     if (shape.stroke) {
-      fmt.stroke = { color: shape.stroke.color, widthPt: shape.stroke.widthPt }
-    }
+      fmt.stroke = brushStroke(shape.stroke)
+    } else fmt.stroke = null
 
     // text: first run of first line (para start)
     if (shape.text?.lines?.length) {
@@ -71,18 +109,48 @@ export function extractBrushFormat(node: RenderNode): BrushFormat | null {
       const firstRun = firstLine?.runs?.find((r) => !r.isBullet) ?? firstLine?.runs?.[0]
       if (firstRun) {
         fmt.run = {
-          fontFamily: firstRun.fontFamily,
-          fontSize: pxToPt(firstRun.fontSizePx),
+          fontFamily: firstRun.srcFontFamily ?? firstRun.fontFamily,
+          fontSize: pxToPt(firstRun.fontSizePx / scale / (shape.text.fontScale || 1)),
           bold: firstRun.bold,
           italic: firstRun.italic,
           underline: firstRun.underline,
           color: firstRun.color,
+          strike: firstRun.strike ?? false,
+          highlight: firstRun.highlight ?? null,
+          baseline: firstRun.baselinePct ?? 0,
+          letterSpacingPt: pxToPt((firstRun.letterSpacingPx ?? 0) / scale),
         }
       }
       // align from first line
       const firstParaLine =
         shape.text.lines.find((l) => l.paraStart !== false) ?? shape.text.lines[0]
-      if (firstParaLine?.align) fmt.align = firstParaLine.align
+      fmt.align = firstParaLine?.align ?? 'left'
+      const bullet = firstParaLine?.runs.find((r) => r.isBullet)
+      fmt.paragraph = {
+        align: fmt.align,
+        rtl: firstParaLine?.rtl ?? false,
+        ...(bullet?.numType
+          ? { bullet: 'number', numType: bullet.numType }
+          : bullet
+            ? { bullet: 'char', bulletChar: bullet.text, bulletFont: bullet.fontFamily }
+            : { bullet: 'none' }),
+      }
+      const { insets, anchor, wrap, autofit, vert } = shape.text
+      fmt.body = {
+        anchor,
+        props: {
+          wrap,
+          autofit: autofit ?? 'none',
+          vert: vert ?? 'horz',
+          ...(insets
+            ? {
+                insets: Object.fromEntries(
+                  Object.entries(insets).map(([key, px]) => [key, Math.round((px * 9525) / scale)]),
+                ),
+              }
+            : {}),
+        },
+      }
     }
 
     return fmt
@@ -91,21 +159,83 @@ export function extractBrushFormat(node: RenderNode): BrushFormat | null {
   if (node.type === 'picture') {
     const pic = node as PictureRenderNode
     const fmt: BrushFormat = { sourceType: 'picture' }
+    fmt.effects = brushEffects(pic, scale)
     if (pic.stroke) {
-      fmt.stroke = { color: pic.stroke.color, widthPt: pic.stroke.widthPt }
-    }
+      fmt.stroke = brushStroke(pic.stroke)
+    } else fmt.stroke = null
     return fmt
   }
 
   return null
 }
 
+function brushEffects(node: ShapeRenderNode | PictureRenderNode, scale: number): SetEffectsPatch {
+  const emu = (px: number) => Math.round((px * 9525) / scale)
+  const shadow = node.shadow
+  return {
+    shadow: shadow
+      ? {
+          color: shadow.color,
+          blurRad: emu(shadow.blurPx),
+          dist: emu(shadow.distPx ?? Math.hypot(shadow.offsetX, shadow.offsetY)),
+          dirDeg: shadow.dirDeg ?? (Math.atan2(shadow.offsetY, shadow.offsetX) * 180) / Math.PI,
+          inner: shadow.inner,
+          ...(shadow.scaleX != null ? { sx: shadow.scaleX } : {}),
+          ...(shadow.scaleY != null ? { sy: shadow.scaleY } : {}),
+          ...(shadow.skewXDeg != null ? { kxDeg: shadow.skewXDeg } : {}),
+          ...(shadow.skewYDeg != null ? { kyDeg: shadow.skewYDeg } : {}),
+          ...(shadow.algn ? { algn: shadow.algn } : {}),
+        }
+      : null,
+    glow: node.glow ? { color: node.glow.color, radius: emu(node.glow.blurPx) } : null,
+    reflection: node.reflection
+      ? {
+          blurRad: emu(node.reflection.blurPx),
+          startA: node.reflection.startAlpha,
+          endPos: node.reflection.endPos,
+          dist: emu(node.reflection.distPx),
+        }
+      : null,
+    softEdge: 'softEdgePx' in node && node.softEdgePx ? emu(node.softEdgePx) : null,
+  }
+}
+
+function brushStroke(
+  stroke: NonNullable<ShapeRenderNode['stroke']>,
+): NonNullable<EditStrokeOp['stroke']> {
+  return {
+    color: stroke.color,
+    widthPt: stroke.widthPt,
+    dash: stroke.dashPreset ?? 'solid',
+    cap: stroke.cap === 'round' ? 'rnd' : stroke.cap === 'square' ? 'sq' : 'flat',
+    join: stroke.join ?? 'miter',
+    compound: stroke.compound ?? 'sng',
+    ...(stroke.gradient ? { gradient: structuredClone(stroke.gradient) } : {}),
+  }
+}
+
+/** Render group children are not top-level nodes; retain their owning group for native edits. */
+export function findBrushTarget(
+  nodes: RenderNode[],
+  id: string,
+  groupId?: string,
+): { node: RenderNode; groupId?: string } | undefined {
+  for (const node of nodes) {
+    if (node.sourceId === id) return { node, ...(groupId ? { groupId } : {}) }
+    if (node.type === 'group') {
+      const found = findBrushTarget(node.children, id, node.sourceId)
+      if (found) return found
+    }
+  }
+}
+
 /** Format application result (caller invokes IPC as needed) */
 export interface BrushApplyPlan {
   /** editFill parameters */
   fillColor?: string
+  fill?: EditFillOp['fill']
   /** editStroke parameters */
-  stroke?: { color: string; widthPt: number } | null
+  stroke?: EditStrokeOp['stroke']
   /** editText parameters (replaces format only, text unchanged; needs to read the current node's text) */
   runFormat?: BrushFormat['run']
   /** Paragraph alignment */
@@ -126,6 +256,7 @@ export function computeBrushApply(fmt: BrushFormat, targetNode: RenderNode): Bru
 
   if (targetNode.type === 'shape' || targetNode.type === 'text') {
     if (fmt.fillColor !== undefined) plan.fillColor = fmt.fillColor
+    if (fmt.fill !== undefined) plan.fill = fmt.fill
     if (fmt.stroke !== undefined) plan.stroke = fmt.stroke
     if (fmt.run) plan.runFormat = fmt.run
     if (fmt.align) plan.align = fmt.align
@@ -135,67 +266,114 @@ export function computeBrushApply(fmt: BrushFormat, targetNode: RenderNode): Bru
   return plan
 }
 
-/**
- * Convert BrushApplyPlan's runFormat + align into EditParagraph[], keeping the target node's
- * original text structure and replacing only run format attributes.
- *
- * targetNode is a ShapeRenderNode; original run text is extracted from its text.lines.
- */
-export function buildEditParagraphsWithFormat(
+/** Native font patches preserve fields, equations, hyperlinks, soft breaks and paragraph metadata. */
+export function brushFontPatch(
+  run: NonNullable<BrushFormat['run']>,
+): Omit<SetElementFontOp, 'slideIndex' | 'sourceIds'> {
+  const { fontSize, ...rest } = run
+  return { ...rest, ...(fontSize != null ? { fontSizePt: fontSize } : {}) }
+}
+
+export function buildBrushOps(
+  brush: BrushFormat,
   node: RenderNode,
-  runFmt: BrushFormat['run'] | undefined,
-  align: 'left' | 'center' | 'right' | 'justify' | undefined,
-): EditParagraph[] | null {
-  if (node.type !== 'shape' && node.type !== 'text') return null
-  const shape = node as ShapeRenderNode
-  const lines = shape.text?.lines ?? []
-  if (lines.length === 0) return null
-
-  // Group lines by paraStart → paragraphs
-  const paraGroups: (typeof lines)[number][][] = []
-  for (const line of lines) {
-    if (line.paraStart !== false || paraGroups.length === 0) {
-      paraGroups.push([line])
-    } else {
-      paraGroups[paraGroups.length - 1]!.push(line)
-    }
+  slideIndex: number,
+  groupId?: string,
+): Op[] {
+  if (node.type === 'group')
+    return node.children.flatMap((child, i) => {
+      const format = brush.sourceType === 'group' ? brush.children?.[i] : brush
+      return format ? buildBrushOps(format, child, slideIndex, node.sourceId) : []
+    })
+  if (brush.sourceType === 'group') return []
+  const plan = computeBrushApply(brush, node)
+  const target = { slide: slideIndex, el: node.sourceId }
+  const group = groupId ? { group: groupId } : {}
+  const ops: Op[] = []
+  const fill = plan.fill ?? plan.fillColor
+  if (fill !== undefined) {
+    const g = typeof fill === 'object' ? fill.gradient : undefined
+    ops.push({
+      op: 'setFill',
+      target,
+      ...group,
+      fill: g
+        ? {
+            stops: g.stops ?? [
+              { pos: 0, color: g.from },
+              { pos: 1, color: g.to },
+            ],
+            ...(g.path || g.radial
+              ? {
+                  path: g.path ?? 'circle',
+                  ...(g.center
+                    ? {
+                        fillTo: {
+                          l: g.center.x,
+                          t: g.center.y,
+                          r: 1 - g.center.x,
+                          b: 1 - g.center.y,
+                        },
+                      }
+                    : {}),
+                }
+              : { angle: Math.round((g.angleDeg ?? 0) * 60000) }),
+          }
+        : fill,
+    })
   }
-
-  return paraGroups.map((group) => {
-    const firstLine = group[0]!
-    const effectiveAlign = align ?? firstLine.align
-
-    // Merge each line's runs into paragraph runs
-    const runs: EditRun[] = []
-    for (const line of group) {
-      for (const r of line.runs) {
-        if (r.isBullet) continue
-        const run: EditRun = { text: r.text }
-        if (runFmt) {
-          if (runFmt.fontFamily) run.fontFamily = runFmt.fontFamily
-          if (runFmt.fontSize) run.fontSize = runFmt.fontSize
-          if (runFmt.bold != null) run.bold = runFmt.bold
-          if (runFmt.italic != null) run.italic = runFmt.italic
-          if (runFmt.underline != null) run.underline = runFmt.underline
-          if (runFmt.color) run.color = runFmt.color
-        } else {
-          // Keep original format
-          run.bold = r.bold
-          run.italic = r.italic
-          run.underline = r.underline
-          run.fontFamily = r.fontFamily
-          run.fontSize = pxToPt(r.fontSizePx)
-          run.color = r.color
-        }
-        runs.push(run)
-      }
-    }
-
-    if (runs.length === 0) runs.push({ text: '' })
-
-    return {
-      runs,
-      ...(effectiveAlign ? { align: effectiveAlign } : {}),
-    }
-  })
+  if (plan.stroke !== undefined) {
+    const stroke = plan.stroke
+    ops.push({
+      op: 'setStroke',
+      target,
+      ...group,
+      stroke: stroke
+        ? {
+            ...stroke,
+            widthEmu: Math.round(stroke.widthPt * 12700),
+            ...(stroke.gradient
+              ? {
+                  gradient: {
+                    stops: stroke.gradient.stops,
+                    angle: Math.round(stroke.gradient.angleDeg * 60000),
+                  },
+                }
+              : {}),
+          }
+        : null,
+    })
+  }
+  if (
+    plan.runFormat &&
+    (node.type === 'shape' || node.type === 'text') &&
+    node.text?.lines.length
+  ) {
+    ops.push({ op: 'setFont', target, ...group, font: brushFontPatch(plan.runFormat) })
+  }
+  if (plan.align && (node.type === 'shape' || node.type === 'text') && node.text?.lines.length) {
+    ops.push({
+      op: 'setParagraphFormat',
+      target,
+      ...group,
+      format: brush.paragraph ?? { align: plan.align },
+    })
+  }
+  if (
+    !groupId &&
+    brush.body &&
+    (node.type === 'shape' || node.type === 'text') &&
+    node.text?.lines.length
+  ) {
+    ops.push({ op: 'setTextAnchor', target, anchor: brush.body.anchor })
+    ops.push({ op: 'setTextBodyProps', target, props: brush.body.props })
+  }
+  if (
+    !groupId &&
+    brush.effects &&
+    (node.type === 'shape' || node.type === 'text' || node.type === 'picture')
+  ) {
+    ops.push({ op: 'setEffects', target, effects: brush.effects })
+  }
+  return ops
 }

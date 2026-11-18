@@ -2,11 +2,11 @@ import { createRoot } from 'react-dom/client'
 import { htmlLang, type Lang } from '@genoffice/i18n'
 import App from './App'
 import { LocaleProvider } from './i18n/locale'
-import type { UiTheme } from '../shared/ipc'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/dropdown.css'
 import '@genoffice/ui/find-panel.css'
+import '@genoffice/ui/floating-outline.css'
 import '@genoffice/ui/ribbon-collapse.css'
 import '@genoffice/ui/ribbon-fit.css'
 import '@genoffice/ui/markdown.css'
@@ -18,7 +18,7 @@ import './styles.css'
 // compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
 import '@genoffice/ui/ribbon-density.css'
 import {
-  applyUiTheme,
+  syncUiTheme,
   applyAiPanelPrefs,
   installMacLineBoundaryKeys,
   installScreenTips,
@@ -27,18 +27,14 @@ import {
 installScreenTips()
 installMacLineBoundaryKeys()
 
-function applyTheme(theme: UiTheme): void {
-  applyUiTheme(theme)
-}
+const themeReady = syncUiTheme(window.markdownApi).ready
 
 void (async () => {
-  const [lang, theme] = await Promise.all([
+  const [lang] = await Promise.all([
     window.markdownApi.getLanguage().catch(() => 'zh' as const),
-    window.markdownApi.getTheme().catch(() => 'system' as const),
+    themeReady,
   ])
   document.documentElement.lang = htmlLang(lang as Lang)
-  applyTheme(theme)
-  window.markdownApi.onThemeChanged(applyTheme)
   void window.markdownApi
     ?.getAiPanelPrefs?.()
     .then(applyAiPanelPrefs)

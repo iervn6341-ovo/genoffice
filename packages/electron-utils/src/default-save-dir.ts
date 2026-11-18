@@ -5,6 +5,7 @@
 /// Every editor main module resolves through here so they all honor the same
 /// setting.
 import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
+import { access, mkdir, readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 
 /** the subset of Electron's `app` needed here (kept structural: this package has no Electron dependency) */
@@ -54,4 +55,32 @@ export function configuredDefaultSaveDir(app: PathProvider): string {
   const settingsPath = join(app.getPath('userData'), 'app-settings.json')
   const fallback = join(app.getPath('documents'), 'GenOffice')
   return resolveDefaultSaveDir(readDefaultSaveDirSetting(settingsPath), fallback)
+}
+
+/** Resolve the same save folder without blocking Electron's main event loop. */
+export async function configuredDefaultSaveDirAsync(app: PathProvider): Promise<string> {
+  const settingsPath = join(app.getPath('userData'), 'app-settings.json')
+  const fallback = join(app.getPath('documents'), 'GenOffice')
+  let configured: string | null = null
+  try {
+    const raw: unknown = JSON.parse(await readFile(settingsPath, 'utf8'))
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const value = (raw as Record<string, unknown>)[DEFAULT_SAVE_DIR_KEY]
+      if (typeof value === 'string' && isAbsolute(value)) configured = value
+    }
+  } catch {
+    // Missing or unreadable settings use the default folder.
+  }
+  const usable = async (dir: string): Promise<boolean> => {
+    try {
+      await mkdir(dir, { recursive: true })
+      await access(dir, constants.W_OK)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (configured && await usable(configured)) return configured
+  if (await usable(fallback)) return fallback
+  throw new Error(`default save dir not usable: ${fallback}`)
 }

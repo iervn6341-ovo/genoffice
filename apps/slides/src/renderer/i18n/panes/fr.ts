@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const fr = {
+  paneAnimSaveFailed: 'Impossible de mettre à jour l’animation : {error}',
   paneShowSetupTitle: 'Configurer le diaporama',
   paneShowSetupType: 'Type de diaporama',
   paneShowTypeSpeaker: 'Présenté par un présentateur (plein écran)',
@@ -31,6 +32,8 @@ export const fr = {
   paneMoveDown: 'Descendre',
 
   paneAnimTitle: 'Volet Animation · Diapositive {n}',
+  paneAnimSelectHint: 'Sélectionnez une animation pour modifier son effet et son minutage.',
+  paneAnimOrderLabel: 'Ordre de l’animation {n} : {target}',
   paneAnimPreview: 'Lire l’aperçu des animations de cette diapositive',
   paneAnimCollapse: 'Réduire le volet Animation',
   paneAnimEmpty: 'Aucune animation sur cette diapositive',

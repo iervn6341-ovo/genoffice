@@ -143,6 +143,98 @@
   line-height: 1.2;
 }
 
+.set-ai-profile-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  min-width: 0;
+}
+.set-ai-profile-list {
+  flex: 0 0 146px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+}
+.set-ai-profile-list h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.set-ai-profile-row {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 9px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.set-ai-profile-row span,
+.set-ai-profile-row small {
+  display: block;
+}
+.set-ai-profile-row small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.set-ai-profile-row.selected {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+.set-ai-profile-row .set-ai-profile-active {
+  color: var(--accent);
+}
+.set-ai-profile-editor {
+  flex: 1;
+  min-width: 0;
+}
+.set-ai-profile-editor .set-field {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.set-ai-profile-editor .set-input,
+.set-ai-profile-editor .set-dd {
+  min-width: 0;
+  max-width: 100%;
+}
+.set-ai-profile-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.set-model-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-shrink: 0;
+  gap: 8px;
+  width: 46%;
+  min-width: min(200px, 100%);
+  max-width: 100%;
+}
+.set-model-picker .set-input {
+  box-sizing: border-box;
+  width: 100%;
+}
+@media (max-width: 760px) {
+  .set-ai-profile-layout {
+    flex-direction: column;
+  }
+  .set-ai-profile-list {
+    flex-basis: auto;
+    position: static;
+    width: 100%;
+  }
+}
+
 .set-field {
   display: flex;
   align-items: center;
@@ -993,7 +1085,24 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  max-width: 320px;
+  max-width: 380px;
+}
+
+.font-sub-select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.font-sub-custom-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .font-sub-cell-input {
@@ -1004,11 +1113,34 @@
   font-size: 13px;
 }
 
-.font-sub-cell-select {
-  width: 32px;
-  min-width: 0;
-  padding: 4px 2px;
-  cursor: pointer;
+.font-sub-back-btn {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 13px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.font-sub-acquire-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-subtle, transparent);
+}
+
+.font-sub-acquire-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
+.font-sub-acquire-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .font-sub-col-type {
@@ -1046,7 +1178,6 @@
   font-size: 12px;
 }
 
-
 .font-sub-warn {
   margin-top: 4px;
   max-width: 320px;
@@ -1054,3 +1185,77 @@
   line-height: 1.4;
   color: var(--danger);
 }
+
+.font-sub-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.font-sub-modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+  padding: 22px 24px;
+  max-width: 460px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.font-sub-modal-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.font-sub-modal-desc {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.font-sub-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.font-sub-toast {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fontSubFadeIn 0.2s ease-out;
+}
+
+@keyframes fontSubFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+

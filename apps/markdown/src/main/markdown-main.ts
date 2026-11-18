@@ -1,3 +1,4 @@
+import { externalFiles, fileContentHash } from '@genoffice/electron-utils/external-files'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -65,7 +66,14 @@ import type {
   SaveMarkdownRequest,
   SaveMarkdownResult,
   SaveMode,
+  WikiBacklink,
+  WikiGraph,
+  WikiLinkResolveRequest,
+  WikiLinkResolved,
 } from '../shared/ipc'
+import { nodeFs, resolveWikiLinks } from './wiki-resolve'
+import { nodeVaultFs, warmWikiIndex, wikiBacklinks, wikiGraph } from './wiki-index'
+import { rememberWikiFragment, takeWikiFragment } from './wiki-fragment'
 
 const tDlg = createI18n({
   zh: {
@@ -395,6 +403,18 @@ export function setMarkdownFileSavedHook(hook: (wc: WebContents, path: string) =
   fileSavedHook = hook
 }
 
+let fileOpenedHook: ((wc: WebContents, path: string) => void) | null = null
+
+export function setMarkdownFileOpenedHook(hook: (wc: WebContents, path: string) => void): void {
+  fileOpenedHook = hook
+}
+
+let markdownDirtyHook: ((wc: WebContents, dirty: boolean) => void) | null = null
+
+export function setMarkdownFileDirtyHook(hook: (wc: WebContents, dirty: boolean) => void): void {
+  markdownDirtyHook = hook
+}
+
 /** Fired after a "convert & open in Docs" export — the shell routes the new .docx to a docs tab */
 let docxExportedHook: ((path: string) => void) | null = null
 /** One marked cache session per app process. Old crash leftovers are removed after seven days. */
@@ -432,6 +452,7 @@ export function markdownFilePath(webContentsId: number): string | undefined {
 /** The file was renamed on disk — re-grant the new path and tell the renderer */
 export function markdownFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
+  void externalFiles.renamed(wcId, oldPath, newPath)
   if (savePathByWc.get(wcId) === oldPath) savePathByWc.set(wcId, newPath)
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
   const allowed = allowedByWc.get(wcId)
@@ -622,23 +643,9 @@ async function writeTextAtomic(path: string, text: string): Promise<void> {
 async function resolveSaveTarget(
   e: Electron.IpcMainInvokeEvent,
   mode: SaveMode,
-  suggestedName?: string,
 ): Promise<string | null | 'canceled'> {
   const current = savePathByWc.get(e.sender.id)
   if (mode === 'save' && current) return current
-  // AI auto-naming: silent first save of an untitled document
-  if (mode === 'save' && !current && suggestedName) {
-    const base = suggestedName
-      .replace(/[/\\:*?"<>|]/g, '_')
-      .slice(0, 80)
-      .trim()
-    if (base) {
-      const dir = configuredDefaultSaveDir(app)
-      let target = join(dir, `${base}.md`)
-      for (let n = 1; existsSync(target); n++) target = join(dir, `${base}-${n}.md`)
-      return target
-    }
-  }
   const win =
     BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow() ?? undefined
   const defaultPath = current
@@ -707,7 +714,13 @@ function registerMarkdownIpc(): void {
 
   registerImageProtocol()
 
-  ipcMain.handle(MARKDOWN_CHANNELS.consumePending, (e) => openPathByWc.get(e.sender.id) ?? null)
+  ipcMain.handle(MARKDOWN_CHANNELS.consumePending, (e) => {
+    const pending = openPathByWc.get(e.sender.id) ?? null
+    // the vault root is known from here on: start the index so the backlinks
+    // panel and the graph usually find it already built
+    if (pending) warmWikiIndex(configuredDefaultSaveDir(app))
+    return pending
+  })
 
   // ---- headless export mode (--headless-export) ----
 
@@ -732,8 +745,49 @@ function registerMarkdownIpc(): void {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       throw new Error('markdown: path not granted to this view')
     }
-    return await readFile(path, 'utf8')
+    const text = await readFile(path, 'utf8')
+    await externalFiles.remember(e.sender.id, path, fileContentHash(text))
+    fileOpenedHook?.(e.sender, path)
+    return text
   })
+
+  ipcMain.handle(
+    MARKDOWN_CHANNELS.resolveWikiLinks,
+    (_e, request: WikiLinkResolveRequest): Promise<Record<string, WikiLinkResolved>> => {
+      const fromPath = typeof request?.fromPath === 'string' ? request.fromPath : ''
+      const targets = Array.isArray(request?.targets)
+        ? request.targets.filter((t): t is string => typeof t === 'string')
+        : []
+      return resolveWikiLinks(
+        targets,
+        {
+          fromPath,
+          root: configuredDefaultSaveDir(app),
+        },
+        nodeFs(),
+      ).then((resolved) => Object.fromEntries(resolved))
+    },
+  )
+
+  ipcMain.handle(MARKDOWN_CHANNELS.rememberWikiFragment, (_e, path: unknown, fragment: unknown) => {
+    if (typeof path === 'string' && typeof fragment === 'string') {
+      rememberWikiFragment(path, fragment)
+    }
+  })
+
+  ipcMain.handle(MARKDOWN_CHANNELS.takeWikiFragment, (_e, path: unknown): string =>
+    typeof path === 'string' ? takeWikiFragment(path) : '',
+  )
+
+  ipcMain.handle(MARKDOWN_CHANNELS.wikiBacklinks, (_e, path: unknown): Promise<WikiBacklink[]> =>
+    typeof path === 'string'
+      ? wikiBacklinks(configuredDefaultSaveDir(app), path, nodeVaultFs())
+      : Promise.resolve([]),
+  )
+
+  ipcMain.handle(MARKDOWN_CHANNELS.wikiGraph, (): Promise<WikiGraph> =>
+    wikiGraph(configuredDefaultSaveDir(app), nodeVaultFs()),
+  )
 
   ipcMain.handle(
     MARKDOWN_CHANNELS.save,
@@ -760,9 +814,7 @@ function registerMarkdownIpc(): void {
         ? await pendingOwnedAssetsForDocument(pathAtRequest)
         : []
       try {
-        const suggestedName =
-          typeof request.suggestedName === 'string' ? request.suggestedName : undefined
-        const target = await resolveSaveTarget(e, mode, suggestedName)
+        const target = await resolveSaveTarget(e, mode)
         if (target === 'canceled') return done({ ok: true, canceled: true })
         if (!target) return done({ ok: false, error: 'markdown: no save target' })
         const currentPath = pathAtRequest
@@ -781,11 +833,12 @@ function registerMarkdownIpc(): void {
         const textToWrite = prepared?.text ?? request.text
         const savedImageSources = prepared?.imageSources ?? imageSources
         try {
-          await writeTextAtomic(target, textToWrite)
+          await externalFiles.write(e.sender.id, target, () => writeTextAtomic(target, textToWrite))
         } catch (error) {
           if (prepared) await rollbackPreparedSaveAsAssets(prepared).catch(() => {})
           throw error
         }
+        await externalFiles.remember(e.sender.id, target, fileContentHash(textToWrite))
         savePathByWc.set(e.sender.id, target)
         // keep the reload path in sync — a stale openPathByWc would make a
         // reloaded renderer load the OLD file and then save it over the new one
@@ -1064,8 +1117,10 @@ function registerMarkdownIpc(): void {
   )
 
   ipcMain.on(MARKDOWN_CHANNELS.dirtyChanged, (e, dirty: unknown) => {
-    if (dirty === true) dirtyByWc.add(e.sender.id)
+    const isDirty = dirty === true
+    if (isDirty) dirtyByWc.add(e.sender.id)
     else dirtyByWc.delete(e.sender.id)
+    markdownDirtyHook?.(e.sender, isDirty)
   })
 
   ipcMain.on(MARKDOWN_CHANNELS.closeSaveResult, (e, ok: unknown) => {
@@ -1099,6 +1154,20 @@ function registerMarkdownIpc(): void {
 }
 
 function grantAndTrack(wc: WebContents, openPath?: string | null): void {
+  externalFiles.attach(wc, {
+    language: getUiLang,
+    isDirty: () => markdownIsDirty(wc.id),
+    reload: async (path) => {
+      await readFile(path) // Keep the live editor if the source is no longer readable.
+      await markdownDiscardPendingAssets(wc)
+      dirtyByWc.delete(wc.id)
+      openPathByWc.set(wc.id, path)
+      wc.reload()
+    },
+    saveCopy: () => {
+      void requestMarkdownSave(wc, 'saveAs')
+    },
+  })
   const wcId = wc.id
   if (openPath && existsSync(openPath)) {
     openPathByWc.set(wcId, openPath)

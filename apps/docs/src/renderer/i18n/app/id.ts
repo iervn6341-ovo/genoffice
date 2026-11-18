@@ -107,6 +107,15 @@ export const id = {
     'Gaya "{name}" diperbarui dengan format pilihan; ditulis ke dokumen saat disimpan',
   appStyleCreated: 'Gaya "{name}" dibuat dan diterapkan ke pilihan',
   appPgNumFormatSet: 'Format nomor halaman ditetapkan',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Format Nomor Halaman',
   appNumberFormat: 'Format nomor',
   appIncludeChapterNumber: 'Sertakan nomor bab',

@@ -15,10 +15,9 @@ import { qualifierMatches } from '@genoffice/xlsx-gateway/gateway/xlsx-structure
 import type { LazyWorkbookState, UniverRuntime } from './univer-state'
 import { parseFormulaReferences } from './formula-closure'
 
-/// Journal ops that renumber rows/columns; the recorded cache coordinates are
-/// stale after these. Layout-only ops (sizing, hiding, outlining, merging)
-/// leave addresses intact.
-const COORDINATE_SHIFTING_OPS = new Set([
+/// Exported: the save path compares the same two coordinate spaces and must
+/// skip the sheets whose rows or columns moved.
+export const COORDINATE_SHIFTING_OPS = new Set([
   'insert-rows',
   'remove-rows',
   'insert-cols',

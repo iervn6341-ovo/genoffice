@@ -8,9 +8,10 @@ import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/dropdown.css'
 import './home.css'
 import './tabbar.css'
-import { applyUiTheme, installScreenTips } from '@genoffice/ui'
+import { syncUiTheme, installScreenTips } from '@genoffice/ui'
 
 installScreenTips()
+const themeReady = syncUiTheme(window.aiOffice).ready
 
 // macOS shell window is created with vibrancy; a transparent body lets the
 // editor views' translucent regions (e.g. slides thumbnail pane) show it
@@ -25,12 +26,9 @@ void Promise.all([
   window.aiOffice.getLanguage(),
   // if the flag is unreadable, skip onboarding rather than block the home screen
   window.aiOffice.onboardingSeen().catch(() => true),
-  window.aiOffice.getTheme().catch(() => 'system' as const),
-]).then(([lang, onboardingSeen, theme]) => {
+  themeReady,
+]).then(([lang, onboardingSeen]) => {
   document.documentElement.lang = htmlLang(lang)
-  // apply theme attribute before first paint to avoid flash
-  applyUiTheme(theme)
-  window.aiOffice.onThemeChanged(applyUiTheme)
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <LocaleProvider initial={lang}>

@@ -35,15 +35,14 @@ interface Props {
   fullBox: NodeBox
   /** Source bitmap for the ghost preview (crop area beyond the current view) */
   imgSrc?: string
+  /** Canvas viewport zoom scale */
+  zoom?: number
   /** Absolute fractions of the full original image; null = crop removed */
   onConfirm: (rect: CropRect | null) => void
   onCancel: () => void
 }
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-
-const HANDLE_SIZE = 8
-const HANDLE_HALF = HANDLE_SIZE / 2
 
 /**
  * Swallow the next `click` the browser synthesizes from the current mousedown.
@@ -119,7 +118,7 @@ function srcRectFromRect(full: NodeBox, cx: number, cy: number, cw: number, ch: 
   return { l: clamp(l), t: clamp(t), r: clamp(r), b: clamp(b) }
 }
 
-export function CropOverlay({ box, fullBox, imgSrc, onConfirm, onCancel }: Props) {
+export function CropOverlay({ box, fullBox, imgSrc, zoom = 1, onConfirm, onCancel }: Props) {
   // The frame starts at the current visible region; the ghost of the full original
   // renders behind it, so dragging outward reveals (and restores) cropped content.
   const [cx, setCx] = useState(box.x)
@@ -158,54 +157,66 @@ export function CropOverlay({ box, fullBox, imgSrc, onConfirm, onCancel }: Props
     const onMove = (e: MouseEvent) => {
       const d = dragRef.current
       if (!d) return
-      const dx = e.clientX - d.startMouseX
-      const dy = e.clientY - d.startMouseY
+      const z = zoom && zoom > 0.01 ? zoom : 1
+      const dx = (e.clientX - d.startMouseX) / z
+      const dy = (e.clientY - d.startMouseY) / z
       const MIN = 20
+
+      const fixedL = d.startCx
+      const fixedT = d.startCy
+      const fixedR = d.startCx + d.startCw
+      const fixedB = d.startCy + d.startCh
+
       let nx = d.startCx,
         ny = d.startCy,
         nw = d.startCw,
         nh = d.startCh
+
       switch (d.handle) {
-        case 'nw':
-          nx = Math.min(d.startCx + dx, d.startCx + d.startCw - MIN)
-          ny = Math.min(d.startCy + dy, d.startCy + d.startCh - MIN)
-          nw = d.startCw - (nx - d.startCx)
-          nh = d.startCh - (ny - d.startCy)
+        case 'nw': {
+          nx = Math.max(fullBox.x, Math.min(d.startCx + dx, fixedR - MIN))
+          ny = Math.max(fullBox.y, Math.min(d.startCy + dy, fixedB - MIN))
+          nw = fixedR - nx
+          nh = fixedB - ny
           break
-        case 'n':
-          ny = Math.min(d.startCy + dy, d.startCy + d.startCh - MIN)
-          nh = d.startCh - (ny - d.startCy)
+        }
+        case 'n': {
+          ny = Math.max(fullBox.y, Math.min(d.startCy + dy, fixedB - MIN))
+          nh = fixedB - ny
           break
-        case 'ne':
-          ny = Math.min(d.startCy + dy, d.startCy + d.startCh - MIN)
-          nh = d.startCh - (ny - d.startCy)
-          nw = Math.max(d.startCw + dx, MIN)
+        }
+        case 'ne': {
+          ny = Math.max(fullBox.y, Math.min(d.startCy + dy, fixedB - MIN))
+          nh = fixedB - ny
+          nw = Math.max(MIN, Math.min(d.startCw + dx, fullBox.x + fullBox.w - fixedL))
           break
-        case 'e':
-          nw = Math.max(d.startCw + dx, MIN)
+        }
+        case 'e': {
+          nw = Math.max(MIN, Math.min(d.startCw + dx, fullBox.x + fullBox.w - fixedL))
           break
-        case 'se':
-          nw = Math.max(d.startCw + dx, MIN)
-          nh = Math.max(d.startCh + dy, MIN)
+        }
+        case 'se': {
+          nw = Math.max(MIN, Math.min(d.startCw + dx, fullBox.x + fullBox.w - fixedL))
+          nh = Math.max(MIN, Math.min(d.startCh + dy, fullBox.y + fullBox.h - fixedT))
           break
-        case 's':
-          nh = Math.max(d.startCh + dy, MIN)
+        }
+        case 's': {
+          nh = Math.max(MIN, Math.min(d.startCh + dy, fullBox.y + fullBox.h - fixedT))
           break
-        case 'sw':
-          nx = Math.min(d.startCx + dx, d.startCx + d.startCw - MIN)
-          nw = d.startCw - (nx - d.startCx)
-          nh = Math.max(d.startCh + dy, MIN)
+        }
+        case 'sw': {
+          nx = Math.max(fullBox.x, Math.min(d.startCx + dx, fixedR - MIN))
+          nw = fixedR - nx
+          nh = Math.max(MIN, Math.min(d.startCh + dy, fullBox.y + fullBox.h - fixedT))
           break
-        case 'w':
-          nx = Math.min(d.startCx + dx, d.startCx + d.startCw - MIN)
-          nw = d.startCw - (nx - d.startCx)
+        }
+        case 'w': {
+          nx = Math.max(fullBox.x, Math.min(d.startCx + dx, fixedR - MIN))
+          nw = fixedR - nx
           break
+        }
       }
-      // Clamp within the ORIGINAL image bounds — outward drag restores cropped content
-      nx = Math.max(fullBox.x, nx)
-      ny = Math.max(fullBox.y, ny)
-      nw = Math.min(nw, fullBox.x + fullBox.w - nx)
-      nh = Math.min(nh, fullBox.y + fullBox.h - ny)
+
       setCx(nx)
       setCy(ny)
       setCw(nw)
@@ -220,30 +231,30 @@ export function CropOverlay({ box, fullBox, imgSrc, onConfirm, onCancel }: Props
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [fullBox])
-
-  // Keyboard: Enter confirm, Esc cancel
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        const r = srcRectFromRect(fullBox, cx, cy, cw, ch)
-        const isEmpty = !r.l && !r.t && !r.r && !r.b
-        onConfirm(isEmpty ? null : r)
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        onCancel()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [fullBox, cx, cy, cw, ch, onConfirm, onCancel])
+  }, [fullBox, zoom])
 
   const confirm = useCallback(() => {
     const r = srcRectFromRect(fullBox, cx, cy, cw, ch)
     const isEmpty = !r.l && !r.t && !r.r && !r.b
     onConfirm(isEmpty ? null : r)
   }, [fullBox, cx, cy, cw, ch, onConfirm])
+
+  // Keyboard: Enter confirm, Esc cancel (capture phase ensures highest priority)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        e.stopPropagation()
+        confirm()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        onCancel()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [confirm, onCancel])
 
   // The overlay only covers the slide canvas; a mousedown anywhere beyond it
   // (thumbnails, ribbon, the gray backdrop) also confirms — capture phase so the
@@ -254,11 +265,6 @@ export function CropOverlay({ box, fullBox, imgSrc, onConfirm, onCancel }: Props
       const root = rootRef.current
       if (root && e.target instanceof Node && root.contains(e.target)) return
       if (e.button !== 0) return // primary button only (right-click = context menu)
-      // The first outside press only confirms: swallow it (and the click it
-      // synthesizes) so the control under the cursor does not also act - e.g. Undo
-      // racing the in-flight crop IPC, or the Crop button re-entering crop mode
-      // from pre-commit geometry. The click swallower is registered outside this
-      // effect so unmounting the overlay cannot cancel it.
       e.preventDefault()
       e.stopPropagation()
       swallowNextClick()
@@ -271,13 +277,16 @@ export function CropOverlay({ box, fullBox, imgSrc, onConfirm, onCancel }: Props
   }, [confirm])
 
   const handles = handlePositions(cx, cy, cw, ch)
+  const z = zoom && zoom > 0.01 ? zoom : 1
+  const hitSize = Math.max(22, Math.round(22 / z))
+  const hitHalf = hitSize / 2
 
   return (
     <div
       ref={rootRef}
       className="crop-overlay"
       onMouseDown={(e) => {
-        // Clicking outside the handles = confirm
+        // Clicking outside the handles and frame confirms crop
         e.stopPropagation()
         confirm()
       }}
@@ -330,24 +339,174 @@ export function CropOverlay({ box, fullBox, imgSrc, onConfirm, onCancel }: Props
       {/* Crop frame border */}
       <div
         className="crop-frame"
-        style={{ left: cx, top: cy, width: cw, height: ch }}
-        onMouseDown={(e) => e.stopPropagation()}
+        style={{ left: cx, top: cy, width: cw, height: ch, pointerEvents: 'auto' }}
+        onMouseDown={(e) => {
+          // Clicking inside the frame should not dismiss crop mode
+          e.stopPropagation()
+        }}
       />
 
-      {/* The 8 handles */}
+      {/* The 8 handles with generous hit targets and PowerPoint-style corner/edge bars */}
       {(Object.entries(handles) as [HandleId, { x: number; y: number }][]).map(([id, pos]) => (
         <div
           key={id}
-          className="crop-handle"
+          className="crop-handle crop-handle-hit"
+          data-handle={id}
           style={{
-            left: pos.x - HANDLE_HALF,
-            top: pos.y - HANDLE_HALF,
-            width: HANDLE_SIZE,
-            height: HANDLE_SIZE,
+            position: 'absolute',
+            left: pos.x - hitHalf,
+            top: pos.y - hitHalf,
+            width: hitSize,
+            height: hitSize,
             cursor: CURSOR[id],
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 22,
           }}
           onMouseDown={(e) => onMouseDown(id, e)}
-        />
+        >
+          {id === 'nw' && (
+            <>
+              <div
+                style={{
+                  position: 'absolute',
+                  left: hitHalf - 2,
+                  top: hitHalf - 2,
+                  width: 14,
+                  height: 3,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: hitHalf - 2,
+                  top: hitHalf - 2,
+                  width: 3,
+                  height: 14,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+            </>
+          )}
+          {id === 'ne' && (
+            <>
+              <div
+                style={{
+                  position: 'absolute',
+                  right: hitHalf - 2,
+                  top: hitHalf - 2,
+                  width: 14,
+                  height: 3,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  right: hitHalf - 2,
+                  top: hitHalf - 2,
+                  width: 3,
+                  height: 14,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+            </>
+          )}
+          {id === 'se' && (
+            <>
+              <div
+                style={{
+                  position: 'absolute',
+                  right: hitHalf - 2,
+                  bottom: hitHalf - 2,
+                  width: 14,
+                  height: 3,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  right: hitHalf - 2,
+                  bottom: hitHalf - 2,
+                  width: 3,
+                  height: 14,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+            </>
+          )}
+          {id === 'sw' && (
+            <>
+              <div
+                style={{
+                  position: 'absolute',
+                  left: hitHalf - 2,
+                  bottom: hitHalf - 2,
+                  width: 14,
+                  height: 3,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: hitHalf - 2,
+                  bottom: hitHalf - 2,
+                  width: 3,
+                  height: 14,
+                  background: '#000',
+                  boxShadow: '0 0 0 1px #fff',
+                  pointerEvents: 'none',
+                }}
+              />
+            </>
+          )}
+          {(id === 'n' || id === 's') && (
+            <div
+              style={{
+                position: 'absolute',
+                left: hitHalf - 8,
+                top: hitHalf - 1.5,
+                width: 16,
+                height: 3,
+                background: '#000',
+                boxShadow: '0 0 0 1px #fff',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+          {(id === 'w' || id === 'e') && (
+            <div
+              style={{
+                position: 'absolute',
+                left: hitHalf - 1.5,
+                top: hitHalf - 8,
+                width: 3,
+                height: 16,
+                background: '#000',
+                boxShadow: '0 0 0 1px #fff',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+        </div>
       ))}
     </div>
   )

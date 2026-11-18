@@ -194,6 +194,7 @@ export function LayoutTab({
   const currentWrap = (protAttrs?.imageWrap as string | null) ?? null
 
   const applyWrap = (value: string | null) => {
+    window.dispatchEvent(new Event('ai-docs-commit-tables'))
     const cleared =
       value === null
         ? { imagePosH: null, imagePosV: null, imageOffsetXEmu: null, imageOffsetYEmu: null }
@@ -207,6 +208,7 @@ export function LayoutTab({
   }
 
   const applyPositionPreset = (h: 'left' | 'center' | 'right', v: 'top' | 'center' | 'bottom') => {
+    window.dispatchEvent(new Event('ai-docs-commit-tables'))
     editor
       .chain()
       .focus()

@@ -130,6 +130,16 @@ export function TabBar() {
   const { t } = useI18n()
   const [tabs, setTabs] = useState<TabSummary[]>([])
   const stripRef = useRef<HTMLDivElement>(null)
+  const [dropHint, setDropHint] = useState<{ x: number; label: string } | null>(null)
+  const previewFrame = useRef(0)
+  const previewPoint = useRef<{ id: string; x: number; y: number } | null>(null)
+
+  const clearPreview = () => {
+    cancelAnimationFrame(previewFrame.current)
+    previewFrame.current = 0
+    previewPoint.current = null
+    window.aiOfficeTabs.endPreview()
+  }
 
   // Chrome-style drag-to-reorder: the grabbed tab tracks the pointer 1:1 while
   // its neighbours slide aside live; the final order is committed on release.
@@ -138,6 +148,7 @@ export function TabBar() {
     id: string
     from: number
     startX: number
+    startY: number
     /** viewport-x left edge + width of every tab, sampled at drag start */
     lefts: number[]
     widths: number[]
@@ -151,12 +162,22 @@ export function TabBar() {
     from: number
     target: number
     width: number
+    dy: number
   } | null>(null)
 
-  const finishDrag = (pointerId: number, commit: boolean) => {
+  const finishDrag = async (
+    pointerId: number,
+    commit: boolean,
+    screenPoint?: { x: number; y: number },
+  ) => {
     const drag = dragRef.current
     if (!drag || pointerId !== drag.pointerId) return
     dragRef.current = null
+    // Release Chromium's capture before reparenting the editor/showing another
+    // native window. The next press must belong to that new window's frame.
+    const captured = stripRef.current?.querySelector<HTMLElement>('.drag-source')
+    if (captured?.hasPointerCapture(pointerId)) captured.releasePointerCapture(pointerId)
+    clearPreview()
     if (!drag.started) {
       // plain click: the in-view scroll was suppressed while the press was
       // held (dragRef was set), so honor it now that the press is over
@@ -166,6 +187,12 @@ export function TabBar() {
       return
     }
     setDragVisual(null)
+    if (
+      commit &&
+      screenPoint &&
+      (await window.aiOfficeTabs.drop(drag.id, screenPoint.x, screenPoint.y).catch(() => false))
+    )
+      return
     if (commit && drag.target !== drag.from) {
       // optimistic local reorder so clearing the transforms causes no flash;
       // the main-process broadcast arrives with the identical order
@@ -188,6 +215,16 @@ export function TabBar() {
     return window.aiOfficeTabs.onChanged(setTabs)
   }, [])
 
+  useEffect(() => window.aiOfficeTabs.onDropHint(setDropHint), [])
+
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(previewFrame.current)
+      window.aiOfficeTabs.endPreview()
+    },
+    [],
+  )
+
   // document tabs are sibling WebContentsViews: they see neither this press
   // nor a focus change, so relay it for them to dismiss open popovers
   useEffect(() => {
@@ -203,8 +240,21 @@ export function TabBar() {
     if (drag && !tabs.some((t) => t.id === drag.id)) {
       dragRef.current = null
       setDragVisual(null)
+      clearPreview()
     }
   }, [tabs])
+
+  useEffect(() => {
+    const cancel = (event: KeyboardEvent) => {
+      const drag = dragRef.current
+      if (event.key === 'Escape' && drag) {
+        event.preventDefault()
+        void finishDrag(drag.pointerId, false)
+      }
+    }
+    window.addEventListener('keydown', cancel)
+    return () => window.removeEventListener('keydown', cancel)
+  }, [])
 
   // Trackpads scroll the strip natively; map a mouse's vertical wheel to
   // horizontal scrolling. Native listener because React registers wheel as
@@ -225,6 +275,25 @@ export function TabBar() {
   // keep the active tab in view — new tabs open at the far end of the strip
   const activeId = tabs.find((tab) => tab.active)?.id
   useEffect(() => {
+    if (!activeId) return
+    let disposed = false
+    let first = 0
+    let second = 0
+    void document.fonts.ready.then(() => {
+      if (disposed) return
+      first = requestAnimationFrame(() => {
+        second = requestAnimationFrame(() => {
+          if (!disposed) window.aiOfficeTabs.frameReady(activeId)
+        })
+      })
+    })
+    return () => {
+      disposed = true
+      cancelAnimationFrame(first)
+      cancelAnimationFrame(second)
+    }
+  }, [activeId])
+  useEffect(() => {
     // pointer-down activation runs while the user is pressing that tab — it is
     // already visible, and scrolling the strip mid-press would invalidate the
     // drag geometry sampled at pointer-down
@@ -236,8 +305,16 @@ export function TabBar() {
 
   return (
     <div
-      className={`tab-bar${tabs.some((tab) => tab.active && tab.coversTabStrip) ? ' tab-bar-covered' : ''}`}
+      className={`tab-bar${dropHint ? ' tab-bar-drop-target' : ''}${tabs.some((tab) => tab.active && tab.coversTabStrip) ? ' tab-bar-covered' : ''}`}
     >
+      {dropHint && (
+        <div
+          className="tab-drop-marker"
+          style={{ left: dropHint.x }}
+          title={dropHint.label}
+          aria-label={dropHint.label}
+        />
+      )}
       <div className="tab-bar-drag-spacer" />
       {!IS_MAC && (
         <button
@@ -266,7 +343,7 @@ export function TabBar() {
           let dragStyle: CSSProperties | undefined
           if (dragVisual) {
             if (dragVisual.id === tab.id) {
-              dragStyle = { transform: `translateX(${dragVisual.dx}px)` }
+              dragStyle = { transform: `translate(${dragVisual.dx}px, ${dragVisual.dy}px)` }
             } else if (dragVisual.target <= index && index < dragVisual.from) {
               dragStyle = { transform: `translateX(${dragVisual.width}px)` }
             } else if (dragVisual.from < index && index <= dragVisual.target) {
@@ -307,6 +384,7 @@ export function TabBar() {
                   id: tab.id,
                   from: index,
                   startX: event.clientX,
+                  startY: event.clientY,
                   lefts: rects.map((r) => r.left),
                   widths: rects.map((r) => r.width),
                   target: index,
@@ -320,7 +398,7 @@ export function TabBar() {
                 let dx = event.clientX - drag.startX
                 // 4px dead zone so plain clicks never wiggle the tab
                 if (!drag.started) {
-                  if (Math.abs(dx) < 4) return
+                  if (Math.hypot(dx, event.clientY - drag.startY) < 4) return
                   // re-sample geometry the moment the drag really starts — the
                   // pointer-down activation re-renders and could have moved tabs
                   const strip = stripRef.current
@@ -362,15 +440,27 @@ export function TabBar() {
                   }
                 }
                 drag.target = target
+                previewPoint.current = { id: drag.id, x: event.screenX, y: event.screenY }
+                if (!previewFrame.current) {
+                  previewFrame.current = requestAnimationFrame(() => {
+                    previewFrame.current = 0
+                    const p = previewPoint.current
+                    if (p && dragRef.current?.started)
+                      window.aiOfficeTabs.previewDrag(p.id, p.x, p.y)
+                  })
+                }
                 setDragVisual({
                   id: drag.id,
                   dx,
                   from: drag.from,
                   target,
                   width: drag.widths[drag.from],
+                  dy: event.clientY - drag.startY,
                 })
               }}
-              onPointerUp={(event) => finishDrag(event.pointerId, true)}
+              onPointerUp={(event) =>
+                void finishDrag(event.pointerId, true, { x: event.screenX, y: event.screenY })
+              }
               onPointerCancel={(event) => finishDrag(event.pointerId, false)}
               onLostPointerCapture={(event) => finishDrag(event.pointerId, false)}
             >
@@ -380,7 +470,7 @@ export function TabBar() {
               <span className="tab-title">{tab.title}</span>
               {tab.closable && (
                 <button
-                  className="tab-close"
+                  className={`tab-close${tab.dirty ? ' is-dirty' : ''}`}
                   title={t('closeTab')}
                   aria-label={t('closeTab')}
                   onClick={(event) => {
@@ -388,7 +478,10 @@ export function TabBar() {
                     void window.aiOfficeTabs.close(tab.id)
                   }}
                 >
-                  ×
+                  <span className="tab-dirty-dot" aria-hidden="true" />
+                  <span className="tab-close-icon" aria-hidden="true">
+                    ×
+                  </span>
                 </button>
               )}
             </div>

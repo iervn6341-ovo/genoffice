@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
@@ -37,6 +38,17 @@ import type {
   WebSearchResult,
   ImageSearchResponse,
   GenerateImageResult,
+  ExternalLinkCell,
+  ExternalLinkCellKind,
+  ExternalLinkListStatus,
+  ExternalLinksResult,
+  ExternalLinksUpdateResult,
+  ExternalLinkStatus,
+  ExternalLinkUsageCell,
+  ExternalLinkUsageResult,
+  PickIdPayload,
+  WorkbookPickSelection,
+  WorkbookTabsResult,
 } from '../shared/desktop-api'
 import {
   HEADER_FOOTER_PICTURE_POSITION,
@@ -117,6 +129,10 @@ const desktopApi: DesktopApi = {
   async newBlankWorkbookTab() {
     await ipcRenderer.invoke('home:new-sheet')
   },
+  async openNewBlankWorkbook() {
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.openNewBlankWorkbook)
+    return result === null ? null : parseWorkbookFile(result)
+  },
   async selectWorkbook() {
     const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.selectWorkbook)
     return result === null ? null : parseWorkbookFile(result)
@@ -156,6 +172,73 @@ const desktopApi: DesktopApi = {
     const validatedRequest = parseRecalcRequest(request)
     const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.recalcWorkbook, validatedRequest)
     return parseRecalcResult(result)
+  },
+  async listExternalLinks(request) {
+    const validatedRequest = parseExternalLinksRequest(request)
+    const result: unknown = await ipcRenderer.invoke(
+      IPC_CHANNELS.listExternalLinks,
+      validatedRequest,
+    )
+    return parseExternalLinksResult(result)
+  },
+  async updateExternalLinks(request) {
+    const validatedRequest = parseExternalLinksRequest(request)
+    const result: unknown = await ipcRenderer.invoke(
+      IPC_CHANNELS.updateExternalLinks,
+      validatedRequest,
+    )
+    return parseExternalLinksUpdateResult(result)
+  },
+  async readExternalLinkUsage(request) {
+    const validatedRequest = parseExternalLinksRequest(request)
+    const result: unknown = await ipcRenderer.invoke(
+      IPC_CHANNELS.readExternalLinkUsage,
+      validatedRequest,
+    )
+    return parseExternalLinkUsageResult(result)
+  },
+  async selectExternalLinkSource() {
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.selectExternalLinkSource)
+    return typeof result === 'string' && result.length > 0 ? result : null
+  },
+  async listWorkbookTabs() {
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.listWorkbookTabs)
+    return parseWorkbookTabsResult(result)
+  },
+  async armWorkbookPick(wcId) {
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.armWorkbookPick, { wcId })
+    return parsePickIdPayload(result)
+  },
+  async sendWorkbookPickSelection(selection) {
+    await ipcRenderer.invoke(
+      IPC_CHANNELS.sendWorkbookPickSelection,
+      parseWorkbookPickSelection(selection),
+    )
+  },
+  async cancelWorkbookPick(pickId) {
+    await ipcRenderer.invoke(IPC_CHANNELS.cancelWorkbookPick, { pickId })
+  },
+  onWorkbookPickArmed(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) =>
+      handler(parsePickIdPayload(payload))
+    ipcRenderer.on(IPC_CHANNELS.workbookPickArmed, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.workbookPickArmed, listener)
+  },
+  onWorkbookPickSelected(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) =>
+      handler(parseWorkbookPickSelection(payload))
+    ipcRenderer.on(IPC_CHANNELS.workbookPickSelected, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.workbookPickSelected, listener)
+  },
+  onWorkbookPickCancelled(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) =>
+      handler(parsePickIdPayload(payload))
+    ipcRenderer.on(IPC_CHANNELS.workbookPickCancelled, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.workbookPickCancelled, listener)
+  },
+  revealLinkSource(request) {
+    const validatedRequest = parseExternalLinkRevealRequest(request)
+    ipcRenderer.send(IPC_CHANNELS.revealLinkSource, validatedRequest)
   },
   async readWorkbookMedia(request) {
     const validatedRequest = parseMediaRequest(request)
@@ -1318,6 +1401,212 @@ function parseRecalcResult(input: unknown): WorkbookRecalcResult {
   return { cells }
 }
 
+/// The links panel's request: a workbook session, never a filesystem path.
+function parseExternalLinksRequest(input: unknown): { sessionId: string } {
+  if (!isRecord(input) || !isUuid(input.sessionId)) {
+    throw new Error('Invalid external links request.')
+  }
+  return { sessionId: input.sessionId }
+}
+
+/// Locate a link source: the session and the link index the panel row names.
+function parseExternalLinkRevealRequest(input: unknown): { sessionId: string; index: number } {
+  if (!isRecord(input) || !isUuid(input.sessionId) || !isPositiveInteger(input.index)) {
+    throw new Error('Invalid external link reveal request.')
+  }
+  return { sessionId: input.sessionId, index: input.index }
+}
+
+const EXTERNAL_LINK_LIMIT = 10_000
+const EXTERNAL_LINK_CELL_LIMIT = 100_000
+const EXTERNAL_LINK_KINDS: readonly ExternalLinkCellKind[] = ['number', 'text', 'boolean', 'error']
+
+/// One link of the read-only listing: identity fields only — the listing
+/// carries no reachability, because probing the targets on open is what the
+/// read path must avoid (a dead network share can block for seconds).
+function parseExternalLinkListStatus(input: unknown): ExternalLinkListStatus {
+  if (
+    !isRecord(input) ||
+    !isPositiveInteger(input.index) ||
+    typeof input.rawTarget !== 'string' ||
+    (input.source !== null && typeof input.source !== 'string') ||
+    !Array.isArray(input.sheetNames) ||
+    !input.sheetNames.every((name): name is string => typeof name === 'string')
+  ) {
+    throw new Error('Invalid external links response.')
+  }
+  return {
+    index: input.index,
+    rawTarget: input.rawTarget,
+    source: input.source,
+    sheetNames: input.sheetNames,
+  }
+}
+
+/// One link of the update report: the listing's fields plus the reachability
+/// verdict the explicit update paid for.
+function parseExternalLinkStatus(input: unknown): ExternalLinkStatus {
+  if (!isRecord(input) || typeof input.reachable !== 'boolean') {
+    throw new Error('Invalid external links response.')
+  }
+  return { ...parseExternalLinkListStatus(input), reachable: input.reachable }
+}
+
+/// One external-formula cell of the update report. `kind` is absent when the
+/// cell has no usable value; the host then keeps the file's own cache.
+function parseExternalLinkCell(input: unknown): ExternalLinkCell {
+  if (
+    !isRecord(input) ||
+    !isBoundedString(input.sheet, 1_024) ||
+    !isNonnegativeInteger(input.row) ||
+    !isNonnegativeInteger(input.column) ||
+    typeof input.formatted !== 'string' ||
+    typeof input.formula !== 'string' ||
+    (input.number !== undefined &&
+      input.number !== null &&
+      (typeof input.number !== 'number' || !Number.isFinite(input.number))) ||
+    (input.kind != null && !EXTERNAL_LINK_KINDS.includes(input.kind as ExternalLinkCellKind))
+  ) {
+    throw new Error('Invalid external links update response.')
+  }
+  return {
+    sheet: input.sheet,
+    row: input.row,
+    column: input.column,
+    formatted: input.formatted,
+    ...(input.number === undefined ? {} : { number: input.number as number | null }),
+    ...(input.kind == null ? {} : { kind: input.kind as ExternalLinkCellKind }),
+    formula: input.formula,
+  }
+}
+
+function parseExternalLinksResult(input: unknown): ExternalLinksResult {
+  if (!isRecord(input) || !Array.isArray(input.links) || input.links.length > EXTERNAL_LINK_LIMIT) {
+    throw new Error('Invalid external links response.')
+  }
+  return { links: input.links.map(parseExternalLinkListStatus) }
+}
+
+function parseExternalLinksUpdateResult(input: unknown): ExternalLinksUpdateResult {
+  if (
+    !isRecord(input) ||
+    !Array.isArray(input.links) ||
+    input.links.length > EXTERNAL_LINK_LIMIT ||
+    !Array.isArray(input.cells) ||
+    input.cells.length > EXTERNAL_LINK_CELL_LIMIT
+  ) {
+    throw new Error('Invalid external links update response.')
+  }
+  return {
+    links: input.links.map(parseExternalLinkStatus),
+    cells: input.cells.map(parseExternalLinkCell),
+  }
+}
+
+const EXTERNAL_LINK_USAGE_KINDS = ['number', 'text', 'bool', 'error'] as const
+
+/** One formula cell of the usage scan: the frozen value typed by the cached
+ * `<v>` (`missing` when the cell has none to freeze). Rows and columns are
+ * 0-based. */
+function parseExternalLinkUsageCell(input: unknown): ExternalLinkUsageCell {
+  if (
+    !isRecord(input) ||
+    !isBoundedString(input.sheet, 1_024) ||
+    !isNonnegativeInteger(input.row) ||
+    !isNonnegativeInteger(input.column) ||
+    !isRecord(input.value) ||
+    (input.value.kind !== 'missing' &&
+      (!EXTERNAL_LINK_USAGE_KINDS.includes(
+        input.value.kind as (typeof EXTERNAL_LINK_USAGE_KINDS)[number],
+      ) ||
+        typeof input.value.value !==
+          (input.value.kind === 'number'
+            ? 'number'
+            : input.value.kind === 'bool'
+              ? 'boolean'
+              : 'string')))
+  ) {
+    throw new Error('Invalid external links usage response.')
+  }
+  return {
+    sheet: input.sheet,
+    row: input.row,
+    column: input.column,
+    value: input.value as ExternalLinkUsageCell['value'],
+  }
+}
+
+function parseExternalLinkUsageResult(input: unknown): ExternalLinkUsageResult {
+  if (!isRecord(input) || !Array.isArray(input.links) || input.links.length > EXTERNAL_LINK_LIMIT) {
+    throw new Error('Invalid external links usage response.')
+  }
+  return {
+    links: input.links.map((link) => {
+      if (
+        !isRecord(link) ||
+        !isPositiveInteger(link.index) ||
+        !Array.isArray(link.cells) ||
+        link.cells.length > EXTERNAL_LINK_CELL_LIMIT
+      ) {
+        throw new Error('Invalid external links usage response.')
+      }
+      return { index: link.index, cells: link.cells.map(parseExternalLinkUsageCell) }
+    }),
+  }
+}
+
+/// One tab another workbook is open in: what the cross-workbook pick lists.
+function parseWorkbookTabsResult(input: unknown): WorkbookTabsResult {
+  if (!isRecord(input) || !Array.isArray(input.tabs) || input.tabs.length > EXTERNAL_LINK_LIMIT) {
+    throw new Error('Invalid workbook tabs response.')
+  }
+  return {
+    tabs: input.tabs.map((tab) => {
+      if (
+        !isRecord(tab) ||
+        !Number.isInteger(tab.wcId) ||
+        !isBoundedString(tab.name, 1_024) ||
+        !isBoundedString(tab.path, 32_768)
+      ) {
+        throw new Error('Invalid workbook tabs response.')
+      }
+      return { wcId: tab.wcId as number, name: tab.name, path: tab.path }
+    }),
+  }
+}
+
+function parsePickIdPayload(input: unknown): PickIdPayload {
+  if (!isRecord(input) || !isBoundedString(input.pickId, 256)) {
+    throw new Error('Invalid workbook pick payload.')
+  }
+  return { pickId: input.pickId }
+}
+
+function parseWorkbookPickSelection(input: unknown): WorkbookPickSelection {
+  const bound = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
+  if (
+    !isRecord(input) ||
+    !isBoundedString(input.pickId, 256) ||
+    !isBoundedString(input.sheetName, 1_024) ||
+    !bound(input.startRow) ||
+    !bound(input.endRow) ||
+    !bound(input.startColumn) ||
+    !bound(input.endColumn) ||
+    (input.rangeType !== undefined && typeof input.rangeType !== 'number')
+  ) {
+    throw new Error('Invalid workbook pick selection.')
+  }
+  return {
+    pickId: input.pickId,
+    sheetName: input.sheetName,
+    startRow: input.startRow,
+    endRow: input.endRow,
+    startColumn: input.startColumn,
+    endColumn: input.endColumn,
+    ...(input.rangeType === undefined ? {} : { rangeType: input.rangeType as number }),
+  }
+}
+
 function parseRangeResult(input: unknown): WorkbookRangeResult {
   if (
     !isRecord(input) ||
@@ -1934,6 +2223,30 @@ export function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveReques
     )
   )
     invalid('protected-range states: malformed entry')
+  if (input.externalLinkOps !== null && input.externalLinkOps !== undefined) {
+    if (
+      !isRecord(input.externalLinkOps) ||
+      !Array.isArray(input.externalLinkOps.broken) ||
+      input.externalLinkOps.broken.length > 64 ||
+      input.externalLinkOps.broken.some(
+        (index: unknown) => typeof index !== 'number' || !Number.isInteger(index) || index <= 0,
+      ) ||
+      !Array.isArray(input.externalLinkOps.retargets) ||
+      input.externalLinkOps.retargets.length > 64 ||
+      input.externalLinkOps.retargets.some(
+        (retarget: unknown) =>
+          !isRecord(retarget) ||
+          typeof retarget.index !== 'number' ||
+          !Number.isInteger(retarget.index) ||
+          retarget.index <= 0 ||
+          typeof retarget.target !== 'string' ||
+          retarget.target.length === 0 ||
+          retarget.target.length > 2_048,
+      )
+    ) {
+      invalid('external link operations: malformed entry')
+    }
+  }
   if (
     input.mode !== 'save-as' &&
     input.restoreWriteBack !== true &&
@@ -1961,7 +2274,8 @@ export function parseSaveRequest(input: WorkbookSaveRequest): WorkbookSaveReques
     input.definedNamesState === null &&
     input.themeState === null &&
     input.workbookProtectionState === null &&
-    input.protectedRangeStates.length === 0
+    input.protectedRangeStates.length === 0 &&
+    (input.externalLinkOps === null || input.externalLinkOps === undefined)
   )
     invalid('no changes to save')
   if (input.sheetOps.length > 0 && input.sheetOrder.length === 0)
@@ -3822,3 +4136,5 @@ function isOptionalEnum<T extends string>(
 ): input is T | undefined {
   return input === undefined || (values as readonly unknown[]).includes(input)
 }
+
+installAiSettingsBridge()

@@ -22,17 +22,26 @@ export interface SortSpec {
   readonly hasHeader: boolean
 }
 
+const isBlank = (v: CellScalar): boolean => v === null || v === ''
+
 /// blanks always sort last; numbers before booleans before text (Excel order)
 function compareScalars(a: CellScalar, b: CellScalar): number {
-  if (a === null && b === null) return 0
-  if (a === null) return 1
-  if (b === null) return -1
-  const rank = (value: Exclude<CellScalar, null>): number =>
+  if (isBlank(a) && isBlank(b)) return 0
+  if (isBlank(a)) return 1
+  if (isBlank(b)) return -1
+  const rank = (value: CellScalar): number =>
     typeof value === 'number' ? 0 : typeof value === 'string' ? 1 : 2
   const rankA = rank(a)
   const rankB = rank(b)
   if (rankA !== rankB) return rankA - rankB
-  if (typeof a === 'number' && typeof b === 'number') return a - b
+  if (typeof a === 'number' && typeof b === 'number') {
+    const aFinite = Number.isFinite(a)
+    const bFinite = Number.isFinite(b)
+    if (aFinite && bFinite) return a < b ? -1 : a > b ? 1 : 0
+    if (aFinite) return -1
+    if (bFinite) return 1
+    return 0
+  }
   if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b)
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
 }
@@ -50,7 +59,7 @@ export function computeSortedRowOrder(
     .map((row, index) => ({ key: row[keyOffset] ?? null, index }))
     .sort((a, b) => {
       const cmp = compareScalars(a.key, b.key)
-      const oriented = a.key === null || b.key === null || cmp === 0 ? cmp : ascending ? cmp : -cmp
+      const oriented = isBlank(a.key) || isBlank(b.key) || cmp === 0 ? cmp : ascending ? cmp : -cmp
       return oriented !== 0 ? oriented : a.index - b.index
     })
     .map((entry) => entry.index)

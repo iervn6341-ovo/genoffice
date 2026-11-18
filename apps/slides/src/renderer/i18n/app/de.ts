@@ -212,6 +212,7 @@ export const de = {
   appCtxEditText: 'Text bearbeiten',
   appCtxHyperlink: 'Hyperlink…',
   appCtxCropPicture: 'Bild zuschneiden',
+  appCtxResetCrop: 'Reset Crop',
   appCtxRemoveBackground: 'Hintergrund entfernen',
   appCtxChangeBgImage: 'Hintergrundbild ändern…',
   appCtxFormatBackground: 'Hintergrund formatieren…',
@@ -281,4 +282,21 @@ export const de = {
   appSettingsCancel: 'Abbrechen',
   appSettingsSave: 'Speichern',
   appCropHint: 'Eingabetaste zum Bestätigen · Esc zum Abbrechen · Klick außerhalb zum Bestätigen',
+  conflictTitle: 'Dateikonflikt erkannt',
+  conflictSubtitle:
+    'Diese Datei wurde außerhalb von GenOffice geändert, und Sie haben ungespeicherte Änderungen. Wählen Sie die Version, die Sie behalten möchten:',
+  conflictLocalTitle: 'Aktuelle Bearbeitung (GenOffice)',
+  conflictLocalBadge: 'Ungespeicherter Entwurf',
+  conflictLocalDesc:
+    'Behält alle Ihre Folienbearbeitungen, Stile und Inhaltsänderungen aus dieser Sitzung bei.',
+  conflictLocalOverwrite: 'Aktuelle Bearbeitung behalten (Datenträger überschreiben)',
+  conflictLocalSaveCopy: 'Kopie speichern…',
+  conflictDiskTitle: 'Externe Datei (Datenträger)',
+  conflictDiskBadge: 'Extern aktualisiert',
+  conflictDiskDesc:
+    'Verwirft ungespeicherte Änderungen und lädt die neueste Version vom Datenträger neu.',
+  conflictDiskMissing: 'Die Datei wurde außerhalb von GenOffice gelöscht oder verschoben.',
+  conflictDiskReload: 'Externe Version verwenden (neu laden)',
+  conflictDecideLater: 'Später entscheiden (weiter bearbeiten)',
+  appStatusFormatApplyFailed: 'Dieses Format konnte nicht angewendet werden',
 } satisfies Record<keyof typeof zh, string>

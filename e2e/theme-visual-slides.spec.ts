@@ -22,8 +22,13 @@ function luminance(rgb: string): number {
   return 0.2126 * Number(m[1]) + 0.7152 * Number(m[2]) + 0.0722 * Number(m[3])
 }
 
-test('slides chrome darkens while the slide canvas stays paper-white', async () => {
-  const launched = await launchShell({ onboardingSeen: true, videoDir: 'theme-visual-slides' })
+test('slides chrome darkens while the light-content slide canvas stays paper-white', async () => {
+  const launched = await launchShell({
+    onboardingSeen: true,
+    videoDir: 'theme-visual-slides',
+    // Content appearance is a separate preference; auto follows dark chrome.
+    settings: { contentTheme: 'light' },
+  })
   try {
     const shellPage = await findShellPage(launched.app)
     await shellPage.locator('.quick-card', { hasText: 'AI Slides' }).click()

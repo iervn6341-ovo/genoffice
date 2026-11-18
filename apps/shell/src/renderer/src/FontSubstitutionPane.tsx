@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  BUILTIN_FONT_FAMILIES,
   DEFAULT_FONT_SUBSTITUTIONS,
+  RECOMMENDED_SUBSTITUTE_FONTS,
+  isOfficeFamily,
   substituteIsUnavailable,
   type FontSubstitutionRule,
 } from '@genoffice/ui'
@@ -17,8 +18,14 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
   const [query, setQuery] = useState('')
   const [isAdding, setIsAdding] = useState(false)
   const [newOriginal, setNewOriginal] = useState('')
-  const [newSubstitute, setNewSubstitute] = useState('Songti TC')
+  const [newSubstitute, setNewSubstitute] = useState('PingFang TC')
+  const [isNewCustom, setIsNewCustom] = useState(false)
+  const [customInputRows, setCustomInputRows] = useState<Set<string>>(new Set())
+  const [acquiredFonts, setAcquiredFonts] = useState<Set<string>>(new Set())
+  const [acquiringFont, setAcquiringFont] = useState<string | null>(null)
   const [savedFeedback, setSavedFeedback] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [noOfficeDialogOpen, setNoOfficeDialogOpen] = useState(false)
 
   useEffect(() => {
     let canceled = false
@@ -46,13 +53,15 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
 
   const handleAdd = () => {
     const orig = newOriginal.trim()
-    const sub = newSubstitute.trim()
+    const sub = (newSubstitute || systemFonts[0]?.name || 'Carlito GO').trim()
     if (!orig || !sub) return
     const filtered = rules.filter((r) => r.original.toLowerCase() !== orig.toLowerCase())
     const next = [{ original: orig, substitute: sub, isDefault: false }, ...filtered]
     saveRules(next)
     setNewOriginal('')
+    setNewSubstitute('')
     setIsAdding(false)
+    setIsNewCustom(false)
   }
 
   const handleDelete = (original: string) => {
@@ -69,6 +78,32 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
     saveRules(next)
   }
 
+  const handleAcquire = async (fontFamily: string) => {
+    setAcquiringFont(fontFamily)
+    try {
+      const res = await window.aiOffice.acquireOfficeFont(fontFamily)
+      if (res.success) {
+        setAcquiredFonts((prev) => {
+          const next = new Set(prev)
+          next.add(fontFamily.toLowerCase())
+          return next
+        })
+        setToastMessage(`✓ ${t('fontSubAcquireSuccess')}`)
+        setTimeout(() => setToastMessage(null), 3500)
+      } else if (res.reason === 'no-office') {
+        setNoOfficeDialogOpen(true)
+      } else {
+        setToastMessage(`⚠ ${res.message}`)
+        setTimeout(() => setToastMessage(null), 4000)
+      }
+    } catch (err) {
+      setToastMessage(`⚠ ${String(err)}`)
+      setTimeout(() => setToastMessage(null), 4000)
+    } finally {
+      setAcquiringFont(null)
+    }
+  }
+
   const filteredRules = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return rules
@@ -77,12 +112,43 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
     )
   }, [rules, query])
 
-  // a rule whose target nothing on this machine answers to cannot do what it says: say so instead of
-  // letting the document fall back to a generic face silently
+  // Only surface system & bundled fonts that actually resolve on this machine,
+  // preventing misleading warnings when users pick a font from the "System" group.
+  const systemFonts = useMemo(
+    () =>
+      RECOMMENDED_SUBSTITUTE_FONTS.filter(
+        (f) => f.group === 'system' && !substituteIsUnavailable(f.name),
+      ),
+    [acquiredFonts],
+  )
+
+  const officeFonts = useMemo(
+    () => RECOMMENDED_SUBSTITUTE_FONTS.filter((f) => f.group === 'office'),
+    [],
+  )
+
+  const isKnownFont = (val: string) => {
+    const target = val.trim().toLowerCase()
+    return (
+      systemFonts.some((f) => f.name.toLowerCase() === target) ||
+      officeFonts.some((f) => f.name.toLowerCase() === target)
+    )
+  }
+
+  // Mark rules whose substitute target is unavailable on this machine,
+  // excluding fonts that have been acquired in this session
   const unavailable = useMemo(
     () =>
-      new Set(rules.filter((r) => substituteIsUnavailable(r.substitute)).map((r) => r.original)),
-    [rules],
+      new Set(
+        rules
+          .filter(
+            (r) =>
+              !acquiredFonts.has(r.substitute.toLowerCase()) &&
+              substituteIsUnavailable(r.substitute),
+          )
+          .map((r) => r.original),
+      ),
+    [rules, acquiredFonts],
   )
 
   return (
@@ -120,7 +186,10 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
           <button
             type="button"
             className="set-btn primary font-sub-btn"
-            onClick={() => setIsAdding(!isAdding)}
+            onClick={() => {
+              setIsAdding(!isAdding)
+              setIsNewCustom(false)
+            }}
           >
             + {t('fontSubAdd')}
           </button>
@@ -157,30 +226,62 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
             <div className="font-sub-add-col">
               <label className="font-sub-label">{t('fontSubTarget')}</label>
               <div className="font-sub-target-inputs">
-                <input
-                  type="text"
-                  className="set-input font-sub-input"
-                  placeholder={t('fontSubTargetPlaceholder')}
-                  value={newSubstitute}
-                  onChange={(e) => setNewSubstitute(e.target.value)}
-                />
-                <select
-                  className="set-input font-sub-quick-select"
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) setNewSubstitute(e.target.value)
-                  }}
-                  aria-label={t('fontSubTarget')}
-                >
-                  <option value="" disabled>
-                    ▾ 候選字型
-                  </option>
-                  {BUILTIN_FONT_FAMILIES.map((font) => (
-                    <option key={font} value={font}>
-                      {font}
-                    </option>
-                  ))}
-                </select>
+                {isNewCustom ? (
+                  <div className="font-sub-custom-input-wrap">
+                    <input
+                      type="text"
+                      className="set-input font-sub-input"
+                      placeholder={t('fontSubTargetPlaceholder')}
+                      value={newSubstitute}
+                      onChange={(e) => setNewSubstitute(e.target.value)}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      className="set-btn font-sub-back-btn"
+                      onClick={() => setIsNewCustom(false)}
+                      title={t('fontSubBackToSelect')}
+                    >
+                      ↩
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    className="set-input font-sub-select font-sub-input"
+                    value={newSubstitute || systemFonts[0]?.name || 'Carlito GO'}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (val === '__custom__') {
+                        setIsNewCustom(true)
+                      } else {
+                        setNewSubstitute(val)
+                      }
+                    }}
+                    aria-label={t('fontSubTarget')}
+                  >
+                    <optgroup label={t('fontSubGroupSystem')}>
+                      {systemFonts.map((font) => (
+                        <option key={font.name} value={font.name}>
+                          {font.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label={t('fontSubGroupOffice')}>
+                      {officeFonts.map((font) => (
+                        <option key={font.name} value={font.name}>
+                          {font.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    {!isKnownFont(newSubstitute || systemFonts[0]?.name || 'Carlito GO') &&
+                      (newSubstitute || systemFonts[0]?.name || 'Carlito GO').trim() && (
+                        <optgroup label={t('fontSubGroupCustom')}>
+                          <option value={newSubstitute}>{newSubstitute}</option>
+                        </optgroup>
+                      )}
+                    <option value="__custom__">{t('fontSubCustomOption')}</option>
+                  </select>
+                )}
               </div>
             </div>
           </div>
@@ -188,12 +289,22 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
             <button
               type="button"
               className="set-btn primary"
-              disabled={!newOriginal.trim() || !newSubstitute.trim()}
+              disabled={
+                !newOriginal.trim() ||
+                !(newSubstitute || systemFonts[0]?.name || 'Carlito GO').trim()
+              }
               onClick={handleAdd}
             >
               {t('fontSubSave')}
             </button>
-            <button type="button" className="set-btn" onClick={() => setIsAdding(false)}>
+            <button
+              type="button"
+              className="set-btn"
+              onClick={() => {
+                setIsAdding(false)
+                setIsNewCustom(false)
+              }}
+            >
               {t('cancel')}
             </button>
           </div>
@@ -216,68 +327,172 @@ export function FontSubstitutionPane({ t }: { t: TFunc }) {
               </tr>
             </thead>
             <tbody>
-              {filteredRules.map((rule) => (
-                <tr key={rule.original} className="font-sub-tr">
-                  <td className="font-sub-td">
-                    <span className="font-sub-orig-badge" title={rule.original}>
-                      {rule.original}
-                    </span>
-                  </td>
-                  <td className="font-sub-td">
-                    <div className="font-sub-target-cell">
-                      <input
-                        type="text"
-                        className="set-input font-sub-cell-input"
-                        value={rule.substitute}
-                        onChange={(e) => handleUpdateSubstitute(rule.original, e.target.value)}
-                      />
-                      <select
-                        className="set-input font-sub-cell-select"
-                        value=""
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            handleUpdateSubstitute(rule.original, e.target.value)
-                          }
-                        }}
-                        aria-label={t('fontSubTarget')}
-                      >
-                        <option value="" disabled>
-                          ▾
-                        </option>
-                        {BUILTIN_FONT_FAMILIES.map((font) => (
-                          <option key={font} value={font}>
-                            {font}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {unavailable.has(rule.original) && (
-                      <div className="font-sub-warn" role="note">
-                        ⚠ {t('fontSubSubstituteMissing')}
+              {filteredRules.map((rule) => {
+                const isCustomEditing = customInputRows.has(rule.original)
+                const isMissing =
+                  unavailable.has(rule.original) &&
+                  !acquiredFonts.has(rule.substitute.toLowerCase())
+                const canAcquire = isOfficeFamily(rule.substitute) && isMissing
+
+                return (
+                  <tr key={rule.original} className="font-sub-tr">
+                    <td className="font-sub-td">
+                      <span className="font-sub-orig-badge" title={rule.original}>
+                        {rule.original}
+                      </span>
+                    </td>
+                    <td className="font-sub-td">
+                      <div className="font-sub-target-cell">
+                        {isCustomEditing ? (
+                          <div className="font-sub-custom-input-wrap">
+                            <input
+                              type="text"
+                              className="set-input font-sub-cell-input"
+                              value={rule.substitute}
+                              onChange={(e) =>
+                                handleUpdateSubstitute(rule.original, e.target.value)
+                              }
+                              placeholder={t('fontSubTargetPlaceholder')}
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              className="set-btn font-sub-back-btn"
+                              onClick={() => {
+                                setCustomInputRows((prev) => {
+                                  const next = new Set(prev)
+                                  next.delete(rule.original)
+                                  return next
+                                })
+                              }}
+                              title={t('fontSubBackToSelect')}
+                            >
+                              ↩
+                            </button>
+                          </div>
+                        ) : (
+                          <select
+                            className="set-input font-sub-select font-sub-cell-select"
+                            value={rule.substitute}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              if (val === '__custom__') {
+                                setCustomInputRows((prev) => new Set(prev).add(rule.original))
+                              } else {
+                                handleUpdateSubstitute(rule.original, val)
+                              }
+                            }}
+                            aria-label={t('fontSubTarget')}
+                          >
+                            <optgroup label={t('fontSubGroupSystem')}>
+                              {systemFonts.map((font) => (
+                                <option key={font.name} value={font.name}>
+                                  {font.label}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label={t('fontSubGroupOffice')}>
+                              {officeFonts.map((font) => (
+                                <option key={font.name} value={font.name}>
+                                  {font.label}
+                                </option>
+                              ))}
+                            </optgroup>
+                            {!isKnownFont(rule.substitute) && rule.substitute.trim() && (
+                              <optgroup label={t('fontSubGroupCustom')}>
+                                <option value={rule.substitute}>{rule.substitute}</option>
+                              </optgroup>
+                            )}
+                            <option value="__custom__">{t('fontSubCustomOption')}</option>
+                          </select>
+                        )}
+                        {canAcquire && (
+                          <button
+                            type="button"
+                            className="set-btn font-sub-acquire-btn"
+                            disabled={acquiringFont === rule.substitute}
+                            onClick={() => handleAcquire(rule.substitute)}
+                            title={t('fontSubAcquire')}
+                          >
+                            {acquiringFont === rule.substitute
+                              ? t('fontSubAcquiring')
+                              : t('fontSubAcquire')}
+                          </button>
+                        )}
                       </div>
-                    )}
-                  </td>
-                  <td className="font-sub-td font-sub-col-type">
-                    <span
-                      className={`font-sub-badge ${rule.isDefault ? 'badge-default' : 'badge-custom'}`}
-                    >
-                      {rule.isDefault ? t('fontSubTypeDefault') : t('fontSubTypeCustom')}
-                    </span>
-                  </td>
-                  <td className="font-sub-td font-sub-col-actions">
-                    <button
-                      type="button"
-                      className="set-btn danger font-sub-action-btn"
-                      onClick={() => handleDelete(rule.original)}
-                      title={t('fontSubDelete')}
-                    >
-                      {t('fontSubDelete')}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {isMissing && (
+                        <div className="font-sub-warn" role="note">
+                          ⚠ {t('fontSubSubstituteMissing')}
+                        </div>
+                      )}
+                    </td>
+                    <td className="font-sub-td font-sub-col-type">
+                      <span
+                        className={`font-sub-badge ${rule.isDefault ? 'badge-default' : 'badge-custom'}`}
+                      >
+                        {rule.isDefault ? t('fontSubTypeDefault') : t('fontSubTypeCustom')}
+                      </span>
+                    </td>
+                    <td className="font-sub-td font-sub-col-actions">
+                      <button
+                        type="button"
+                        className="set-btn danger font-sub-action-btn"
+                        onClick={() => handleDelete(rule.original)}
+                        title={t('fontSubDelete')}
+                      >
+                        {t('fontSubDelete')}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {noOfficeDialogOpen && (
+        <div
+          className="font-sub-modal-backdrop"
+          onClick={() => setNoOfficeDialogOpen(false)}
+        >
+          <div
+            className="font-sub-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="font-sub-no-office-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 id="font-sub-no-office-title" className="font-sub-modal-title">
+              {t('fontSubNoOfficeTitle')}
+            </h4>
+            <p className="font-sub-modal-desc">{t('fontSubNoOfficeDesc')}</p>
+            <div className="font-sub-modal-actions">
+              <button
+                type="button"
+                className="set-btn primary"
+                onClick={async () => {
+                  await window.aiOffice.openFontsFolder()
+                  setNoOfficeDialogOpen(false)
+                }}
+              >
+                {t('fontSubOpenFontsFolder')}
+              </button>
+              <button
+                type="button"
+                className="set-btn"
+                onClick={() => setNoOfficeDialogOpen(false)}
+              >
+                {t('cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div className="font-sub-toast" role="status">
+          {toastMessage}
         </div>
       )}
     </div>

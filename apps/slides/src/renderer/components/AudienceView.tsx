@@ -10,7 +10,7 @@
  * Navigation input (clicks/→ etc.) is sent back for presenter arbitration (audienceNav); Esc ends
  * the whole show.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RenderFill, RenderNode, RenderSlide } from '@genoffice/pptx-render'
 import type { AnimationItem, ShapeKey, ShowSyncState, TransitionKind } from '../../shared/ipc'
 import { AnimatedSlideStage, useAnimPlayer } from './AnimatedSlide'
@@ -116,7 +116,7 @@ export function AudienceView() {
     () =>
       window.slidesApi.onDeckChanged?.(({ slides: all }) => {
         if (all.length === 0) return
-        cursorRef.current = ''
+        setAllAnims(null)
         setSlides(all)
       }),
     [],
@@ -172,7 +172,11 @@ export function AudienceView() {
   })
 
   const slide = sync && slides ? slides[sync.idx] : null
-  const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960)
+  const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960, {
+    key: `${sync?.idx ?? -1}:${sync?.visit ?? 0}`,
+    items: sync ? (allAnims?.[sync.idx] ?? null) : null,
+    cursor: { played: sync?.played ?? 0, playing: sync?.playing ?? false },
+  })
 
   // The presenter's pointer tool works with the mouse on this screen too (PowerPoint): the
   // laser or ink shows here at once and mirrors back to presenter view
@@ -184,14 +188,8 @@ export function AudienceView() {
 
   // Apply synced state: animation cursor seek alignment; play the transition effect on page turns (forward only)
   const shownRef = useRef(-1)
-  const cursorRef = useRef('')
-  useEffect(() => {
-    if (!sync || !slides || !allAnims) return
-    const cursor = `${sync.idx}:${sync.played}:${sync.playing}`
-    if (cursor !== cursorRef.current) {
-      cursorRef.current = cursor
-      player.seek(allAnims[sync.idx] ?? [], sync.played, sync.playing)
-    }
+  useLayoutEffect(() => {
+    if (!sync || !slides || !player.ready) return
     if (shownRef.current !== sync.idx) {
       const from = shownRef.current
       shownRef.current = sync.idx
@@ -210,11 +208,10 @@ export function AudienceView() {
       }
       board.clear()
     }
-    // player.seek has a stable reference
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sync, slides, allAnims])
+  }, [sync, slides, player.ready])
 
-  if (!slide || !sync) {
+  if (!slide || !sync || !player.ready) {
     return <div className="slideshow" />
   }
 

@@ -9,6 +9,20 @@ export interface OutlineNode {
   items?: OutlineNode[]
 }
 
+/** Preserve the bookmark tree's order and destinations in a flat floating list. */
+export function flattenOutline(nodes: OutlineNode[]) {
+  const items: { id: string; text: string; level: number; node: OutlineNode }[] = []
+  const visit = (nodes: OutlineNode[], level: number, prefix: string) => {
+    nodes.forEach((node, index) => {
+      const id = `${prefix}${index}`
+      if (node.title.trim()) items.push({ id, text: node.title, level, node })
+      if (node.items) visit(node.items, level + 1, `${id}.`)
+    })
+  }
+  visit(nodes, 1, '')
+  return items
+}
+
 function Item({
   node,
   depth,

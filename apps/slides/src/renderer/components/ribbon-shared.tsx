@@ -290,6 +290,7 @@ export type RibbonPanelKey =
   | 'collapse'
   | 'pen'
   | 'slideShow'
+  | 'cropMenu'
 
 /** Ribbon popups are mutually exclusive: a trigger closes every sibling popup
  *  on mousedown, before its own click-toggle runs. A trigger rendered inside
@@ -637,6 +638,8 @@ export interface Props {
   /** Animation pane (right side) toggle */
   animPaneOpen: boolean
   onToggleAnimPane: () => void
+  /** Editor order badges follow the Animations tab, even when the pane is closed. */
+  onAnimationTabActive?: (active: boolean) => void
   /** Current page's animation count (preview button availability) */
   animCount: number
   /** Preview the current page's animations on the edit canvas */
@@ -771,6 +774,13 @@ export interface Props {
   onPictureCrop?: () => void
   /** Crop mode is live — the Crop button shows its selected state */
   cropActive?: boolean
+  /** Crop aspect ratio / fill / fit / reset dropdown commands */
+  onCropAspectRatio?: (w: number, h: number) => void
+  onCropFill?: () => void
+  onCropFit?: () => void
+  onCropReset?: () => void
+  /** Whether the selected picture has an active crop rect */
+  contextPictureHasCrop?: boolean
   /** Picture opacity (1 = opaque) */
   onPictureOpacity?: (opacity: number) => void
   /** Current native brightness/contrast and recolor effects for the selected picture. */

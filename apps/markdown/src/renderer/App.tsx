@@ -5,7 +5,13 @@ import {
   type MarkdownSourceSnapshot,
 } from './markdown/roundtripSerializer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ImageViewer, useAutoSavePref } from '@genoffice/ui'
+import {
+  FloatingOutline,
+  floatingOutlineLabels,
+  ImageViewer,
+  useAutoSavePref,
+  useOutlineScrollSpy,
+} from '@genoffice/ui'
 import {
   pollUntilReady,
   runHeadlessRendererExport,
@@ -13,6 +19,7 @@ import {
 import { EditorContent, useEditor } from '@tiptap/react'
 import { FindPanel, type FindFocusRequest, type FindPanelStrings } from '@genoffice/ui'
 import type { Editor } from '@tiptap/core'
+import type { Node as PmNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import { t as translateNow, useI18n } from './i18n/locale'
 import { printEntryFor, type HtmlPrintOptions } from '@genoffice/electron-utils/print-job'
@@ -32,9 +39,12 @@ import type { SlashController, SlashMenuState } from './editor/slashCommand'
 import { dirOf, setImageBaseDir, VIEW_IMAGE_EVENT } from './editor/localImage'
 import { Ribbon } from './components/Ribbon'
 import { OutlinePane } from './components/OutlinePane'
+import { BacklinksPane } from './components/BacklinksPane'
+import { GraphView } from './components/GraphView'
 import { SlashMenu, type SlashMenuHandle } from './components/SlashMenu'
 import { ToastHost } from './components/toast'
 import { showToast } from './components/toast-bus'
+import { wikiFragmentPosition } from './editor/wikilink'
 import { PrintSheet } from './components/PrintSheet'
 import { TableMenu } from './components/TableMenu'
 import { FrontmatterPanel } from './components/FrontmatterPanel'
@@ -128,7 +138,7 @@ export function deriveAutoFileName(editor: Editor): string {
 }
 
 export default function App() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [filePath, setFilePath] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -150,6 +160,8 @@ export default function App() {
   const [outlineWidth, setOutlineWidth] = useState(
     () => Number(localStorage.getItem('mdapp.outlineWidth')) || undefined,
   )
+  const [backlinksOpen, setBacklinksOpen] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
   const [spellcheck, setSpellcheck] = useState(
     () => localStorage.getItem('mdapp.spellcheck') !== '0',
   )
@@ -173,6 +185,8 @@ export default function App() {
   const originalSourceRef = useRef<MarkdownSourceSnapshot | undefined>(undefined)
   const envelopeRef = useRef<DocEnvelope>(EMPTY_ENVELOPE)
   const editorRef = useRef<Editor | null>(null)
+  const savedBodyRef = useRef<PmNode | null>(null)
+  const savedFrontmatterRef = useRef('')
   // blocks of the text on disk paired with the editor's nodes; null until a
   // file is loaded or saved, and whenever the pairing could not be established
   const sourceMapRef = useRef<SourceMap | null>(null)
@@ -195,11 +209,17 @@ export default function App() {
   )
 
   const markDirty = useCallback(() => {
-    if (statusRef.current !== 'ready' || dirtyRef.current) return
-    dirtyRef.current = true
-    setDirty(true)
+    if (statusRef.current !== 'ready') return
+    const current = editorRef.current
+    const changed =
+      !current ||
+      !savedBodyRef.current ||
+      !current.state.doc.eq(savedBodyRef.current) ||
+      envelopeRef.current.frontmatter !== savedFrontmatterRef.current
+    dirtyRef.current = changed
+    setDirty(changed)
     setSaveState('idle')
-    window.markdownApi.setDirty(true)
+    window.markdownApi.setDirty(changed)
   }, [])
 
   const insertImage = useCallback(() => {
@@ -208,6 +228,28 @@ export default function App() {
       const current = editorRef.current
       if (relPath && current) uiOp(current, { op: 'insertImage', after: 'selection', src: relPath })
     })()
+  }, [])
+
+  /**
+   * Land on the heading a wiki link pointed at. The fragment waited in main
+   * for this path — the shell activates an open tab without waking anything —
+   * so it is taken here, once the note is actually on screen.
+   */
+  const jumpToWikiFragment = useCallback((path: string): void => {
+    const current = editorRef.current
+    if (!current) return
+    // The browser test harness stubs markdownApi without the Electron-only
+    // wiki channels; a missing API here means nothing to jump to, not a
+    // failed load.
+    if (typeof window.markdownApi?.takeWikiFragment !== 'function') return
+    void window.markdownApi.takeWikiFragment(path).then((fragment) => {
+      if (!fragment || filePathRef.current !== path) return
+      const pos = wikiFragmentPosition(current.state.doc, fragment)
+      if (pos === null) return
+      const selection = TextSelection.near(current.state.doc.resolve(pos))
+      current.view.dispatch(current.state.tr.setSelection(selection).scrollIntoView())
+      current.view.focus()
+    })
   }, [])
 
   const extensions = useMemo(() => {
@@ -221,8 +263,20 @@ export default function App() {
       slashController: controller,
       slashItems: () =>
         buildSlashItems({ insertImage: filePathRef.current ? insertImage : undefined }),
+      wikiLink: {
+        getDocumentPath: () => filePathRef.current ?? '',
+        onOpen: (path, fragment) => {
+          void window.markdownApi.rememberWikiFragment?.(path, fragment)
+          void window.markdownApi.openSourcePath(path)
+          // a link into the note already on screen opens no tab; jump here
+          if (filePathRef.current === path) jumpToWikiFragment(path)
+        },
+        // the module-level `t`, not the hook's: this memo holds the closure for
+        // the life of the editor, and the hook's `t` is a new function each render
+        onUnresolved: (target) => showToast(translateNow('wikiLinkUnresolved', { target }), 'error'),
+      },
     })
-  }, [insertImage])
+  }, [insertImage, jumpToWikiFragment])
 
   const editor = useEditor({
     extensions,
@@ -249,6 +303,24 @@ export default function App() {
     if (outlineWidth) localStorage.setItem('mdapp.outlineWidth', String(outlineWidth))
   }, [outlineWidth])
   const findTarget = useMemo(() => (editor ? tiptapFindTarget(editor) : null), [editor])
+  const floatingOutlineItems = useMemo(
+    () => outlineItems.map((item) => ({ ...item, id: String(item.pos) })),
+    [outlineItems],
+  )
+  const outlineAnchors = useCallback(() => {
+    const scroller = scrollRef.current
+    if (!scroller || !editor) return []
+    const origin = scroller.getBoundingClientRect().top - scroller.scrollTop
+    return floatingOutlineItems.flatMap((item) => {
+      const node = editor.view.nodeDOM(item.pos)
+      return node instanceof HTMLElement && node.getClientRects().length > 0
+        ? [{ id: item.id, top: node.getBoundingClientRect().top - origin }]
+        : []
+    })
+    // CSS zoom changes the displayed offsets without changing the source nodes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, floatingOutlineItems, zoom])
+  const activeOutlineId = useOutlineScrollSpy(scrollRef, editor?.view.dom ?? null, outlineAnchors)
 
   useEffect(() => {
     setImageBaseDir(filePath ? dirOf(filePath) : null)
@@ -283,9 +355,12 @@ export default function App() {
           const inner = frontmatterInner(envelope.frontmatter)
           setFmText(inner)
           if (inner) setFmOpen(true)
+          jumpToWikiFragment(path)
         } else {
           envelopeRef.current = { ...EMPTY_ENVELOPE }
         }
+        savedBodyRef.current = editor.state.doc
+        savedFrontmatterRef.current = envelopeRef.current.frontmatter
         statusRef.current = 'ready'
         setStatus('ready')
       } catch (err) {
@@ -299,7 +374,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [editor, roundTripEnabled])
+  }, [editor, roundTripEnabled, jumpToWikiFragment])
 
   const onFrontmatterChange = useCallback(
     (inner: string) => {
@@ -311,7 +386,7 @@ export default function App() {
   )
 
   /** Serialize and write to disk; false when canceled/failed (caller keeps the tab open) */
-  const doSave = useCallback(async (mode: SaveMode, suggestedName?: string): Promise<boolean> => {
+  const doSave = useCallback(async (mode: SaveMode): Promise<boolean> => {
     const current = editorRef.current
     if (!current || statusRef.current !== 'ready' || savingRef.current) return false
     savingRef.current = true
@@ -330,7 +405,7 @@ export default function App() {
         sourceAtSave,
       )
       const imageSources = imageSourcesFromEditor(current)
-      const result = await window.markdownApi.save({ text, imageSources, mode, suggestedName })
+      const result = await window.markdownApi.save({ text, imageSources, mode })
       if (result.ok && 'path' in result) {
         const unchanged =
           editorRef.current?.state.doc === docAtSave && envelopeRef.current.frontmatter === fmAtSave
@@ -372,6 +447,9 @@ export default function App() {
         }
         setImageBaseDir(dirOf(result.path))
         setFilePath(result.path)
+        savedBodyRef.current =
+          unchanged && editorRef.current ? editorRef.current.state.doc : docAtSave
+        savedFrontmatterRef.current = fmAtSave
         if (unchanged) {
           dirtyRef.current = false
           setDirty(false)
@@ -379,9 +457,12 @@ export default function App() {
           setSaveState('saved')
         } else {
           // the main process cleared its dirty flag on write — re-assert it
-          dirtyRef.current = true
-          setDirty(true)
-          window.markdownApi.setDirty(true)
+          const changed =
+            !editorRef.current?.state.doc.eq(savedBodyRef.current) ||
+            envelopeRef.current.frontmatter !== fmAtSave
+          dirtyRef.current = changed
+          setDirty(changed)
+          window.markdownApi.setDirty(changed)
           setSaveState('idle')
         }
         return true
@@ -621,8 +702,10 @@ export default function App() {
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return
       if (!(event.target as HTMLElement | null)?.closest?.('.editor-scroll')) return
-      event.preventDefault()
-      setZoom((value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value - event.deltaY * 0.6)))
+      const delta =
+        event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * 800 : event.deltaY
+      const clampedDelta = Math.max(-100, Math.min(100, delta))
+      setZoom((value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value * Math.exp(-clampedDelta * 0.0075))))
     }
     window.addEventListener('wheel', onWheel, { passive: false })
     return () => window.removeEventListener('wheel', onWheel)
@@ -699,9 +782,25 @@ export default function App() {
   const jumpToOutline = useCallback((pos: number): void => {
     const current = editorRef.current
     if (!current) return
-    const selection = TextSelection.near(current.state.doc.resolve(pos))
-    current.view.dispatch(current.state.tr.setSelection(selection).scrollIntoView())
-    current.view.focus()
+    const selection = TextSelection.near(
+      current.state.doc.resolve(Math.min(pos + 1, current.state.doc.content.size)),
+    )
+    current.view.dispatch(current.state.tr.setSelection(selection))
+    current.view.dom.focus({ preventScroll: true })
+    const target = current.view.nodeDOM(pos)
+    const scroller = scrollRef.current
+    if (target instanceof HTMLElement && scroller) {
+      scroller.scrollTo({
+        top: Math.max(
+          0,
+          scroller.scrollTop +
+            target.getBoundingClientRect().top -
+            scroller.getBoundingClientRect().top -
+            24,
+        ),
+        behavior: 'smooth',
+      })
+    }
   }, [])
   const askSendNow = useCallback((text: string): void => {
     setAiOpen(true)
@@ -735,12 +834,8 @@ export default function App() {
       sourceMapRef.current = buildSourceMap(current, current.state.doc, snapshot.body)
       markDirty()
     },
-    onRunDone: (mutated) => {
-      // AI wrote into a never-saved document → name it from the content and save silently
-      if (!mutated || filePathRef.current || !editorRef.current) return
-      const name = deriveAutoFileName(editorRef.current)
-      if (name) void doSave('save', name)
-    },
+    // An AI edit keeps an untitled document in memory until the user saves it.
+    onRunDone: () => {},
   }
 
   const fileName = filePath ? filePath.replace(/^.*[/\\]/, '') : null
@@ -794,6 +889,9 @@ export default function App() {
         outlineOpen={outlineOpen}
         onToggleOutline={() => setOutlineOpen((v) => !v)}
         hasOutline={outlineItems.length > 0}
+        backlinksOpen={backlinksOpen}
+        onToggleBacklinks={() => setBacklinksOpen((v) => !v)}
+        onOpenGraph={() => setGraphOpen(true)}
         spellcheck={spellcheck}
         onToggleSpellcheck={() => setSpellcheck((v) => !v)}
         aiOpen={aiOpen}
@@ -840,7 +938,21 @@ export default function App() {
             onResize={setOutlineWidth}
           />
         )}
+        {backlinksOpen && (
+          <BacklinksPane
+            path={filePath}
+            onOpen={(path) => void window.markdownApi.openSourcePath(path)}
+          />
+        )}
         <div className="app-content">
+          {!outlineOpen && (
+            <FloatingOutline
+              {...floatingOutlineLabels(lang)}
+              items={floatingOutlineItems}
+              activeId={activeOutlineId}
+              onSelect={(id) => jumpToOutline(Number(id))}
+            />
+          )}
           {showFind && findTarget && (
             <FindPanel
               target={findTarget}
@@ -877,7 +989,7 @@ export default function App() {
                 type="range"
                 min={MIN_ZOOM}
                 max={MAX_ZOOM}
-                step={ZOOM_STEP}
+                step={1}
                 value={Math.round(zoom)}
                 aria-label={t('zoom')}
                 onChange={(event) => setZoom(Number(event.target.value))}
@@ -898,6 +1010,16 @@ export default function App() {
       </div>
       <SlashMenu ref={slashMenuRef} state={slashState} onDismiss={() => setSlashState(null)} />
       <ToastHost />
+      {graphOpen && (
+        <GraphView
+          current={filePath}
+          onClose={() => setGraphOpen(false)}
+          onOpen={(path) => {
+            setGraphOpen(false)
+            void window.markdownApi.openSourcePath(path)
+          }}
+        />
+      )}
       {printSheet && (
         <PrintSheet
           busy={false}

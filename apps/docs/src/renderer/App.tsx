@@ -1,3 +1,5 @@
+import { numberingSectionBreak, withPageNumber, withoutPageNumber } from './editor/page-numbering'
+import { useAiSettingsSync } from '@genoffice/ui'
 import { DOC_CSS_COMMITTED_EVENT } from './editor/cjk-punct-shrink'
 import { refreshLayoutMeasurement } from './editor/layout-measure-refresh'
 import { nextNoteReference } from './editor/note-navigation'
@@ -265,7 +267,7 @@ import { useShallowStable, useStableCallbacks } from './use-stable'
 import { FindPanel } from './components/FindPanel'
 import { Ribbon } from './components/Ribbon'
 import { computeFormatState } from './components/ribbon-format-state'
-import { IconOutlineView, IconRedo, IconSave, IconUndo } from './components/icons'
+import { IconRedo, IconSave, IconUndo } from './components/icons'
 import { ToastHost } from './components/toast'
 import {
   AI_REWRITE_ACK_KEY,
@@ -334,7 +336,12 @@ import {
   type SpacingFields,
 } from './editor/paragraph-spacing'
 import { StylesPane } from './components/StylesPane'
-import { isDocDirty } from './doc-dirty'
+import {
+  bodyDirtyAgainstSaved,
+  forceBodyDirty,
+  isDocDirty,
+  persistedBodyChanged,
+} from './doc-dirty'
 import {
   EMPTY_HF_VARIANTS,
   hfFromPart,
@@ -728,7 +735,11 @@ export function App() {
   }, [zoom])
   const setZoom = useCallback((updater: number | ((prev: number) => number)) => {
     lastFitRef.current = null
-    setZoomState(updater)
+    setZoomState((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      zoomLiveRef.current = next
+      return next
+    })
   }, [])
   const scrollContainerRef = useRef<HTMLElement>(null)
   // Word-style dark page (editor/dark-page.ts): on by default in the dark theme,
@@ -781,12 +792,21 @@ export function App() {
     setHfViewState(v)
     setHfViewTouched(true)
   }
+  const numberPageBoundaries = useRef<{
+    doc: unknown
+    pages: PageSlice[]
+    blocks: BlockBox[]
+    factor: number
+  } | null>(null)
   const [pageInfo, setPageInfo] = useState({ current: 1, total: 1 })
   // last page's number for the document-end footer: text for the page marker, num for
   // even/odd parity (section restarts / pageNumberFmt make both differ from the physical count)
   const [lastPageNo, setLastPageNo] = useState<{ text: string; num: number } | null>(null)
   /** Page-number-format dialog + pending final-section pgNumType write (non-final sections rewrite sectPr via pgNumDirtySections) */
   const [pgNumModal, setPgNumModal] = useState<{
+    fromPage: string
+    hideBefore: boolean
+    physical: boolean
     fmt: string
     start: string
     chapStyle: number | null
@@ -1037,6 +1057,7 @@ export function App() {
   const layoutSnapshot = (): LayoutSnapshot => ({
     section,
     sectionDirty,
+    fullSections: sections,
     sections: sectionLayouts(sections),
     sectionsDirty,
     titlePg,
@@ -1105,7 +1126,7 @@ export function App() {
     }
     setSection(s.section)
     setSectionDirty(s.sectionDirty)
-    const restoredSections = applySectionLayouts(sections, s.sections)
+    const restoredSections = applySectionLayouts(s.fullSections ?? sections, s.sections)
     const numberingBaseline = doc ? readSections(doc.parsed) : []
     const numberingEdits = pageNumberEditsAgainstBaseline(restoredSections, numberingBaseline)
     setSections(restoredSections)
@@ -1144,6 +1165,7 @@ export function App() {
   }
   const layoutRef = useRef({ snapshot: layoutSnapshot, apply: applyLayoutSnapshot })
   layoutRef.current = { snapshot: layoutSnapshot, apply: applyLayoutSnapshot }
+  const savedLayoutRef = useRef<LayoutSnapshot | null>(null)
   const commitLayout = (change: (before: LayoutSnapshot) => Partial<LayoutSnapshot>) => {
     const before = layoutRef.current.snapshot()
     const after: LayoutSnapshot = { ...before, ...change(before) }
@@ -1201,10 +1223,6 @@ export function App() {
   const [showNav, setShowNav] = useState(() => localStorage.getItem('aidocs.showNav') === '1')
   const closeNav = useCallback(() => setShowNav(false), [])
   const [showFloatingOutline, setShowFloatingOutline] = useState(false)
-  const [hasRightGutter, setHasRightGutter] = useState<boolean>(() => {
-    return typeof window !== 'undefined' ? window.innerWidth >= 1080 : true
-  })
-  const [activeHeadingText, setActiveHeadingText] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('print')
   const [readMode, setReadMode] = useState(false)
   const [showGrid, setShowGrid] = useState(false)
@@ -1641,8 +1659,10 @@ export function App() {
     onSelectionUpdate: () => forceRender(),
     // typing in the main document takes ribbon routing back from any textbox
     onFocus: () => setActiveSubEditor(null),
-    onUpdate: () => {
-      dirtyRef.current = true
+    onUpdate: ({ editor: updated, transaction }) => {
+      const againstSaved = bodyDirtyAgainstSaved(updated)
+      if (againstSaved !== null) dirtyRef.current = againstSaved
+      else if (persistedBodyChanged(transaction.before, updated.state.doc)) dirtyRef.current = true
       forceRender()
     },
   })
@@ -1653,7 +1673,9 @@ export function App() {
     const onTransaction = ({ transaction }: { transaction: Transaction }) => {
       const restored = restoredLayout(transaction, transaction.before.attrs[LAYOUT_ATTR])
       if (restored) {
-        layoutRef.current.apply(withRestoreDirty(restored, layoutRef.current.snapshot()))
+        layoutRef.current.apply(
+          withRestoreDirty(restored, layoutRef.current.snapshot(), savedLayoutRef.current),
+        )
       }
     }
     editor.on('transaction', onTransaction)
@@ -1673,9 +1695,10 @@ export function App() {
     [],
   )
 
+  useAiSettingsSync(setSettings)
+
   useEffect(() => {
     void window.desktop.getRecentFiles().then(setRecent)
-    void window.desktop.getAiSettings().then(setSettings)
   }, [])
 
   useEffect(() => {
@@ -1689,32 +1712,6 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('aidocs.showFloatingOutline', showFloatingOutline ? '1' : '0')
   }, [showFloatingOutline])
-
-  useEffect(() => {
-    const el = scrollContainerRef.current
-    if (!el) return
-    const updateGutter = () => {
-      const area = el.closest('.editor-area') ?? el
-      const page = el.querySelector('.doc-page')
-      if (!area || !page) {
-        setHasRightGutter(window.innerWidth >= 1080)
-        return
-      }
-      const areaRect = area.getBoundingClientRect()
-      const pageRect = page.getBoundingClientRect()
-      const rightGutter = areaRect.right - pageRect.right
-      const fits = rightGutter >= 80 && areaRect.width >= 960
-      setHasRightGutter(fits)
-    }
-    updateGutter()
-    const ro = new ResizeObserver(updateGutter)
-    ro.observe(el)
-    window.addEventListener('resize', updateGutter)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', updateGutter)
-    }
-  }, [doc])
 
   const spellcheckWasOn = useRef(spellcheck)
   const respellKickBusy = useRef(false)
@@ -1942,28 +1939,169 @@ export function App() {
     refreshLayoutMeasurement(editor, 'tabStops')
   }, [editor, docFlags.defaultTabStopTwips])
 
-  // Pinch-to-zoom: Chromium delivers trackpad pinch as a wheel event
-  // with ctrlKey set. Also support ⌘+scroll. Must be non-passive to preventDefault.
-  // The viewport point under the cursor is stashed for the zoom layout effect
-  // below so the content there stays put (public #238); set only when the zoom
-  // actually changes, else a clamped tick would leave a stale anchor behind.
-  const zoomAnchorRef = useRef<{ vx: number; vy: number } | null>(null)
+  // Browser compositor-style pinch-to-zoom:
+  // Trackpad pinch delivers high-frequency wheel events (60-120/sec). Calling setZoom directly on
+  // every event re-renders the entire App (8,000+ lines) and reflows the entire ProseMirror document per tick.
+  // Instead, the active gesture applies a pure GPU 2D affine transform to `.doc-zoom` (rAF-batched),
+  // pinning the cursor anchor point with 0 layout reflows. When the gesture completes (150ms debounce),
+  // the transform is cleared and the final layout dimensions and scroll offsets commit cleanly.
+  const zoomAnchorRef = useRef<{
+    gesture?: boolean
+    anchorX?: number
+    anchorY?: number
+    vx: number
+    vy: number
+    startZoom?: number
+    pinEl?: HTMLElement | null
+    pinOffsetX?: number
+    pinOffsetY?: number
+  } | null>(null)
+  const docZoomGestureRef = useRef<{
+    active: boolean
+    raf: number
+    timer: number
+    startZoom: number
+    pendingZoom: number
+    anchor: { clientX: number; clientY: number } | null
+    vx: number
+    vy: number
+    containerRect: DOMRect | null
+    pinEl?: HTMLElement | null
+    pinOffsetX?: number
+    pinOffsetY?: number
+    initialScrollTop: number
+    initialScrollLeft: number
+    unpin?: () => void
+  }>({
+    active: false,
+    raf: 0,
+    timer: 0,
+    startZoom: 100,
+    pendingZoom: 100,
+    anchor: null,
+    vx: 0,
+    vy: 0,
+    containerRect: null,
+    initialScrollTop: 0,
+    initialScrollLeft: 0,
+  })
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
-      if (!(e.target as HTMLElement | null)?.closest?.('.editor-scroll')) return
+      const target = e.target as HTMLElement | null
+      if (!target?.closest?.('.editor-scroll')) return
       e.preventDefault()
-      const rect = scrollContainerRef.current?.getBoundingClientRect()
-      const anchor = rect ? { vx: e.clientX - rect.left, vy: e.clientY - rect.top } : null
-      setZoom((z) => {
-        const next = Math.min(200, Math.max(50, z - e.deltaY * 0.6))
-        if (next !== z) zoomAnchorRef.current = anchor
-        return next
-      })
+
+      const g = docZoomGestureRef.current
+      const container = scrollContainerRef.current
+      const page = container?.querySelector<HTMLElement>('.doc-zoom')
+      if (!container || !page) return
+
+      // Initialize the compositor gesture once at start of pinch
+      if (!g.active) {
+        g.active = true
+        g.startZoom = zoomLiveRef.current || 100
+        g.pendingZoom = g.startZoom
+        g.initialScrollTop = container.scrollTop
+        g.initialScrollLeft = container.scrollLeft
+        const cr = container.getBoundingClientRect()
+        const pr = page.getBoundingClientRect()
+        g.containerRect = cr
+        g.anchor = { clientX: e.clientX, clientY: e.clientY }
+        g.vx = e.clientX - pr.left
+        g.vy = e.clientY - pr.top
+
+        // Capture the DOM element directly under the cursor for exact paragraph pinning
+        const targetUnder = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+        const pinEl =
+          (targetUnder?.closest(
+            'p, h1, h2, h3, h4, h5, h6, table, tr, li, blockquote, .doc-toc-line, .doc-page > *',
+          ) as HTMLElement | null) ?? targetUnder
+        g.pinEl = pinEl
+        if (pinEl) {
+          const pinRect = pinEl.getBoundingClientRect()
+          g.pinOffsetY = e.clientY - pinRect.top
+          g.pinOffsetX = e.clientX - pinRect.left
+        }
+
+        const currentZoomFactor = (g.startZoom || 100) / 100
+        const localX = g.vx / currentZoomFactor
+        const localY = g.vy / currentZoomFactor
+        page.style.willChange = 'transform'
+        page.style.transformOrigin = `${localX}px ${localY}px`
+
+        const pinScroll = () => {
+          if (!g.active || !container) return
+          if (container.scrollTop !== g.initialScrollTop) container.scrollTop = g.initialScrollTop
+          if (container.scrollLeft !== g.initialScrollLeft) container.scrollLeft = g.initialScrollLeft
+        }
+        g.unpin = () => {
+          container.removeEventListener('scroll', pinScroll, true)
+        }
+        container.addEventListener('scroll', pinScroll, true)
+      }
+
+      const delta =
+        e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY
+      const clampedDelta = Math.max(-100, Math.min(100, delta))
+      const factor = Math.exp(-clampedDelta * 0.0075)
+      g.pendingZoom = Math.min(200, Math.max(50, g.pendingZoom * factor))
+
+      if (!g.raf) {
+        g.raf = requestAnimationFrame(() => {
+          g.raf = 0
+          if (!g.active) return
+          const p = container.querySelector<HTMLElement>('.doc-zoom')
+          if (!p) return
+          const visualRatio = g.pendingZoom / g.startZoom
+          p.style.transform = `scale(${visualRatio})`
+
+          // Live status-bar slider and label update without triggering React re-render
+          const slider = document.querySelector<HTMLInputElement>('.status-bar .zoom-slider')
+          if (slider) slider.value = String(Math.round(g.pendingZoom))
+          const valLabel = document.querySelector<HTMLElement>('.status-bar .zoom-value')
+          if (valLabel) valLabel.textContent = `${Math.round(g.pendingZoom)}%`
+        })
+      }
+
+      window.clearTimeout(g.timer)
+      g.timer = window.setTimeout(() => {
+        if (!g.active) return
+        g.unpin?.()
+        const committedZoom = g.pendingZoom
+        if (g.anchor) {
+          zoomAnchorRef.current = {
+            gesture: true,
+            anchorX: g.anchor.clientX,
+            anchorY: g.anchor.clientY,
+            vx: g.vx,
+            vy: g.vy,
+            startZoom: g.startZoom,
+            pinEl: g.pinEl,
+            pinOffsetX: g.pinOffsetX,
+            pinOffsetY: g.pinOffsetY,
+          }
+        }
+        g.active = false
+        zoomLiveRef.current = committedZoom
+        setZoom(committedZoom)
+      }, 250)
     }
     window.addEventListener('wheel', onWheel, { passive: false })
-    return () => window.removeEventListener('wheel', onWheel)
-  }, [])
+    return () => {
+      window.removeEventListener('wheel', onWheel)
+      docZoomGestureRef.current.unpin?.()
+      cancelAnimationFrame(docZoomGestureRef.current.raf)
+      window.clearTimeout(docZoomGestureRef.current.timer)
+      const container = scrollContainerRef.current
+      const p = container?.querySelector<HTMLElement>('.doc-zoom')
+      if (p) {
+        p.style.willChange = ''
+        p.style.transform = ''
+        p.style.transformOrigin = ''
+      }
+    }
+  }, [setZoom])
 
   // Keep the document point under the anchor (cursor for wheel zoom, viewport
   // center otherwise) fixed across a zoom change. Runs after the zoomed layout
@@ -1974,6 +2112,12 @@ export function App() {
   // shrink the overflow and clamp them before this effect gets to read them.
   const scrollPosRef = useRef({ left: 0, top: 0 })
   const prevZoomRef = useRef(zoom)
+  const activePinTargetRef = useRef<{
+    el: HTMLElement
+    targetTop: number
+    targetLeft?: number
+    timestamp: number
+  } | null>(null)
   useLayoutEffect(() => {
     const prevZoom = prevZoomRef.current
     prevZoomRef.current = zoom
@@ -1983,23 +2127,69 @@ export function App() {
     const page = container?.querySelector<HTMLElement>('.doc-zoom')
     if (!container || !page || prevZoom === zoom) return
 
-    const ratio = zoom / prevZoom
-    const vx = anchor ? anchor.vx : container.clientWidth / 2
-    const vy = anchor ? anchor.vy : container.clientHeight / 2
-    const cs = getComputedStyle(container)
-    const padLeft = parseFloat(cs.paddingLeft) || 0
-    const innerWidth = container.clientWidth - padLeft - (parseFloat(cs.paddingRight) || 0)
-    const containerRect = container.getBoundingClientRect()
-    const pageRect = page.getBoundingClientRect()
-    const pageLeft = pageRect.left - containerRect.left + container.scrollLeft
-    const pageTop = pageRect.top - containerRect.top + container.scrollTop
-    const prevPageLeft = padLeft + Math.max(0, (innerWidth - pageRect.width / ratio) / 2)
-    const prev = scrollPosRef.current
+    // Clear temporary GPU transform synchronously now that the new zoom layout is active
+    page.style.willChange = ''
+    page.style.transform = ''
+    page.style.transformOrigin = ''
 
-    const docX = Math.max(0, prev.left + vx - prevPageLeft)
-    const docY = Math.max(0, prev.top + vy - pageTop)
-    container.scrollLeft = pageLeft + docX * ratio - vx
-    container.scrollTop = pageTop + docY * ratio - vy
+    if (
+      anchor?.gesture &&
+      anchor.pinEl &&
+      document.contains(anchor.pinEl) &&
+      anchor.anchorY != null &&
+      anchor.pinOffsetY != null
+    ) {
+      // Exact paragraph / element pinning: adjust scrollTop so the element stays at its pre-zoom screen coordinate
+      const curPinRect = anchor.pinEl.getBoundingClientRect()
+      const targetTop = anchor.anchorY - anchor.pinOffsetY
+      const diffY = curPinRect.top - targetTop
+      container.scrollTop = Math.max(0, container.scrollTop + diffY)
+
+      const targetLeft =
+        anchor.pinOffsetX != null && anchor.anchorX != null
+          ? anchor.anchorX - anchor.pinOffsetX
+          : undefined
+      if (targetLeft != null) {
+        const diffX = curPinRect.left - targetLeft
+        container.scrollLeft = Math.max(0, container.scrollLeft + diffX)
+      }
+
+      activePinTargetRef.current = {
+        el: anchor.pinEl,
+        targetTop,
+        targetLeft,
+        timestamp: performance.now(),
+      }
+    } else if (anchor?.gesture && anchor.anchorX != null && anchor.anchorY != null && anchor.startZoom) {
+      const docDistX = anchor.vx * (zoom / anchor.startZoom)
+      const docDistY = anchor.vy * (zoom / anchor.startZoom)
+      const containerRect = container.getBoundingClientRect()
+      const pageRect = page.getBoundingClientRect()
+      const pageScrollLeft = pageRect.left - containerRect.left + container.scrollLeft
+      const pageScrollTop = pageRect.top - containerRect.top + container.scrollTop
+      const targetPointX = pageScrollLeft + docDistX
+      const targetPointY = pageScrollTop + docDistY
+      container.scrollLeft = Math.max(0, targetPointX - (anchor.anchorX - containerRect.left))
+      container.scrollTop = Math.max(0, targetPointY - (anchor.anchorY - containerRect.top))
+    } else {
+      const ratio = zoom / prevZoom
+      const vx = anchor ? anchor.vx : container.clientWidth / 2
+      const vy = anchor ? anchor.vy : container.clientHeight / 2
+      const cs = getComputedStyle(container)
+      const padLeft = parseFloat(cs.paddingLeft) || 0
+      const innerWidth = container.clientWidth - padLeft - (parseFloat(cs.paddingRight) || 0)
+      const containerRect = container.getBoundingClientRect()
+      const pageRect = page.getBoundingClientRect()
+      const pageLeft = pageRect.left - containerRect.left + container.scrollLeft
+      const pageTop = pageRect.top - containerRect.top + container.scrollTop
+      const prevPageLeft = padLeft + Math.max(0, (innerWidth - pageRect.width / ratio) / 2)
+      const prev = scrollPosRef.current
+
+      const docX = Math.max(0, prev.left + vx - prevPageLeft)
+      const docY = Math.max(0, prev.top + vy - pageTop)
+      container.scrollLeft = pageLeft + docX * ratio - vx
+      container.scrollTop = pageTop + docY * ratio - vy
+    }
     scrollPosRef.current = { left: container.scrollLeft, top: container.scrollTop }
   }, [zoom])
 
@@ -2294,8 +2484,27 @@ export function App() {
     },
   }
 
+  const savedParsedDoc = doc?.parsed
+  useLayoutEffect(() => {
+    savedLayoutRef.current = savedParsedDoc ? layoutRef.current.snapshot() : null
+  }, [savedParsedDoc])
+
   const loadFile = useCallback(async (result: OpenDocxResult) => {
+    const isSameDoc = !!(
+      result &&
+      'path' in result &&
+      fileCtxRef.current.doc?.filePath === result.path
+    )
+    const prevScroll = isSameDoc
+      ? document.querySelector<HTMLElement>('.editor-scroll')?.scrollTop
+      : undefined
     const outcome = await loadFileImpl(fileCtxRef.current, result)
+    if (outcome === 'ok' && prevScroll !== undefined && prevScroll > 0) {
+      requestAnimationFrame(() => {
+        const scroller = document.querySelector<HTMLElement>('.editor-scroll')
+        if (scroller) scroller.scrollTop = prevScroll
+      })
+    }
     // a failed open with no document yet (boot, or the open that superseded the
     // boot open) must land on blank instead of the "Opening…" screen
     if (outcome === 'failed' && !fileCtxRef.current.doc) await newFileImpl(fileCtxRef.current)
@@ -2343,7 +2552,11 @@ export function App() {
 
         // 'password': the prompt is up; its cancel path lands on blank instead.
         const outcome = pending ? await loadFile(pending) : 'canceled'
-        if (outcome === 'canceled') await newFile()
+        if (outcome === 'canceled') {
+          const recovery = aiContent ? null : await window.desktop.consumeUntitledRecovery()
+          if (recovery) await loadFile(recovery)
+          else await newFile()
+        }
         if (aiContent && !pending) {
           // fileCtxRef refreshes per render: wait until newFile's setDoc landed
           for (let i = 0; i < 100 && !fileCtxRef.current.doc; i++) {
@@ -2413,6 +2626,7 @@ export function App() {
       if (res.ok) {
         setDoc((d) => (d ? { ...d, encrypted: !!result.openPassword } : d))
         // the on-disk file only changes on the next save
+        forceBodyDirty(editor)
         dirtyRef.current = true
         changed = true
       }
@@ -2850,12 +3064,15 @@ export function App() {
   const openPgNumModal = useCallback(() => {
     const sec = sections[Math.min(activeSection, sections.length - 1)]
     setPgNumModal({
+      fromPage: String(pageInfo.current),
+      hideBefore: true,
+      physical: false,
       fmt: sec?.pageNumberFmt ?? 'decimal',
       start: sec?.pageNumberStart !== undefined ? String(sec.pageNumberStart) : '',
       chapStyle: sec?.pageNumberChapterStyle ?? null,
       chapSep: sec?.pageNumberChapterSeparator ?? 'hyphen',
     })
-  }, [sections, activeSection])
+  }, [sections, activeSection, pageInfo.current])
 
   const numberedHeadingLevels = Array.from({ length: 9 }, (_, i) => i + 1).filter((level) => {
     const parsed = doc?.parsed
@@ -2875,6 +3092,134 @@ export function App() {
   /** Apply the page-number format to the cursor's section: final section via SaveOptions.pgNumType, others rewrite their sectPr */
   const applyPgNumFormat = useCallback(() => {
     if (!pgNumModal) return
+    if (pgNumModal.physical && editor) {
+      const fromPage = Number(pgNumModal.fromPage),
+        start = Number(pgNumModal.start)
+      const boundaries = numberPageBoundaries.current
+      if (
+        !Number.isInteger(fromPage) ||
+        fromPage < 1 ||
+        fromPage > pageInfo.total ||
+        pgNumModal.start.trim() === '' ||
+        !Number.isInteger(start) ||
+        start < 0 ||
+        start > 32767
+      )
+        return
+      const boundary = boundaries?.pages[fromPage - 1]
+      if (!boundaries || boundaries.doc !== editor.state.doc || !boundary) {
+        setStatus(t('appPageNumberBoundaryUnavailable'))
+        return
+      }
+      let boundaryPos: number | undefined = fromPage === 1 ? 0 : undefined
+      if (fromPage > 1) {
+        const block = boundaries.blocks.find((b) => b.el && b.top + b.height > boundary.start + 0.5)
+        const pm = editor.view.dom
+        const natural = pm.classList.contains('measuring-natural')
+        pm.classList.add('measuring-natural')
+        try {
+          if (block?.el) {
+            if (boundary.start > block.top + 1.5) {
+              const anchor =
+                lineStartAnchor(block.el, boundary.start - block.top, boundaries.factor) ??
+                nextLineAnchor(block.el, boundary.start - block.top, boundaries.factor)
+              boundaryPos = anchor ? posFromAnchor(editor.view, anchor) : undefined
+            } else {
+              const resolved = editor.state.doc.resolve(editor.view.posAtDOM(block.el, 0))
+              boundaryPos = resolved.depth ? resolved.before(1) : resolved.pos
+            }
+          }
+        } catch {
+          /* A stale DOM boundary must be remeasured before editing. */
+        } finally {
+          if (!natural) pm.classList.remove('measuring-natural')
+        }
+      }
+      if (boundaryPos === undefined) {
+        setStatus(t('appPageNumberBoundaryUnavailable'))
+        return
+      }
+      const before = layoutRef.current.snapshot()
+      let next = [...sections],
+        target = boundary.section
+      let mutate:
+        | ((tr: import('@tiptap/pm/state').Transaction) => import('@tiptap/pm/state').Transaction)
+        | undefined
+      const alreadyStarts = fromPage === 1 || boundaries.pages[fromPage - 2]?.section !== target
+      if (!alreadyStarts) {
+        try {
+          const split = numberingSectionBreak(
+            editor,
+            boundaryPos,
+            sections,
+            target,
+            effectiveSectPrXml(target) ?? sections[target].sectPrXml,
+          )
+          next = split.sections
+          target = split.target
+          mutate = split.mutate
+        } catch {
+          setStatus(t('appPageNumberInsideTable'))
+          return
+        }
+      }
+      next = next.map((sec, i) =>
+        i < target
+          ? sec
+          : {
+              ...sec,
+              ...(i === target && target > 0 ? { startType: 'nextPage' as const } : {}),
+              pageNumberStart: i === target ? start : undefined,
+              pageNumberFmt: pgNumModal.fmt === 'decimal' ? undefined : pgNumModal.fmt,
+              pageNumberChapterStyle: pgNumModal.chapStyle ?? undefined,
+              pageNumberChapterSeparator:
+                pgNumModal.chapStyle === null ? undefined : pgNumModal.chapSep,
+            },
+      )
+      const edits = { ...before.sectionHfEdits },
+        links = { ...before.sectionHfLinkEdits },
+        refs = { ...before.sectionHfRefEdits }
+      next.forEach((sec, i) => {
+        // A new prefix and suffix inherit the original owner's effective parts.
+        const source = mutate
+          ? i === target - 1 || i === target
+            ? target - 1
+            : i > target
+              ? i - 1
+              : i
+          : i
+        for (const kind of ['header', 'footer'] as const)
+          for (const view of ['default', 'first', 'even'] as const) {
+            const hf = sectionHfAt(source, kind, view)
+            const key = `${sec.lastBlockIndex}:${kind}:${view}`
+            if (i < target && pgNumModal.hideBefore) edits[key] = withoutPageNumber(hf)
+            else if (i >= target) {
+              const headerHasNumber =
+                sectionHfAt(source, 'header', view)?.pageNumber ||
+                sectionHfAt(source, 'header', view)?.text.includes('\uE001')
+              edits[key] =
+                kind === 'footer' && !headerHasNumber ? withPageNumber(hf) : (hf ?? { text: '' })
+            } else if (mutate && i === target - 1) edits[key] = hf ?? { text: '' }
+            else continue
+            delete links[key]
+            delete refs[key]
+          }
+      })
+      const after: LayoutSnapshot = {
+        ...before,
+        fullSections: next,
+        sections: sectionLayouts(next),
+        pgNumDirtySections: next.slice(0, -1).map((_, i) => i),
+        sectionHfEdits: edits,
+        sectionHfLinkEdits: links,
+        sectionHfRefEdits: refs,
+      }
+      layoutRef.current.apply(after)
+      recordLayoutChange(editor, before, after, mutate)
+      setPgNumModal(null)
+      setStatus(t('appPgNumFormatSet'))
+      return
+    }
     const fmt = pgNumModal.fmt === 'decimal' ? undefined : pgNumModal.fmt
     const start =
       pgNumModal.start.trim() === '' ? undefined : Math.max(0, parseInt(pgNumModal.start, 10) || 0)
@@ -2912,7 +3257,7 @@ export function App() {
     requestAnimationFrame(() => editor?.commands.focus())
     setStatus(t('appPgNumFormatSet'))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- commitLayout reads the live layout through layoutRef
-  }, [pgNumModal, sections, activeSection, editor])
+  }, [pgNumModal, sections, activeSection, editor, pageInfo.total, sectionHfAt])
 
   const exportPdf = useCallback(
     (outPath?: string) => exportPdfImpl(fileCtxRef.current, outPath),
@@ -4020,11 +4365,19 @@ export function App() {
           ? chapterNumbersForPages(slices, mBlocks, secs, doc.parsed.headingStyleIds)
           : slices.map(() => null)
       const byEl = new Map(mBlocks.filter((b) => b.el).map((b) => [b.el as HTMLElement, b.top]))
+      const pmRect = pm.getBoundingClientRect()
       const pages: string[] = []
       for (const pos of positions ??
         collectHeadings(editor.state.doc).map((heading) => heading.pos)) {
         const dom = editor.view.nodeDOM(pos) as HTMLElement | null
-        const top = dom ? byEl.get(dom) : undefined
+        let rootEl: HTMLElement | null = dom
+        while (rootEl && rootEl.parentElement && rootEl.parentElement !== pm) {
+          rootEl = rootEl.parentElement
+        }
+        let top = rootEl ? byEl.get(rootEl) : undefined
+        if (top === undefined && rootEl) {
+          top = (rootEl.getBoundingClientRect().top - pmRect.top) / factor
+        }
         const idx = top === undefined ? 1 : pageAt(slices, top + 1)
         const pageIndex = Math.min(Math.max(idx, 1), nums.length) - 1
         const owner = secs[slices[pageIndex]?.section ?? 0]
@@ -4141,24 +4494,34 @@ export function App() {
     const remeasurePass = () => {
       const pm = pmEl()
       if (!pm) return
-      followUps = selfScheduled ? followUps + 1 : 0
-      selfScheduled = false
-      retrigger = []
-      const tStart = performance.now()
-      let tMeasure = 0
-      let tSlice = 0
-      // consecutive anchor-paragraph runs collapse onto their band union before
-      // measurement (layout-affecting, idempotent)
-      syncAnchorBands(pm, factor)
-      // natural-flow measuring state: in-paragraph gap widgets force a line break
-      // at the PREVIOUS pass's cut, so measuring with them in layout re-confirms
-      // that cut even after decoration-only reflows (justify space-shrink) moved
-      // the natural wrap points — a justified page-last line then stayed
-      // stretched sparse until an at-boundary edit (r177). Hidden, sampling AND
-      // cut-anchor resolution below see the natural wrap; removed before
-      // setPageGaps so widget building and later display-state reads (strip
-      // alignment, cut overlays, locate) run against the real layout.
-      pm.classList.add('measuring-natural')
+      const preMeasureTop = scroller.scrollTop
+      const preMeasureLeft = scroller.scrollLeft
+      const pinScroll = () => {
+        const pin = activePinTargetRef.current
+        if (pin && performance.now() - pin.timestamp < 1500) return
+        if (scroller.scrollTop < preMeasureTop) scroller.scrollTop = preMeasureTop
+        if (scroller.scrollLeft < preMeasureLeft) scroller.scrollLeft = preMeasureLeft
+      }
+      scroller.addEventListener('scroll', pinScroll, true)
+      try {
+        followUps = selfScheduled ? followUps + 1 : 0
+        selfScheduled = false
+        retrigger = []
+        const tStart = performance.now()
+        let tMeasure = 0
+        let tSlice = 0
+        // consecutive anchor-paragraph runs collapse onto their band union before
+        // measurement (layout-affecting, idempotent)
+        syncAnchorBands(pm, factor)
+        // natural-flow measuring state: in-paragraph gap widgets force a line break
+        // at the PREVIOUS pass's cut, so measuring with them in layout re-confirms
+        // that cut even after decoration-only reflows (justify space-shrink) moved
+        // the natural wrap points — a justified page-last line then stayed
+        // stretched sparse until an at-boundary edit (r177). Hidden, sampling AND
+        // cut-anchor resolution below see the natural wrap; removed before
+        // setPageGaps so widget building and later display-state reads (strip
+        // alignment, cut overlays, locate) run against the real layout.
+        pm.classList.add('measuring-natural')
       // a columned canvas measures + slices in the single-flow measuring state (fillLineBoxes
       // also reads the DOM for line sampling, so it must share the state); display-state DOM
       // reads like gap positioning happen outside the measuring state
@@ -4255,6 +4618,10 @@ export function App() {
         oversizeClips,
       } = measured
       slices = measured.s
+      // Keep the existing pagination result; resolve just the requested page on Apply.
+      // Measuring every line of every page here would penalize normal editing of large documents.
+      if (editor)
+        numberPageBoundaries.current = { doc: editor.state.doc, pages: slices, blocks, factor }
       const measuredPageNotes = pageFootnotesOf(blocks, slices)
       const measuredNoteNumbers = Object.fromEntries(
         measuredPageNotes.flatMap((page) => page.map((item) => [item.id, item.no])),
@@ -4930,14 +5297,38 @@ export function App() {
             for (const b of parsed.blocks) {
               if (b.docxIndex == null) continue
               for (const a of b.hiddenBookmarks ?? []) anchorIdx.set(a, b.docxIndex)
+              for (const a of b.bookmarks ?? []) anchorIdx.set(a, b.docxIndex)
             }
             const topByIdx = new Map<number, number>()
             for (const b of blocks) {
               if (b.docxIndex != null) topByIdx.set(b.docxIndex, b.top)
             }
+            const anchorTopFromDoc = new Map<string, number>()
+            editor?.state.doc.forEach((node, offset) => {
+              const bms = [
+                ...(Array.isArray(node.attrs?.hiddenBookmarks) ? node.attrs.hiddenBookmarks : []),
+                ...(Array.isArray(node.attrs?.bookmarks) ? node.attrs.bookmarks : []),
+              ]
+              if (bms.length > 0) {
+                const dom = editor.view.nodeDOM(offset) as HTMLElement | null
+                let rootEl: HTMLElement | null = dom
+                while (rootEl && rootEl.parentElement && rootEl.parentElement !== pm) {
+                  rootEl = rootEl.parentElement
+                }
+                const top = rootEl
+                  ? (rootEl.getBoundingClientRect().top - pm.getBoundingClientRect().top) / factor
+                  : undefined
+                if (top !== undefined) {
+                  for (const bm of bms) {
+                    if (typeof bm === 'string') anchorTopFromDoc.set(bm, top)
+                  }
+                }
+              }
+            })
             for (const el of tocLines) {
-              const idx = anchorIdx.get(el.getAttribute('data-toc-anchor') ?? '')
-              const top = idx === undefined ? undefined : topByIdx.get(idx)
+              const anchor = el.getAttribute('data-toc-anchor') ?? ''
+              const idx = anchorIdx.get(anchor)
+              const top = (idx !== undefined ? topByIdx.get(idx) : undefined) ?? anchorTopFromDoc.get(anchor)
               if (top === undefined) continue
               const pageEl = el.querySelector('.doc-toc-page')
               // pageAt is 1-based; pageNoTextOf indexes nums/slices 0-based
@@ -5038,6 +5429,24 @@ export function App() {
         setFloatVShifts(editor.view, floatVEls, layoutBatch)
         pm.classList.remove('measuring-natural')
         setPageGaps(editor.view, gaps, firstPageFloats, layoutBatch)
+        scroller.removeEventListener('scroll', pinScroll, true)
+        const pin = activePinTargetRef.current
+        if (pin && performance.now() - pin.timestamp < 1500 && document.contains(pin.el)) {
+          const r = pin.el.getBoundingClientRect()
+          const diff = r.top - pin.targetTop
+          if (Math.abs(diff) > 0.5) {
+            scroller.scrollTop = Math.max(0, scroller.scrollTop + diff)
+          }
+          if (pin.targetLeft != null) {
+            const diffX = r.left - pin.targetLeft
+            if (Math.abs(diffX) > 0.5) {
+              scroller.scrollLeft = Math.max(0, scroller.scrollLeft + diffX)
+            }
+          }
+        } else {
+          if (scroller.scrollTop < preMeasureTop) scroller.scrollTop = preMeasureTop
+          if (scroller.scrollLeft < preMeasureLeft) scroller.scrollLeft = preMeasureLeft
+        }
         // mixed-column canvas: paint the engine's regions via per-block width/translate decorations
         const colSpecs =
           viewMode === 'print' && !readMode && colMode === 'mixed' && secList
@@ -5266,7 +5675,10 @@ export function App() {
         })
       }
       locate()
+    } finally {
+      scroller.removeEventListener('scroll', pinScroll, true)
     }
+  }
     const onUpdate = () => {
       // while the tail streams, chunks land every few frames: a plain debounce
       // would either never fire (dense chunks) or pay a whole-document pass
@@ -5464,15 +5876,23 @@ export function App() {
 
   // "has unsaved changes" check shared by the close guard and autosave; refreshed on every
   // render (all edit paths forceRender), so the guard's query reads the latest value
-  const anyDirtyRef = useRef(false)
   const hasUnsavedChanges = isDocDirty(fileCtxRef.current)
-  anyDirtyRef.current = hasUnsavedChanges
+
+  // notify shell tab manager whenever dirty state changes
+  useEffect(() => {
+    window.desktop.setDirty?.(!!doc && hasUnsavedChanges)
+  }, [doc, hasUnsavedChanges])
 
   // close guard: the main process queries dirty state before closing a tab/window; choosing "Save" runs a full save and reports back
   useEffect(() => {
     const offCheck = window.desktop.onCloseCheck?.(() => {
+      // Flush a live textbox before comparing with the saved body, including
+      // a local Undo that restored the box without a parent transaction.
+      window.dispatchEvent(new Event('ai-docs-commit-tables'))
+      const bodyDirty = bodyDirtyAgainstSaved(editor)
+      if (bodyDirty !== null) dirtyRef.current = bodyDirty
       window.desktop.reportCloseCheck({
-        dirty: !!doc && (anyDirtyRef.current || dirtyRef.current),
+        dirty: !!doc && isDocDirty(fileCtxRef.current),
         autoSave: autoSave && !!doc?.filePath,
         filePath: doc?.filePath ?? null,
       })
@@ -5496,7 +5916,7 @@ export function App() {
       offCheck?.()
       offSave?.()
     }
-  }, [doc, save, autoSave])
+  }, [doc, save, autoSave, editor])
 
   // autosave: every 30s and on window blur, silently persist pending changes
   useEffect(() => {
@@ -5515,21 +5935,6 @@ export function App() {
       window.removeEventListener('blur', tick)
     }
   }, [tornDown, autoSave, doc, editor, save])
-
-  // After an AI run finishes on a never-saved document, silently save it once: the
-  // first save derives the file name from the first heading (see deriveAutoFileName
-  // in file-actions), which also renames the shell tab — mirrors slides, where AI
-  // generation names and persists the draft deck.
-  useEffect(() => {
-    const handler = () => {
-      const cur = fileCtxRef.current
-      if (!cur.doc || cur.doc.filePath || !anyDirtyRef.current) return
-      if (editor?.view.composing) return
-      void save(false, true)
-    }
-    window.addEventListener('ai-docs-run-done', handler)
-    return () => window.removeEventListener('ai-docs-run-done', handler)
-  }, [editor, save])
 
   useEffect(() => {
     // editing shortcuts only fire when focus is in an editor surface (main
@@ -5974,25 +6379,49 @@ export function App() {
       let target: Element | null = null
       const anchor = line.dataset.tocAnchor
       if (anchor && doc) {
-        const block = doc.parsed.blocks.find((b) => b.originalXml?.includes(`w:name="${anchor}"`))
+        const block = doc.parsed.blocks.find(
+          (b) =>
+            b.originalXml?.includes(`w:name="${anchor}"`) ||
+            b.hiddenBookmarks?.includes(anchor) ||
+            b.bookmarks?.includes(anchor),
+        )
         if (block && block.docxIndex !== null) {
           target = document.querySelector(`.ProseMirror [data-idx="${block.docxIndex}"]`)
+        }
+      }
+      if (anchor && !target && editor) {
+        let targetPos: number | undefined
+        editor.state.doc.forEach((node, offset) => {
+          if (targetPos !== undefined) return
+          const bms = [
+            ...(Array.isArray(node.attrs?.hiddenBookmarks) ? node.attrs.hiddenBookmarks : []),
+            ...(Array.isArray(node.attrs?.bookmarks) ? node.attrs.bookmarks : []),
+          ]
+          if (bms.includes(anchor)) targetPos = offset
+        })
+        if (targetPos !== undefined) {
+          const dom = editor.view.nodeDOM(targetPos) as HTMLElement | null
+          target = dom
         }
       }
       if (!target) {
         const title = (line.dataset.tocTitle ?? '').replace(/\s+/g, '')
         if (title) {
+          const candidates = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6, .ProseMirror li, .ProseMirror p',
+            ),
+          )
           target =
-            [
-              ...document.querySelectorAll(
-                '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6',
-              ),
-            ].find((h) => (h.textContent ?? '').replace(/\s+/g, '') === title) ?? null
+            candidates.find((h) => {
+              const text = (h.textContent ?? '').replace(/\s+/g, '')
+              return text === title || text.endsWith(title) || text.includes(title)
+            }) ?? null
         }
       }
       target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     },
-    [doc, comments],
+    [doc, comments, editor],
   )
 
   /** Editor right-click menu, only inside the document body */
@@ -7114,14 +7543,14 @@ export function App() {
                   editor={editor}
                   doc={editor.state.doc}
                   visible={showFloatingOutline}
-                  isDark={Boolean(darkPage || themeDark)}
-                  canFitRightGutter={hasRightGutter}
-                  onClose={() => setShowFloatingOutline(false)}
-                  onActiveHeadingChange={setActiveHeadingText}
+                  onVisibleChange={setShowFloatingOutline}
+                  scrollRef={scrollContainerRef}
+                  zoom={zoom}
                 />
               )}
               <main
                 className={imageDragOver ? 'editor-scroll image-drop-target' : 'editor-scroll'}
+                aria-busy={docLoading}
                 ref={scrollContainerRef}
                 onScroll={(e) => {
                   scrollPosRef.current = {
@@ -7433,28 +7862,25 @@ export function App() {
                   >
                     {t('appWordCountN', { n: wordCount })}
                   </button>
-                  {!hasRightGutter && (
-                    <button
-                      className={`status-item status-outline-btn ${showFloatingOutline ? 'active' : ''}`}
-                      data-tip={lang === 'zh-TW' ? '目錄與大綱導覽' : lang === 'zh' ? '目录与大纲导航' : 'Outline & TOC'}
-                      onClick={() => setShowFloatingOutline((prev) => !prev)}
-                    >
-                      <IconOutlineView size={12} />
-                      <span className="status-outline-text">
-                        {activeHeadingText ? activeHeadingText : (lang === 'zh-TW' ? '目錄' : 'Outline')}
-                      </span>
-                    </button>
-                  )}
                 </>
               )}
               {!doc && t('appReady')}
-              {status && (
+              {(status || docLoading) && (
                 <span
                   className={`status-msg ${missingFonts.length > 0 ? 'status-font-clickable' : ''}`}
-                  onClick={missingFonts.length > 0 ? () => setShowMissingFontsDialog(true) : undefined}
-                  title={missingFonts.length > 0 ? (lang === 'zh-TW' ? '點擊檢視字型替換對照表' : 'Click to view font substitution details') : undefined}
+                  onClick={
+                    missingFonts.length > 0 ? () => setShowMissingFontsDialog(true) : undefined
+                  }
+                  title={
+                    missingFonts.length > 0
+                      ? lang === 'zh-TW'
+                        ? '點擊檢視字型替換對照表'
+                        : 'Click to view font substitution details'
+                      : undefined
+                  }
                 >
-                  {' '}— {status}
+                  {' '}
+                  — {docLoading ? t('appStartOpening') : status}
                 </span>
               )}
             </div>
@@ -7470,7 +7896,7 @@ export function App() {
                 type="range"
                 min={50}
                 max={200}
-                step={10}
+                step={1}
                 value={Math.round(zoom)}
                 onChange={(e) => setZoom(Number(e.target.value))}
               />
@@ -7802,6 +8228,45 @@ export function App() {
           <div className="modal">
             <h2>{t('appPageNumFormatTitle')}</h2>
             <label className="pgnum-row">
+              <input
+                data-testid="pgnum-physical"
+                type="checkbox"
+                checked={pgNumModal.physical}
+                onChange={(e) =>
+                  setPgNumModal({
+                    ...pgNumModal,
+                    physical: e.target.checked,
+                    start: pgNumModal.start || '1',
+                  })
+                }
+              />
+              {t('appPageNumberPhysical')}
+            </label>
+            {pgNumModal.physical && (
+              <>
+                <label className="pgnum-row">
+                  {t('appPageNumberFromPage')}
+                  <input
+                    data-testid="pgnum-from-page"
+                    type="number"
+                    min={1}
+                    max={pageInfo.total}
+                    value={pgNumModal.fromPage}
+                    onChange={(e) => setPgNumModal({ ...pgNumModal, fromPage: e.target.value })}
+                  />
+                </label>
+                <label className="pgnum-row">
+                  <input
+                    data-testid="pgnum-hide-before"
+                    type="checkbox"
+                    checked={pgNumModal.hideBefore}
+                    onChange={(e) => setPgNumModal({ ...pgNumModal, hideBefore: e.target.checked })}
+                  />
+                  {t('appPageNumberHideBefore')}
+                </label>
+              </>
+            )}
+            <label className="pgnum-row">
               {t('appNumberFormat')}
               <Dropdown
                 value={pgNumModal.fmt}
@@ -7908,6 +8373,7 @@ export function App() {
               <input
                 type="radio"
                 name="pgnum-start"
+                disabled={pgNumModal.physical}
                 checked={pgNumModal.start === ''}
                 onChange={() => setPgNumModal({ ...pgNumModal, start: '' })}
               />
@@ -7930,7 +8396,7 @@ export function App() {
               />
             </label>
             <p className="pgnum-hint">
-              {t('appPgNumHintBlank')}
+              {pgNumModal.physical ? t('appPageNumberSectionHint') : t('appPgNumHintBlank')}
               {sections.length > 1
                 ? t('appPgNumAppliesTo', { n: Math.min(activeSection, sections.length - 1) + 1 })
                 : ''}

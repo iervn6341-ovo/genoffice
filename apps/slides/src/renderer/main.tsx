@@ -4,7 +4,6 @@ import { htmlLang, type Lang } from '@genoffice/i18n'
 import { App } from './App'
 import { AudienceView } from './components/AudienceView'
 import { LocaleProvider, setModuleLang } from './i18n/locale'
-import type { UiTheme } from '../shared/ipc'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/color-picker.css'
@@ -22,7 +21,7 @@ import './styles.css'
 // compact Microsoft 365 ribbon metrics: after styles.css so they win over its base rules
 import '@genoffice/ui/ribbon-density.css'
 import {
-  applyUiTheme,
+  syncUiTheme,
   applyAiPanelPrefs,
   installMacLineBoundaryKeys,
   installScreenTips,
@@ -46,19 +45,16 @@ const mode = new URLSearchParams(window.location.search).get('mode')
 if (mode !== 'audience' && navigator.platform.toLowerCase().includes('mac'))
   document.body.classList.add('vib')
 
-function applyTheme(theme: UiTheme): void {
-  applyUiTheme(theme)
-}
+const themeReady = mode === 'audience' ? Promise.resolve() : syncUiTheme(window.slidesApi).ready
 
 async function bootstrap(): Promise<void> {
   let lang: Lang = 'zh'
-  let theme: UiTheme = 'system'
   try {
     // per-promise catch: standalone runs have no app:get-theme handler, and
     // that rejection must not drop a resolved language
-    ;[lang, theme] = await Promise.all([
+    ;[lang] = await Promise.all([
       window.slidesApi.getLanguage().catch(() => 'zh' as const),
-      window.slidesApi.getTheme().catch(() => 'system' as const),
+      themeReady,
     ])
   } catch {
     /* dev renderer without the preload bridge */
@@ -67,8 +63,6 @@ async function bootstrap(): Promise<void> {
   document.documentElement.lang = htmlLang(lang)
   // the audience show window renders slide content only — it never themes
   if (mode !== 'audience') {
-    applyTheme(theme)
-    window.slidesApi?.onThemeChanged(applyTheme)
     void window.slidesApi
       ?.getAiPanelPrefs?.()
       .then(applyAiPanelPrefs)

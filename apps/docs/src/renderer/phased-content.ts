@@ -77,11 +77,17 @@ export function setContentPhased(
   cancelPhasedContent()
   const content = pmDoc.content ?? []
   const my = ++token
-  if (content.length <= PHASED_MIN_BLOCKS) {
+  // A medium document with a long TOC can be more expensive to mount than
+  // hundreds of plain paragraphs. Let its cached entries paint first too.
+  const tocHeavy =
+    content.length > 32 &&
+    content.filter(
+      (node) => (node.attrs?.fieldDisplay as { kind?: string } | undefined)?.kind === 'tocLine',
+    ).length >= 8
+  if (content.length <= PHASED_MIN_BLOCKS && !tocHeavy) {
     host.setContent(pmDoc)
     return
   }
-  host.setContent({ ...pmDoc, content: content.slice(0, PHASE1_BLOCKS) })
   let settle!: () => void
   settled = new Promise<void>((resolve) => (settle = resolve))
   host.setLoading(true)
@@ -89,7 +95,17 @@ export function setContentPhased(
     host.setLoading(false)
     settle()
   }
-  let index = PHASE1_BLOCKS
+  const firstBlocks = tocHeavy ? 16 : PHASE1_BLOCKS
+  // Set the pending gate before mounting: layout plugins must not measure
+  // every partial document only to repeat the work after the tail arrives.
+  try {
+    host.setContent({ ...pmDoc, content: content.slice(0, firstBlocks) })
+  } catch (error) {
+    cancelPhasedContent()
+    throw error
+  }
+  let index = firstBlocks
+  let chunkSize = tocHeavy ? 32 : PHASE_CHUNK_BLOCKS
   const finish = () => {
     if (my !== token) return
     // still "pending" through the history reset: it re-creates the plugin
@@ -105,9 +121,10 @@ export function setContentPhased(
   const appendChunk = () => {
     if (my !== token) return
     if (host.isDestroyed()) return finish()
-    const chunk = content.slice(index, index + PHASE_CHUNK_BLOCKS)
+    const chunk = content.slice(index, index + chunkSize)
     index += chunk.length
     const wasDirty = host.getDirty()
+    const started = performance.now()
     try {
       host.appendNodes(chunk)
     } catch {
@@ -121,6 +138,8 @@ export function setContentPhased(
       return finish()
     }
     host.setDirty(wasDirty)
+    const elapsed = performance.now() - started
+    if (elapsed > 12) chunkSize = Math.max(8, Math.floor((chunkSize * 12) / elapsed))
     if (index < content.length) schedule(appendChunk)
     else finish()
   }

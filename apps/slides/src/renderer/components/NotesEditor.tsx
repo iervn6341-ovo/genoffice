@@ -22,7 +22,14 @@ function populate(root: HTMLElement, paras: NotesParagraphView[]): void {
     div.dataset.level = String(p.level)
     if (p.level) div.style.setProperty('--notes-level', String(p.level))
     if (p.align) div.style.textAlign = p.align
-    if (p.bullet) div.dataset.glyph = p.bullet
+    if (p.bullet) {
+      div.dataset.bulletText = p.bullet
+      div.dataset.hadBullet = p.bulletKind ?? 'char'
+      if (p.bulletKind === 'number') {
+        div.dataset.hadNumType = p.numType ?? 'arabicPeriod'
+        if (p.startAt != null) div.dataset.startAt = String(p.startAt)
+      } else div.dataset.bulletChar = p.bullet
+    }
     p.runs.forEach((r, ri) => {
       if (!r.text) return
       const span = document.createElement('span')
@@ -53,7 +60,11 @@ function populate(root: HTMLElement, paras: NotesParagraphView[]): void {
 
 /** The pane's current notes: formatted paragraphs plus their plain text */
 export function readNotesEditor(root: HTMLElement): { paragraphs: EditParagraph[]; text: string } {
-  const paragraphs = extractParagraphs(root, 1)
+  // New, untraced DOM paragraphs without a list marker are explicitly plain.
+  // Otherwise OOXML's notes-master bullet can reappear only after committing/loading.
+  const paragraphs = extractParagraphs(root, 1).map((p) =>
+    p.srcPara == null && p.bullet == null ? { ...p, bullet: 'none' as const } : p,
+  )
   const text = paragraphs.map((p) => p.runs.map((r) => r.text).join('')).join('\n')
   return { paragraphs: text ? paragraphs : [], text }
 }
@@ -106,7 +117,17 @@ export function NotesEditor({
       childList: true,
       characterData: true,
       // formatting lives in inline styles; the root's own placeholder class is not an edit
-      attributeFilter: ['style'],
+      attributeFilter: [
+        'style',
+        'data-bullet',
+        'data-bullet-char',
+        'data-bullet-font',
+        'data-num-type',
+        'data-start-at',
+        'data-level',
+        'data-space-before-pt',
+        'data-space-after-pt',
+      ],
     })
     observerRef.current = mo
     return () => mo.disconnect()

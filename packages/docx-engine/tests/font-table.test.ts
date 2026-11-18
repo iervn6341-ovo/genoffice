@@ -27,7 +27,13 @@ describe('parseFontTable', () => {
   it('reads name / altName / panose / family / pitch per entry', () => {
     const entries = parseFontTable(FONT_TABLE_XML)
     expect(entries).toEqual([
-      { name: '원신한 Light', panose: '020B0303000000000000', family: 'modern', pitch: 'variable' },
+      {
+        name: '원신한 Light',
+        panose: '020B0303000000000000',
+        charset: '81',
+        family: 'modern',
+        pitch: 'variable',
+      },
       {
         name: '汉仪旗黑-50简',
         altName: '黑体',

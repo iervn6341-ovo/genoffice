@@ -1535,8 +1535,10 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
                         return
                       }
                       setLastColor(hex)
-                      if (editing) onTextColor(hex)
-                      else onElementTextColor(hex)
+                      if (editing) {
+                        restoreEditSelection()
+                        onTextColor(hex)
+                      } else onElementTextColor(hex)
                       setColorOpen(false)
                     }}
                     moreInputProps={{

@@ -98,8 +98,9 @@ export function PresenterView({
   /** Per-page animation lists + notes (prefetched once on entry, zero IPC on page turns) */
   const [allAnims, setAllAnims] = useState<AnimationItem[][] | null>(null)
   const [allNotes, setAllNotes] = useState<NotesParagraphView[][]>([])
-  /** How the current page was entered: forward = initial state playing step by step, others = all-finished state */
-  const navModeRef = useRef<'fresh' | 'all'>('fresh')
+  /** Page transition direction is separate from in-page animation replay. */
+  const transitionRef = useRef(true)
+  const [visit, setVisit] = useState(0)
   /** Whether an external audience window was opened (swap-displays button availability) */
   const [hasAudience, setHasAudience] = useState(false)
 
@@ -218,15 +219,11 @@ export function PresenterView({
   }, [slides])
 
   const slide = slides[order[pos]!]
-  const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960)
-
-  // Load the page's animations when the page changes/prefetch completes (forward = initial state, back/jump = finished state);
-  // loadedRef ticks with player.epoch; the broadcast effect uses it to read the "in place" page number
-  const loadedRef = useRef<{ idx: number; fresh: boolean }>({ idx: order[pos]!, fresh: true })
-  useEffect(() => {
-    loadedRef.current = { idx: order[pos]!, fresh: navModeRef.current === 'fresh' }
-    player.load(allAnims?.[order[pos]!] ?? [], navModeRef.current)
-  }, [allAnims, pos, order, player.load]) // eslint-disable-line react-hooks/exhaustive-deps
+  const pageIndex = order[pos]!
+  const player = useAnimPlayer(slide?.heightPx ?? 540, slide?.widthPx ?? 960, {
+    key: `${pageIndex}:${visit}`,
+    items: allAnims?.[pageIndex] ?? null,
+  })
 
   // ── Multi-screen: open the audience window on entry, close on exit ─────────────
   useEffect(() => {
@@ -240,11 +237,13 @@ export function PresenterView({
     }
   }, [])
 
-  // Broadcast show state: epoch change = the new page's animations are loaded and loadedRef matches the player cursor
+  // The page and its cursor are initialized together before a broadcast/paint.
   useEffect(() => {
+    if (!player.ready) return
     const state: ShowSyncState = {
-      idx: loadedRef.current.idx,
-      fresh: loadedRef.current.fresh,
+      idx: pageIndex,
+      visit,
+      fresh: transitionRef.current,
       played: player.played,
       playing: player.playing,
       ended,
@@ -258,6 +257,9 @@ export function PresenterView({
     window.slidesApi.presenterSync(state)
   }, [
     player.epoch,
+    player.ready,
+    pageIndex,
+    visit,
     player.played,
     player.playing,
     ended,
@@ -337,9 +339,10 @@ export function PresenterView({
   const posRef = useRef(pos)
   posRef.current = pos
   const goTo = useCallback((nextPos: number, fresh: boolean) => {
-    navModeRef.current = fresh ? 'fresh' : 'all'
+    transitionRef.current = fresh
     if (nextPos !== posRef.current) setLastViewed(posRef.current)
     setPos(nextPos)
+    setVisit((n) => n + 1)
   }, [])
 
   const next = useCallback(() => {
@@ -347,11 +350,12 @@ export function PresenterView({
       exitRef.current()
       return
     }
+    if (!player.ready) return
     // Advance in-page animations first; turn the page only when this page's animations are done
     if (player.advance()) return
     if (pos >= order.length - 1) setEnded(true)
     else goTo(pos + 1, true)
-  }, [ended, pos, order.length, goTo, player.advance]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ended, pos, order.length, goTo, player.advance, player.ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const prev = useCallback(() => {
     if (ended) {
@@ -550,12 +554,14 @@ export function PresenterView({
                       : undefined
                   }
                 >
-                  <AnimatedSlideStage
-                    slide={slide}
-                    images={images}
-                    width={fitW}
-                    states={player.states}
-                  />
+                  {player.ready && (
+                    <AnimatedSlideStage
+                      slide={slide}
+                      images={images}
+                      width={fitW}
+                      states={player.states}
+                    />
+                  )}
                 </div>
                 <CameraBubble on={camera} width={fitW} onError={() => setCamera(false)} />
                 <InkLayer board={board} width={fitW} height={fitH} />

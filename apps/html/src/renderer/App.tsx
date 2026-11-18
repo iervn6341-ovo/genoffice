@@ -60,7 +60,7 @@ import {
 import { compileOps, type HtmlOp, type OpError } from './document/ops'
 import { injectBrief, parseBrief, type Brief } from './document/brief'
 import { applyPatches } from './document/patch'
-import { deriveAutoFileName, deriveNameFromPrompt, derivePageTitleName } from './document/auto-name'
+import { deriveAutoFileName, deriveNameFromPrompt } from './document/auto-name'
 import type { ExportFormat, SaveMode } from '../shared/ipc'
 
 type LoadStatus = 'loading' | 'ready' | 'error'
@@ -1078,7 +1078,7 @@ export default function App() {
   }
 
   const doSave = useCallback(
-    async (mode: SaveMode, suggestedName?: string): Promise<boolean> => {
+    async (mode: SaveMode): Promise<boolean> => {
       if (statusRef.current !== 'ready') return false
       // uncommitted live style pokes belong to the document being saved
       flushPending()
@@ -1094,7 +1094,6 @@ export default function App() {
           text: serialized,
           imageSources: [],
           mode,
-          suggestedName,
           defaultName: provisionalNameRef.current ?? undefined,
         })
         if (result.ok && 'path' in result) {
@@ -1341,8 +1340,10 @@ export default function App() {
       if (!event.ctrlKey && !event.metaKey) return
       if (canvasModeRef.current === 'present') return
       if (!(event.target as HTMLElement | null)?.closest?.('.preview-stage')) return
-      event.preventDefault()
-      setZoom((z) => clampZoom(z - event.deltaY * 0.6))
+      const delta =
+        event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * 800 : event.deltaY
+      const clampedDelta = Math.max(-100, Math.min(100, delta))
+      setZoom((z) => clampZoom(z * Math.exp(-clampedDelta * 0.0075)))
     }
     window.addEventListener('wheel', onWheel, { passive: false })
     return () => window.removeEventListener('wheel', onWheel)
@@ -1390,15 +1391,8 @@ export default function App() {
       provisionalNameRef.current = name
       window.htmlApi.setProvisionalTitle(name)
     },
-    onRunDone: (mutated) => {
-      // AI wrote into a never-saved document: save it silently under the page's own title,
-      // falling back to the name of the request that started it
-      if (!mutated || pathRef.current) return
-      const text = textRef.current
-      const name =
-        derivePageTitleName(text) || provisionalNameRef.current || deriveAutoFileName(text)
-      if (name) void doSave('save', name)
-    },
+    // AI edits remain in the untitled tab until the user saves explicitly.
+    onRunDone: () => {},
     clearHighlights: () => editorRef.current?.clearHighlights(),
     onBriefConfirmed: (brief) => {
       briefRef.current = brief
@@ -1684,7 +1678,7 @@ export default function App() {
                 type="range"
                 min={MIN_ZOOM}
                 max={MAX_ZOOM}
-                step={ZOOM_STEP}
+                step={1}
                 value={Math.round(zoom)}
                 aria-label={t('zoom')}
                 onChange={(event) => setZoom(Number(event.target.value))}

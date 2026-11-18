@@ -38,6 +38,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'AVI 格式不受内置播放器支持，无法在应用内播放。文件会原样嵌入，导出后在 PowerPoint 中仍可播放。',
     legacyPptTitle: '无法打开 .ppt 旧格式',
+    pptImportMsg: "转换这个 .{ext} 演示文稿？",
+    pptImportDetail:
+      "GenOffice 会把演示文稿重建为可编辑的文本框，保持原来的幻灯片顺序和尺寸；形状位置、图片和文本格式暂不保留。原文件不会被改动，转换出的 .pptx 是一个独立副本，之后的保存都写入它。",
+    pptImportConvertBtn: "转换并打开",
+    pptImportFailedTitle: "无法转换这个 .ppt",
+    pptImportFailedBody: "文件可能已损坏，或不是有效的 PowerPoint 97-2003 演示文稿。",
     legacyPptBody:
       '这是 PowerPoint 97-2003 (.ppt) 二进制格式,本应用只支持 .pptx。请在 PowerPoint/WPS/Keynote 里打开后「另存为 .pptx」,再回来打开。',
     legacyPptOk: '知道了',
@@ -145,6 +151,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'The AVI format is not supported by the built-in player, so it cannot be played inside the app. The file is embedded as-is and still plays in PowerPoint after export.',
     legacyPptTitle: 'Cannot open legacy .ppt',
+    pptImportMsg: "Convert this .{ext} presentation?",
+    pptImportDetail:
+      "GenOffice rebuilds the deck as editable text boxes, in the original slide order and size; shape placement, pictures and text formatting are not brought over yet. The source file is never modified; the converted .pptx is an independent copy that later saves write to.",
+    pptImportConvertBtn: "Convert and Open",
+    pptImportFailedTitle: "Cannot convert this .ppt",
+    pptImportFailedBody: "The file may be damaged or not a valid PowerPoint 97-2003 presentation.",
     legacyPptBody:
       'This is a PowerPoint 97-2003 (.ppt) binary file. Only .pptx is supported. Open it in PowerPoint/WPS/Keynote and "Save As .pptx", then try again.',
     legacyPptOk: 'OK',
@@ -251,6 +263,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'AVI 形式は内蔵プレーヤーでサポートされていないため、アプリ内では再生できません。ファイルはそのまま埋め込まれ、エクスポート後は PowerPoint で再生できます。',
     legacyPptTitle: '.ppt 形式は開けません',
+    pptImportMsg: "この .{ext} プレゼンテーションを変換しますか？",
+    pptImportDetail:
+      "GenOffice はプレゼンテーションを元のスライド順序とサイズのまま編集可能なテキストボックスとして再構築します。図形の位置、画像、文字書式はまだ移行されません。元のファイルが変更されることはなく、変換後の .pptx はその後の保存先となる独立したコピーです。",
+    pptImportConvertBtn: "変換して開く",
+    pptImportFailedTitle: "この .ppt を変換できません",
+    pptImportFailedBody: "ファイルが破損しているか、有効な PowerPoint 97-2003 プレゼンテーションではない可能性があります。",
     legacyPptBody:
       'PowerPoint 97-2003 (.ppt) のバイナリ形式です。本アプリは .pptx のみ対応しています。PowerPoint などで開いて「.pptx として保存」してください。',
     legacyPptOk: 'OK',
@@ -362,6 +380,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'AVI 형식은 내장 플레이어에서 지원되지 않아 앱 내에서 재생할 수 없습니다. 파일은 원본 그대로 삽입되며 내보낸 후 PowerPoint에서는 재생할 수 있습니다.',
     legacyPptTitle: '.ppt 형식을 열 수 없음',
+    pptImportMsg: "이 .{ext} 프레젠테이션을 변환할까요?",
+    pptImportDetail:
+      "GenOffice는 원래 슬라이드 순서와 크기대로 편집 가능한 텍스트 상자로 프레젠테이션을 다시 만듭니다. 도형 위치, 그림, 서식은 아직 가져오지 않습니다. 원본 파일은 변경되지 않으며, 변환된 .pptx는 이후 저장이 기록되는 독립된 사본입니다.",
+    pptImportConvertBtn: "변환 후 열기",
+    pptImportFailedTitle: "이 .ppt를 변환할 수 없습니다",
+    pptImportFailedBody: "파일이 손상되었거나 올바른 PowerPoint 97-2003 프레젠테이션이 아닐 수 있습니다.",
     legacyPptBody:
       'PowerPoint 97-2003(.ppt) 이진 형식입니다. 이 앱은 .pptx만 지원합니다. PowerPoint 등에서 열어 ".pptx로 저장" 후 다시 시도하세요.',
     legacyPptOk: '확인',
@@ -470,6 +494,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Le format AVI n’est pas pris en charge par le lecteur intégré : lecture impossible dans l’application. Le fichier est incorporé tel quel et reste lisible dans PowerPoint après export.',
     legacyPptTitle: 'Impossible d’ouvrir le format .ppt',
+    pptImportMsg: "Convertir cette présentation .{ext} ?",
+    pptImportDetail:
+      "GenOffice reconstruit la présentation sous forme de zones de texte modifiables, dans l'ordre et la taille des diapositives d'origine ; la disposition des formes, les images et la mise en forme du texte ne sont pas encore reprises. Le fichier source n'est jamais modifié ; le .pptx converti est une copie indépendante.",
+    pptImportConvertBtn: "Convertir et ouvrir",
+    pptImportFailedTitle: "Impossible de convertir ce .ppt",
+    pptImportFailedBody: "Le fichier est peut-être endommagé ou n'est pas une présentation PowerPoint 97-2003 valide.",
     legacyPptBody:
       'Fichier binaire PowerPoint 97-2003 (.ppt). Seul .pptx est pris en charge. Ouvrez-le dans PowerPoint puis « Enregistrer sous .pptx ».',
     legacyPptOk: 'OK',
@@ -583,6 +613,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Das AVI-Format wird vom integrierten Player nicht unterstützt und kann in der App nicht wiedergegeben werden. Die Datei wird unverändert eingebettet und ist nach dem Export in PowerPoint weiterhin abspielbar.',
     legacyPptTitle: '.ppt kann nicht geöffnet werden',
+    pptImportMsg: "Diese .{ext}-Präsentation konvertieren?",
+    pptImportDetail:
+      "GenOffice baut die Präsentation als bearbeitbare Textfelder in der ursprünglichen Folienreihenfolge und -größe neu auf; Formenplatzierung, Bilder und Textformatierung werden noch nicht übernommen. Die Quelldatei wird niemals geändert; die konvertierte .pptx ist eine eigenständige Kopie.",
+    pptImportConvertBtn: "Konvertieren und öffnen",
+    pptImportFailedTitle: "Diese .ppt kann nicht konvertiert werden",
+    pptImportFailedBody: "Die Datei ist möglicherweise beschädigt oder keine gültige PowerPoint 97-2003-Präsentation.",
     legacyPptBody:
       'PowerPoint 97-2003 (.ppt) Binärformat. Es wird nur .pptx unterstützt. In PowerPoint öffnen und als .pptx speichern.',
     legacyPptOk: 'OK',
@@ -695,6 +731,13 @@ export const tMain = createI18n({
     mediaAviBody:
       'El formato AVI no es compatible con el reproductor integrado y no se puede reproducir en la aplicación. El archivo se incrusta tal cual y sigue reproduciéndose en PowerPoint tras exportar.',
     legacyPptTitle: 'No se puede abrir el formato .ppt',
+    pptImportMsg: '¿Convertir esta presentación .{ext}?',
+    pptImportDetail:
+      'GenOffice reconstruye la presentación como cuadros de texto editables, en el orden y tamaño de diapositiva originales; la posición de las formas, las imágenes y el formato del texto aún no se transfieren. El archivo de origen nunca se modifica; el .pptx convertido es una copia independiente.',
+    pptImportConvertBtn: 'Convertir y abrir',
+    pptImportFailedTitle: 'No se puede convertir este .ppt',
+    pptImportFailedBody:
+      'El archivo puede estar dañado o no ser una presentación válida de PowerPoint 97-2003.',
     legacyPptBody:
       'Archivo binario de PowerPoint 97-2003 (.ppt). Solo se admite .pptx. Ábralo en PowerPoint y «Guardar como .pptx».',
     legacyPptOk: 'Aceptar',
@@ -806,6 +849,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'รูปแบบ AVI ไม่รองรับโดยเครื่องเล่นในตัว จึงเล่นในแอปไม่ได้ ไฟล์จะถูกฝังตามต้นฉบับและยังเล่นได้ใน PowerPoint หลังส่งออก',
     legacyPptTitle: 'ไม่สามารถเปิดไฟล์ .ppt',
+    pptImportMsg: "แปลงงานนำเสนอ .{ext} นี้ไหม?",
+    pptImportDetail:
+      "GenOffice จะสร้างชุดสไลด์ขึ้นใหม่เป็นกล่องข้อความที่แก้ไขได้ ตามลำดับและขนาดสไลด์เดิม การจัดวางรูปร่าง รูปภาพ และการจัดรูปแบบข้อความยังไม่ถูกนำมาด้วย ไฟล์ต้นฉบับจะไม่ถูกแก้ไข ไฟล์ .pptx ที่แปลงแล้วเป็นสำเนาแยกต่างหาก",
+    pptImportConvertBtn: "แปลงและเปิด",
+    pptImportFailedTitle: "ไม่สามารถแปลงไฟล์ .ppt นี้",
+    pptImportFailedBody: "ไฟล์อาจเสียหายหรือไม่ใช่งานนำเสนอ PowerPoint 97-2003 ที่ถูกต้อง",
     legacyPptBody:
       'ไฟล์ PowerPoint 97-2003 (.ppt) แบบไบนารี รองรับเฉพาะ .pptx โปรดเปิดใน PowerPoint แล้วบันทึกเป็น .pptx',
     legacyPptOk: 'ตกลง',
@@ -914,6 +963,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Format AVI tidak didukung pemutar bawaan sehingga tidak dapat diputar di aplikasi. File disematkan apa adanya dan tetap dapat diputar di PowerPoint setelah diekspor.',
     legacyPptTitle: 'Tidak dapat membuka format .ppt',
+    pptImportMsg: "Konversi presentasi .{ext} ini?",
+    pptImportDetail:
+      "GenOffice menyusun ulang presentasi sebagai kotak teks yang dapat diedit, dalam urutan dan ukuran slide asli; penempatan bentuk, gambar, dan pemformatan teks belum disertakan. File sumber tidak pernah diubah; .pptx hasil konversi adalah salinan independen.",
+    pptImportConvertBtn: "Konversi dan buka",
+    pptImportFailedTitle: "Tidak dapat mengonversi .ppt ini",
+    pptImportFailedBody: "File mungkin rusak atau bukan presentasi PowerPoint 97-2003 yang valid.",
     legacyPptBody:
       'Ini berkas biner PowerPoint 97-2003 (.ppt). Hanya .pptx yang didukung. Buka di PowerPoint lalu "Simpan Sebagai .pptx".',
     legacyPptOk: 'OK',
@@ -1026,6 +1081,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Формат AVI не поддерживается встроенным проигрывателем, воспроизведение в приложении невозможно. Файл встраивается без изменений и по-прежнему воспроизводится в PowerPoint после экспорта.',
     legacyPptTitle: 'Не удаётся открыть формат .ppt',
+    pptImportMsg: "Преобразовать эту презентацию .{ext}?",
+    pptImportDetail:
+      "GenOffice пересобирает презентацию в виде редактируемых текстовых полей с исходным порядком и размером слайдов; размещение фигур, изображения и форматирование текста пока не переносятся. Исходный файл не изменяется; созданный .pptx является отдельной копией.",
+    pptImportConvertBtn: "Преобразовать и открыть",
+    pptImportFailedTitle: "Не удалось преобразовать этот .ppt",
+    pptImportFailedBody: "Файл может быть повреждён или не является допустимой презентацией PowerPoint 97-2003.",
     legacyPptBody:
       'Это двоичный файл PowerPoint 97-2003 (.ppt). Поддерживается только .pptx. Откройте в PowerPoint и сохраните как .pptx.',
     legacyPptOk: 'ОК',
@@ -1137,6 +1198,13 @@ export const tMain = createI18n({
     mediaAviBody:
       'تنسيق AVI غير مدعوم في المشغّل المدمج ولا يمكن تشغيله داخل التطبيق. يتم تضمين الملف كما هو ويظل قابلاً للتشغيل في PowerPoint بعد التصدير.',
     legacyPptTitle: 'تعذّر فتح تنسيق .ppt',
+    pptImportMsg: 'تحويل هذا العرض التقديمي .{ext}؟',
+    pptImportDetail:
+      'يعيد GenOffice بناء العرض التقديمي كمربعات نص قابلة للتحرير، بالترتيب والحجم الأصليين للشرائح؛ ولم يتم نقل موضع الأشكال والصور وتنسيق النص بعد. لا يتم تعديل الملف الأصلي أبدًا؛ وملف .pptx المحول هو نسخة مستقلة.',
+    pptImportConvertBtn: 'تحويل وفتح',
+    pptImportFailedTitle: 'لا يمكن تحويل ملف .ppt هذا',
+    pptImportFailedBody:
+      'قد يكون الملف تالفًا أو ليس عرضًا تقديميًا صالحًا لـ PowerPoint 97-2003.',
     legacyPptBody:
       'هذا ملف PowerPoint 97-2003 (.ppt) ثنائي. المدعوم هو .pptx فقط. افتحه في PowerPoint ثم احفظه بصيغة .pptx.',
     legacyPptOk: 'حسنًا',
@@ -1245,6 +1313,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'O formato AVI não é suportado pelo player integrado e não pode ser reproduzido no aplicativo. O arquivo é incorporado como está e continua reproduzível no PowerPoint após a exportação.',
     legacyPptTitle: 'Não é possível abrir o formato .ppt antigo',
+    pptImportMsg: "Converter esta apresentação .{ext}?",
+    pptImportDetail:
+      "O GenOffice reconstrói a apresentação como caixas de texto editáveis, na ordem e tamanho originais dos slides; o posicionamento das formas, as imagens e a formatação do texto ainda não são transferidos. O arquivo de origem nunca é modificado; o .pptx convertido é uma cópia independente.",
+    pptImportConvertBtn: "Converter e abrir",
+    pptImportFailedTitle: "Não é possível converter este .ppt",
+    pptImportFailedBody: "O arquivo pode estar corrompido ou não ser uma apresentação válida do PowerPoint 97-2003.",
     legacyPptBody:
       'Este é um arquivo binário do PowerPoint 97-2003 (.ppt). Somente .pptx é suportado. Abra-o no PowerPoint/WPS/Keynote, use "Salvar Como .pptx" e tente novamente.',
     legacyPptOk: 'OK',
@@ -1357,6 +1431,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Il formato AVI non è supportato dal lettore integrato e non può essere riprodotto nell’app. Il file viene incorporato così com’è e resta riproducibile in PowerPoint dopo l’esportazione.',
     legacyPptTitle: 'Impossibile aprire il vecchio formato .ppt',
+    pptImportMsg: "Convertire questa presentazione .{ext}?",
+    pptImportDetail:
+      "GenOffice ricostruisce la presentazione sotto forma di caselle di testo modificabili, nell'ordine e nelle dimensioni originali delle diapositive; il posizionamento delle forme, le immagini e la formattazione del testo non vengono ancora importati. Il file sorgente non viene mai modificato; il .pptx convertito è una copia indipendente.",
+    pptImportConvertBtn: "Converti e apri",
+    pptImportFailedTitle: "Impossibile convertire questo .ppt",
+    pptImportFailedBody: "Il file potrebbe essere danneggiato o non essere una presentazione valida di PowerPoint 97-2003.",
     legacyPptBody:
       'Questo è un file binario PowerPoint 97-2003 (.ppt). È supportato solo .pptx. Aprilo in PowerPoint/WPS/Keynote, usa "Salva con nome .pptx" e riprova.',
     legacyPptOk: 'OK',
@@ -1470,6 +1550,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Format AVI nie jest obsługiwany przez wbudowany odtwarzacz i nie można go odtworzyć w aplikacji. Plik jest osadzany bez zmian i po eksporcie nadal odtwarza się w programie PowerPoint.',
     legacyPptTitle: 'Nie można otworzyć starego formatu .ppt',
+    pptImportMsg: "Skonwertować tę prezentację .{ext}?",
+    pptImportDetail:
+      "GenOffice odtwarza prezentację jako edytowalne pola tekstowe w pierwotnej kolejności i rozmiarze slajdów; rozmieszczenie kształtów, obrazy i formatowanie tekstu nie są jeszcze przenoszone. Plik źródłowy nie jest modyfikowany; przekonwertowany .pptx to niezależna kopia.",
+    pptImportConvertBtn: "Konwertuj i otwórz",
+    pptImportFailedTitle: "Nie można przekonwertować tego pliku .ppt",
+    pptImportFailedBody: "Plik może być uszkodzony lub nie jest prawidłową prezentacją PowerPoint 97-2003.",
     legacyPptBody:
       'To jest plik binarny PowerPoint 97-2003 (.ppt). Obsługiwany jest tylko format .pptx. Otwórz go w programie PowerPoint/WPS/Keynote, użyj „Zapisz jako .pptx" i spróbuj ponownie.',
     legacyPptOk: 'OK',
@@ -1581,6 +1667,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Formát AVI není vestavěným přehrávačem podporován, takže ho v aplikaci nelze přehrát. Soubor je vložen beze změny a po exportu se v PowerPointu stále přehrává.',
     legacyPptTitle: 'Nelze otevřít starší formát .ppt',
+    pptImportMsg: "Převést tuto prezentaci .{ext}?",
+    pptImportDetail:
+      "GenOffice sestaví prezentaci znovu jako upravitelná textová pole v původním pořadí a velikosti snímků; umístění tvarů, obrázky a formátování textu se zatím nepřenášejí. Původní soubor se nikdy nemění; převedený .pptx je samostatná kopie, do níž se dalším ukládáním zapisuje.",
+    pptImportConvertBtn: "Převést a otevřít",
+    pptImportFailedTitle: "Tento .ppt nelze převést",
+    pptImportFailedBody: "Soubor může být poškozený nebo to není platná prezentace PowerPoint 97-2003.",
     legacyPptBody:
       'Toto je binární soubor PowerPoint 97-2003 (.ppt). Podporován je pouze formát .pptx. Otevřete ho v PowerPointu/WPS/Keynote, použijte „Uložit jako .pptx“ a zkuste to znovu.',
     legacyPptOk: 'OK',
@@ -1691,6 +1783,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Het AVI-formaat wordt niet ondersteund door de ingebouwde speler en kan niet in de app worden afgespeeld. Het bestand wordt ongewijzigd ingesloten en blijft na export afspeelbaar in PowerPoint.',
     legacyPptTitle: 'Kan het oude .ppt-formaat niet openen',
+    pptImportMsg: "Deze .{ext}-presentatie converteren?",
+    pptImportDetail:
+      "GenOffice bouwt de presentatie opnieuw op als bewerkbare tekstvakken, in de oorspronkelijke diavolgorde en -grootte; vormplaatsing, afbeeldingen en tekstopmaak worden nog niet meegenomen. Het oorspronkelijke bestand wordt nooit gewijzigd; de omgezette .pptx is een zelfstandige kopie waarin volgende opslaan-acties terechtkomen.",
+    pptImportConvertBtn: "Converteren en openen",
+    pptImportFailedTitle: "Deze .ppt kan niet worden geconverteerd",
+    pptImportFailedBody: "Het bestand is mogelijk beschadigd of geen geldige PowerPoint 97-2003-presentatie.",
     legacyPptBody:
       'Dit is een binair PowerPoint 97-2003-bestand (.ppt). Alleen .pptx wordt ondersteund. Open het in PowerPoint/WPS/Keynote, kies "Opslaan als .pptx" en probeer het opnieuw.',
     legacyPptOk: 'OK',
@@ -1802,6 +1900,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'Format AVI tidak disokong oleh pemain terbina dalam dan tidak boleh dimainkan dalam aplikasi. Fail dibenamkan seadanya dan masih boleh dimainkan dalam PowerPoint selepas eksport.',
     legacyPptTitle: 'Tidak dapat membuka format .ppt lama',
+    pptImportMsg: "Tukar pembentangan .{ext} ini?",
+    pptImportDetail:
+      "GenOffice membina semula pembentangan sebagai kotak teks yang boleh diedit, mengikut susunan dan saiz slaid asal; kedudukan bentuk, imej dan pemformatan teks belum dibawa masuk lagi. Fail asal tidak pernah diubah; salinan .pptx yang ditukar ialah salinan berasingan tempat simpanan seterusnya ditulis.",
+    pptImportConvertBtn: "Tukar dan buka",
+    pptImportFailedTitle: "Tidak dapat menukar .ppt ini",
+    pptImportFailedBody: "Fail mungkin rosak atau bukan pembentangan PowerPoint 97-2003 yang sah.",
     legacyPptBody:
       'Ini ialah fail binari PowerPoint 97-2003 (.ppt). Hanya .pptx disokong. Buka dalam PowerPoint/WPS/Keynote, gunakan "Simpan Sebagai .pptx", kemudian cuba lagi.',
     legacyPptOk: 'OK',
@@ -1911,6 +2015,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'פורמט AVI אינו נתמך בנגן המובנה ולא ניתן להפעילו באפליקציה. הקובץ מוטמע כפי שהוא ועדיין ניתן להפעלה ב-PowerPoint לאחר הייצוא.',
     legacyPptTitle: 'לא ניתן לפתוח את הפורמט הישן .ppt',
+    pptImportMsg: "להמיר את מצגת ה‑.{ext} הזו?",
+    pptImportDetail:
+      "GenOffice בונה מחדש את החפיסה כתיבות טקסט הניתנות לעריכה, בסדר ובגודל המקוריים של השקופיות; מיקום צורות, תמונות ועיצוב טקסט עדיין לא מועברים. הקובץ המקורי לעולם אינו משתנה; ה-.pptx המומר הוא עותק נפרד שאליו נכתבות השמירות הבאות.",
+    pptImportConvertBtn: "המר ופתח",
+    pptImportFailedTitle: "לא ניתן להמיר את קובץ ה-.ppt הזה",
+    pptImportFailedBody: "ייתכן שהקובץ פגום או שאינו מצגת PowerPoint 97-2003 תקינה.",
     legacyPptBody:
       'זהו קובץ בינארי של PowerPoint 97-2003 (.ppt). נתמך רק .pptx. פתח אותו ב-PowerPoint/WPS/Keynote, בחר "שמירה בשם .pptx" ונסה שוב.',
     legacyPptOk: 'הבנתי',
@@ -2018,6 +2128,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'AVI प्रारूप अंतर्निहित प्लेयर द्वारा समर्थित नहीं है और ऐप में नहीं चलाया जा सकता। फ़ाइल यथावत एम्बेड की जाती है और निर्यात के बाद PowerPoint में चलती रहती है।',
     legacyPptTitle: 'पुराना .ppt प्रारूप नहीं खोला जा सकता',
+    pptImportMsg: "इस .{ext} प्रेजेंटेशन को बदलें?",
+    pptImportDetail:
+      "GenOffice प्रस्तुति को संपादन योग्य टेक्स्ट बॉक्स के रूप में, मूल स्लाइड क्रम और आकार में फिर से बनाता है; आकृतियों की स्थिति, चित्र और टेक्स्ट फ़ॉर्मैटिंग अभी नहीं लाए जाते। मूल फ़ाइल कभी नहीं बदलती; रूपांतरित .pptx एक अलग प्रति है जिसमें आगे के सेव लिखे जाते हैं।",
+    pptImportConvertBtn: "बदलकर खोलें",
+    pptImportFailedTitle: "इस .ppt को बदला नहीं जा सकता",
+    pptImportFailedBody: "फ़ाइल क्षतिग्रस्त हो सकती है या मान्य PowerPoint 97-2003 प्रस्तुति नहीं है।",
     legacyPptBody:
       'यह PowerPoint 97-2003 (.ppt) बाइनरी फ़ाइल है। केवल .pptx समर्थित है। इसे PowerPoint/WPS/Keynote में खोलकर ".pptx के रूप में सहेजें" और फिर से प्रयास करें।',
     legacyPptOk: 'ठीक है',
@@ -2127,6 +2243,12 @@ export const tMain = createI18n({
     mediaAviBody:
       'AVI 格式不受內建播放器支援，無法在應用程式內播放。檔案會原樣嵌入，匯出後在 PowerPoint 中仍可播放。',
     legacyPptTitle: '無法開啟 .ppt 舊格式',
+    pptImportMsg: "轉換這個 .{ext} 簡報？",
+    pptImportDetail:
+      "GenOffice 會把簡報重建為可編輯的文字方塊，保持原來的投影片順序和尺寸；形狀位置、圖片和文字格式暫不保留。原檔案不會被改動，轉換出的 .pptx 是一個獨立副本，之後的儲存都寫入它。",
+    pptImportConvertBtn: "轉換並開啟",
+    pptImportFailedTitle: "無法轉換這個 .ppt",
+    pptImportFailedBody: "檔案可能已損毀，或不是有效的 PowerPoint 97-2003 簡報。",
     legacyPptBody:
       '這是 PowerPoint 97-2003 (.ppt) 二進位格式,本應用程式只支援 .pptx。請在 PowerPoint/WPS/Keynote 裡開啟後「另存為 .pptx」,再回來開啟。',
     legacyPptOk: '知道了',

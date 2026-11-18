@@ -271,19 +271,34 @@ describe('headless create_pptx', () => {
 function fakeSlidesControl(): { control: SlidesControl; saved: Array<{ path: string }> } {
   let nextId = 1
   const saved: Array<{ path: string }> = []
+  const slideNotes = new Map<number, string>()
   return {
     saved,
     control: {
       openBlankTab: async () => nextId++,
       runTxn: async (wcId, req) => {
         if (wcId <= 0) throw new Error('no deck')
-        const ops = req.ops as Array<{ op: string }>
+        const ops = req.ops as Array<{ op: string; target?: { slide: number }; text?: string }>
         if (ops.some((o) => o.op === 'explode')) {
           return { applied: false, failures: [{ index: 0, error: 'boom' }] }
         }
+        for (const o of ops) {
+          if (o.op === 'setNotes' && o.target?.slide !== undefined) {
+            slideNotes.set(o.target.slide, o.text ?? '')
+          }
+        }
         return { applied: true, records: ops.map((o) => ({ op: o.op })) }
       },
-      readDeck: async (wcId) => ({ slides: [{ index: 0, wc: wcId, elements: [] }] }),
+      readDeck: async (wcId) => ({
+        slides: [
+          {
+            index: 0,
+            wc: wcId,
+            ...(slideNotes.get(0) ? { notes: slideNotes.get(0) } : {}),
+            elements: [],
+          },
+        ],
+      }),
       saveDeck: async (wcId, path) => {
         if (wcId <= 0) throw new Error('no deck')
         saved.push({ path })
@@ -342,6 +357,59 @@ describe('visible deck session tools', () => {
     })
     expect(after.isError).toBe(true)
     expect(text(after.content)).toMatch(/no session is open/)
+  })
+
+  it('supports setNotes op via apply_slide_ops to update speaker notes', async () => {
+    const fake = fakeSlidesControl()
+    await startService(sessionSurface(fake.control))
+    await client!.callTool({ name: 'create_session', arguments: { family: 'pptx' } })
+
+    // 1. Initial read before notes
+    const readInitial = await client!.callTool({ name: 'read_deck', arguments: {} })
+    expect(readInitial.isError).toBeFalsy()
+    expect(text(readInitial.content)).not.toContain('"notes"')
+
+    // 2. Set notes via apply_slide_ops
+    const applyNotes = await client!.callTool({
+      name: 'apply_slide_ops',
+      arguments: {
+        ops: [
+          {
+            op: 'setNotes',
+            target: { slide: 0 },
+            text: 'Key speaker takeaway for slide 1',
+          },
+        ],
+      },
+    })
+    expect(applyNotes.isError).toBeFalsy()
+    expect(text(applyNotes.content)).toContain('"applied": true')
+    expect(text(applyNotes.content)).toContain('"op": "setNotes"')
+
+    // 3. Read deck back: notes are returned
+    const readUpdated = await client!.callTool({ name: 'read_deck', arguments: {} })
+    expect(readUpdated.isError).toBeFalsy()
+    expect(text(readUpdated.content)).toContain('Key speaker takeaway for slide 1')
+
+    // 4. Clear notes via apply_slide_ops
+    const clearNotes = await client!.callTool({
+      name: 'apply_slide_ops',
+      arguments: {
+        ops: [
+          {
+            op: 'setNotes',
+            target: { slide: 0 },
+            text: '',
+          },
+        ],
+      },
+    })
+    expect(clearNotes.isError).toBeFalsy()
+
+    // 5. Read deck back after clear: notes are gone
+    const readCleared = await client!.callTool({ name: 'read_deck', arguments: {} })
+    expect(readCleared.isError).toBeFalsy()
+    expect(text(readCleared.content)).not.toContain('"notes"')
   })
 
   it('surfaces failed transactions as errors, keeps dry runs successful, caps batch size', async () => {

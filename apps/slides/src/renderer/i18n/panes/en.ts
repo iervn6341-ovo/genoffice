@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const en = {
+  paneAnimSaveFailed: 'Could not update animation: {error}',
   paneShowSetupTitle: 'Set Up Slide Show',
   paneShowSetupType: 'Show type',
   paneShowTypeSpeaker: 'Presented by a speaker (full screen)',
@@ -31,6 +32,8 @@ export const en = {
   paneMoveDown: 'Move Down',
 
   paneAnimTitle: 'Animation Pane · Slide {n}',
+  paneAnimSelectHint: 'Select an animation to edit its effect and timing.',
+  paneAnimOrderLabel: 'Animation order {n}: {target}',
   paneAnimPreview: 'Play animation preview for this slide',
   paneAnimCollapse: 'Collapse Animation Pane',
   paneAnimEmpty: 'No animations on this slide',

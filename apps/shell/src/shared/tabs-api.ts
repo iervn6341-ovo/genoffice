@@ -10,6 +10,8 @@ export interface TabSummary {
   title: string
   closable: boolean
   active: boolean
+  /** whether this tab has unsaved changes */
+  dirty?: boolean
   /** The active editor covers the shell strip during a show/fullscreen presentation. */
   coversTabStrip?: boolean
   /** absolute path behind the tab; absent while the document is untitled */
@@ -32,6 +34,11 @@ export interface OpenDocumentTab {
 }
 
 export interface TabsApi {
+  /** The active tab header is painted and its native drag regions can be used. */
+  frameReady(activeId: string): void
+  previewDrag(id: string, screenX: number, screenY: number): void
+  endPreview(): void
+  onDropHint(handler: (hint: { x: number; label: string } | null) => void): () => void
   list(): Promise<TabSummary[]>
   activate(id: string): Promise<void>
   close(id: string): Promise<void>
@@ -55,6 +62,8 @@ export interface TabsApi {
   showAppMenu(x: number, y: number): Promise<void>
   /** move a tab to a new index in the strip; Home stays pinned at index 0 */
   reorder(id: string, toIndex: number): Promise<void>
+  /** Release a captured tab drag in screen coordinates. True if moved to another window. */
+  drop(id: string, screenX: number, screenY: number): Promise<boolean>
   /** subscribe to tab list changes (open/close/activate/title updates); returns unsubscribe */
   onChanged(handler: (tabs: TabSummary[]) => void): () => void
   /**
@@ -70,6 +79,10 @@ export interface TabsApi {
 }
 
 export const TABS_CHANNELS = {
+  frameReady: 'tabs:frame-ready',
+  previewDrag: 'tabs:preview-drag',
+  endPreview: 'tabs:end-preview',
+  dropHint: 'tabs:drop-hint',
   list: 'tabs:list',
   activate: 'tabs:activate',
   close: 'tabs:close',
@@ -77,6 +90,7 @@ export const TABS_CHANNELS = {
   showNewMenu: 'tabs:show-new-menu',
   showAppMenu: 'tabs:show-app-menu',
   reorder: 'tabs:reorder',
+  drop: 'tabs:drop',
   changed: 'tabs:changed',
   chromePressed: 'tabs:chrome-pressed',
 } as const

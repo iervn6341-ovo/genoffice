@@ -163,7 +163,14 @@ test.describe('theme visual adoption', () => {
 
       // View ▸ Dark Mode is Word's Switch Modes: back to white paper under the dark chrome
       await editorPage.getByRole('button', { name: 'View', exact: true }).click()
-      await editorPage.getByRole('button', { name: 'Dark Mode', exact: true }).click()
+      const group = editorPage.locator('.rb-fold-group[aria-label="Appearance"]')
+      const toggle = group.locator('.rb-fold-items button').filter({ hasText: 'Dark Mode' })
+      const folded = group.locator('.rb-fold-btn')
+      await expect
+        .poll(async () => (await toggle.isVisible()) || (await folded.isVisible()))
+        .toBe(true)
+      if (await folded.isVisible()) await folded.click()
+      await toggle.click()
       await expect.poll(async () => luminance(await pageBg())).toBeGreaterThan(180)
       expect(luminance(await pageInk())).toBeLessThan(60)
       await editorPage.screenshot({ path: screenshotPath('theme-docs-dark-white-page') })

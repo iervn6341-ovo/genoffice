@@ -251,10 +251,20 @@ describe('After Animation hide', () => {
   })
 
   it('hides at the start of the next click, not after it', () => {
-    const steps = buildSteps([item('a', 'hideOnNextClick'), item('b')])
+    const steps = buildSteps([
+      item('a', 'hideOnNextClick'),
+      { ...item('b'), effect: 'fade' as const, durationMs: 500 },
+    ])
     const s = computeNodeStates(steps, 1, 0, 540)
     expect(s.get('a')!.hidden).toBe(true)
     expect(s.get('b')!.hidden).toBe(true)
+  })
+
+  it('reveals an instant replacement on that same click without a synthetic frame delay', () => {
+    const steps = buildSteps([item('a', 'hideOnNextClick'), item('b')])
+    const s = computeNodeStates(steps, 1, 0, 540)
+    expect(s.get('a')!.hidden).toBe(true)
+    expect(s.get('b')!.hidden).toBe(false)
   })
 
   it('hide after animation goes away once its own effect finishes', () => {
@@ -262,3 +272,41 @@ describe('After Animation hide', () => {
     expect(computeNodeStates(steps, 1, null, 540).get('a')!.hidden).toBe(true)
   })
 })
+
+describe('direction options in playback', () => {
+  const H = 540
+  const W = 960
+
+  it('flyIn animates from the specified direction', () => {
+    const directions = ['bottom', 'top', 'left', 'right'] as const
+    for (const direction of directions) {
+      const steps = buildSteps([item({ sourceId: 'a', effect: 'flyIn', direction, durationMs: 1000 })])
+      const mid = computeNodeStates(steps, 0, 500, H, W).get('a')!
+      if (direction === 'bottom') expect(mid.dy).toBeGreaterThan(0)
+      if (direction === 'top') expect(mid.dy).toBeLessThan(0)
+      if (direction === 'left') expect(mid.dx).toBeLessThan(0)
+      if (direction === 'right') expect(mid.dx).toBeGreaterThan(0)
+    }
+  })
+
+  it('flyOut animates to the specified direction', () => {
+    const directions = ['bottom', 'top', 'left', 'right'] as const
+    for (const direction of directions) {
+      const steps = buildSteps([item({ sourceId: 'a', effect: 'flyOut', direction, durationMs: 1000 })])
+      const mid = computeNodeStates(steps, 0, 500, H, W).get('a')!
+      if (direction === 'bottom') expect(mid.dy).toBeGreaterThan(0)
+      if (direction === 'top') expect(mid.dy).toBeLessThan(0)
+      if (direction === 'left') expect(mid.dx).toBeLessThan(0)
+      if (direction === 'right') expect(mid.dx).toBeGreaterThan(0)
+    }
+  })
+
+  it('wipe sets clip mode matching direction', () => {
+    for (const direction of ['bottom', 'top', 'left', 'right'] as const) {
+      const steps = buildSteps([item({ sourceId: 'a', effect: 'wipe', direction, durationMs: 1000 })])
+      const mid = computeNodeStates(steps, 0, 500, H, W).get('a')!
+      expect(mid.clip?.mode).toBe(direction === 'bottom' ? 'btm' : direction)
+    }
+  })
+})
+

@@ -55,7 +55,7 @@ export const FORMAT_FAMILIES: readonly FormatFamily[] = [
   {
     family: 'docx',
     label: 'Word document',
-    editorOpen: ['docx'],
+    editorOpen: ['docx', 'doc', 'dot'],
     editorSave: ['docx'],
     editorExport: ['pdf'],
     mcp: { generate: 'docx', save: ['docx'], read: 'docx' },
@@ -74,7 +74,7 @@ export const FORMAT_FAMILIES: readonly FormatFamily[] = [
   {
     family: 'pptx',
     label: 'presentation',
-    editorOpen: ['pptx', 'ppsx'],
+    editorOpen: ['pptx', 'ppsx', 'ppt'],
     editorSave: ['pptx', 'ppsx'],
     editorExport: ['pdf'],
     mcp: { generate: 'pptx', save: ['pptx', 'ppsx'] },

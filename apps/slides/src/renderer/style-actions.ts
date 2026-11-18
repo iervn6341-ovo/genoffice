@@ -19,8 +19,10 @@ import {
   applySelectionFontFamily,
   applySelectionParagraphFormat,
   changeSelectionCase,
+  ensureEditorSelection,
   resizeSelectionFont,
   restoreEditSelection,
+  saveEditSelection,
   setSelectionFontSizePt,
   setSelectionHighlight,
   setSelectionLetterSpacingPt,
@@ -62,9 +64,18 @@ function judgedRuns(ctx: ActionCtx, id: string) {
 
 export function onFormat(ctx: ActionCtx, cmd: FormatCmd): void {
   if (typing(ctx) || !ELEMENT_FORMAT_CMDS.has(cmd)) {
+    const root =
+      (document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable
+        ? document.activeElement
+        : document.querySelector<HTMLElement>('.slide-text-editor')) ??
+      document.querySelector<HTMLElement>('.notes-editor-body')
+    if (root) ensureEditorSelection(root)
     if (cmd === 'fontSizeUp') resizeSelectionFont(1)
     else if (cmd === 'fontSizeDown') resizeSelectionFont(-1)
-    else document.execCommand(cmd)
+    else {
+      document.execCommand(cmd)
+      saveEditSelection()
+    }
     return
   }
   if (!ctx.selectedIds.length) return
@@ -237,9 +248,10 @@ const SELECTION_PATCH_KEYS = new Set([
 export function onParagraphFormat(ctx: ActionCtx, patch: ParagraphFormatPatch): void {
   // Cell editing commits regenerate whole paragraphs from the overlay DOM, which round-trips
   // the rtl mark; the other selection keys keep their historical element-wide semantics there
-  const selectable = ctx.editing
-    ? Object.keys(patch).every((k) => SELECTION_PATCH_KEYS.has(k))
-    : ctx.editingCell != null && Object.keys(patch).every((k) => k === 'rtl')
+  const selectable =
+    ctx.editing || ctx.editingNotes
+      ? Object.keys(patch).every((k) => SELECTION_PATCH_KEYS.has(k))
+      : ctx.editingCell != null && Object.keys(patch).every((k) => k === 'rtl')
   if (selectable) {
     const active = document.activeElement
     if (!(active instanceof HTMLElement && active.isContentEditable)) restoreEditSelection()

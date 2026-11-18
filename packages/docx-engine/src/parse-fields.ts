@@ -2,6 +2,7 @@
 import { inlineEqFieldResults } from './eq-field'
 import { computeListMarkers, type ListItemRef } from './list-markers'
 import { decodeEntities, lineTwipsOf, plainText } from './parse-xml-text'
+import { EAST_ASIAN_FONT_RE } from './parse-styles'
 import type { Block, FieldDisplay, NumberingDef, StyleInfo, TabStop } from './types'
 
 /**
@@ -117,25 +118,64 @@ export function fieldDisplayOf(
     // result runs' rPr (a Times bold TOC under a Calibri body), the paragraph
     // style alone often says nothing
     let font: string | undefined
+    let fontAscii: string | undefined
+    let eastAsiaFont: string | undefined
     let bold = false
     let runStyleId: string | undefined
+    const pStyle = styles?.get(styleId)
+
+    const inheritedEa =
+      pStyle?.display?.eastAsiaFont ??
+      (pStyle?.display?.font &&
+      (pStyle.display.font !== pStyle.display.fontAscii ||
+        EAST_ASIAN_FONT_RE.test(pStyle.display.font.normalize('NFKC')))
+        ? pStyle.display.font
+        : undefined)
+    const inheritedAscii =
+      pStyle?.display?.fontAscii && !EAST_ASIAN_FONT_RE.test(pStyle.display.fontAscii)
+        ? pStyle.display.fontAscii
+        : (pStyle?.display?.csFont && !EAST_ASIAN_FONT_RE.test(pStyle.display.csFont)
+          ? pStyle.display.csFont
+          : undefined)
+
+    let explicitEa: string | undefined
+    let explicitAscii: string | undefined
+
     const runRe = /<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g
     let run: RegExpExecArray | null
     while ((run = runRe.exec(xml)) !== null) {
       if (!/<w:(?:t|delText)(?:\s|>)/.test(run[1]) || run[1].includes('<w:instrText')) continue
       const v = parseInt(/<w:sz w:val="(\d+)"/.exec(run[1])?.[1] ?? '', 10)
       if (v > sz) sz = v
-      if (font === undefined) {
-        const rPr = /<w:rPr>[\s\S]*?<\/w:rPr>/.exec(run[1])?.[0] ?? ''
-        runStyleId = /<w:rStyle w:val="([^"]+)"/.exec(rPr)?.[1]
-        const text = Array.from(
-          run[1].matchAll(/<w:(?:t|delText)(?:\s[^>]*)?>([\s\S]*?)<\/w:(?:t|delText)>/g),
-          (m) => m[1],
-        ).join('')
-        font = leadingRunFont(rPr, text) ?? ''
-        bold = /<w:b(?:\s*\/>|\s(?![^>]*w:val="(?:0|false|none|off)")[^>]*\/>)/i.test(rPr)
+
+      const rPr = /<w:rPr>[\s\S]*?<\/w:rPr>/.exec(run[1])?.[0] ?? ''
+      if (!runStyleId) runStyleId = /<w:rStyle w:val="([^"]+)"/.exec(rPr)?.[1]
+      const fonts = /<w:rFonts [^/>]*/.exec(rPr)?.[0]
+      const rfAscii = fonts
+        ? /w:ascii="([^"]+)"/.exec(fonts)?.[1] ?? /w:hAnsi="([^"]+)"/.exec(fonts)?.[1]
+        : undefined
+      const rfEa = fonts ? /w:eastAsia="([^"]+)"/.exec(fonts)?.[1] : undefined
+
+      const text = Array.from(
+        run[1].matchAll(/<w:(?:t|delText)(?:\s[^>]*)?>([\s\S]*?)<\/w:(?:t|delText)>/g),
+        (m) => m[1],
+      ).join('')
+      const hasCjk = /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/.test(text)
+
+      if (hasCjk && rfEa) explicitEa ??= rfEa
+      if (rfAscii && !EAST_ASIAN_FONT_RE.test(rfAscii)) explicitAscii ??= rfAscii
+
+      if (!bold) {
+        bold =
+          /<w:b(?:\s*\/>|\s(?![^>]*w:val="(?:0|false|none|off)")[^>]*\/>)/i.test(rPr) ||
+          Boolean(pStyle?.display?.bold)
       }
     }
+
+    fontAscii = explicitAscii ?? inheritedAscii
+    eastAsiaFont = explicitEa ?? inheritedEa
+    const hasCjkTitle = /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/.test(left)
+    font = (hasCjkTitle ? eastAsiaFont : undefined) ?? fontAscii ?? eastAsiaFont ?? ''
     return {
       kind: 'tocLine',
       left,
@@ -147,6 +187,8 @@ export function fieldDisplayOf(
       ...(deleted && /<w:del\b[^>]*\/>/.test(pPr) ? { markDeleted: true } : {}),
       ...(sz > 0 ? { szHalfPoints: sz } : {}),
       ...(font ? { fontFamily: font } : {}),
+      ...(fontAscii ? { fontAscii } : {}),
+      ...(eastAsiaFont ? { eastAsiaFont } : {}),
       ...(bold ? { bold } : {}),
       ...(runStyleId ? { runStyleId } : {}),
       ...(leader ? { leader } : {}),

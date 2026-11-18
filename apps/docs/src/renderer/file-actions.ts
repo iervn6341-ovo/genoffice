@@ -85,9 +85,14 @@ import {
   type InkTool,
 } from './editor/ink'
 import { t, getLang } from './i18n/locale'
-import { isBlankDocument, parseHtmlFragment, replaceBlockRange } from './ai/protocol'
+import { parseHtmlFragment, replaceBlockRange } from './ai/protocol'
 import { carryDocSeen } from './ai/tools'
-import { isDocDirty, resetCrossDocEditState } from './doc-dirty'
+import {
+  bodyDirtyAgainstSaved,
+  isDocDirty,
+  rememberSavedBody,
+  resetCrossDocEditState,
+} from './doc-dirty'
 import { applySectPrRewrites, type SectPrRewrite } from './sectpr-rewrite'
 import { effectiveHfRefs } from './pagination-hf'
 import { createSaveSerializer } from './save-until-persisted'
@@ -238,7 +243,11 @@ export interface FileActionContext {
   themeColors: ThemeColors | null
   themeColorsDirty: boolean
   setThemeFonts: (value: ThemeFonts | null) => void
-  onMissingFontsDetected?: (missing: FontSubstitution[], filePath?: string, fileName?: string) => void
+  onMissingFontsDetected?: (
+    missing: FontSubstitution[],
+    filePath?: string,
+    fileName?: string,
+  ) => void
   setThemeFontsDirty: (dirty: boolean) => void
   setThemeColors: (value: ThemeColors | null) => void
   setThemeColorsDirty: (dirty: boolean) => void
@@ -401,8 +410,8 @@ export async function loadFile(
     noteDocumentSwapped()
     ctx.setDoc({
       parsed,
-      filePath: result.path,
-      fileName: result.name,
+      filePath: result.path || null,
+      fileName: result.path ? result.name : t('appUntitledDocx'),
       hash: result.hash,
       encrypted: result.encrypted,
     })
@@ -489,6 +498,11 @@ export async function loadFile(
     // Recovery content still only exists in the autosave copy. Keep it dirty
     // until an explicit/automatic save lands it on the original path.
     ctx.dirtyRef.current = openedFileStartsDirty(result)
+    void waitForFullContent().then(() => {
+      if (generation === openGeneration && ctx.editor && !ctx.editor.isDestroyed) {
+        rememberSavedBody(ctx.editor, ctx.editor.state.doc, openedFileStartsDirty(result))
+      }
+    })
     const missing = checkMissingFonts(collectDocFonts(parsed))
     if (missing.length > 0) {
       const names = missing
@@ -589,6 +603,7 @@ export async function newFile(ctx: FileActionContext): Promise<boolean | undefin
     ctx.setCompareResult(null)
     ctx.dirtyRef.current = false
     ctx.setShowAi(true)
+    rememberSavedBody(ctx.editor)
     ctx.setStatus(t('appNewDocCreated'))
     return true
   } catch (err) {
@@ -734,6 +749,7 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
     const hfKind = kind as 'header' | 'footer'
     return {
       lastBlockIndex: Number(lastBlockIndex),
+      ...(sectionIndex >= 0 ? { sectionIndex } : {}),
       kind: hfKind,
       hf,
       variant: (view ?? 'default') as 'default' | 'first' | 'even',
@@ -839,21 +855,16 @@ export async function buildDocBytes(ctx: FileActionContext): Promise<Uint8Array 
  * bytes to the main process, which stores them under userData. Best-effort —
  * a failure only means this tick's copy is skipped.
  *
- * A dirty document that never got a path can't have a recovery copy (the main
- * process only accepts allowlisted paths), so it is silently persisted into the
- * default folder first (same save-new path as the first manual save); every
- * later tick then covers it like any opened file.
+ * Pathless drafts use a private userData recovery copy. They never acquire a
+ * document path or recent-file entry until the user explicitly saves.
  */
 export async function writeRecoveryCopy(ctx: FileActionContext): Promise<void> {
   const { doc, editor } = ctx
   if (!doc || !editor || ctx.saveInFlightRef.current || !isDocDirty(ctx)) return
   if (!doc.filePath) {
-    if (isBlankDocument(editor)) return
     if (editor.view.composing) return
     const active = document.activeElement as HTMLElement | null
     if (active?.closest('td[contenteditable], .doc-textbox')) return
-    await save(ctx, false, true)
-    return
   }
   try {
     const bytes = await buildDocBytes(ctx)
@@ -862,7 +873,8 @@ export async function writeRecoveryCopy(ctx: FileActionContext): Promise<void> {
       bytes.byteOffset,
       bytes.byteOffset + bytes.byteLength,
     ) as ArrayBuffer
-    await window.desktop.writeRecoveryCopy(doc.filePath, buffer)
+    if (doc.filePath) await window.desktop.writeRecoveryCopy(doc.filePath, buffer)
+    else await window.desktop.writeUntitledRecoveryCopy(buffer)
   } catch {
     /* best-effort */
   }
@@ -872,9 +884,8 @@ const runSerializedSave = createSaveSerializer()
 
 /**
  * Drop unsaved password intents left by a replaced document — queued behind any
- * in-flight save: writeRecoveryCopy silently save-new's a dirty pathless
- * draft, and that save must still consume the draft's desired password (the
- * draft stays protected on disk) before the swap-triggered clear lands.
+ * in-flight save: a queued explicit save must consume the draft's desired
+ * password before replacement cleanup clears the old intent.
  */
 function discardStalePasswordIntents(): void {
   // Start the IPC now, before the replacement document can record a password.
@@ -976,10 +987,8 @@ export function aiDocContentNodes(html: string): PmNode[] {
 
 /**
  * Boot-time half of the AI create_document tool: fill the fresh blank
- * document with the queued content (same restricted-HTML pipeline as
- * insert_content), then silently save it under the tool-provided title.
- * The save runs even when nothing could be parsed — the tool already
- * reported the document as created, so an unsaved untitled tab would lie.
+ * document with queued content and persist it. Unlike an ordinary blank tab,
+ * create_document is an explicit request to create a separate document.
  */
 export async function applyAiDocContent(
   ctx: FileActionContext,
@@ -1088,7 +1097,8 @@ async function saveOnce(
       // password after the main process captured this save. Keep the live state
       // dirty; replacing it with the saved snapshot or marking it clean would
       // consume the newer intent.
-      if (passwordIntentPending) ctx.dirtyRef.current = true
+      rememberSavedBody(editor, docSnapshot, passwordIntentPending)
+      ctx.dirtyRef.current = bodyDirtyAgainstSaved(editor) ?? true
       ctx.saveIncompleteRef.current = true
       ctx.setDoc((prev) =>
         prev
@@ -1234,6 +1244,7 @@ async function saveOnce(
     ctx.setRemovePersonalInfo(reparsed.removePersonalInfo)
     ctx.setRemovePersonalInfoDirty(false)
     ctx.dirtyRef.current = false
+    rememberSavedBody(editor)
     ctx.setStatus(
       auto ? t('appAutoSavedAt', { time: new Date().toLocaleTimeString() }) : t('appSaved'),
     )

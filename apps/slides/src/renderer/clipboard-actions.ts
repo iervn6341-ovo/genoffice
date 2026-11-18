@@ -6,14 +6,12 @@
 import type { ActionCtx } from './action-context'
 import type { PasteSlideMode } from '../shared/ipc'
 import { FIT_WIDTH } from './app-constants'
-import { withHistoryGroup } from './history-group'
+import { flushPendingTransforms, withHistoryGroup } from './history-group'
+import { flushFormatEdits, queueFormatEdit } from './format-edit-queue'
+import { flushTextCommit } from './active-text-edit'
 import { renderElementsToPngBase64, renderSlidesToPngBase64 } from './export-render'
 import { copySelectedCells, pasteIntoCells, selectedTable } from './table-select-actions'
-import {
-  extractBrushFormat,
-  computeBrushApply,
-  buildEditParagraphsWithFormat,
-} from './format-brush'
+import { extractBrushFormat, buildBrushOps, findBrushTarget } from './format-brush'
 import { t } from './i18n/locale'
 
 export async function deleteSelected(ctx: ActionCtx): Promise<void> {
@@ -256,11 +254,8 @@ export async function duplicateSelected(
 // ── Format painter operations ───────────────────────────────────────────────
 
 /** ⌘⇧C: copy the selected single element's format to the clipboard (without entering paste mode) */
-export function copyFormat(ctx: ActionCtx): void {
-  if (ctx.selectedIds.length !== 1 || !ctx.slide) return
-  const node = ctx.slide.nodes.find((n) => n.sourceId === ctx.selectedIds[0])
-  if (!node) return
-  const fmt = extractBrushFormat(node)
+export async function copyFormat(ctx: ActionCtx): Promise<void> {
+  const fmt = await captureBrushFormat(ctx)
   if (fmt) {
     ctx.setBrushFormat(fmt)
     ctx.setStatus(t('appStatusFormatCopied'))
@@ -271,16 +266,23 @@ export function copyFormat(ctx: ActionCtx): void {
 export async function pasteFormat(ctx: ActionCtx): Promise<void> {
   if (!ctx.brushFormat || ctx.selectedIds.length === 0 || !ctx.slide) return
   // fill + stroke + text are separate calls per element: one paste = one undo step
-  await withHistoryGroup(() => pasteFormatEach(ctx))
-  ctx.setStatus(t('appStatusFormatPasted'))
+  try {
+    await queueFormatEdit(async () => {
+      await withHistoryGroup(() => pasteFormatEach(ctx))
+      ctx.setStatus(t('appStatusFormatPasted'))
+    })
+  } catch {
+    ctx.setStatus(t('appStatusFormatApplyFailed'))
+  }
 }
 
 async function pasteFormatEach(ctx: ActionCtx): Promise<void> {
   if (!ctx.brushFormat || !ctx.slide) return
   for (const id of ctx.selectedIds) {
-    const node = ctx.slide.nodes.find((n) => n.sourceId === id)
+    const target = findBrushTarget(ctx.slide.nodes, id)
+    const node = target?.node
     if (!node) continue
-    await applyBrushFormatTo(ctx, ctx.brushFormat, id, node)
+    await applyBrushFormatTo(ctx, ctx.brushFormat, node, target?.groupId)
   }
 }
 
@@ -291,45 +293,25 @@ async function pasteFormatEach(ctx: ActionCtx): Promise<void> {
 async function applyBrushFormatTo(
   ctx: ActionCtx,
   brush: NonNullable<ActionCtx['brushFormat']>,
-  targetId: string,
   node: NonNullable<ActionCtx['slide']>['nodes'][number],
-): Promise<void> {
-  const plan = computeBrushApply(brush, node)
-  if (plan.fillColor !== undefined) {
-    const updated = await window.slidesApi.editFill({
-      slideIndex: ctx.current,
-      sourceId: targetId,
-      fill: plan.fillColor,
-    })
-    if (updated) ctx.applySlide(ctx.current, updated)
-  }
-  if (plan.stroke !== undefined) {
-    const updated = await window.slidesApi.editStroke({
-      slideIndex: ctx.current,
-      sourceId: targetId,
-      stroke: plan.stroke,
-    })
-    if (updated) ctx.applySlide(ctx.current, updated)
-  }
-  if ((plan.runFormat || plan.align) && (node.type === 'shape' || node.type === 'text')) {
-    const paras = buildEditParagraphsWithFormat(node, plan.runFormat, plan.align)
-    if (paras) {
-      const updated = await window.slidesApi.editText({
-        slideIndex: ctx.current,
-        sourceId: targetId,
-        paragraphs: paras,
-      })
-      if (updated) ctx.applySlide(ctx.current, updated)
-    }
-  }
+  groupId?: string,
+): Promise<boolean> {
+  const ops = buildBrushOps(brush, node, ctx.current, groupId)
+  if (!ops.length) return false
+  const result = await window.slidesApi.applyTxn({
+    ops,
+    isolation: 'atomic',
+    renderSlideIndex: ctx.current,
+  })
+  const updated = result?.slide ?? result?.slides?.[ctx.current]
+  if (!result?.applied || !updated) throw new Error(t('appStatusFormatApplyFailed'))
+  ctx.applySlide(ctx.current, updated)
+  return true
 }
 
 /** Format painter button single click: copy current format + enter single-paste mode */
-export function onFormatBrushClick(ctx: ActionCtx): void {
-  if (ctx.selectedIds.length !== 1 || !ctx.slide) return
-  const node = ctx.slide.nodes.find((n) => n.sourceId === ctx.selectedIds[0])
-  if (!node) return
-  const fmt = extractBrushFormat(node)
+export async function onFormatBrushClick(ctx: ActionCtx): Promise<void> {
+  const fmt = await captureBrushFormat(ctx)
   if (!fmt) return
   ctx.setBrushFormat(fmt)
   ctx.setBrushMode('once')
@@ -337,28 +319,45 @@ export function onFormatBrushClick(ctx: ActionCtx): void {
 }
 
 /** Format painter button double click: enter continuous mode */
-export function onFormatBrushDoubleClick(ctx: ActionCtx): void {
-  if (ctx.selectedIds.length !== 1 || !ctx.slide) return
-  const node = ctx.slide.nodes.find((n) => n.sourceId === ctx.selectedIds[0])
-  if (!node) return
-  const fmt = extractBrushFormat(node)
+export async function onFormatBrushDoubleClick(ctx: ActionCtx): Promise<void> {
+  const fmt = await captureBrushFormat(ctx)
   if (!fmt) return
   ctx.setBrushFormat(fmt)
   ctx.setBrushMode('continuous')
   ctx.setStatus(t('appStatusBrushContinuous'))
 }
 
+async function captureBrushFormat(ctx: ActionCtx) {
+  if (ctx.selectedIds.length !== 1 || !ctx.slide) return null
+  try {
+    await flushTextCommit()
+    await flushFormatEdits()
+    await flushPendingTransforms()
+    const slide = await window.slidesApi.getRenderSlide(ctx.current)
+    const node = slide && findBrushTarget(slide.nodes, ctx.selectedIds[0]!)?.node
+    return node ? extractBrushFormat(node, slide!.scale) : null
+  } catch {
+    ctx.setStatus(t('appStatusFormatApplyFailed'))
+    return null
+  }
+}
+
 /** Apply format when an element is clicked in format painter mode */
 export async function applyBrushToElement(ctx: ActionCtx, targetId: string): Promise<void> {
   const brush = ctx.brushFormat
   if (!brush || !ctx.slide) return
-  const node = ctx.slide.nodes.find((n) => n.sourceId === targetId)
+  const target = findBrushTarget(ctx.slide.nodes, targetId)
+  const node = target?.node
   if (!node) return
   // fill / outline / text are separate calls: one brush click = one undo step
-  await withHistoryGroup(() => applyBrushFormatTo(ctx, brush, targetId, node))
-
-  if (ctx.brushMode === 'once') {
-    ctx.setBrushMode(null)
+  try {
+    const changed = await queueFormatEdit(() =>
+      withHistoryGroup(() => applyBrushFormatTo(ctx, brush, node, target?.groupId)),
+    )
+    if (!changed) return // unsupported targets do not consume a single-use brush
+    if (ctx.brushMode === 'once') ctx.setBrushMode(null)
     ctx.setStatus(t('appStatusFormatApplied'))
+  } catch {
+    ctx.setStatus(t('appStatusFormatApplyFailed'))
   }
 }

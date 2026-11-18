@@ -15,6 +15,7 @@ const localAlias = {
     __dirname,
     '../../packages/docx-engine/src/zip-splice.ts',
   ),
+  '@genoffice/compound-file': resolve(__dirname, '../../packages/compound-file/src/index.ts'),
   '@genoffice/docx-engine': resolve(__dirname, '../../packages/docx-engine/src/index.ts'),
 }
 

@@ -2427,7 +2427,10 @@ export function journalSize(journal: EditJournal): number {
   if (journal.theme.colors !== undefined) total += 1
   if (journal.theme.fonts !== undefined) total += 1
   for (const [sheetId, state] of journal.pageSetup) {
-    if (!isSheetRemoved(journal, sheetId) && Object.keys(state).length > 0) total += 1
+    // Keep reading zoom for an explicit save, but it must not trigger a close
+    // prompt, autosave, or recovery write without any authored changes.
+    if (!isSheetRemoved(journal, sheetId) && Object.keys(state).some((key) => key !== 'zoomScale'))
+      total += 1
   }
   for (const sheetId of journal.noteDirty) {
     if (!isSheetRemoved(journal, sheetId)) total += 1

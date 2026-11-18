@@ -5,6 +5,7 @@
  * paragraph/run structure (each run's format preserved independently) and go through IPC editText.
  */
 import React, { useEffect, useRef } from 'react'
+import { registerTextCommit } from './active-text-edit'
 import { moveToLineBoundary } from './line-boundary'
 import { createTextHistory, setActiveTextHistory, type TextHistory } from './text-history'
 import type { EditCaret } from './action-context'
@@ -38,7 +39,7 @@ interface Props {
   /** `owner` = the session (text box / `cellEdit_<table>_<row>_<col>`) whose text these paragraphs are:
    * the editor DOM is reused when the edit target changes, so a late commit (blur, press guard) must be
    * written back to the cell the DOM was populated for, not to whichever cell is current by then */
-  onCommit: (paragraphs: EditParagraph[], owner?: string) => void
+  onCommit: (paragraphs: EditParagraph[], owner?: string) => void | Promise<void>
   onCancel: (owner?: string) => void
   /** Tab/Shift+Tab (for table cell editing): commit current content and jump to the next/previous cell.
    * paragraphs=null means content unchanged (the host may skip committing and only jump). */
@@ -696,9 +697,19 @@ export function populateEditorDom(
       const probe = document.createElement('span')
       probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline'
       p.insertBefore(probe, p.firstChild)
-      const pr = p.getBoundingClientRect()
-      const br = probe.getBoundingClientRect()
-      probe.remove()
+      // Axis-aligned bounding boxes include rotation; using them as a zoom factor
+      // moves a rotated label's baseline. Measure in the frame's local axes instead.
+      const frame = div.parentElement
+      const rotation = frame?.style.transform
+      if (frame && rotation?.startsWith('rotate(')) frame.style.transform = 'none'
+      let pr: DOMRect, br: DOMRect
+      try {
+        pr = p.getBoundingClientRect()
+        br = probe.getBoundingClientRect()
+      } finally {
+        if (frame && rotation?.startsWith('rotate(')) frame.style.transform = rotation
+        probe.remove()
+      }
       const k = pr.width / p.offsetWidth
       const measured = (br.top - pr.top) / k
       if (k > 0 && Number.isFinite(measured)) {
@@ -1046,12 +1057,30 @@ export function TextEditOverlay({
   const commit = () => {
     forgetEditSelection()
     const div = ref.current
+    const norm = populatedRef.current?.norm ?? 1
     const owner = populatedRef.current?.key
     if (!div) return onCancel(owner)
     const paras = extractParagraphs(div, norm)
     if (JSON.stringify(paras) === initialRef.current) return onCancel(owner)
-    onCommit(paras, owner)
+    initialRef.current = JSON.stringify(paras)
+    return onCommit(paras, owner)
   }
+
+  // Ensure unmounting flushes any pending edits so navigation/deselection doesn't drop changes
+  useEffect(() => {
+    return () => {
+      const div = ref.current
+      if (div) {
+        const norm = populatedRef.current?.norm ?? 1
+        const owner = populatedRef.current?.key
+        const paras = extractParagraphs(div, norm)
+        if (JSON.stringify(paras) !== initialRef.current) {
+          initialRef.current = JSON.stringify(paras)
+          void onCommit(paras, owner)
+        }
+      }
+    }
+  }, [])
 
   // Targeted layout release (native listeners: React's onBeforeInput synthetic event does
   // not map to the real `beforeinput`). beforeinput sees the pre-mutation target ranges
@@ -1097,6 +1126,7 @@ export function TextEditOverlay({
   // immediately when focus is already parked off the editor.
   const commitRef = useRef(commit)
   commitRef.current = commit
+  useEffect(() => registerTextCommit(() => commitRef.current()), [])
   useEffect(
     () =>
       installKeepEditGuard({
@@ -1154,6 +1184,9 @@ export function TextEditOverlay({
         ref={ref}
         className={darkContent ? 'slide-text-editor dk' : 'slide-text-editor'}
         contentEditable
+        data-dynamic-field={
+          node.placeholder === 'sldNum' || node.placeholder === 'dt' ? 'true' : undefined
+        }
         spellCheck
         suppressContentEditableWarning
         onFocus={keeper.clearPaint}
@@ -1267,13 +1300,15 @@ export function TextEditOverlay({
           }
         }}
         style={{
-          // wrap=none: no wrapping (width follows content, same as the canvas overflow behavior); soft-break \n still breaks via pre.
+          // The text area must match the authored width, including tiny page numbers and cells.
+          // A usability minimum changes center/right alignment and wrapping when editing starts.
+          // wrap=none: max-content follows overflow; soft-break \n still breaks via pre.
           // insets use padding not margin: paragraph divs' marginTop (paragraph spacing) must not collapse with the root node
-          width: wrap ? Math.max(box.w, 40 + insets.l + insets.r) : 'max-content',
+          width: wrap ? Math.max(box.w, 1 + insets.l + insets.r) : 'max-content',
           // nowrap keeps max-content growth for overflow, but never below the box width:
           // a narrower block would defeat per-paragraph text-align (centered titles would
           // visually snap left on entering edit) — the canvas centers within the box
-          minWidth: wrap ? undefined : Math.max(box.w, 40 + insets.l + insets.r),
+          minWidth: wrap ? undefined : Math.max(box.w, 1 + insets.l + insets.r),
           // Only an empty body needs a synthetic height (so typing matches the canvas line
           // height); inflating a laid-out body distorts the flex vertical anchor — a
           // middle-anchored single line with tight spacing sat a few px too high in edit
@@ -1523,7 +1558,8 @@ export function extractParagraphs(root: HTMLElement, norm: number): EditParagrap
     // Super/subscript: <sub>/<sup> (execCommand product) or vertical-align (for initial DOM restoration)
     if (el.tagName === 'SUP' || style.verticalAlign === 'super') next.baseline = 30
     else if (el.tagName === 'SUB' || style.verticalAlign === 'sub') next.baseline = -25
-    if (style.color) next.color = rgbToHex(style.color)
+    const fontColor = (el.tagName === 'FONT' ? el.getAttribute('color') : null) || style.color
+    if (fontColor) next.color = rgbToHex(fontColor)
     // Character spacing / highlight chosen in this session (marks set by the ribbon helpers
     // below); unmarked text keeps the model's values, so a plain round trip commits nothing
     if (el.dataset?.spc != null) {
@@ -1870,7 +1906,8 @@ export function liveBulletChar(): string | null | undefined {
   const blocks = Array.from(root.children).filter(
     (el): el is HTMLElement => el instanceof HTMLElement && el.tagName === 'DIV',
   )
-  if (!blocks.length || !blocks.some((b) => b.dataset.bullet)) return undefined
+  if (!blocks.length || !blocks.some((b) => b.dataset.bullet || b.dataset.hadBullet))
+    return undefined
   const found = new Set<string>()
   for (const b of blocks) {
     const kind = b.dataset.bullet ?? b.dataset.hadBullet
@@ -2008,6 +2045,96 @@ export function liveAlign(): 'left' | 'center' | 'right' | 'justify' | null | un
   return found.size === 1 ? [...found][0]! : null
 }
 
+function isEditableElement(el: unknown): el is HTMLElement {
+  return (
+    el instanceof HTMLElement &&
+    (el.isContentEditable ||
+      el.contentEditable === 'true' ||
+      el.getAttribute('contenteditable') === 'true' ||
+      el.classList.contains('slide-text-editor') ||
+      el.classList.contains('notes-editor-body'))
+  )
+}
+
+/**
+ * Ensure an active selection exists in the editor for formatting.
+ * 1. If an uncollapsed range is already selected inside `root`, return it.
+ * 2. If the selection is collapsed, expand to the word under the caret (if any).
+ * 3. If still collapsed (e.g. at end of line, empty line, whitespace, or Chinese text boundary),
+ *    select the entire editor contents so formatting applies to the text box as a whole
+ *    (matching PowerPoint/Google Slides when formatting a text frame or caret without selection).
+ */
+export function ensureEditorSelection(root?: HTMLElement | null): Range | null {
+  const editor =
+    root ??
+    (isEditableElement(document.activeElement)
+      ? document.activeElement
+      : (document.querySelector<HTMLElement>('.slide-text-editor') ??
+         document.querySelector<HTMLElement>('.notes-editor-body')))
+  if (!isEditableElement(editor)) return null
+
+  if (document.activeElement !== editor) {
+    editor.focus()
+  }
+
+  const sel = window.getSelection()
+  if (!sel) return null
+
+  // If selection is outside editor or missing, select all content
+  if (!sel.rangeCount || !editor.contains(sel.anchorNode)) {
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    saveEditSelection()
+    return range
+  }
+
+  // If already a non-collapsed selection inside the editor, keep it!
+  if (!sel.isCollapsed) {
+    return sel.getRangeAt(0)
+  }
+
+  // Collapsed: if it's a dynamic field (e.g. slide number), format the whole field
+  if (editor.dataset.dynamicField === 'true') {
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    saveEditSelection()
+    return range
+  }
+
+  // Try expanding to word under caret
+  try {
+    sel.modify('move', 'backward', 'word')
+    sel.modify('extend', 'forward', 'word')
+    const r = sel.rangeCount ? sel.getRangeAt(0) : null
+    if (r) {
+      const end = r.endContainer
+      if (end.nodeType === Node.TEXT_NODE && r.endOffset > 0) {
+        const text = (end as Text).data
+        let o = r.endOffset
+        while (o > 0 && /\s/.test(text[o - 1]!)) o--
+        if (o > r.startOffset || end !== r.startContainer) r.setEnd(end, o)
+      }
+    }
+  } catch {
+    // sel.modify may not be supported in some environments (e.g. JSDOM)
+  }
+
+  // If still collapsed (end of text, whitespace, CJK without boundary, etc.), select all editor contents
+  if (sel.isCollapsed || !sel.rangeCount) {
+    const allRange = document.createRange()
+    allRange.selectNodeContents(editor)
+    sel.removeAllRanges()
+    sel.addRange(allRange)
+  }
+
+  saveEditSelection()
+  return sel.rangeCount ? sel.getRangeAt(0) : null
+}
+
 /**
  * Font size increase/decrease while editing: execCommand('fontSize', 7) wraps the selection as a
  * placeholder, then <font size="7"> is replaced with a span whose size steps along the PowerPoint
@@ -2015,8 +2142,11 @@ export function liveAlign(): 'left' | 'center' | 'right' | 'justify' | null | un
  * reads back style.fontSize.
  */
 export function resizeSelectionFont(dir: 1 | -1): void {
-  const root = document.activeElement
-  if (!(root instanceof HTMLElement) || !root.isContentEditable) return
+  const root = isEditableElement(document.activeElement)
+    ? document.activeElement
+    : document.querySelector<HTMLElement>('.slide-text-editor')
+  if (!isEditableElement(root)) return
+  ensureEditorSelection(root)
   const norm = parseFloat(root.dataset.norm ?? '') || 1
   // When the selection exactly covers a sized span (our own product from the
   // previous click), execCommand replaces that span with the <font> wrapper —
@@ -2093,8 +2223,11 @@ export function firstFontFamily(cssList: string): string {
  * takes only the first item on commit).
  */
 export function applySelectionFontFamily(family: string): void {
-  const root = document.activeElement
-  if (!(root instanceof HTMLElement) || !root.isContentEditable) return
+  const root = isEditableElement(document.activeElement)
+    ? document.activeElement
+    : document.querySelector<HTMLElement>('.slide-text-editor')
+  if (!isEditableElement(root)) return
+  ensureEditorSelection(root)
   document.execCommand('styleWithCSS', false, 'true')
   document.execCommand('fontName', false, family)
   // Handle both products: <font face="…"> (path where styleWithCSS doesn't apply) and span style
@@ -2109,12 +2242,16 @@ export function applySelectionFontFamily(family: string): void {
     if (s.style.fontFamily && firstFontFamily(s.style.fontFamily) === family)
       s.style.fontFamily = displayFontFamily(family)
   })
+  saveEditSelection()
 }
 
 /** Set an absolute font size (pt) on the selection while editing: fontSize=7 placeholder then replaced by a px span (same as resizeSelectionFont). */
 export function setSelectionFontSizePt(pt: number): void {
-  const root = document.activeElement
-  if (!(root instanceof HTMLElement) || !root.isContentEditable) return
+  const root = isEditableElement(document.activeElement)
+    ? document.activeElement
+    : document.querySelector<HTMLElement>('.slide-text-editor')
+  if (!isEditableElement(root)) return
+  ensureEditorSelection(root)
   const norm = parseFloat(root.dataset.norm ?? '') || 1
   // PowerPoint's range: 1–4000pt
   const px = (Math.min(4000, Math.max(1, pt)) * 96 * norm) / 72
@@ -2137,23 +2274,7 @@ export function setSelectionFontSizePt(pt: number): void {
  * PowerPoint applies character formatting and Change Case to the whole word under the caret.
  */
 function editorSelectionRange(root: HTMLElement): Range | null {
-  const sel = window.getSelection()
-  if (!sel?.rangeCount || !root.contains(sel.anchorNode)) return null
-  if (sel.isCollapsed) {
-    sel.modify('move', 'backward', 'word')
-    sel.modify('extend', 'forward', 'word')
-    // a trailing space belongs to the gap, not the word
-    const r = sel.getRangeAt(0)
-    const end = r.endContainer
-    if (end.nodeType === Node.TEXT_NODE && r.endOffset > 0) {
-      const text = (end as Text).data
-      let o = r.endOffset
-      while (o > 0 && /\s/.test(text[o - 1]!)) o--
-      if (o > r.startOffset || end !== r.startContainer) r.setEnd(end, o)
-    }
-    if (sel.isCollapsed) return null
-  }
-  return sel.getRangeAt(0)
+  return ensureEditorSelection(root)
 }
 
 /** Text nodes the range covers, each with the covered [start, end) slice. */
@@ -2260,6 +2381,11 @@ function normalizeCss(c: string): string {
 }
 
 function rgbToHex(rgb: string): string | undefined {
+  if (!rgb) return undefined
+  if (rgb.startsWith('#')) return normalizeCss(rgb).toUpperCase()
+  if (rgb.toLowerCase() === 'black') return '#000000'
+  if (rgb.toLowerCase() === 'white') return '#FFFFFF'
+  if (rgb.toLowerCase() === 'red') return '#FF0000'
   const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb)
   if (!m) return undefined
   const h = (n: string) => parseInt(n, 10).toString(16).padStart(2, '0')

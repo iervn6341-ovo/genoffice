@@ -209,6 +209,7 @@ export const fr = {
   appCtxEditText: 'Modifier le texte',
   appCtxHyperlink: 'Lien hypertexte…',
   appCtxCropPicture: 'Rogner l’image',
+  appCtxResetCrop: 'Reset Crop',
   appCtxRemoveBackground: 'Supprimer l’arrière-plan',
   appCtxChangeBgImage: 'Changer l’image d’arrière-plan…',
   appCtxFormatBackground: 'Mise en forme de l’arrière-plan…',
@@ -278,4 +279,21 @@ export const fr = {
   appSettingsCancel: 'Annuler',
   appSettingsSave: 'Enregistrer',
   appCropHint: 'Entrée pour confirmer · Échap pour annuler · Cliquez à l’extérieur pour confirmer',
+  conflictTitle: 'Conflit de fichier détecté',
+  conflictSubtitle:
+    'Ce fichier a été modifié en dehors de GenOffice, et vous avez également des modifications non enregistrées. Choisissez la version à conserver :',
+  conflictLocalTitle: 'Modifications actuelles (GenOffice)',
+  conflictLocalBadge: 'Brouillon non enregistré',
+  conflictLocalDesc:
+    'Conserve toutes vos modifications de diapositives, styles et contenus de cette session.',
+  conflictLocalOverwrite: 'Conserver les modifications (écraser le disque)',
+  conflictLocalSaveCopy: 'Enregistrer une copie…',
+  conflictDiskTitle: 'Fichier externe (Disque)',
+  conflictDiskBadge: 'Mise à jour externe',
+  conflictDiskDesc:
+    'Ignore les modifications non enregistrées et recharge la dernière version du disque.',
+  conflictDiskMissing: 'Le fichier a été supprimé ou déplacé en dehors de GenOffice.',
+  conflictDiskReload: 'Utiliser la version externe (recharger)',
+  conflictDecideLater: 'Décider plus tard (continuer l’édition)',
+  appStatusFormatApplyFailed: 'Impossible d’appliquer ce format',
 } satisfies Record<keyof typeof zh, string>

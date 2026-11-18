@@ -18,7 +18,7 @@ import { readZoteroDocumentData } from './zotero-doc-props'
 import { computeListMarkerInfos, type ListItemRef } from './list-markers'
 import { FONT_TABLE_PART_PATH, parseFontTable, readEmbeddedFonts } from './font-table'
 import { DEFAULT_THEME_COLORS, THEME_PART_PATH, readThemeColors, readThemeFonts } from './theme'
-import { PAGE_MARK, TOTAL_PAGES_MARK } from './types'
+import { PAGE_MARK, SECTION_PAGES_MARK, TOTAL_PAGES_MARK } from './types'
 import { assertZipWithinLimits, loadDocxZip } from './zip-load'
 import { altChunkToDocx } from './alt-chunk'
 import type {
@@ -6018,7 +6018,7 @@ interface HfFieldFragment {
   instruction: string
   resultXml: string
   token: string
-  kind: 'page' | 'total' | 'other'
+  kind: 'page' | 'total' | 'section' | 'other'
 }
 
 /** Return non-structural ancestors that a field's replacement must not discard. */
@@ -6063,7 +6063,14 @@ function protectHfFieldXml(source: string): {
   const replaceRange = (start: number, end: number, instruction: string, resultXml: string) => {
     const raw = xml.slice(start, end)
     const keyword = /^\s*([A-Za-z][A-Za-z0-9]*)/.exec(instruction)?.[1]?.toUpperCase() ?? 'FIELD'
-    const kind = keyword === 'PAGE' ? 'page' : keyword === 'NUMPAGES' ? 'total' : 'other'
+    const kind =
+      keyword === 'PAGE'
+        ? 'page'
+        : keyword === 'NUMPAGES'
+          ? 'total'
+          : keyword === 'SECTIONPAGES'
+            ? 'section'
+            : 'other'
     let token: string
     let marker: string
     do {
@@ -6188,6 +6195,143 @@ function protectHfFieldXml(source: string): {
   return { xml, fields, unsafe: wrapped }
 }
 
+interface FieldFrame {
+  start: number
+  end: number
+  instr: string
+  /** where the field's own separate element starts; -1 when it has none */
+  separateStart: number
+  /** where the field's own separate element ends; -1 when it has none */
+  separateEnd: number
+  /** the fields nested inside this one, in the order they appear */
+  children: FieldFrame[]
+}
+
+/** The field tokens of a part: the fldChar markers and the instruction runs.
+ *  The element bodies are bounded (a fldChar carries no content, an instrText
+ *  carries its instruction), so the scan never walks the whole part twice. */
+const FIELD_TOKEN_RE =
+  /<w:fldChar\b[^>]*?\/>|<w:fldChar\b[^>]*?>\s*<\/w:fldChar>|<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/g
+
+/**
+ * The complex fields of a part, as a tree. A field's span runs from its begin
+ * to the end that closes it — counting the nested fields, so a child's end
+ * does not close the parent (genoffice#2458). Each field carries only its own
+ * instruction text: a nested child's instruction belongs to the child.
+ */
+function parseFieldTree(xml: string): FieldFrame[] {
+  const roots: FieldFrame[] = []
+  const stack: FieldFrame[] = []
+  for (const match of xml.matchAll(FIELD_TOKEN_RE)) {
+    const token = match[0]
+    const at = match.index
+    if (token.startsWith('<w:instrText')) {
+      const top = stack[stack.length - 1]
+      if (top) top.instr += token.replace(/<[^>]+>/g, '')
+      continue
+    }
+    const type = /\bw:fldCharType\s*=\s*["'](begin|separate|end)["']/.exec(token)?.[1]
+    if (type === 'begin') {
+      const frame: FieldFrame = {
+        start: at,
+        end: -1,
+        instr: '',
+        separateStart: -1,
+        separateEnd: -1,
+        children: [],
+      }
+      const parent = stack[stack.length - 1]
+      if (parent) parent.children.push(frame)
+      else roots.push(frame)
+      stack.push(frame)
+      continue
+    }
+    if (type === 'separate') {
+      const top = stack[stack.length - 1]
+      if (top && top.separateEnd < 0) {
+        top.separateStart = at
+        top.separateEnd = at + token.length
+      }
+      continue
+    }
+    if (type === 'end') {
+      const frame = stack.pop()
+      if (frame) frame.end = at + token.length
+    }
+  }
+  return roots
+}
+
+/**
+ * A region of the part with the fields inside it rewritten: every nested field
+ * is replaced by its display text.
+ */
+function renderFieldRegion(
+  xml: string,
+  from: number,
+  to: number,
+  children: FieldFrame[],
+  page: { hasPageNumber: boolean },
+): string {
+  let text = ''
+  let pos = from
+  for (const child of children) {
+    if (child.start < from || child.end > to) continue
+    text += xml.slice(pos, child.start)
+    text += renderField(xml, child, page)
+    pos = child.end
+  }
+  return text + xml.slice(pos, to)
+}
+
+/**
+ * The display text of one field: a page-number marker for a PAGE/NUMPAGES
+ * field, its cached result for anything else. A field's instruction is field
+ * code and never displays, so the nested fields inside it drop out with it —
+ * only the ones inside the cached result are rewritten.
+ */
+function renderField(xml: string, field: FieldFrame, page: { hasPageNumber: boolean }): string {
+  const span = xml.slice(field.start, field.end)
+  const cached = field.separateEnd < 0 ? '' : xml.slice(field.separateEnd, field.end)
+  // Word formats the number with the result run's rPr; the separate run's
+  // rPr (first in the span) is only the field-code formatting
+  const resultRun = cached
+    .match(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g)
+    ?.find((run) => run.includes('<w:t'))
+  const rPr =
+    (resultRun && /<w:rPr>[\s\S]*?<\/w:rPr>/.exec(resultRun)?.[0]) ||
+    (/<w:rPr>[\s\S]*?<\/w:rPr>/.exec(span)?.[0] ?? '')
+  // the span starts inside the begin run and ends inside the end run, so
+  // the replacement closes/reopens the enclosing w:r to stay balanced
+  // (the leftover edge runs end up empty and are dropped later)
+  const emit = (inner: string) => `</w:r>${inner}<w:r>`
+  // classify by the leading keyword: a nested child field's PAGE inside a
+  // DOCPROPERTY instruction must not make the parent a PAGE field
+  // (genoffice#2458 — the span is matched by nesting depth, so the parent's
+  // instruction is its own and the child's instruction stays the child's)
+  if (/^\s*SECTIONPAGES\b/.test(field.instr)) {
+    return emit(`<w:r>${rPr}<w:t>${SECTION_PAGES_MARK}</w:t></w:r>`)
+  }
+  if (/^\s*NUMPAGES\b/.test(field.instr)) {
+    return emit(`<w:r>${rPr}<w:t>${TOTAL_PAGES_MARK}</w:t></w:r>`)
+  }
+  if (/^\s*PAGE\b/.test(field.instr)) {
+    page.hasPageNumber = true
+    return emit(`<w:r>${rPr}<w:t>${PAGE_MARK}</w:t></w:r>`)
+  }
+  // Keep the original run boundaries: separate/result/end may share a run,
+  // whose rPr is outside this span. Rewrapping only complete result runs
+  // drops those edge fragments and their formatting.
+  if (field.separateEnd < 0) return emit('')
+  const prefix = xml.slice(field.start, field.separateEnd)
+  const instruction = prefix
+    .replace(/<w:t(?:\s[^>]*)?>[\s\S]*?<\/w:t>/g, '')
+    .replace(/<w:instrText[^>]*>[\s\S]*?<\/w:instrText>/g, '')
+    .replace(/<w:fldChar[^>]*?(?:\/>|>[\s\S]*?<\/w:fldChar>)/g, '')
+  const result = renderFieldRegion(xml, field.separateEnd, field.end, field.children, page)
+  return instruction + result.replace(/<w:fldChar[^>]*?(?:\/>|>[\s\S]*?<\/w:fldChar>)/g, '')
+}
+
 /** header/footer part XML -> display content (PAGE fields shown as PAGE_MARK) */
 function hfContentFromXml(
   xml: string,
@@ -6210,6 +6354,62 @@ function hfContentFromXml(
   // page numbers), so only the Choice branch feeds text/paragraph extraction
   const source = xml.replace(/<mc:Fallback[^>]*>[\s\S]*?<\/mc:Fallback>/g, '')
   const protectedXml = protectHfFieldXml(source)
+  if (protectedXml.unsafe) {
+    let fallbackCleaned = source
+    const page = { hasPageNumber: false }
+    if (fallbackCleaned.includes('<w:fldChar')) {
+      const roots = parseFieldTree(fallbackCleaned)
+      let out = ''
+      let pos = 0
+      for (const field of roots) {
+        if (field.end < 0) continue
+        out += fallbackCleaned.slice(pos, field.start)
+        out += renderField(fallbackCleaned, field, page)
+        pos = field.end
+      }
+      out += fallbackCleaned.slice(pos)
+      fallbackCleaned = out
+    }
+    fallbackCleaned = fallbackCleaned.replace(
+      /<w:fldSimple[^>]*w:instr\s*=\s*["']([^"']*)["'][^>]*(?:\/>|>([\s\S]*?)<\/w:fldSimple>)/g,
+      (whole, instr: string, inner: string | undefined) => {
+        const rPr = inner ? (/<w:rPr>[\s\S]*?<\/w:rPr>/.exec(inner)?.[0] ?? '') : ''
+        if (/^\s*SECTIONPAGES\b/.test(instr))
+          return `<w:r>${rPr}<w:t>${SECTION_PAGES_MARK}</w:t></w:r>`
+        if (/^\s*NUMPAGES\b/.test(instr)) return `<w:r>${rPr}<w:t>${TOTAL_PAGES_MARK}</w:t></w:r>`
+        if (/^\s*PAGE\b/.test(instr)) {
+          page.hasPageNumber = true
+          return `<w:r>${rPr}<w:t>${PAGE_MARK}</w:t></w:r>`
+        }
+        return inner ?? whole
+      },
+    )
+    fallbackCleaned = fallbackCleaned.replace(/<w:pgNum\s*\/>/g, () => {
+      page.hasPageNumber = true
+      return `<w:t>${PAGE_MARK}</w:t>`
+    })
+    const paras = hfParagraphs(
+      fallbackCleaned.replace(/<w:fldChar[^>]*?(?:\/>|>\s*<\/w:fldChar>)/g, ''),
+      theme,
+      styles,
+      tableMedia,
+      compatibilityMode,
+      themeFonts,
+      docDefaults,
+    )
+    if (paras.length === 0) paras.push({ runs: [], protectedFields: true })
+    else for (const para of paras) para.protectedFields = true
+
+    const text = plainText(fallbackCleaned)
+    return {
+      text,
+      hasPageNumber: page.hasPageNumber || text.includes(PAGE_MARK),
+      watermark: kind === 'header' ? readWatermarkText(xml) : null,
+      watermarkPicture: kind === 'header' ? readPictureWatermark(xml) : null,
+      paras,
+    }
+  }
+
   let cleaned = protectedXml.xml
   // legacy <w:pgNum/> run element (pre-field page number) renders as a PAGE field
   cleaned = cleaned.replace(/<w:pgNum\s*\/>/g, () => {
@@ -6225,10 +6425,6 @@ function hfContentFromXml(
     docDefaults,
     protectedXml.fields,
   )
-  if (protectedXml.unsafe) {
-    if (paras.length === 0) paras.push({ runs: [], protectedFields: true })
-    else for (const para of paras) para.protectedFields = true
-  }
   const text = [...protectedXml.fields].reduce(
     (value, [marker, field]) =>
       value.replaceAll(
@@ -6237,7 +6433,9 @@ function hfContentFromXml(
           ? PAGE_MARK
           : field.kind === 'total'
             ? TOTAL_PAGES_MARK
-            : plainText(`<w:p>${field.resultXml}</w:p>`),
+            : field.kind === 'section'
+              ? SECTION_PAGES_MARK
+              : plainText(`<w:p>${field.resultXml}</w:p>`),
       ),
     plainText(cleaned),
   )
@@ -6500,7 +6698,9 @@ function hfParagraphs(
             ? PAGE_MARK
             : field.kind === 'total'
               ? TOTAL_PAGES_MARK
-              : resultRuns.map((part) => part.text).join('')
+              : field.kind === 'section'
+                ? SECTION_PAGES_MARK
+                : resultRuns.map((part) => part.text).join('')
         out.push({
           ...(resultRuns[0] ?? run),
           text,

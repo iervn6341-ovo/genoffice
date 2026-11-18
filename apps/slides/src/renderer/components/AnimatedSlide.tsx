@@ -8,137 +8,18 @@
  *   in a Konva Group driven by NodeAnimState (opacity/scale/rotation/offset/wipe clip,
  *   transformed around the node center).
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef } from 'react'
+import { useAnimPlayer } from '../use-anim-player'
+export { useAnimPlayer, type AnimPlayer } from '../use-anim-player'
 import { Stage, Layer, Rect, Group } from 'react-konva'
 import type { Context } from 'konva/lib/Context'
+import type { Stage as KonvaStage } from 'konva/lib/Stage'
 import type { RenderNode, RenderSlide, ShapeRenderNode } from '@genoffice/pptx-render'
 import type { AnimationItem } from '../../shared/ipc'
-import {
-  buildSteps,
-  computeNodeStates,
-  parseParaStateKey,
-  type AnimStep,
-  type NodeAnimState,
-} from '../animation-play'
+import { parseParaStateKey, type NodeAnimState } from '../animation-play'
 import { useI18n } from '../i18n/locale'
 import { fillToKonva } from '../konva-adapter'
 import { StaticNode } from '../NodeBody'
-
-export interface AnimPlayer {
-  /** animStateKey (sourceId or sourceId+paragraph index) → current visual state (targets without animation aren't in the Map) */
-  states: Map<string, NodeAnimState>
-  /** Whether the current step is playing */
-  playing: boolean
-  /** Whether there are steps left to play */
-  pending: boolean
-  /** Number of steps played (broadcast by the presenter to the audience window) */
-  played: number
-  /** Generation number of load/seek: incremented after a page loads; broadcasters use it to tell "the new page is in place" */
-  epoch: number
-  /** Advance: playing → complete the current step immediately; otherwise play the next step. Returns false when nothing to play */
-  advance: () => boolean
-  /** Load a page's animations; 'fresh' = initial state (auto steps auto-play), 'all' = everything-played state */
-  load: (items: AnimationItem[], mode: 'fresh' | 'all') => void
-  /** Jump to an absolute cursor (audience window mirroring the presenter); playing=true plays the current step pointed by played from its start */
-  seek: (items: AnimationItem[], played: number, playing: boolean) => void
-}
-
-export function useAnimPlayer(canvasHpx: number, canvasWpx?: number): AnimPlayer {
-  const [state, setState] = useState<{
-    steps: AnimStep[]
-    played: number
-    startedAt: number | null
-    epoch: number
-  }>({ steps: [], played: 0, startedAt: null, epoch: 0 })
-  const [elapsed, setElapsed] = useState(0)
-  const stateRef = useRef(state)
-  stateRef.current = state
-
-  // rAF drives the current step's progress; when finished, stops at step end automatically (awaiting the next trigger)
-  useEffect(() => {
-    if (state.startedAt == null) return
-    let raf = 0
-    const tick = () => {
-      const t = performance.now() - state.startedAt!
-      const total = state.steps[state.played]?.totalMs ?? 0
-      if (t >= total) {
-        setState((s) => ({ ...s, played: s.played + 1, startedAt: null }))
-      } else {
-        setElapsed(t)
-        raf = requestAnimationFrame(tick)
-      }
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [state])
-
-  const load = useCallback((items: AnimationItem[], mode: 'fresh' | 'all') => {
-    const steps = buildSteps(items)
-    setElapsed(0)
-    setState((s) =>
-      mode === 'all'
-        ? { steps, played: steps.length, startedAt: null, epoch: s.epoch + 1 }
-        : {
-            steps,
-            played: 0,
-            startedAt: steps[0]?.auto ? performance.now() : null,
-            epoch: s.epoch + 1,
-          },
-    )
-  }, [])
-
-  const seek = useCallback((items: AnimationItem[], played: number, playing: boolean) => {
-    const steps = buildSteps(items)
-    setElapsed(0)
-    setState((s) => {
-      const p = Math.max(0, Math.min(played, steps.length))
-      return {
-        steps,
-        played: p,
-        startedAt: playing && p < steps.length ? performance.now() : null,
-        epoch: s.epoch + 1,
-      }
-    })
-  }, [])
-
-  const advance = useCallback((): boolean => {
-    const s = stateRef.current
-    if (s.startedAt != null) {
-      // Playing: complete the current step immediately
-      setState({ ...s, played: s.played + 1, startedAt: null })
-      return true
-    }
-    if (s.played < s.steps.length) {
-      setElapsed(0)
-      setState({ ...s, startedAt: performance.now() })
-      return true
-    }
-    return false
-  }, [])
-
-  const states = useMemo(
-    () =>
-      computeNodeStates(
-        state.steps,
-        state.played,
-        state.startedAt != null ? elapsed : null,
-        canvasHpx,
-        canvasWpx ?? (canvasHpx * 16) / 9,
-      ),
-    [state, elapsed, canvasHpx, canvasWpx],
-  )
-
-  return {
-    states,
-    playing: state.startedAt != null,
-    pending: state.played < state.steps.length,
-    played: state.played,
-    epoch: state.epoch,
-    advance,
-    load,
-    seek,
-  }
-}
 
 /** Whole-page rendering (with animation state); with an empty states Map it's equivalent to SlideThumb. */
 export function AnimatedSlideStage({
@@ -152,6 +33,12 @@ export function AnimatedSlideStage({
   width: number
   states: Map<string, NodeAnimState>
 }) {
+  const stageRef = useRef<KonvaStage>(null)
+  // Konva normally batches draws to the next frame. Flush a page replacement
+  // before browser paint so the old canvas cannot flash with the new page.
+  useLayoutEffect(() => {
+    stageRef.current?.draw()
+  }, [slide])
   const scale = width / slide.widthPx
   const h = slide.heightPx * scale
   const bg = fillToKonva(slide.background, slide.widthPx, slide.heightPx, images)
@@ -165,7 +52,13 @@ export function AnimatedSlideStage({
     paraStates.set(pk.sourceId, arr)
   }
   return (
-    <Stage width={width} height={h} listening={false} style={{ pointerEvents: 'none' }}>
+    <Stage
+      ref={stageRef}
+      width={width}
+      height={h}
+      listening={false}
+      style={{ pointerEvents: 'none' }}
+    >
       <Layer scaleX={scale} scaleY={scale} listening={false}>
         <Rect
           x={0}
@@ -205,26 +98,29 @@ export function AnimPreviewOverlay({
   onDone: () => void
 }) {
   const { t } = useI18n()
-  const player = useAnimPlayer(slide.heightPx, slide.widthPx)
-  const loadRef = useRef(player.load)
-  loadRef.current = player.load
-  useEffect(() => {
-    loadRef.current(items, 'fresh')
-    // Loaded only once on mount (App remounts with key=nonce to replay)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const player = useAnimPlayer(slide.heightPx, slide.widthPx, { key: 'preview', items })
+  const { playing, pending, played, epoch, advance } = player
 
   // Auto-advance: 350ms pause between steps; after everything plays, exit after 600ms
   useEffect(() => {
-    if (player.playing) return
+    if (playing) return
     const t = window.setTimeout(
       () => {
-        if (!player.advance()) onDone()
+        if (!advance()) onDone()
       },
-      player.pending ? 350 : 600,
+      pending ? 350 : 600,
     )
     return () => window.clearTimeout(t)
-  }, [player.playing, player.pending, player.advance, onDone]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    playing,
+    pending,
+    // Instant effects change the cursor without changing playing/pending.
+    // A metadata reload also resets the pause even if that cursor is unchanged.
+    played,
+    epoch,
+    advance,
+    onDone,
+  ])
 
   return (
     <div className="anim-preview-overlay" onClick={onDone} data-tip={t('paneAnimClickToEnd')}>
@@ -256,12 +152,19 @@ function stateGroupProps(st: NodeAnimState, cx: number, cy: number) {
 /** Wipe/split clip: narrows the visible area within rect according to t/mode. */
 function wipedRect(
   clip: NonNullable<NodeAnimState['clip']>,
-  rect: { y: number; h: number },
-): { y: number; h: number } {
-  const visH = rect.h * clip.t
-  if (clip.mode === 'top') return { y: rect.y, h: visH }
-  if (clip.mode === 'mid') return { y: rect.y + (rect.h - visH) / 2, h: visH }
-  return { y: rect.y + (rect.h - visH), h: visH }
+  rect: { x?: number; y: number; w?: number; h: number },
+): { x: number; y: number; w: number; h: number } {
+  const x = rect.x ?? 0
+  const y = rect.y
+  const w = rect.w ?? 0
+  const h = rect.h
+  const visH = h * clip.t
+  const visW = w * clip.t
+  if (clip.mode === 'top') return { x, y, w, h: visH }
+  if (clip.mode === 'mid') return { x, y: y + (h - visH) / 2, w, h: visH }
+  if (clip.mode === 'left') return { x, y, w: visW, h }
+  if (clip.mode === 'right') return { x: x + (w - visW), y, w: visW, h }
+  return { x, y: y + (h - visH), w, h: visH }
 }
 
 /**
@@ -314,11 +217,13 @@ function AnimNode({
       clip != null
         ? (ctx: Context) => {
             // Wipe/split: clip the visible area to the node's bounding box
-            const r = wipedRect(clip, { y: b.y, h: b.h })
-            // The fixed top/bottom edge is widened outward by m so edge strokes aren't clipped
+            const r = wipedRect(clip, { x: b.x, y: b.y, w: b.w, h: b.h })
+            // The fixed edges are widened outward by m so edge strokes aren't clipped
             const top = clip.mode === 'top' ? m : 0
             const btm = clip.mode === 'btm' ? m : 0
-            ctx.rect(b.x - m, r.y - top, b.w + 2 * m, r.h + top + btm)
+            const left = clip.mode === 'left' ? m : 0
+            const right = clip.mode === 'right' ? m : 0
+            ctx.rect(r.x - left, r.y - top, r.w + left + right, r.h + top + btm)
           }
         : undefined
     return (
@@ -361,8 +266,8 @@ function AnimNode({
               clipFunc={(ctx: Context) => {
                 // Paragraph line range; narrowed within the range during wipe. No top/bottom margin, avoiding bleeding into adjacent paragraphs
                 const r = p.st.clip
-                  ? wipedRect(p.st.clip, { y: s.y0, h: s.y1 - s.y0 })
-                  : { y: s.y0, h: s.y1 - s.y0 }
+                  ? wipedRect(p.st.clip, { x: b.x, y: s.y0, w: b.w, h: s.y1 - s.y0 })
+                  : { x: b.x, y: s.y0, w: b.w, h: s.y1 - s.y0 }
                 ctx.rect(b.x - m, r.y, b.w + 2 * m, r.h)
               }}
             >

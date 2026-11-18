@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
@@ -26,6 +27,7 @@ import type {
   NotesHandoutsHeaderFooterOp,
   SetLinkOp,
   AiSettings,
+  ConflictInfo,
   CopyElementsOp,
   PasteElementsOp,
   DuplicateElementsOp,
@@ -214,12 +216,14 @@ const api: SlidesApi = {
   }) => ipcRenderer.invoke('slides:set-text-body-props', op),
   setEffects: (op: { slideIndex: number; sourceId: string; effects: SetEffectsPatch }) =>
     ipcRenderer.invoke('slides:set-effects', op),
-  clipboardExternal: (skipNative?: boolean) => ipcRenderer.invoke('slides:clipboard-external', skipNative),
+  clipboardExternal: (skipNative?: boolean) =>
+    ipcRenderer.invoke('slides:clipboard-external', skipNative),
   groupElements: (op: GroupElementsOp) => ipcRenderer.invoke('slides:group-elements', op),
   ungroupElement: (op: UngroupElementOp) => ipcRenderer.invoke('slides:ungroup-element', op),
   batchEditTransform: (op: BatchEditTransformOp) =>
     ipcRenderer.invoke('slides:batch-edit-transform', op),
   getRenderSlides: () => ipcRenderer.invoke('slides:get-render-slides'),
+  getRenderSlide: (slideIndex: number) => ipcRenderer.invoke('slides:get-render-slide', slideIndex),
   addElement: (op: AddElementOp) => ipcRenderer.invoke('slides:add-element', op),
   deleteElement: (op: DeleteElementOp) => ipcRenderer.invoke('slides:delete-element', op),
   addSlide: (op: AddSlideOp) => ipcRenderer.invoke('slides:add-slide', op),
@@ -365,7 +369,14 @@ const api: SlidesApi = {
   setPrintPrefs: (patch: Record<string, unknown>) =>
     ipcRenderer.invoke('slides:print-prefs-set', patch),
   save: () => ipcRenderer.invoke('slides:save'),
+  forceSave: () => ipcRenderer.invoke('slides:force-save'),
+  reload: () => ipcRenderer.invoke('slides:reload'),
   saveAs: (defaultName: string) => ipcRenderer.invoke('slides:save-as', defaultName),
+  onConflict: (handler: (conflict: ConflictInfo) => void) => {
+    const listener = (_e: IpcRendererEvent, conflict: ConflictInfo) => handler(conflict)
+    ipcRenderer.on('slides:conflict', listener)
+    return () => ipcRenderer.removeListener('slides:conflict', listener)
+  },
   onCloseSaveRequest: (handler: () => void) => {
     const listener = () => handler()
     ipcRenderer.on('slides:close-save-request', listener)
@@ -390,6 +401,7 @@ const api: SlidesApi = {
   reportCloseSaveResult: (ok: boolean) => ipcRenderer.send('slides:close-save-result', ok === true),
   setAutoSavePref: (on: boolean) => ipcRenderer.send('slides:autosave-pref', on === true),
   isDirty: () => ipcRenderer.invoke('slides:is-dirty'),
+  setDirty: (dirty: boolean) => ipcRenderer.send('slides:dirty-changed', dirty === true),
   getRecentFiles: () => ipcRenderer.invoke('slides:recent'),
   onMenuCommand: (handler: (command: MenuCommand) => void) => {
     const listener = (_e: IpcRendererEvent, cmd: MenuCommand) => handler(cmd)
@@ -513,3 +525,5 @@ contextBridge.exposeInMainWorld('projectApi', projectApi)
 
 // open documents dragged from the OS onto this tab as a new shell tab
 installDropOpenBridge()
+
+installAiSettingsBridge()

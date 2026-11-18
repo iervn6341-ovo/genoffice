@@ -1,6 +1,7 @@
 import type { zh } from './zh'
 
 export const ja = {
+  paneAnimSaveFailed: 'アニメーションを更新できません：{error}',
   paneShowSetupTitle: 'スライド ショーの設定',
   paneShowSetupType: '表示の種類',
   paneShowTypeSpeaker: '発表者として使用（全画面）',
@@ -31,6 +32,8 @@ export const ja = {
   paneMoveDown: '下へ移動',
 
   paneAnimTitle: 'アニメーション ウィンドウ · スライド {n}',
+  paneAnimSelectHint: 'アニメーションを選択して効果とタイミングを編集します。',
+  paneAnimOrderLabel: 'アニメーションの順序 {n}: {target}',
   paneAnimPreview: 'このスライドのアニメーションをプレビュー再生',
   paneAnimCollapse: 'アニメーション ウィンドウを折りたたむ',
   paneAnimEmpty: 'このスライドにはまだアニメーションがありません',

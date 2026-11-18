@@ -8,6 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 // Pin resolution to this repo's workspace sources (matches tsconfig paths;
 // avoids bundling stale implementations when node_modules links point elsewhere)
 const workspaceAlias = {
+  '@genoffice/compound-file': resolve(here, '../../packages/compound-file/src/index.ts'),
   '@genoffice/office-math': resolve(here, '../../packages/office-math/src/index.ts'),
   // Subpath before the bare name: string aliases are prefix replacements
   '@genoffice/pptx-engine/table-grid': resolve(

@@ -2330,8 +2330,12 @@ export interface TocEntry {
   /** heading level 1-9 */
   level: number
   text: string
+  /** optional list number or chapter prefix (e.g. "第1章", "1.1") */
+  num?: string
   /** page number computed by real pagination (cached text; begin is dirty, so Word still recalculates on open) */
   pageNo?: number | string
+  /** bookmark anchor for hyperlinked TOC entries (_Toc...) */
+  anchor?: string
 }
 
 export type TocLeader = 'none' | 'dot' | 'hyphen' | 'underscore' | 'heavy' | 'middleDot'
@@ -2348,6 +2352,7 @@ export interface TocOptions {
   useHeadingStyles: boolean
   useOutlineLevels: boolean
   useTcFields: boolean
+  captionLabel?: string
   /** Style name to TOC level; Word stores this as the TOC field's \t switch. */
   styleLevels: Record<string, number>
   format: TocFormat
@@ -2371,6 +2376,7 @@ export function tocInstruction(options: TocOptions): string {
   const parts = ['TOC']
   const levels = Math.min(9, Math.max(1, Math.round(options.levels)))
   if (options.useHeadingStyles) parts.push(`\\o "1-${levels}"`)
+  if (options.captionLabel) parts.push(`\\c "${options.captionLabel}"`)
   const styles = Object.entries(options.styleLevels)
     .filter(
       ([name, level]) =>
@@ -2405,6 +2411,7 @@ export function generateTocFieldXml(
   entries: TocEntry[],
   options?: TocOptions,
   instruction?: string,
+  fonts?: { fontFamily?: string; fontAscii?: string; eastAsiaFont?: string },
 ): string[] {
   if (entries.length === 0) return []
   const resolved = options ?? {
@@ -2420,13 +2427,45 @@ export function generateTocFieldXml(
     `<w:pPr><w:pStyle w:val="TOC${Math.min(Math.max(level, 1), 9)}"/>` +
     tab +
     '<w:rPr><w:noProof/></w:rPr></w:pPr>'
-  const resultRPr = `<w:rPr><w:noProof/>${TOC_FORMAT_RUN[resolved.format]}</w:rPr>`
-  const entryRuns = (text: string, pageNo?: number | string) =>
-    `<w:r>${resultRPr}<w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r>` +
-    (resolved.showPageNumbers ? `<w:r>${resultRPr}<w:tab/></w:r>` : '') +
-    (resolved.showPageNumbers && pageNo !== undefined
-      ? `<w:r>${resultRPr}<w:t>${escapeXmlText(String(pageNo))}</w:t></w:r>`
-      : '')
+  const rf = fonts
+    ? [
+        fonts.fontAscii
+          ? `w:ascii="${escapeXmlAttr(fonts.fontAscii)}" w:hAnsi="${escapeXmlAttr(fonts.fontAscii)}"`
+          : '',
+        fonts.eastAsiaFont || fonts.fontFamily
+          ? `w:eastAsia="${escapeXmlAttr(fonts.eastAsiaFont ?? fonts.fontFamily!)}"`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : ''
+  const rFontsXml = rf ? `<w:rFonts ${rf}/>` : ''
+  const resultRPr = `<w:rPr><w:noProof/>${rFontsXml}${TOC_FORMAT_RUN[resolved.format]}</w:rPr>`
+  const entryRuns = (
+    text: string,
+    pageNo?: number | string,
+    num?: string,
+    anchor?: string,
+  ) => {
+    const numRun = num
+      ? `<w:r>${resultRPr}<w:t xml:space="preserve">${escapeXmlText(num)}</w:t></w:r><w:r>${resultRPr}<w:tab/></w:r>`
+      : ''
+    const pageRun =
+      resolved.showPageNumbers && pageNo !== undefined
+        ? resolved.useHyperlinks && anchor
+          ? `<w:r>${resultRPr}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${resultRPr}<w:instrText xml:space="preserve"> PAGEREF ${escapeXmlText(anchor)} \\h </w:instrText></w:r><w:r>${resultRPr}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${resultRPr}<w:t>${escapeXmlText(String(pageNo))}</w:t></w:r><w:r>${resultRPr}<w:fldChar w:fldCharType="end"/></w:r>`
+          : `<w:r>${resultRPr}<w:t>${escapeXmlText(String(pageNo))}</w:t></w:r>`
+        : ''
+    const inner =
+      numRun +
+      `<w:r>${resultRPr}<w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r>` +
+      (resolved.showPageNumbers ? `<w:r>${resultRPr}<w:tab/></w:r>` : '') +
+      pageRun
+    if (resolved.useHyperlinks && anchor) {
+      return `<w:hyperlink w:anchor="${escapeXmlAttr(anchor)}" w:history="1">${inner}</w:hyperlink>`
+    }
+    return inner
+  }
   const begin =
     '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>' +
     `<w:r><w:instrText xml:space="preserve">${escapeXmlText(instruction ?? tocInstruction(resolved))}</w:instrText></w:r>` +
@@ -2436,7 +2475,7 @@ export function generateTocFieldXml(
   return entries.map((entry, i) => {
     const first = i === 0 ? begin : ''
     const last = i === entries.length - 1 ? end : ''
-    return `<w:p>${pPr(entry.level)}${first}${entryRuns(entry.text, entry.pageNo)}${last}</w:p>`
+    return `<w:p>${pPr(entry.level)}${first}${entryRuns(entry.text, entry.pageNo, entry.num, entry.anchor)}${last}</w:p>`
   })
 }
 

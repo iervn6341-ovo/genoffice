@@ -1,3 +1,4 @@
+import { externalFiles, fileContentHash } from '@genoffice/electron-utils/external-files'
 import {
   constants,
   copyFileSync,
@@ -31,6 +32,7 @@ import {
 import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { PDF_CHANNELS } from '../shared/ipc'
+import { isUnsavedPdfPath, unsavedPdfPath } from '../shared/unsaved'
 import type {
   PrintNativeResult,
   ExportImagesRequest,
@@ -81,11 +83,12 @@ import {
   mergePdfBytes,
   readStaticFormFills,
   replacePagesBytes,
-  savePdfToPath,
+  savePdfToBytes,
   setPageSizeBytes,
   splitPagesBytes,
   splitPdfBytes,
 } from './save-pdf'
+import { readPdfText } from './read-text'
 import {
   addSignature,
   isSignatureData,
@@ -95,6 +98,7 @@ import {
 } from './signature-store'
 import { uniqueGeneratedPdfPath } from './generated-output'
 import { validateRedactionRegions } from './redaction'
+import { blankPdfBuffer } from './blank-pdf'
 
 const tDlg = createI18n({
   zh: {
@@ -583,6 +587,17 @@ function openGeneratedPdf(path: string): void {
  * (View > Reload) remounts the renderer and consumes again — a one-shot entry
  * would strand the tab on "No file to open". */
 const openPathByWc = new Map<number, string>()
+/** Blank views carry their source bytes only in this process until an explicit Save. */
+const unsavedPdfByWc = new Map<
+  number,
+  {
+    path: string
+    bytes: Promise<Uint8Array>
+    initialBytes: Promise<Uint8Array>
+    modified: boolean
+    saveDir: string
+  }
+>()
 /** File paths granted to each view — readFile only allows these */
 const allowedByWc = new Map<number, Set<string>>()
 /** Unsaved-changes flags mirrored from the renderer; drives the save prompt before closing a tab/window */
@@ -593,7 +608,7 @@ const saveAsWaiters = new Map<number, (ok: boolean) => void>()
 const saveAsTargetByWc = new Map<number, string>()
 
 export function pdfIsDirty(webContentsId: number): boolean {
-  return dirtyByWc.has(webContentsId)
+  return dirtyByWc.has(webContentsId) || unsavedPdfByWc.get(webContentsId)?.modified === true
 }
 
 /** Drop the mirrored dirty flag (webContents.reload does not destroy the view). */
@@ -607,6 +622,7 @@ export function clearPdfDirty(webContentsId: number): void {
 const untitledPdfPaths = new Set<string>()
 /** Shell hook fired after an auto-rename so the tab title / recents / project mapping follow the file */
 let pdfRenamedHook: ((wc: WebContents, oldPath: string, newPath: string) => void) | null = null
+let pdfMaterializedHook: ((wc: WebContents, path: string) => void) | null = null
 
 /** Called by the shell right after "New PDF" writes the blank file to disk */
 export function markPdfUntitledPath(path: string): void {
@@ -620,6 +636,9 @@ export function markPdfUntitledPath(path: string): void {
  */
 export function pdfFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
+  void externalFiles.renamed(wcId, oldPath, newPath)
+  const opened = openedPdfSources.get(wcId)
+  if (opened?.path === oldPath) opened.path = newPath
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
   const allowed = allowedByWc.get(wcId)
   if (allowed?.has(oldPath)) allowed.add(newPath)
@@ -632,6 +651,64 @@ export function setPdfRenamedHook(
   hook: (wc: WebContents, oldPath: string, newPath: string) => void,
 ): void {
   pdfRenamedHook = hook
+}
+
+let pdfFileOpenedHook: ((wc: WebContents, path: string) => void) | null = null
+
+export function setPdfFileOpenedHook(hook: (wc: WebContents, path: string) => void): void {
+  pdfFileOpenedHook = hook
+}
+
+/** Shell bookkeeping begins only after the first successful explicit save. */
+export function setPdfMaterializedHook(hook: (wc: WebContents, path: string) => void): void {
+  pdfMaterializedHook = hook
+}
+
+let pdfDirtyHook: ((wc: WebContents, dirty: boolean) => void) | null = null
+
+export function setPdfFileDirtyHook(hook: (wc: WebContents, dirty: boolean) => void): void {
+  pdfDirtyHook = hook
+}
+
+// Immutable opened bytes keep pending edits aligned when another program rewrites pages.
+const openedPdfSources = new Map<number, { path: string; bytes: Uint8Array }>()
+
+async function pdfSourceBytes(wcId: number, path: string): Promise<Uint8Array> {
+  const unsaved = unsavedPdfByWc.get(wcId)
+  if (unsaved?.path === path) return new Uint8Array(await unsaved.bytes)
+  const opened = openedPdfSources.get(wcId)
+  if (opened?.path === path) return opened.bytes
+  const bytes = new Uint8Array(await readFile(path))
+  openedPdfSources.set(wcId, { path, bytes })
+  await externalFiles.remember(wcId, path, fileContentHash(bytes))
+  return bytes
+}
+
+async function writePdfSource(wcId: number, path: string, bytes: Uint8Array): Promise<void> {
+  const unsaved = unsavedPdfByWc.get(wcId)
+  if (unsaved?.path === path) {
+    const initial = await unsaved.initialBytes
+    unsaved.modified = !Buffer.from(initial).equals(Buffer.from(bytes))
+    unsaved.bytes = Promise.resolve(new Uint8Array(bytes))
+    return
+  }
+  await externalFiles.write(wcId, path, () => writePdfAtomically(path, bytes))
+  openedPdfSources.set(wcId, { path, bytes: new Uint8Array(bytes) })
+}
+
+function materializePdf(contents: WebContents, sourcePath: string, targetPath: string): void {
+  const wcId = contents.id
+  if (unsavedPdfByWc.get(wcId)?.path !== sourcePath) return
+  openedPdfSources.delete(wcId)
+  unsavedPdfByWc.delete(wcId)
+  openPathByWc.set(wcId, targetPath)
+  allowedByWc.set(wcId, new Set([targetPath]))
+  if (!contents.isDestroyed()) contents.send(PDF_CHANNELS.fileRenamed, targetPath)
+  try {
+    pdfMaterializedHook?.(contents, targetPath)
+  } catch (err) {
+    console.warn('[pdf] materialized hook failed:', err)
+  }
 }
 
 /** Sanitize a proposed base name into a safe filename: strip illegal path chars, collapse whitespace, cap length; null if nothing survives. (Mirrors docs' deriveAutoFileName.) */
@@ -766,7 +843,7 @@ export async function requestPdfClose(
   contents: WebContents,
   parent?: BrowserWindow | null,
 ): Promise<boolean> {
-  if (!dirtyByWc.has(contents.id) || contents.isDestroyed()) return true
+  if (!pdfIsDirty(contents.id) || contents.isDestroyed()) return true
   const options = {
     type: 'warning' as const,
     message: tm('closeUnsavedMsg'),
@@ -801,8 +878,29 @@ function requestRendererSave(contents: WebContents): Promise<boolean> {
 
 /** Menu Save: ask the renderer to write pending edits to disk; clean views resolve true immediately */
 export function flushPdfSave(contents: WebContents): Promise<boolean> {
-  if (contents.isDestroyed() || !dirtyByWc.has(contents.id)) return Promise.resolve(true)
+  if (contents.isDestroyed()) return Promise.resolve(false)
+  if (!dirtyByWc.has(contents.id) && !unsavedPdfByWc.has(contents.id)) return Promise.resolve(true)
   return requestRendererSave(contents)
+}
+
+async function requestInitialPdfSave(contents: WebContents): Promise<boolean> {
+  const source = unsavedPdfByWc.get(contents.id)
+  if (!source || contents.isDestroyed()) return false
+  setPdfSaveAsInFlight(contents, true)
+  try {
+    const parent = BrowserWindow.fromWebContents(contents)
+    const options = {
+      defaultPath: join(source.saveDir, basename(source.path)),
+      filters: [{ name: tm('filterPdf'), extensions: ['pdf'] }],
+    }
+    const picked = parent
+      ? await dialog.showSaveDialog(parent, options)
+      : await dialog.showSaveDialog(options)
+    if (picked.canceled || !picked.filePath) return false
+    return await requestPdfSaveAs(contents, picked.filePath)
+  } finally {
+    setPdfSaveAsInFlight(contents, false)
+  }
 }
 
 /** Menu Print: ask the renderer to run its print flow (save, rasterize, system dialog) */
@@ -867,6 +965,7 @@ function registerPdfIpc(): void {
   ipcRegistered = true
 
   ipcMain.handle(PDF_CHANNELS.consumePending, (e) => openPathByWc.get(e.sender.id) ?? null)
+  ipcMain.handle(PDF_CHANNELS.requestInitialSave, (e) => requestInitialPdfSave(e.sender))
 
   ipcMain.handle(PDF_CHANNELS.getUsername, () => {
     try {
@@ -880,13 +979,21 @@ function registerPdfIpc(): void {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       throw new Error('pdf: path not granted to this view')
     }
-    const buf = await readFile(path)
-    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+    const bytes = await pdfSourceBytes(e.sender.id, path)
+    if (!isUnsavedPdfPath(path)) pdfFileOpenedHook?.(e.sender, path)
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  })
+
+  ipcMain.handle(PDF_CHANNELS.sourceModified, (e) => {
+    return unsavedPdfByWc.get(e.sender.id)?.modified === true
   })
 
   ipcMain.handle(PDF_CHANNELS.printNative, async (e, path: unknown): Promise<PrintNativeResult> => {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       return { ok: false, error: 'pdf: path not granted to this view' }
+    }
+    if (isUnsavedPdfPath(path)) {
+      return { ok: false, error: 'pdf: memory-only documents print through the renderer' }
     }
     // the renderer saved first, so the file on disk holds every edit, rotation and page deletion
     const outcome = await printPdfWithSystemPanel(path, basename(path), {
@@ -959,11 +1066,16 @@ function registerPdfIpc(): void {
       request = { ...request, redactions: regions }
     }
     try {
-      const { skippedTextEdits, skippedTextInserts, skippedImageEdits } = await savePdfToPath(
-        path,
-        target,
-        request,
-      )
+      const source = await pdfSourceBytes(e.sender.id, path)
+      const { bytes, skippedTextEdits, skippedTextInserts, skippedImageEdits } =
+        await savePdfToBytes(source, request)
+      if (isUnsavedPdfPath(path) && target === path) {
+        await writePdfSource(e.sender.id, path, bytes)
+      } else {
+        await externalFiles.write(e.sender.id, target, () => writePdfAtomically(target, bytes))
+        if (target === path) openedPdfSources.set(e.sender.id, { path, bytes })
+      }
+      if (target !== path) materializePdf(e.sender, path, target)
       return {
         ok: true,
         ...(skippedTextEdits.length > 0 ? { skippedTextEdits } : {}),
@@ -1057,14 +1169,14 @@ function registerPdfIpc(): void {
     }
     // Lazy import like the text-edit paths: pdfium wasm only loads when the feature is used
     const { listPageImages } = await import('./image-edit')
-    return listPageImages(new Uint8Array(await readFile(path)))
+    return listPageImages(await pdfSourceBytes(e.sender.id, path))
   })
 
   ipcMain.handle(PDF_CHANNELS.listStaticFormFills, async (e, path: unknown) => {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       throw new Error('pdf: path not granted to this view')
     }
-    return readStaticFormFills(new Uint8Array(await readFile(path)))
+    return readStaticFormFills(await pdfSourceBytes(e.sender.id, path))
   })
 
   ipcMain.handle(PDF_CHANNELS.ocrPage, async (_e, png: unknown) => {
@@ -1096,7 +1208,7 @@ function registerPdfIpc(): void {
       }
       const { renderImagePng } = await import('./image-edit')
       return renderImagePng(
-        new Uint8Array(await readFile(path)),
+        await pdfSourceBytes(e.sender.id, path),
         pageIndex,
         rect,
         typeof scale === 'number' && Number.isFinite(scale) ? scale : 1,
@@ -1119,7 +1231,7 @@ function registerPdfIpc(): void {
       throw new Error('pdf: path not granted to this view')
     }
     const { renderPagePreviewPng } = await import('./image-edit')
-    return renderPagePreviewPng(new Uint8Array(await readFile(path)), {
+    return renderPagePreviewPng(await pdfSourceBytes(e.sender.id, path), {
       pageIndex,
       excludeRects,
       excludeAnnots,
@@ -1142,7 +1254,7 @@ function registerPdfIpc(): void {
       }
       // Same lazy import as the save path: the pdfium wasm only loads when text editing is used
       const { validateTextEdits } = await import('./text-edit')
-      return validateTextEdits(new Uint8Array(await readFile(path)), edits)
+      return validateTextEdits(await pdfSourceBytes(e.sender.id, path), edits)
     },
   )
 
@@ -1177,7 +1289,7 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: path not granted to this view' }
       }
       try {
-        const bytes = await extractPagesBytes(new Uint8Array(await readFile(path)), pages)
+        const bytes = await extractPagesBytes(await pdfSourceBytes(e.sender.id, path), pages)
         const targetPath = uniqueGeneratedPdfPath(
           configuredDefaultSaveDir(app),
           String(suggestedName || 'pages.pdf'),
@@ -1209,17 +1321,63 @@ function registerPdfIpc(): void {
       if (picked.canceled || !other) return { ok: true, canceled: true }
       try {
         const { merged, count } = await insertPdfBytes(
-          new Uint8Array(await readFile(path)),
+          await pdfSourceBytes(e.sender.id, path),
           new Uint8Array(await readFile(other)),
           typeof afterPageIndex === 'number' ? afterPageIndex : -1,
         )
-        await writePdfAtomically(path, merged)
+        await writePdfSource(e.sender.id, path, merged)
         return { ok: true, insertedCount: count }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
     },
   )
+
+  // Compare: pick a second document and extract its per-page text main-side —
+  // the bytes and the path stay here, the renderer gets text only
+  ipcMain.handle(PDF_CHANNELS.compareReadPdf, async (e) => {
+    if (!allowedByWc.has(e.sender.id)) {
+      return { ok: false as const, reason: 'pdf: sender is not a registered PDF view' }
+    }
+    const win = BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow()
+    const picked = await showOpenDialogWithMemory(dialog, win ?? undefined, {
+      filters: [{ name: tm('filterPdf'), extensions: ['pdf'] }],
+      properties: ['openFile'],
+    })
+    const file = picked.filePaths[0]
+    if (picked.canceled || !file) return { ok: false as const, canceled: true }
+    try {
+      const text = await readPdfText(new Uint8Array(await readFile(file)))
+      return {
+        ok: true as const,
+        name: basename(file),
+        pageCount: text.pageCount,
+        pages: text.pages.map((page) => page.text),
+      }
+    } catch (err) {
+      return { ok: false as const, reason: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Compare: the open document's own text through the same pdfium engine as the
+  // picked side — pdf.js and pdfium break lines differently, and a diff across
+  // engines reports added and removed lines on files that are identical.
+  ipcMain.handle(PDF_CHANNELS.compareReadOpen, async (e, path: unknown) => {
+    if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
+      return { ok: false as const, reason: 'pdf: path not granted to this view' }
+    }
+    try {
+      const text = await readPdfText(new Uint8Array(await readFile(path)))
+      return {
+        ok: true as const,
+        name: basename(path),
+        pageCount: text.pageCount,
+        pages: text.pages.map((page) => page.text),
+      }
+    } catch (err) {
+      return { ok: false as const, reason: err instanceof Error ? err.message : String(err) }
+    }
+  })
 
   ipcMain.handle(
     PDF_CHANNELS.insertBlankPage,
@@ -1229,12 +1387,14 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: path not granted to this view' }
       }
       try {
+        const before = await pdfSourceBytes(e.sender.id, path)
         const bytes = await insertBlankPageBytes(
-          new Uint8Array(await readFile(path)),
+          before,
           typeof afterPageIndex === 'number' ? afterPageIndex : -1,
         )
-        await writePdfAtomically(path, bytes)
-        return { ok: true }
+        await writePdfSource(e.sender.id, path, bytes)
+        const undoToken = pageOpHistory.record(path, before, bytes)
+        return undoToken ? { ok: true, undoToken } : { ok: true }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -1258,7 +1418,7 @@ function registerPdfIpc(): void {
       if (picked.canceled || !dir) return { ok: true, canceled: true }
       try {
         const parts = await splitPdfBytes(
-          new Uint8Array(await readFile(path)),
+          await pdfSourceBytes(e.sender.id, path),
           typeof chunkSize === 'number' ? chunkSize : 1,
         )
         const safeBase = String(baseName || 'split').replace(/[/\\:*?"<>|]/g, '_')
@@ -1294,7 +1454,7 @@ function registerPdfIpc(): void {
           picked.filePaths.map(async (p) => new Uint8Array(await readFile(p))),
         )
         const { merged, appended } = await mergePdfBytes(
-          new Uint8Array(await readFile(path)),
+          await pdfSourceBytes(e.sender.id, path),
           others,
         )
         const targetPath = uniqueGeneratedPdfPath(
@@ -1321,7 +1481,7 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: pages-per-sheet must be 2-16' }
       }
       try {
-        const bytes = await mergePagesBytes(new Uint8Array(await readFile(path)), {
+        const bytes = await mergePagesBytes(await pdfSourceBytes(e.sender.id, path), {
           perSheet,
           direction: direction === 'horizontal' ? 'horizontal' : 'vertical',
           separator: separator === true,
@@ -1361,13 +1521,17 @@ function registerPdfIpc(): void {
       const other = picked.filePaths[0]
       if (picked.canceled || !other) return { ok: true, canceled: true }
       try {
+        const before = await pdfSourceBytes(e.sender.id, path)
         const { merged, removed, inserted } = await replacePagesBytes(
-          new Uint8Array(await readFile(path)),
+          before,
           new Uint8Array(await readFile(other)),
           pages,
         )
-        await writePdfAtomically(path, merged)
-        return { ok: true, removed, inserted }
+        await writePdfSource(e.sender.id, path, merged)
+        const undoToken = pageOpHistory.record(path, before, merged)
+        return undoToken
+          ? { ok: true, removed, inserted, undoToken }
+          : { ok: true, removed, inserted }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -1385,9 +1549,9 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: invalid page size' }
       }
       try {
-        const before = new Uint8Array(await readFile(path))
+        const before = await pdfSourceBytes(e.sender.id, path)
         const bytes = await setPageSizeBytes(before, width, height)
-        await writePdfAtomically(path, bytes)
+        await writePdfSource(e.sender.id, path, bytes)
         const undoToken = pageOpHistory.record(path, before, bytes)
         return undoToken ? { ok: true, undoToken } : { ok: true }
       } catch (err) {
@@ -1411,10 +1575,10 @@ function registerPdfIpc(): void {
           path,
           token,
           direction,
-          new Uint8Array(await readFile(path)),
+          await pdfSourceBytes(e.sender.id, path),
         )
         if (!resolved.ok) return resolved
-        await writePdfAtomically(path, resolved.bytes)
+        await writePdfSource(e.sender.id, path, resolved.bytes)
         return { ok: true }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -1433,7 +1597,7 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: unsupported split grid' }
       }
       try {
-        const bytes = await splitPagesBytes(new Uint8Array(await readFile(path)), perPage)
+        const bytes = await splitPagesBytes(await pdfSourceBytes(e.sender.id, path), perPage)
         const targetPath = uniqueGeneratedPdfPath(
           configuredDefaultSaveDir(app),
           String(suggestedName || 'split-pages.pdf'),
@@ -1461,9 +1625,9 @@ function registerPdfIpc(): void {
         return { ok: false, error: 'pdf: path not granted to this view' }
       }
       try {
-        const before = new Uint8Array(await readFile(path))
+        const before = await pdfSourceBytes(e.sender.id, path)
         const bytes = await cropPagesBytes(before, pages, rect)
-        await writePdfAtomically(path, bytes)
+        await writePdfSource(e.sender.id, path, bytes)
         const undoToken = pageOpHistory.record(path, before, bytes)
         return undoToken ? { ok: true, undoToken } : { ok: true }
       } catch (err) {
@@ -1533,8 +1697,10 @@ function registerPdfIpc(): void {
   )
 
   ipcMain.on(PDF_CHANNELS.dirtyChanged, (e, dirty: unknown) => {
-    if (dirty === true) dirtyByWc.add(e.sender.id)
+    const isDirty = dirty === true
+    if (isDirty) dirtyByWc.add(e.sender.id)
     else dirtyByWc.delete(e.sender.id)
+    pdfDirtyHook?.(e.sender, isDirty)
   })
 
   ipcMain.on(PDF_CHANNELS.closeSaveResult, (e, ok: unknown) => {
@@ -1555,6 +1721,31 @@ function registerPdfIpc(): void {
 }
 
 function grantAndTrack(wc: WebContents, openPath?: string | null): void {
+  externalFiles.attach(wc, {
+    language: getUiLang,
+    isDirty: () => pdfIsDirty(wc.id),
+    reload: async (path) => {
+      await readFile(path)
+      openedPdfSources.delete(wc.id)
+      dirtyByWc.delete(wc.id)
+      openPathByWc.set(wc.id, path)
+      wc.reload()
+    },
+    saveCopy: async () => {
+      const path = openPathByWc.get(wc.id)
+      if (!path) return
+      setPdfSaveAsInFlight(wc, true)
+      try {
+        const picked = await dialog.showSaveDialog({
+          defaultPath: path.replace(/\.pdf$/i, '-copy.pdf'),
+          filters: [{ name: tm('filterPdf'), extensions: ['pdf'] }],
+        })
+        if (!picked.canceled && picked.filePath) await requestPdfSaveAs(wc, picked.filePath)
+      } finally {
+        setPdfSaveAsInFlight(wc, false)
+      }
+    },
+  })
   const wcId = wc.id
   const allowedPaths = new Set<string>()
   allowedByWc.set(wcId, allowedPaths)
@@ -1569,7 +1760,9 @@ function grantAndTrack(wc: WebContents, openPath?: string | null): void {
     return { action: 'deny' }
   })
   wc.once('destroyed', () => {
+    openedPdfSources.delete(wcId)
     openPathByWc.delete(wcId)
+    unsavedPdfByWc.delete(wcId)
     allowedByWc.delete(wcId)
     dirtyByWc.delete(wcId)
     saveAsTargetByWc.delete(wcId)
@@ -1586,7 +1779,10 @@ function grantAndTrack(wc: WebContents, openPath?: string | null): void {
   })
 }
 
-export function createPdfView(openPath?: string | null): WebContentsView {
+export function createPdfView(
+  openPath?: string | null,
+  options?: { blank?: boolean; saveDir?: string; untitledName?: string },
+): WebContentsView {
   registerPdfIpc()
   const view = new WebContentsView({
     webPreferences: {
@@ -1597,6 +1793,20 @@ export function createPdfView(openPath?: string | null): WebContentsView {
     },
   })
   grantAndTrack(view.webContents, openPath)
+  if (options?.blank && !openPath) {
+    const wcId = view.webContents.id
+    const path = unsavedPdfPath(wcId, options.untitledName)
+    const bytes = blankPdfBuffer().then((bytes) => new Uint8Array(bytes))
+    unsavedPdfByWc.set(wcId, {
+      path,
+      bytes,
+      initialBytes: bytes,
+      modified: false,
+      saveDir: options.saveDir ?? configuredDefaultSaveDir(app),
+    })
+    openPathByWc.set(wcId, path)
+    allowedByWc.get(wcId)?.add(path)
+  }
   void view.webContents.loadURL(rendererUrl(runtime.rendererUrl, 'pdf'))
   return view
 }

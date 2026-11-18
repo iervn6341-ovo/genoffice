@@ -1,3 +1,4 @@
+import { installAiSettingsBridge } from '@genoffice/electron-utils/ai-settings-preload'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { Lang } from '@genoffice/i18n'
@@ -9,6 +10,13 @@ import type { AutoSaveDefault, ExportFormat, MarkdownApi, SaveMode, UiTheme } fr
 
 const api: MarkdownApi = {
   consumePending: () => ipcRenderer.invoke(MARKDOWN_CHANNELS.consumePending),
+  openSourcePath: (path: string) => ipcRenderer.invoke('home:open-path', path),
+  resolveWikiLinks: (request) => ipcRenderer.invoke(MARKDOWN_CHANNELS.resolveWikiLinks, request),
+  rememberWikiFragment: (path, fragment) =>
+    ipcRenderer.invoke(MARKDOWN_CHANNELS.rememberWikiFragment, path, fragment),
+  takeWikiFragment: (path) => ipcRenderer.invoke(MARKDOWN_CHANNELS.takeWikiFragment, path),
+  wikiBacklinks: (path: string) => ipcRenderer.invoke(MARKDOWN_CHANNELS.wikiBacklinks, path),
+  wikiGraph: () => ipcRenderer.invoke(MARKDOWN_CHANNELS.wikiGraph),
   consumeHeadlessExport: () => ipcRenderer.invoke(MARKDOWN_CHANNELS.consumeHeadlessExport),
   headlessExportDone: (result: { ok: boolean; error?: string }) =>
     ipcRenderer.send(MARKDOWN_CHANNELS.headlessExportDone, result),
@@ -118,3 +126,5 @@ contextBridge.exposeInMainWorld('projectApi', projectApi)
 
 // open documents dragged from the OS onto this tab as a new shell tab
 installDropOpenBridge()
+
+installAiSettingsBridge()

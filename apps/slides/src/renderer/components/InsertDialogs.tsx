@@ -1,3 +1,4 @@
+import type { SlideNumberingRule } from '@genoffice/pptx-engine'
 /**
  * The Insert tab's three dialogs: hyperlink / header & footer / equation.
  * Reuses SettingsModal's .modal-backdrop/.modal styles.
@@ -129,6 +130,7 @@ export type HeaderFooterDialogApply =
       dateFormat: string
       dontShowOnTitleSlide: boolean
       firstSlideNum: number
+      numbering?: SlideNumberingRule | null
       scope: 'current' | 'all'
     })
   | { tab: 'notes-handouts'; settings: NotesHandoutsHeaderFooterOptions }
@@ -145,6 +147,7 @@ interface HeaderFooterDialogProps {
     dateFormat: string
     dontShowOnTitleSlide: boolean
     firstSlideNum: number
+    numbering?: SlideNumberingRule | null
     isTitleSlide: boolean
     slideNumber: number
     notesHandouts: NotesHandoutsHeaderFooterState
@@ -167,12 +170,27 @@ export function HeaderFooterDialog({ initial, onApply, onClose }: HeaderFooterDi
   const [footerOn, setFooterOn] = useState(!!initial.footer)
   const [footerText, setFooterText] = useState(initial.footer ?? '')
   const [excludeTitle, setExcludeTitle] = useState(initial.dontShowOnTitleSlide)
-  const [firstSlideNumText, setFirstSlideNumText] = useState(String(initial.firstSlideNum))
+  const [firstSlideNumText, setFirstSlideNumText] = useState(
+    String(
+      initial.numbering?.startNumber ?? (initial.firstSlideNum < 0 ? 1 : initial.firstSlideNum),
+    ),
+  )
+  const [startSlideText, setStartSlideText] = useState(
+    String(
+      initial.numbering?.startSlide ?? (initial.firstSlideNum < 0 ? 2 - initial.firstSlideNum : 1),
+    ),
+  )
+  const [hideBefore, setHideBefore] = useState(initial.numbering?.hideBefore ?? true)
+  const startSlide = Number(startSlideText)
   const firstSlideNum = Number(firstSlideNumText)
   const firstSlideNumValid =
     firstSlideNumText.trim() !== '' &&
     Number.isInteger(firstSlideNum) &&
-    firstSlideNum >= -9999 &&
+    firstSlideNum >= 0 &&
+    startSlideText.trim() !== '' &&
+    Number.isInteger(startSlide) &&
+    startSlide >= 1 &&
+    startSlide <= 99999 &&
     firstSlideNum <= 9999
   const [nh, setNh] = useState<NotesHandoutsHeaderFooterState>(initial.notesHandouts)
   const [nhFixedDate, setNhFixedDate] = useState(initial.notesHandouts.date)
@@ -185,6 +203,7 @@ export function HeaderFooterDialog({ initial, onApply, onClose }: HeaderFooterDi
   const dateFormats = Array.from({ length: 13 }, (_, i) => `datetime${i + 1}`)
   if (!dateFormats.includes(dateFormat)) dateFormats.push(dateFormat)
   const exampleDate = new Date(2007, 9, 12, 16, 28, 34)
+  const physicalSlide = initial.slideNumber - initial.firstSlideNum + 1
   const hiddenOnPreview = excludeTitle && initial.isTitleSlide
   const dateValue = (dateAuto ? autoDateText : dateText).trim()
   const apply = (scope: 'current' | 'all') =>
@@ -197,6 +216,7 @@ export function HeaderFooterDialog({ initial, onApply, onClose }: HeaderFooterDi
       dateFormat,
       dontShowOnTitleSlide: excludeTitle,
       firstSlideNum,
+      numbering: { startSlide, startNumber: firstSlideNum, hideBefore, enabled: numOn },
       scope,
     })
   const applyNotes = () =>
@@ -318,11 +338,32 @@ export function HeaderFooterDialog({ initial, onApply, onClose }: HeaderFooterDi
               {t('ribbonDlgSlideNum')}
             </label>
             <label className="dlg-check">
+              {t('ribbonDlgNumberFromSlide')}
+              <input
+                data-testid="hf-number-from-slide"
+                type="number"
+                min={1}
+                max={99999}
+                step={1}
+                value={startSlideText}
+                onChange={(e) => setStartSlideText(e.target.value)}
+              />
+            </label>
+            <label className="dlg-check">
+              <input
+                data-testid="hf-hide-before"
+                type="checkbox"
+                checked={hideBefore}
+                onChange={(e) => setHideBefore(e.target.checked)}
+              />
+              {t('ribbonDlgHideBefore')}
+            </label>
+            <label className="dlg-check">
               {t('ribbonDlgSlideStartAt')}
               <input
                 data-testid="hf-slide-start-at"
                 type="number"
-                min={-9999}
+                min={0}
                 max={9999}
                 step={1}
                 value={firstSlideNumText}
@@ -393,8 +434,10 @@ export function HeaderFooterDialog({ initial, onApply, onClose }: HeaderFooterDi
                     </span>
                     <span data-testid="hf-preview-footer">{footerOn ? footerText : ''}</span>
                     <span data-testid="hf-preview-number">
-                      {numOn && firstSlideNumValid
-                        ? firstSlideNum + initial.slideNumber - initial.firstSlideNum
+                      {numOn && firstSlideNumValid && !(hideBefore && physicalSlide < startSlide)
+                        ? physicalSlide >= startSlide
+                          ? firstSlideNum + physicalSlide - startSlide
+                          : physicalSlide
                         : ''}
                     </span>
                   </div>

@@ -12,6 +12,7 @@ import * as slideActions from './slide-actions'
 import * as showActions from './show-actions'
 import * as styleActions from './style-actions'
 import * as tableSelectActions from './table-select-actions'
+import * as pictureEditActions from './picture-edit-actions'
 import { shouldRouteUndoToDeck } from './undo-routing'
 
 /** Whether focus is in a text input (input/textarea/contentEditable) — these cases use native undo/delete */
@@ -65,6 +66,7 @@ export function handleGlobalKeydown(
   if (mod && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
     if (editing || (inField && !shouldRouteUndoToDeck(e.target as HTMLElement))) return
     e.preventDefault()
+    void flushNudgeHistoryBatch()
     void (e.shiftKey ? ctx.redo() : ctx.undo())
     return
   }
@@ -150,6 +152,12 @@ export function handleGlobalKeydown(
     e.preventDefault()
     ctx.setBrushMode(null)
     ctx.setStatus('')
+    return
+  }
+  // Esc: cancel picture crop mode
+  if (e.key === 'Escape' && ctx.cropTarget) {
+    e.preventDefault()
+    pictureEditActions.cancelCrop(ctx)
     return
   }
   // Element clipboard (text editing uses the native clipboard, not intercepted)
@@ -361,6 +369,7 @@ export function handleGlobalKeydown(
   else if (e.key === 'ArrowDown') dy = step
   else return
   e.preventDefault()
+  startNudgeHistoryBatch()
   // Nudge the whole multi-selection: onTransform collects the commits of this keypress and
   // applies them as one batch, so one press = one undo step however many elements moved.
   // Key repeat can outrun the IPC round trip: until a nudge has landed, the next press steps
@@ -376,10 +385,56 @@ export function handleGlobalKeydown(
     asked.set(id, next)
     sent.push(ctx.onTransform(id, next, undefined, nodeCtx.groupId))
   }
+  // Optimistically update the rendered slide so that arrow nudges respond instantaneously on screen
+  if (ctx.slides && ctx.slides[ctx.current] && ctx.applySlide && asked.size > 0) {
+    const curSlide = ctx.slides[ctx.current]!
+    const updatedNodes = curSlide.nodes.map((n) => {
+      const nextBox = asked.get(n.sourceId)
+      return nextBox ? { ...n, box: { ...n.box, ...nextBox } } : n
+    })
+    ctx.applySlide(ctx.current, { ...curSlide, nodes: updatedNodes })
+  }
   void Promise.allSettled(sent).then(() => {
     // only forget what this press asked for: a later press may already have moved the target on
     for (const [id, box] of asked) if (nudgeTarget.get(id) === box) nudgeTarget.delete(id)
   })
+}
+
+let nudgeHistoryTimer: ReturnType<typeof setTimeout> | null = null
+let nudgeHistoryActive = false
+
+/** End any pending arrow-nudge history batch and collapse the gesture into a single undo step. */
+export async function flushNudgeHistoryBatch(): Promise<void> {
+  if (nudgeHistoryTimer) {
+    clearTimeout(nudgeHistoryTimer)
+    nudgeHistoryTimer = null
+  }
+  if (nudgeHistoryActive) {
+    nudgeHistoryActive = false
+    await window.slidesApi?.endHistoryBatch?.({ snapshot: false })
+  }
+}
+
+export function resetNudgeStateForTest(): void {
+  if (nudgeHistoryTimer) {
+    clearTimeout(nudgeHistoryTimer)
+    nudgeHistoryTimer = null
+  }
+  nudgeHistoryActive = false
+  nudgeTarget.clear()
+}
+
+function startNudgeHistoryBatch(): void {
+  if (!nudgeHistoryActive) {
+    nudgeHistoryActive = true
+    void window.slidesApi?.beginHistoryBatch?.()
+  }
+  if (nudgeHistoryTimer) clearTimeout(nudgeHistoryTimer)
+  nudgeHistoryTimer = setTimeout(async () => {
+    nudgeHistoryTimer = null
+    nudgeHistoryActive = false
+    await window.slidesApi?.endHistoryBatch?.({ snapshot: false })
+  }, 400)
 }
 
 /** Boxes arrow-key nudges have requested but the slide has not rendered yet (see above) */

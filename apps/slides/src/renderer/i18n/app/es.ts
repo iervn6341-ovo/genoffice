@@ -207,6 +207,7 @@ export const es = {
   appCtxEditText: 'Editar texto',
   appCtxHyperlink: 'Hipervínculo…',
   appCtxCropPicture: 'Recortar imagen',
+  appCtxResetCrop: 'Reset Crop',
   appCtxRemoveBackground: 'Quitar fondo',
   appCtxChangeBgImage: 'Cambiar imagen de fondo…',
   appCtxFormatBackground: 'Formato del fondo…',
@@ -276,4 +277,21 @@ export const es = {
   appSettingsCancel: 'Cancelar',
   appSettingsSave: 'Guardar',
   appCropHint: 'Entrar para confirmar · Esc para cancelar · Haga clic fuera para confirmar',
+  conflictTitle: 'Conflicto de archivo detectado',
+  conflictSubtitle:
+    'Este archivo se modificó fuera de GenOffice y también tiene cambios sin guardar. Elija qué versión desea conservar:',
+  conflictLocalTitle: 'Edición actual (GenOffice)',
+  conflictLocalBadge: 'Borrador sin guardar',
+  conflictLocalDesc:
+    'Conserva todas las modificaciones de diapositivas, estilos y contenido de esta sesión.',
+  conflictLocalOverwrite: 'Conservar edición actual (sobrescribir disco)',
+  conflictLocalSaveCopy: 'Guardar una copia…',
+  conflictDiskTitle: 'Archivo externo (Disco)',
+  conflictDiskBadge: 'Actualizado externamente',
+  conflictDiskDesc:
+    'Descarta los cambios actuales sin guardar y recarga la versión más reciente del disco.',
+  conflictDiskMissing: 'El archivo se eliminó o movió fuera de GenOffice.',
+  conflictDiskReload: 'Usar versión externa (recargar)',
+  conflictDecideLater: 'Decidir más tarde (continuar editando)',
+  appStatusFormatApplyFailed: 'No se pudo aplicar este formato',
 } satisfies Record<keyof typeof zh, string>

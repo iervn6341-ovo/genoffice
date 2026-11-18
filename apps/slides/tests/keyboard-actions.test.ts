@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { handleGlobalKeydown } from '../src/renderer/keyboard-actions'
+import { handleGlobalKeydown, resetNudgeStateForTest } from '../src/renderer/keyboard-actions'
 import * as clipboardActions from '../src/renderer/clipboard-actions'
 import * as slideActions from '../src/renderer/slide-actions'
 import * as showActions from '../src/renderer/show-actions'
@@ -267,6 +267,11 @@ describe('arrow-key nudge of a multi-selection', () => {
     b: boxOf(200, 40),
     c: boxOf(300, 80),
   }
+  beforeEach(() => {
+    resetNudgeStateForTest()
+    vi.clearAllMocks()
+  })
+
   const make = (onTransform: (...a: unknown[]) => Promise<void>) =>
     makeCtx({
       selectedIds: ['a', 'b', 'c'],
@@ -307,6 +312,58 @@ describe('arrow-key nudge of a multi-selection', () => {
     // once the nudges landed, the next press starts from the rendered box again
     handleGlobalKeydown(ctx, keydown('ArrowLeft', { metaKey: false }))
     expect((onTransform.mock.calls[6]![1] as { x: number }).x).toBe(9)
+  })
+
+  it('optimistically updates the current slide nodes via applySlide for instant visual response', () => {
+    const onTransform = vi.fn((..._a: unknown[]) => Promise.resolve())
+    const applySlide = vi.fn()
+    const curSlide = {
+      id: 's0',
+      widthPx: 1280,
+      heightPx: 720,
+      nodes: [
+        { id: '1', sourceId: 'a', box: { ...nodes.a } },
+        { id: '2', sourceId: 'b', box: { ...nodes.b } },
+        { id: '3', sourceId: 'c', box: { ...nodes.c } },
+      ],
+    }
+    const ctx = makeCtx({
+      selectedIds: ['a', 'b'],
+      findNodeCtx: (id: string) => (nodes[id] ? { node: { box: nodes[id] } } : null),
+      onTransform,
+      applySlide,
+      current: 0,
+      slides: [curSlide],
+    })
+    handleGlobalKeydown(ctx, keydown('ArrowRight', { metaKey: false }))
+    expect(applySlide).toHaveBeenCalledTimes(1)
+    const updated = applySlide.mock.calls[0]![1] as typeof curSlide
+    expect(updated.nodes.find((n) => n.sourceId === 'a')!.box.x).toBe(11)
+    expect(updated.nodes.find((n) => n.sourceId === 'b')!.box.x).toBe(201)
+    expect(updated.nodes.find((n) => n.sourceId === 'c')!.box.x).toBe(300)
+  })
+
+  it('batches continuous arrow nudges inside a history batch', async () => {
+    vi.useFakeTimers()
+    const beginHistoryBatch = vi.fn().mockResolvedValue(true)
+    const endHistoryBatch = vi.fn().mockResolvedValue(null)
+    window.slidesApi = {
+      beginHistoryBatch,
+      endHistoryBatch,
+    } as unknown as typeof window.slidesApi
+
+    const onTransform = vi.fn((..._a: unknown[]) => Promise.resolve())
+    const ctx = make(onTransform)
+
+    handleGlobalKeydown(ctx, keydown('ArrowRight', { metaKey: false }))
+    handleGlobalKeydown(ctx, keydown('ArrowRight', { metaKey: false }))
+    expect(beginHistoryBatch).toHaveBeenCalledTimes(1)
+    expect(endHistoryBatch).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(450)
+    expect(endHistoryBatch).toHaveBeenCalledTimes(1)
+    expect(endHistoryBatch).toHaveBeenCalledWith({ snapshot: false })
+    vi.useRealTimers()
   })
 })
 

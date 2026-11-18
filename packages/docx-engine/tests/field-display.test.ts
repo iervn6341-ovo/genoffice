@@ -173,6 +173,42 @@ describe('field paragraph display model', () => {
     expect(del.blocks[0].fieldDisplay).toMatchObject({ deleted: true, fontFamily: 'SimSun' })
   })
 
+  it('TOC entry resolves dual-slot fonts when run declares ascii but inherits eastAsia', async () => {
+    const entryXml = (rPr: string, text: string) =>
+      '<w:p><w:pPr><w:pStyle w:val="TOC1"/><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="8494"/></w:tabs></w:pPr>' +
+      '<w:hyperlink w:anchor="_Toc1">' +
+      `<w:r><w:rPr>${rPr}</w:rPr><w:t>${text}</w:t></w:r>` +
+      '<w:r><w:tab/></w:r>' +
+      '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+      '<w:r><w:instrText xml:space="preserve"> PAGEREF _Toc1 \\h </w:instrText></w:r>' +
+      '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+      '<w:r><w:t>1</w:t></w:r>' +
+      '<w:r><w:fldChar w:fldCharType="end"/></w:r>' +
+      '</w:hyperlink></w:p>'
+
+    const stylesXml =
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:style w:type="paragraph" w:styleId="TOC1">' +
+      '<w:name w:val="toc 1"/>' +
+      '<w:rPr><w:rFonts w:ascii="Times New Roman" w:eastAsia="標楷體"/></w:rPr>' +
+      '</w:style>' +
+      '</w:styles>'
+
+    const bodyXml = entryXml(
+      '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:hint="eastAsia"/>',
+      '緒論',
+    )
+    const doc = await parseDocx(await buildDocx({ bodyXml, stylesXml }))
+    expect(doc.blocks[0].fieldDisplay).toMatchObject({
+      kind: 'tocLine',
+      left: '緒論',
+      right: '1',
+      fontFamily: '標楷體',
+      fontAscii: 'Times New Roman',
+      eastAsiaFont: '標楷體',
+    })
+  })
+
   it('TOC bold respects off/none/case variants (onOff parity)', async () => {
     const offEntry = (b: string) =>
       '<w:p><w:pPr><w:pStyle w:val="TOC2"/><w:tabs><w:tab w:val="right" w:pos="8786"/></w:tabs>' +

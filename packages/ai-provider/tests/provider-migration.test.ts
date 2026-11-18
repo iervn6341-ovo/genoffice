@@ -7,6 +7,22 @@ import {
 } from '../src/providers'
 
 describe('provider selection without an account fallback', () => {
+  it('keeps custom gateway model aliases and endpoint overrides intact', () => {
+    const stored = defaultAiSettings()
+    stored.provider = 'deepseek'
+    stored.providers.deepseek = {
+      apiKey: 'gateway-key',
+      model: 'deepseek-chat',
+      customModel: true,
+      baseUrl: 'https://gateway.example/v1',
+    }
+    const result = resolveAiSettings(stored, defaultAiSettings())
+    expect(result.providers.deepseek).toMatchObject(stored.providers.deepseek)
+    stored.providers.deepseek.customModel = false
+    expect(resolveAiSettings(stored, defaultAiSettings()).providers.deepseek.model).toBe(
+      'deepseek-flash',
+    )
+  })
   it('keeps an incomplete explicit provider selected instead of sending data to another service', () => {
     const stored = defaultAiSettings({ anthropic: 'configured-key' })
     stored.provider = 'custom'

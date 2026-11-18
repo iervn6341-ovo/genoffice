@@ -29,12 +29,21 @@ import {
   StyledTaskItem,
 } from './markdownStyleRenderers'
 import { boundOrderedList, boundTable, boundTaskList } from './boundedTokenizers'
+import { WikiLink, WikiLinkResolve, WikiAliasDisplay } from './wikilink'
+import type { WikiLinkOptions } from './wikilink'
+import { WikiEmbed } from './wikiEmbed'
 import type { SlashController, SlashItem } from './slashCommand'
 import { t } from '../i18n/locale'
 
 export interface BuildExtensionsOptions {
   slashController: SlashController
   slashItems: () => SlashItem[]
+  /**
+   * Wiki-link navigation. Omitted in tests and headless paths: the resolver is
+   * then left on its default, which reports every link unresolved rather than
+   * reaching for the filesystem.
+   */
+  wikiLink?: Partial<WikiLinkOptions>
 }
 
 export function buildExtensions(options: BuildExtensionsOptions): AnyExtension[] {
@@ -91,6 +100,10 @@ export function buildExtensions(options: BuildExtensionsOptions): AnyExtension[]
     // KaTeX-rendered $...$ / $$...$$ formulas (issue #100)
     ...buildMathExtensions(),
     LocalImage,
+    WikiLink,
+    WikiEmbed,
+    WikiLinkResolve.configure(options.wikiLink ?? {}),
+    WikiAliasDisplay,
     TableDragGuard,
     BlockDragHandle,
     BlockKeymap,

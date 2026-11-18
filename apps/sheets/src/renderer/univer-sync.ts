@@ -19,6 +19,7 @@ import {
   type IStyleData,
   IUndoRedoService,
   LifecycleStages,
+  type Nullable,
   RANGE_TYPE,
   VerticalAlign,
   WrapStrategy,
@@ -175,6 +176,8 @@ import {
   type UniverWorksheet,
   type WrapMeasureCoverage,
 } from './univer-state'
+import { externalLinkOverlayCell } from './external-link-values'
+import type { ExternalLinkCell } from '../shared/desktop-api'
 import { isManualCalculation } from './calc-options'
 import { installCaseInsensitiveFormulaSheetLookup } from './formula-sheet-lookup'
 import { noteFormulaStreamChunk, requestFullRecalcAfterStream } from './formula-stream-hold'
@@ -8041,3 +8044,157 @@ export function lazyCellEditable(
     column <= loaded.endColumn
   )
 }
+
+/**
+ * Applies an external-links update (genoffice#2109): installs the freshly
+ * computed values into the recalc overlay so the grid shows them and the
+ * next save writes them as the formulas' cached `<v>` — the stored `[n]`
+ * formula text is untouched. Each cell's `kind` keeps its type: a boolean
+ * stays a boolean and an error stays an error, instead of both becoming the
+ * text of their display spelling. A cell whose report entry has no kind (the
+ * file never cached a value for it) keeps whatever the file has.
+ */
+export function applyExternalLinkValues(
+  state: LazyWorkbookState,
+  runtime: UniverRuntime,
+  report: { cells: readonly ExternalLinkCell[] },
+): { applied: number; sheets: number } {
+  const workbook = runtime.univerAPI.getActiveWorkbook()
+  if (!workbook) return { applied: 0, sheets: 0 }
+  const idByName = new Map(
+    workbook.getSheets().map((sheet) => [sheet.getSheetName().toLowerCase(), sheet.getSheetId()]),
+  )
+  const bySheet = new Map<string, Map<string, PinnedClosureCell>>()
+  let applied = 0
+  for (const cell of report.cells) {
+    const overlayValue = externalLinkOverlayCell(cell)
+    if (overlayValue === null) continue
+    const sheetId = idByName.get(cell.sheet.toLowerCase())
+    if (sheetId === undefined) continue
+    const overlay = bySheet.get(sheetId) ?? new Map<string, PinnedClosureCell>()
+    overlay.set(`${cell.row}:${cell.column}`, overlayValue)
+    bySheet.set(sheetId, overlay)
+    applied += 1
+  }
+  // The values go to a map of their own: they are a fresh sidecar
+  // computation, so an incomplete engine run must not release them (the
+  // incompleteRuns flag only qualifies engine-derived values), and a save
+  // counts them as pending work of its own. A report is complete for the
+  // workbook, so it replaces the previous external values.
+  state.recalc.externalOverlay.clear()
+  for (const [sheetId, overlay] of bySheet) {
+    state.recalc.externalOverlay.set(sheetId, overlay)
+    const loaded = state.loadedRanges.get(sheetId)
+    const worksheet = workbook.getSheets().find((sheet) => sheet.getSheetId() === sheetId)
+    if (worksheet && loaded && overlay.size > 0) {
+      journalSuppression.active = true
+      loadAutoHeightSuppression.active = true
+      try {
+        applyPinnedOverlay(worksheet, overlay, undefined, loaded)
+      } finally {
+        journalSuppression.active = false
+        loadAutoHeightSuppression.active = false
+      }
+    }
+  }
+  return { applied, sheets: bySheet.size }
+}
+
+const SET_RANGE_VALUES_COMMAND = 'sheet.command.set-range-values'
+
+/** What journalExternalLinkLiterals did, and how to undo it. */
+export interface ExternalLinkLiteralJournal {
+  /** Cells rewritten as literals. */
+  readonly journaled: number
+  /**
+   * Puts the previous cell contents back. The file only gets the break if the
+   * save that carries it lands, so a failed save must not leave the grid
+   * showing literals the workbook does not have.
+   */
+  readonly restore: () => Promise<void>
+}
+
+type CellMatrix = { [row: number]: { [column: number]: ICellData | null } }
+
+/**
+ * Breaks one link's cells in the model (genoffice#2109): every formula cell
+ * the usage scan reported becomes the literal its cached `<v>` holds, through
+ * the set-range-values command so the edit journal records a literal
+ * overwrite. A cell whose cache is an error or empty stays on the formula —
+ * the save-time break transform freezes those file-side (`t="e"` survives
+ * there, a journal edit would not).
+ *
+ * The previous cells are kept so the caller can roll the formulas back when
+ * the save that was supposed to write the break does not happen.
+ */
+export async function journalExternalLinkLiterals(
+  runtime: UniverRuntime,
+  cells: readonly {
+    sheet: string
+    row: number
+    column: number
+    value: { kind: string; value?: number | string | boolean }
+  }[],
+): Promise<ExternalLinkLiteralJournal> {
+  const workbook = runtime.univerAPI.getActiveWorkbook()
+  if (!workbook) return { journaled: 0, restore: async () => {} }
+  const unitId = workbook.getId()
+  const commandService = runtime.univer.__getInjector().get(ICommandService)
+  const sheetByName = new Map(
+    workbook.getSheets().map((sheet) => [sheet.getSheetName().toLowerCase(), sheet]),
+  )
+  const patches = new Map<string, CellMatrix>()
+  const previous = new Map<string, CellMatrix>()
+  let journaled = 0
+  for (const cell of cells) {
+    const kind = cell.value.kind
+    if (kind !== 'number' && kind !== 'text' && kind !== 'bool') continue
+    const sheet = sheetByName.get(cell.sheet.toLowerCase())
+    if (!sheet) continue
+    const raw = cell.value.value
+    const patch: ICellData =
+      kind === 'number'
+        ? { v: raw as number, t: CellValueType.NUMBER, f: null, si: null, p: null }
+        : kind === 'bool'
+          ? { v: raw as boolean, t: CellValueType.BOOLEAN, f: null, si: null, p: null }
+          : { v: String(raw), t: CellValueType.STRING, f: null, si: null, p: null }
+    const sheetId = sheet.getSheetId()
+    // the formula (and its cache) the cell holds right now — what a failed
+    // save has to put back
+    const before = (sheet.getSheet().getCellMatrix().getMatrix() as unknown as CellMatrix)[
+      cell.row
+    ]?.[cell.column]
+    const restoreMatrix = previous.get(sheetId) ?? {}
+    restoreMatrix[cell.row] = {
+      ...restoreMatrix[cell.row],
+      [cell.column]: before === undefined || before === null ? null : { ...before },
+    }
+    previous.set(sheetId, restoreMatrix)
+    const matrix = patches.get(sheetId) ?? {}
+    matrix[cell.row] = { ...matrix[cell.row], [cell.column]: patch }
+    patches.set(sheetId, matrix)
+    journaled += 1
+  }
+  const apply = async (entries: ReadonlyMap<string, CellMatrix>): Promise<void> => {
+    for (const [sheetId, matrix] of entries) {
+      const rows = Object.keys(matrix).map(Number)
+      const startRow = Math.min(...rows)
+      const endRow = Math.max(...rows)
+      const columns = rows.flatMap((row) => Object.keys(matrix[row]!).map(Number))
+      await commandService.executeCommand(SET_RANGE_VALUES_COMMAND, {
+        unitId,
+        subUnitId: sheetId,
+        range: {
+          startRow,
+          endRow,
+          startColumn: Math.min(...columns),
+          endColumn: Math.max(...columns),
+        },
+        value: matrix as Nullable<Record<number, Record<number, ICellData>>>,
+      })
+    }
+  }
+  await apply(patches)
+  return { journaled, restore: () => apply(previous) }
+}
+

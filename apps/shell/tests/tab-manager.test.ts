@@ -45,6 +45,17 @@ function makeFakeView(): FakeView {
 }
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }))
+vi.mock('../../markdown/src/main/markdown-main', () => ({
+  createMarkdownView: vi.fn(),
+  markdownIsDirty: () => false,
+  requestMarkdownClose: vi.fn(),
+}))
+vi.mock('../../html/src/main/html-main', () => ({
+  createHtmlView: vi.fn(),
+  createHtmlPresentView: vi.fn(),
+  htmlIsDirty: () => false,
+  requestHtmlClose: vi.fn(),
+}))
 
 const createDocsView = vi.fn(() => makeFakeView())
 const docsQueryDirty = vi.fn(() => Promise.resolve(false))
@@ -79,7 +90,7 @@ const nudgeQueuedWorkbook = vi.fn()
 const queueWorkbookForView = vi.fn()
 const requestSheetsClose = vi.fn(() => Promise.resolve(true))
 const setActiveSheetsWebContents = vi.fn()
-const setSheetsNewBlank = vi.fn()
+const queueNewBlankWorkbookForView = vi.fn()
 const sheetsPendingEditCount = vi.fn(() => 0)
 
 vi.mock('../../sheets/src/main/sheets-main', () => ({
@@ -88,7 +99,7 @@ vi.mock('../../sheets/src/main/sheets-main', () => ({
   queueWorkbookForView: (...args: unknown[]) => queueWorkbookForView(...args),
   requestSheetsClose: (...args: unknown[]) => requestSheetsClose(...(args as [])),
   setActiveSheetsWebContents: (...args: unknown[]) => setActiveSheetsWebContents(...args),
-  setSheetsNewBlank: (...args: unknown[]) => setSheetsNewBlank(...args),
+  queueNewBlankWorkbookForView: (...args: unknown[]) => queueNewBlankWorkbookForView(...args),
   sheetsPendingEditCount: (...args: unknown[]) => sheetsPendingEditCount(...(args as [])),
 }))
 
@@ -111,6 +122,7 @@ const WINDOW_WIDTH = 800
 const WINDOW_HEIGHT = 600
 
 interface FakeShellWindow {
+  once: ReturnType<typeof vi.fn>
   on: ReturnType<typeof vi.fn>
   webContents: { once: ReturnType<typeof vi.fn> }
   isDestroyed: ReturnType<typeof vi.fn>
@@ -123,6 +135,7 @@ interface FakeShellWindow {
 
 function makeShellWindow(): FakeShellWindow {
   return {
+    once: vi.fn(),
     on: vi.fn(),
     webContents: { once: vi.fn() },
     isDestroyed: vi.fn(() => false),
@@ -163,6 +176,66 @@ describe('initial state', () => {
     expect(manager.list()).toEqual([
       { id: 'home', kind: 'home', title: 'GenOffice', closable: false, active: true },
     ])
+  })
+})
+
+describe('moving live tabs between windows', () => {
+  it('moves the same unsaved editor both ways without teardown or close and updates metadata ownership', () => {
+    const id = manager.openDocsTab(undefined, { newBlank: true })
+    const view = lastCreatedView(createDocsView)
+    const secondWindow = makeShellWindow()
+    const second = new TabManager(secondWindow as never, vi.fn(), vi.fn(), undefined, 'second-')
+    const other = second.openSlidesTab()
+    view.setVisible.mockClear()
+    expect(manager.moveTabTo(id, second, 1)).toBe(true)
+    expect(view.setVisible.mock.calls.map((call) => call[0])).toEqual([false, true])
+    expect(view.setVisible.mock.invocationCallOrder[0]).toBeLessThan(
+      shellWindow.contentView.removeChildView.mock.invocationCallOrder[0],
+    )
+    expect(manager.list().map((t) => t.id)).toEqual(['home'])
+    expect(second.list().map((t) => t.id)).toEqual(['home', id, other])
+    expect(second.webContentsForTab(id)).toBe(view.webContents)
+    expect(shellWindow.contentView.removeChildView).toHaveBeenCalledWith(view)
+    expect(secondWindow.contentView.addChildView).toHaveBeenCalledWith(view)
+    expect(view.webContents.close).not.toHaveBeenCalled()
+    expect(teardownDocsRenderer).not.toHaveBeenCalled()
+    second.setTabFileFor(view.webContents.id, '/tmp/moved.docx')
+    expect(second.list()[1].title).toBe('moved.docx')
+    expect(second.moveTabTo(id, manager)).toBe(true)
+    expect(manager.webContentsForTab(id)).toBe(view.webContents)
+    view.webContents.listeners.get('enter-html-full-screen')!()
+    expect(manager.list().find((t) => t.id === id)?.coversTabStrip).toBe(true)
+    expect(second.list().some((t) => t.coversTabStrip)).toBe(false)
+    expect(view.webContents.close).not.toHaveBeenCalled()
+  })
+
+  it('keeps Home pinned and rolls back a failed native reparent', () => {
+    const second = new TabManager(makeShellWindow() as never, vi.fn(), vi.fn())
+    expect(manager.moveTabTo('home', second)).toBe(false)
+    const id = manager.openSheetsTab()
+    const view = lastCreatedView(createSheetsView)
+    const badWindow = makeShellWindow()
+    badWindow.contentView.addChildView.mockImplementation(() => {
+      throw new Error('native failure')
+    })
+    const bad = new TabManager(badWindow as never, vi.fn(), vi.fn())
+    expect(() => manager.moveTabTo(id, bad)).toThrow('native failure')
+    expect(manager.webContentsForTab(id)).toBe(view.webContents)
+    expect(shellWindow.contentView.addChildView).toHaveBeenLastCalledWith(view)
+    expect(view.setVisible).toHaveBeenLastCalledWith(true)
+    expect(view.webContents.close).not.toHaveBeenCalled()
+  })
+
+  it('does not move documents into or out of a window awaiting a close decision', () => {
+    const target = new TabManager(makeShellWindow() as never, vi.fn(), vi.fn())
+    const id = manager.openSlidesTab()
+    target.setWindowClosing(true)
+    expect(manager.moveTabTo(id, target)).toBe(false)
+    target.setWindowClosing(false)
+    manager.setWindowClosing(true)
+    expect(manager.moveTabTo(id, target)).toBe(false)
+    manager.setWindowClosing(false)
+    expect(manager.moveTabTo(id, target)).toBe(true)
   })
 })
 
@@ -215,8 +288,11 @@ describe('opening tabs', () => {
   it('forwards the new-blank flag to the module', () => {
     manager.openDocsTab(undefined, { newBlank: true })
     expect(markDocsNewBlank).toHaveBeenCalledTimes(1)
-    manager.openSheetsTab(undefined, { newBlank: true })
-    expect(setSheetsNewBlank).toHaveBeenCalledTimes(1)
+    manager.openSheetsTab(undefined, { newBlank: true, suggestedPath: '/tmp/Untitled.xlsx' })
+    expect(queueNewBlankWorkbookForView).toHaveBeenCalledWith(
+      lastCreatedView(createSheetsView).webContents,
+      '/tmp/Untitled.xlsx',
+    )
   })
 })
 
@@ -227,6 +303,21 @@ describe('spare sheets view', () => {
     )
     ;(call![1] as () => void)()
   }
+
+  it('defers speculative Sheets startup while a document is active', () => {
+    vi.useFakeTimers()
+    try {
+      homeLoaded()
+      manager.openDocsTab()
+      vi.advanceTimersByTime(1500)
+      expect(createSheetsView).not.toHaveBeenCalled()
+      manager.activateTab('home')
+      vi.advanceTimersByTime(1500)
+      expect(createSheetsView).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it('warms a hidden sheets view after the home page loads and hands it to the next open', () => {
     vi.useFakeTimers()
@@ -254,9 +345,12 @@ describe('spare sheets view', () => {
       })
 
       vi.advanceTimersByTime(3000)
+      expect(createSheetsView).toHaveBeenCalledTimes(1)
+      manager.activateTab('home')
+      vi.advanceTimersByTime(1500)
       expect(createSheetsView).toHaveBeenCalledTimes(2)
       expect(lastCreatedView(createSheetsView)).not.toBe(spare)
-      expect(setActiveSheetsWebContents).toHaveBeenLastCalledWith(spare.webContents)
+      expect(setActiveSheetsWebContents).toHaveBeenLastCalledWith(null)
     } finally {
       vi.useRealTimers()
     }
@@ -396,51 +490,48 @@ describe('window resize layout', () => {
     return call![1] as () => void
   }
 
-  it('re-lays out after resize bounds settle (Linux/X11 stale getContentBounds)', async () => {
-    // On X11, `resize` fires before the WM applies maximize bounds, so the first
-    // layout still sees the pre-maximize size. The deferred layout must pick up
-    // the real size on the next turn (see issue #15).
-    manager.openSheetsTab()
-    const view = lastCreatedView(createSheetsView)
-    view.setBounds.mockClear()
-
-    let width = WINDOW_WIDTH
-    let height = WINDOW_HEIGHT
-    shellWindow.getContentBounds = () => ({ x: 0, y: 0, width, height })
-
-    resizeHandler()()
-    expect(view.setBounds).toHaveBeenLastCalledWith({
-      x: 0,
-      y: TAB_STRIP_HEIGHT,
-      width: WINDOW_WIDTH,
-      height: WINDOW_HEIGHT - TAB_STRIP_HEIGHT,
-    })
-
-    // Bounds update after the synchronous layout, as on X11 maximize.
-    width = 1920
-    height = 1080
-    await new Promise<void>((resolve) => setImmediate(resolve))
-
-    expect(view.setBounds).toHaveBeenLastCalledWith({
-      x: 0,
-      y: TAB_STRIP_HEIGHT,
-      width: 1920,
-      height: 1080 - TAB_STRIP_HEIGHT,
-    })
-    expect(view.setBounds).toHaveBeenCalledTimes(2)
+  it('coalesces resize bursts and uses the latest bounds after the window manager settles', () => {
+    vi.useFakeTimers()
+    try {
+      manager.openSheetsTab()
+      const view = lastCreatedView(createSheetsView)
+      view.setBounds.mockClear()
+      let width = WINDOW_WIDTH
+      let height = WINDOW_HEIGHT
+      shellWindow.getContentBounds = () => ({ x: 0, y: 0, width, height })
+      for (let i = 0; i < 100; i++) resizeHandler()()
+      expect(view.setBounds).not.toHaveBeenCalled()
+      width = 1920
+      height = 1080
+      vi.advanceTimersByTime(16)
+      expect(view.setBounds).toHaveBeenCalledExactlyOnceWith({
+        x: 0,
+        y: TAB_STRIP_HEIGHT,
+        width: 1920,
+        height: 1080 - TAB_STRIP_HEIGHT,
+      })
+      // An unchanged size must not wake the renderer for another layout.
+      resizeHandler()()
+      vi.advanceTimersByTime(16)
+      expect(view.setBounds).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('skips deferred layout after the shell window is destroyed', async () => {
-    manager.openSheetsTab()
-    const view = lastCreatedView(createSheetsView)
-    view.setBounds.mockClear()
-
-    resizeHandler()()
-    expect(view.setBounds).toHaveBeenCalledTimes(1)
-
-    shellWindow.isDestroyed.mockReturnValue(true)
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    expect(view.setBounds).toHaveBeenCalledTimes(1)
+  it('skips a pending resize after the shell window is destroyed', () => {
+    vi.useFakeTimers()
+    try {
+      manager.openSheetsTab()
+      const view = lastCreatedView(createSheetsView)
+      view.setBounds.mockClear()
+      resizeHandler()()
+      shellWindow.isDestroyed.mockReturnValue(true)
+      vi.advanceTimersByTime(16)
+      expect(view.setBounds).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -637,6 +728,35 @@ describe('dirty-tab queries (shell close guard)', () => {
     manager.openSheetsTab()
     manager.openDocsTab('/tmp/a.docx')
     expect(manager.docsTabs().map((t) => t.id)).toEqual(['t1', 't3'])
+  })
+
+  it('updates dirty state and notifies onChanged when setTabDirtyFor is called', () => {
+    const id = manager.openDocsTab('/tmp/demo.docx')
+    const wcId = manager.webContentsForTab(id)?.id
+    expect(wcId).toBeDefined()
+    expect(manager.list().find((t) => t.id === id)?.dirty).toBeUndefined()
+
+    onChanged.mockClear()
+    manager.setTabDirtyFor(wcId!, true)
+    expect(manager.list().find((t) => t.id === id)?.dirty).toBe(true)
+    expect(onChanged).toHaveBeenCalledTimes(1)
+
+    // calling again with same value is a no-op
+    onChanged.mockClear()
+    manager.setTabDirtyFor(wcId!, true)
+    expect(onChanged).not.toHaveBeenCalled()
+
+    // calling with false resets dirty
+    onChanged.mockClear()
+    manager.setTabDirtyFor(wcId!, false)
+    expect(manager.list().find((t) => t.id === id)?.dirty).toBeUndefined()
+    expect(onChanged).toHaveBeenCalledTimes(1)
+
+    // saving via setTabFileFor also resets dirty
+    manager.setTabDirtyFor(wcId!, true)
+    expect(manager.list().find((t) => t.id === id)?.dirty).toBe(true)
+    manager.setTabFileFor(wcId!, '/tmp/saved.docx')
+    expect(manager.list().find((t) => t.id === id)?.dirty).toBeUndefined()
   })
 })
 

@@ -15,6 +15,7 @@ use zip::ZipArchive;
 
 pub mod archive;
 pub mod convert;
+pub mod external_links;
 pub mod recalc;
 mod richdata;
 mod shared_formulas;

@@ -1,0 +1,21 @@
+.ai-model-profile-picker {
+  min-width: 0;
+  max-width: 130px;
+  flex: 1;
+}
+.ai-model-profile-picker select {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border, #8884);
+  border-radius: 6px;
+  background: var(--surface, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+.ai-model-profile-error {
+  display: block;
+  color: var(--danger, #c33);
+  font-size: 11px;
+}

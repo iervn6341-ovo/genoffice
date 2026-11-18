@@ -105,6 +105,15 @@ export const hi = {
   appStyleUpdated: 'शैली "{name}" चयन के स्वरूप से अपडेट की गई; सहेजने पर दस्तावेज़ में लिखी जाएगी',
   appStyleCreated: 'शैली "{name}" बनाई गई और चयन पर लागू की गई',
   appPgNumFormatSet: 'पृष्ठ संख्या स्वरूप सेट किया गया',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'पृष्ठ संख्या स्वरूप',
   appNumberFormat: 'संख्या स्वरूप',
   appIncludeChapterNumber: 'अध्याय संख्या शामिल करें',

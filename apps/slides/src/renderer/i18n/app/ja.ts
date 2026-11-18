@@ -199,6 +199,7 @@ export const ja = {
   appCtxEditText: 'テキストの編集',
   appCtxHyperlink: 'ハイパーリンク…',
   appCtxCropPicture: '図のトリミング',
+  appCtxResetCrop: 'Reset Crop',
   appCtxRemoveBackground: '背景の削除',
   appCtxChangeBgImage: '背景画像の変更…',
   appCtxFormatBackground: '背景の書式設定…',
@@ -266,4 +267,20 @@ export const ja = {
   appSettingsCancel: 'キャンセル',
   appSettingsSave: '保存',
   appCropHint: 'Enter で確定 · Esc でキャンセル · 外側をクリックで確定',
+  conflictTitle: 'ファイルの競合が検出されました',
+  conflictSubtitle:
+    'このファイルは外部で変更されており、GenOffice にも未保存の変更があります。保持するバージョンを選択してください：',
+  conflictLocalTitle: '現在の編集（GenOffice）',
+  conflictLocalBadge: '未保存の下書き',
+  conflictLocalDesc:
+    '現在のセッションでのすべてのスライド編集、スタイル、コンテンツの変更を保持します。',
+  conflictLocalOverwrite: '現在の編集を保持（ディスクを上書き）',
+  conflictLocalSaveCopy: 'コピーとして保存…',
+  conflictDiskTitle: '外部ファイル（ディスク）',
+  conflictDiskBadge: '外部更新',
+  conflictDiskDesc: '現在の未保存の編集を破棄し、ディスクから最新バージョンを再読み込みします。',
+  conflictDiskMissing: 'ファイルは外部で削除または移動されました。',
+  conflictDiskReload: '外部バージョンを採用（再読み込み）',
+  conflictDecideLater: '後で決定（編集を継続）',
+  appStatusFormatApplyFailed: 'この書式を適用できませんでした',
 } satisfies Record<keyof typeof zh, string>

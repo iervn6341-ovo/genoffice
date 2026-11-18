@@ -112,12 +112,20 @@ export function renderFieldSpec(field: FieldDisplay): DomSpec | null {
     // direct pPr/run metrics of the entry paragraph beat the inherited body size
     const tocStyles: string[] = []
     if (field.szHalfPoints) tocStyles.push(`font-size:${field.szHalfPoints / 2}pt`)
-    if (field.fontFamily) {
-      const familyChain = isCjkFontName(field.fontFamily)
-        ? cssEaOnlyFontFamily(field.fontFamily)
-        : cssFontFamily(field.fontFamily)
+    if (field.fontFamily || field.fontAscii || field.eastAsiaFont) {
+      const ascii =
+        field.fontAscii ??
+        (!isCjkFontName(field.fontFamily ?? '') ? field.fontFamily : undefined)
+      const ea =
+        field.eastAsiaFont ??
+        (isCjkFontName(field.fontFamily ?? '') ? field.fontFamily : undefined)
+      const familyChain =
+        ascii || ea
+          ? cssRunFontFamily(ascii, ea)
+          : cssFontFamily(field.fontFamily!)
+      const factorFace = ea ?? ascii ?? field.fontFamily!
       tocStyles.push(
-        `--doc-line-factor:${lineHeightFactor(field.fontFamily)}`,
+        `--doc-line-factor:${lineHeightFactor(factorFace)}`,
         `font-family:${familyChain}`,
       )
     }
@@ -127,7 +135,7 @@ export function renderFieldSpec(field: FieldDisplay): DomSpec | null {
     // would carry the body face's factor; the inherited multiple still applies
     // (same --doc-line-max contract as cssLineHeight)
     if (tocLh) tocStyles.push(`line-height:${tocLh}`)
-    else if (field.fontFamily)
+    else if (field.fontFamily || field.fontAscii || field.eastAsiaFont)
       tocStyles.push(
         'line-height:var(--doc-line-max, calc(var(--doc-line-factor,1.2) * var(--doc-line-mult,1)))',
       )

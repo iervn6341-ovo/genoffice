@@ -1,7 +1,12 @@
 import { existsSync } from 'node:fs'
 import { extname, isAbsolute } from 'node:path'
 import { webContents } from 'electron'
-import { elementDurableId, slideDurableId, type SlideElement } from '@genoffice/pptx-engine'
+import {
+  elementDurableId,
+  getSlideNotes,
+  slideDurableId,
+  type SlideElement,
+} from '@genoffice/pptx-engine'
 import { applySessionTxn, saveSessionDeckTo } from '../../../../slides/src/main/slides-main'
 import { attachedIds, sessions, type Session } from '../../../../slides/src/main/session-state'
 import type { SlidesControl, SlidesTxnRequest } from './tools/slides-tools'
@@ -116,11 +121,15 @@ function readDeckModel(session: Session): Record<string, unknown> {
       widthPx: Math.round(deck.size.cx / EMU_PER_PX_96),
       heightPx: Math.round(deck.size.cy / EMU_PER_PX_96),
     },
-    slides: deck.slides.map((slide, index) => ({
-      index,
-      id: slideDurableId(slide),
-      elements: slide.elements.map(elementInfo),
-    })),
+    slides: deck.slides.map((slide, index) => {
+      const rawNotes = getSlideNotes(session.opened.archive, slide.path)
+      return {
+        index,
+        id: slideDurableId(slide),
+        ...(rawNotes ? { notes: clip(rawNotes) } : {}),
+        elements: slide.elements.map(elementInfo),
+      }
+    }),
   }
 }
 

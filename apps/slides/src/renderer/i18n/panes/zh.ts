@@ -1,5 +1,6 @@
 /** panes strings, zh: defines the key set every other locale shard must match. */
 export const zh = {
+  paneAnimSaveFailed: '无法更新动画：{error}',
   paneShowSetupTitle: '设置幻灯片放映',
   paneShowSetupType: '放映类型',
   paneShowTypeSpeaker: '演讲者放映（全屏）',
@@ -30,6 +31,8 @@ export const zh = {
   paneMoveDown: '下移',
 
   paneAnimTitle: '动画窗格 · 第 {n} 页',
+  paneAnimSelectHint: '选择一个动画来编辑效果和时间。',
+  paneAnimOrderLabel: '动画顺序 {n}：{target}',
   paneAnimPreview: '播放当前页动画预览',
   paneAnimCollapse: '收起动画窗格',
   paneAnimEmpty: '本页还没有动画',

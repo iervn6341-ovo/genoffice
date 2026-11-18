@@ -1,3 +1,4 @@
+import type { SlideNumberingRule } from '@genoffice/pptx-engine'
 import type { AiPanelPrefs } from '@genoffice/ui'
 import type { PrintCommentItem, PrintLayout, PrintOutlineItem, PrintPaper } from './print-html'
 import type { SlidesPrintPrefs } from './print-prefs'
@@ -92,10 +93,22 @@ export interface SetEffectsPatch {
 export interface OpenResult {
   path: string
   slides: RenderSlide[]
+  /** A private crash copy was restored but is not yet saved to a document path. */
+  recovered?: boolean
   /** Slide page size in EMU */
   size: { cx: number; cy: number }
   /** Theme body default font (fallback shown in the font box when the selection has no text element) */
   defaultFont?: string
+  /** Whether this open is a reload of the current document */
+  isReload?: boolean
+}
+
+export interface ConflictInfo {
+  path: string
+  fileName: string
+  missing: boolean
+  mtimeMs?: number | undefined
+  size?: number | undefined
 }
 
 // ---- Chat attachments (local files fed to the agent via tools; structure copied from apps/docs) ----
@@ -157,6 +170,8 @@ export interface DesktopFilesApi {
 /** A raw op transaction from the AI batch surface (ops are validated by the registry; coordinates are document-space EMU). */
 export interface ApplyTxnOp {
   ops: unknown[]
+  /** UI edits confined to one page can request only that page's rebuilt result. */
+  renderSlideIndex?: number
   /** atomic (default): all-or-nothing. per_op: independent, failures skip. */
   isolation?: 'atomic' | 'per_op'
   /** Validate and return the plan without touching the deck. */
@@ -165,6 +180,7 @@ export interface ApplyTxnOp {
 
 export interface ApplyTxnResult {
   applied: boolean
+  slide?: RenderSlide
   dryRun?: boolean
   /** dry-run: one line per validated op */
   plan?: string[]
@@ -1018,6 +1034,10 @@ export interface NotesParagraphView {
   level: number
   /** Bullet glyph to show before the text ('•', '1.' …); absent = none */
   bullet?: string
+  /** Source list metadata for the live notes ribbon; the label alone loses numbering type. */
+  bulletKind?: 'char' | 'number'
+  numType?: string
+  startAt?: number
 }
 
 /** Add a comment (the author is the system username fetched by the main process). */
@@ -1129,6 +1149,7 @@ export interface HeaderFooterOp {
   dateFormat?: string
   dontShowOnTitleSlide?: boolean
   firstSlideNum?: number
+  numbering?: SlideNumberingRule | null
   fitWidthPx: number
 }
 
@@ -1370,6 +1391,8 @@ export interface PrinterInfo {
 export interface ShowSyncState {
   /** Original index of the current page */
   idx: number
+  /** Visit identity; repeated jumps to a page restart its in-page animations. */
+  visit?: number
   /** Number of in-page animation steps already played */
   played: number
   /** Whether the current step is playing (audience plays that step from the start) */
@@ -1541,6 +1564,8 @@ export interface SlidesApi {
   batchEditTransform: (op: BatchEditTransformOp) => Promise<RenderSlide | null>
   /** Read-only: RenderSlide for every page of the current session (E2E driver/debug use) */
   getRenderSlides: () => Promise<RenderSlide[] | null>
+  /** Read the current native page after pending edits without rebuilding the entire deck. */
+  getRenderSlide: (slideIndex: number) => Promise<RenderSlide | null>
   /** Update the picture crop srcRect (0..1 ratios; null = full image); returns the updated page */
   editPictureSrcRect: (op: EditPictureSrcRectOp) => Promise<RenderSlide | null>
   /** Whole-picture opacity */
@@ -1666,9 +1691,7 @@ export interface SlidesApi {
     op: PasteElementsOp,
   ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
   /** Paste PowerPoint-native shapes/table or an HTML table from the system clipboard as editable elements, centred on the page */
-  pasteSystem: (
-    op: PasteElementsOp,
-  ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
+  pasteSystem: (op: PasteElementsOp) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
   duplicateElements: (
     op: DuplicateElementsOp,
   ) => Promise<{ slide: RenderSlide; sourceIds: string[] } | null>
@@ -1738,6 +1761,7 @@ export interface SlidesApi {
     dateFormat: string
     dontShowOnTitleSlide: boolean
     firstSlideNum: number
+    numbering?: SlideNumberingRule | null
     isTitleSlide: boolean
     slideNumber: number
     notesHandouts: NotesHandoutsHeaderFooterState
@@ -1870,9 +1894,15 @@ export interface SlidesApi {
   getPrintPrefs: () => Promise<SlidesPrintPrefs>
   setPrintPrefs: (patch: Partial<SlidesPrintPrefs>) => Promise<SlidesPrintPrefs>
   save: () => Promise<{ ok: boolean; path?: string; error?: string; slides?: RenderSlide[] }>
+  /** Save changes even if an external change occurred, overwriting disk */
+  forceSave: () => Promise<{ ok: boolean; path?: string; error?: string; slides?: RenderSlide[] }>
+  /** Reload the currently open file from disk */
+  reload: () => Promise<OpenResult | null>
   saveAs: (
     defaultName: string,
   ) => Promise<{ ok: boolean; path?: string; error?: string; slides?: RenderSlide[] }>
+  /** Conflict detected between local edits and disk file */
+  onConflict: (handler: (conflict: ConflictInfo) => void) => () => void
   /** The close guard chose "Save": the main process asks the renderer to run the full save flow */
   onCloseSaveRequest: (handler: () => void) => () => void
   /** Undo/redo stack occupancy pushed by the main process (drives the QAT button gray states) */
@@ -1885,6 +1915,7 @@ export interface SlidesApi {
   /** Mirror the autosave toggle state to the main process: files with it on save silently on close, no dialog */
   setAutoSavePref: (on: boolean) => void
   isDirty: () => Promise<boolean>
+  setDirty?: (dirty: boolean) => void
   getRecentFiles: () => Promise<string[]>
   onMenuCommand: (handler: (command: MenuCommand) => void) => () => void
   onOpened: (handler: (result: OpenResult) => void) => () => void

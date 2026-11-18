@@ -12,6 +12,7 @@ const actualAccess = vi.mocked(accessSync).getMockImplementation()!
 
 import {
   configuredDefaultSaveDir,
+  configuredDefaultSaveDirAsync,
   readDefaultSaveDirSetting,
   resolveDefaultSaveDir,
 } from '../src/index'
@@ -105,5 +106,28 @@ describe('configuredDefaultSaveDir', () => {
     }
     expect(configuredDefaultSaveDir(app)).toBe(join(documents, 'GenOffice'))
     expect(existsSync(join(documents, 'GenOffice'))).toBe(true)
+  })
+})
+
+describe('configuredDefaultSaveDirAsync', () => {
+  const appPaths = () => ({
+    getPath: (name: 'userData' | 'documents') => join(root, name),
+  })
+
+  it('uses the configured folder and falls back when the setting is invalid', async () => {
+    const userData = join(root, 'userData')
+    mkdirSync(userData)
+    const custom = join(root, 'custom')
+    writeFileSync(join(userData, 'app-settings.json'), JSON.stringify({ defaultSaveDir: custom }))
+    expect(await configuredDefaultSaveDirAsync(appPaths())).toBe(custom)
+    expect(existsSync(custom)).toBe(true)
+
+    writeFileSync(join(userData, 'app-settings.json'), JSON.stringify({ defaultSaveDir: 'relative' }))
+    expect(await configuredDefaultSaveDirAsync(appPaths())).toBe(join(root, 'documents', 'GenOffice'))
+  })
+
+  it('rejects an unusable fallback folder', async () => {
+    writeFileSync(join(root, 'documents'), 'blocked')
+    await expect(configuredDefaultSaveDirAsync(appPaths())).rejects.toThrow(/default save dir not usable/)
   })
 })

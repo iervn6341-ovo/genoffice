@@ -7,19 +7,18 @@ import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } fr
 
 /**
  * Regression for "new spreadsheet cannot be saved" (feedback 2368785): the
- * quick-create card must create a real backing .xlsx up front so the save
- * pipeline works from the first edit.
+ * quick-create card starts unsaved, and the first explicit Save writes edits.
  */
 test.describe('sheets: new blank workbook', () => {
-  test('quick-create writes a backing file and saves the first edit', async () => {
+  test('quick-create stays unsaved and saves the first edit on request', async () => {
     const scratch = await mkdtemp(join(tmpdir(), 'genoffice-sheets-blank-'))
-    const launched = await launchShell({ onboardingSeen: true, videoDir: 'sheets-new-blank' })
+    const launched = await launchShell({
+      onboardingSeen: true,
+      settings: { defaultSaveDir: scratch },
+      videoDir: 'sheets-new-blank',
+    })
     try {
       const { app, page } = launched
-      // keep the auto-created workbook out of the real ~/Documents/GenOffice
-      await app.evaluate(({ app: electronApp }, dir) => {
-        electronApp.setPath('documents', dir)
-      }, scratch)
 
       await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
       await page.locator('.quick-card').nth(1).click()
@@ -30,11 +29,8 @@ test.describe('sheets: new blank workbook', () => {
       })
       await sheets.waitForTimeout(1_500)
 
-      // the backing file exists before any edit
-      const saveDir = join(scratch, 'GenOffice')
-      const created = (await readdir(saveDir)).filter((f) => f.endsWith('.xlsx'))
-      expect(created).toHaveLength(1)
-      const workbook = join(saveDir, created[0])
+      expect((await readdir(scratch)).filter((f) => f.endsWith('.xlsx'))).toHaveLength(0)
+      const workbook = join(scratch, 'Untitled Spreadsheet.xlsx')
 
       const grid = await sheets.evaluate(() => {
         for (const canvas of document.querySelectorAll('canvas')) {
@@ -50,6 +46,9 @@ test.describe('sheets: new blank workbook', () => {
       await sheets.keyboard.press('Enter')
       await sheets.screenshot({ path: screenshotPath('sheets-new-blank-edited') })
 
+      await app.evaluate(({ dialog }, target) => {
+        dialog.showSaveDialog = (async () => ({ canceled: false, filePath: target })) as never
+      }, workbook)
       await app.evaluate(({ webContents }) => {
         const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('://sheets/'))
         wc?.send('menu:action', 'save')

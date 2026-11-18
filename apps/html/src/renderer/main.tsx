@@ -3,9 +3,8 @@ import { htmlLang, type Lang } from '@genoffice/i18n'
 import App from './App'
 import { PresentView } from './PresentView'
 import { LocaleProvider } from './i18n/locale'
-import type { UiTheme } from '../shared/ipc'
 import {
-  applyUiTheme,
+  syncUiTheme,
   applyAiPanelPrefs,
   installMacLineBoundaryKeys,
   installScreenTips,
@@ -27,18 +26,14 @@ import '@genoffice/ui/ribbon-density.css'
 installScreenTips()
 installMacLineBoundaryKeys()
 
-function applyTheme(theme: UiTheme): void {
-  applyUiTheme(theme)
-}
+const themeReady = syncUiTheme(window.htmlApi).ready
 
 void (async () => {
-  const [lang, theme] = await Promise.all([
+  const [lang] = await Promise.all([
     window.htmlApi.getLanguage().catch(() => 'zh' as const),
-    window.htmlApi.getTheme().catch(() => 'system' as const),
+    themeReady,
   ])
   document.documentElement.lang = htmlLang(lang as Lang)
-  applyTheme(theme)
-  window.htmlApi.onThemeChanged(applyTheme)
   void window.htmlApi
     ?.getAiPanelPrefs?.()
     .then(applyAiPanelPrefs)

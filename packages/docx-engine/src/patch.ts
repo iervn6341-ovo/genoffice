@@ -1,3 +1,4 @@
+import { removePageFields } from './page-fields'
 import JSZip from 'jszip'
 import { PENDING_IMG_PREFIX, lookupPendingMedia } from './pending-media'
 import {
@@ -159,6 +160,7 @@ export interface SaveOptions {
    * parts available for cross-save undo.
    */
   sectionHf?: Array<{
+    sectionIndex?: number
     lastBlockIndex: number
     kind: 'header' | 'footer'
     hf: HeaderFooter
@@ -958,6 +960,24 @@ export async function saveDocx(
         : `${open}${tags.join('')}`,
     )
   }
+  const ordinalRefs = new Map<
+    number,
+    { tags: string[]; edits: { kind: 'header' | 'footer'; variant: string }[] }
+  >()
+  let sectionOrdinal = 0
+  const applyOrdinalRefs = (xml: string): string => {
+    if (!/<w:sectPr[\s/>]/.test(xml)) return xml
+    const refs = ordinalRefs.get(sectionOrdinal++)
+    if (!refs) return xml
+    for (const edit of refs.edits)
+      xml = xml.replace(new RegExp(`<w:${edit.kind}Reference\\b[^>]*/>`, 'g'), (tag) => {
+        const variant = /w:type="([^"]+)"/.exec(tag)?.[1] ?? 'default'
+        return variant === edit.variant || (edit.variant === 'default' && variant === 'odd')
+          ? ''
+          : tag
+      })
+    return insertSectionRefs(xml, refs.tags)
+  }
   for (const edit of options.sectionHf ?? []) {
     const variant = edit.variant ?? 'default'
     const block = parsed.blocks.find((b) => b.docxIndex === edit.lastBlockIndex)
@@ -1004,9 +1024,17 @@ export async function saveDocx(
     hfOverrides.push(
       `<Override PartName="/word/${filename}" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.${edit.kind}+xml"/>`,
     )
-    const tags = sectionRefTags.get(edit.lastBlockIndex) ?? []
-    tags.push(`<w:${edit.kind}Reference w:type="${variant}" r:id="${newRId}"/>`)
-    sectionRefTags.set(edit.lastBlockIndex, tags)
+    const tag = `<w:${edit.kind}Reference w:type="${variant}" r:id="${newRId}"/>`
+    if (edit.sectionIndex !== undefined) {
+      const refs = ordinalRefs.get(edit.sectionIndex) ?? { tags: [], edits: [] }
+      refs.tags.push(tag)
+      refs.edits.push({ kind: edit.kind, variant })
+      ordinalRefs.set(edit.sectionIndex, refs)
+    } else {
+      const tags = sectionRefTags.get(edit.lastBlockIndex) ?? []
+      tags.push(tag)
+      sectionRefTags.set(edit.lastBlockIndex, tags)
+    }
     if (rId) {
       const replacements = linkedRefs.get(edit.lastBlockIndex) ?? []
       replacements.push({ kind: edit.kind, variant })
@@ -1289,6 +1317,7 @@ export async function saveDocx(
         (revision.date ? ` w:date="${escapeXmlAttr(revision.date)}"` : '')
       xml = `<w:${revision.kind}${attrs}>${xml}</w:${revision.kind}>`
     }
+    xml = applyOrdinalRefs(xml)
     parts.push(xml)
   }
   // Trailing hidden elements (w:sectPr) always keep their original bytes and position,
@@ -1320,6 +1349,7 @@ export async function saveDocx(
         const sectionNoteProps = notePropsBySection.get(block.docxIndex)
         if (sectionNoteProps) xml = patchExistingSectionNoteProps(xml, sectionNoteProps)
       }
+      xml = applyOrdinalRefs(xml)
       parts.push(xml)
     }
   }
@@ -1744,6 +1774,7 @@ function headerFooterPartXml(
   watermarkXml: string | undefined = undefined,
   originalXml: string | null = null,
 ): string {
+  if (hf.suppressPageNumber && originalXml) originalXml = removePageFields(originalXml)
   if (hf.paras?.some((para) => para.protectedFields)) {
     if (!originalXml)
       throw new Error(

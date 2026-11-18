@@ -17,6 +17,7 @@ interface PresenterShow {
   audienceWin: BrowserWindow | null
   /** Most recent sync state: audience-ready re-sends it when the audience window mounts after the broadcast */
   lastSync: ShowSyncState | null
+  backgroundThrottling: boolean
 }
 const presenterShows = new Map<number, PresenterShow>()
 /** Audience wc.id -> presenter wc.id (routing for navigation actions sent back) */
@@ -67,6 +68,8 @@ function closePresenterShow(presenterId: number): void {
   const show = presenterShows.get(presenterId)
   if (!show) return
   presenterShows.delete(presenterId)
+  if (!show.presenterWc.isDestroyed())
+    show.presenterWc.setBackgroundThrottling(show.backgroundThrottling)
   const win = show.audienceWin
   show.audienceWin = null
   if (win && !win.isDestroyed()) {
@@ -96,7 +99,15 @@ export function registerPresenterIpc(): void {
   ipcMain.handle('slides:presenter-start', (e, opts?: { monitor?: string | null }) => {
     const existing = presenterShows.get(e.sender.id)
     if (existing) return { audience: existing.audienceWin != null }
-    const show: PresenterShow = { presenterWc: e.sender, audienceWin: null, lastSync: null }
+    const show: PresenterShow = {
+      presenterWc: e.sender,
+      audienceWin: null,
+      lastSync: null,
+      backgroundThrottling: e.sender.getBackgroundThrottling(),
+    }
+    // The presenter owns the animation clock, even while input is on the projector.
+    // Restore the editor's normal throttling policy as soon as the show ends.
+    e.sender.setBackgroundThrottling(false)
     presenterShows.set(e.sender.id, show)
     e.sender.once('destroyed', () => closePresenterShow(e.sender.id))
 
@@ -118,6 +129,7 @@ export function registerPresenterIpc(): void {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        backgroundThrottling: false,
       },
     })
     show.audienceWin = win

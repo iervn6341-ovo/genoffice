@@ -1,3 +1,5 @@
+import { selectCollapsedFieldText } from './field-format-selection'
+import { useAiSettingsSync } from '@genoffice/ui'
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { InsertGalleryKey } from './components/RibbonGalleryPane'
 import type {
@@ -35,6 +37,7 @@ import type {
   TransitionDetail,
   SlideComment,
   TransitionKind,
+  ConflictInfo,
 } from '../shared/ipc'
 import { SlideCanvas, selectionChromeColor, type SlideCanvasHandle } from './SlideCanvas'
 import {
@@ -46,10 +49,11 @@ import { tableCellOverlayBox } from './table-hit'
 import { ZOOM_PREVIEW_EVENT } from './zoom-preview'
 import { createWheelPager } from './wheel-page-flip'
 import type { DrawRect } from './draw-shape'
-import { SlideThumb } from './SlideThumb'
+import { ViewportSlideThumb } from './ViewportSlideThumb'
 import { MasterView } from './MasterView'
 import {
   TextEditOverlay,
+  ensureEditorSelection,
   firstFontFamily,
   liveAlign,
   liveFontSize,
@@ -58,8 +62,10 @@ import {
   type TextToggles,
   liveBulletChar,
   liveRtl,
+  restoreEditSelection,
   saveEditSelection,
 } from './TextEditOverlay'
+import { flushTextCommit } from './active-text-edit'
 import { CropOverlay } from './CropOverlay'
 import { createImageLoader } from './image-loader'
 import { runHeadlessPdfExport } from './headless-export'
@@ -119,6 +125,8 @@ import { FormatBackgroundPane, type BgPaneOp } from './components/FormatBackgrou
 import { FormatPane } from './components/FormatPane'
 import { CommentsPane } from './components/CommentsPane'
 import { AnimationPane } from './components/AnimationPane'
+import { AnimationOrderOverlay } from './components/AnimationOrderOverlay'
+import { animationTargetSelection } from './animation-authoring'
 import { AnimPreviewOverlay } from './components/AnimatedSlide'
 import { outlineOf } from './outline-of'
 import {
@@ -129,6 +137,7 @@ import {
   SymbolDialog,
 } from './components/InsertDialogs'
 import { CutoutDialog } from './components/CutoutDialog'
+import { ConflictDialog } from './components/ConflictDialog'
 import {
   Backstage,
   backstageLabels,
@@ -147,6 +156,7 @@ import { t, useI18n } from './i18n/locale'
 import { AiPanel } from './ai/AiPanel'
 import { ChartDataDialog } from './components/ChartDataDialog'
 import type { BrushFormat } from './format-brush'
+import { flushFormatEdits } from './format-edit-queue'
 import { isTextUndoTarget, shouldRouteUndoToDeck } from './undo-routing'
 import { redoTextEdit, undoTextEdit } from './text-history'
 import type {
@@ -162,7 +172,12 @@ import type {
   SlideShowState,
 } from './action-context'
 import { FIT_WIDTH } from './app-constants'
-import { createTransformBatcher, flushTransforms, withHistoryGroup } from './history-group'
+import {
+  createTransformBatcher,
+  flushPendingTransforms,
+  flushTransforms,
+  withHistoryGroup,
+} from './history-group'
 import { StageRuler } from './components/StageRuler'
 import { formatRulerValue, type RulerUnit } from './ruler-ticks'
 import * as fileActions from './file-actions'
@@ -195,7 +210,7 @@ import { TableCellLayer } from './components/TableCellLayer'
 import * as tableLayoutActions from './table-layout-actions'
 import type { TableTabActions, TableTabInfo } from './components/RibbonTableTabs'
 import * as styleActions from './style-actions'
-import { handleGlobalKeydown } from './keyboard-actions'
+import { handleGlobalKeydown, flushNudgeHistoryBatch } from './keyboard-actions'
 import { buildCtxItems } from './context-menu-items'
 
 const _IS_MAC = navigator.platform.toLowerCase().includes('mac')
@@ -369,6 +384,9 @@ export function App() {
     if (slides.length) void syncPrivateFonts()
   }, [slides])
   const [path, setPath] = useState<string | null>(null)
+  const pathRef = useRef<string | null>(null)
+  pathRef.current = path
+  const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
   // Deck references catalog fonts that are missing locally → one-click download banner
   const [missingFonts, setMissingFonts] = useState<string[]>([])
   const [fontBannerBusy, setFontBannerBusy] = useState(false)
@@ -405,6 +423,8 @@ export function App() {
   }, [missingFonts, refreshMissingFonts])
   /** AiPanel reset key: incremented only on applyOpen (open/new file), not on draft path updates */
   const [aiPanelKey, setAiPanelKey] = useState(0)
+  /** Slide render epoch: incremented on file reload, external conflict reload, or deck sync so the canvas remounts cleanly */
+  const [slideEpoch, setSlideEpoch] = useState(0)
   /** Theme body default font (fallback for the font box when the selection has no text element) */
   const [defaultFont, setDefaultFont] = useState<string | null>(null)
   const [current, setCurrent] = useState(0)
@@ -418,6 +438,16 @@ export function App() {
   /** Group being edited from inside (double-click to enter, click outside/Esc to exit); the selection may contain its children */
   const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null)
   const [editing, setEditing] = useState<EditingState | null>(null)
+  const editingRef = useRef<{ sourceId: string; groupId?: string; slideIndex: number } | null>(null)
+  useEffect(() => {
+    if (editing) {
+      editingRef.current = { sourceId: editing.sourceId, groupId: editing.groupId, slideIndex: current }
+    } else {
+      queueMicrotask(() => {
+        if (!editing) editingRef.current = null
+      })
+    }
+  }, [editing, current])
   const [editingCell, setEditingCell] = useState<EditingCellState | null>(null)
   /** Table cell-range selection: the table is the selected element, these cells are highlighted */
   const [cellSel, setCellSel] = useState<TableCellSel | null>(null)
@@ -438,7 +468,12 @@ export function App() {
   const stageRelRef = useRef<HTMLDivElement | null>(null)
   const zoomBoxRef = useRef<HTMLDivElement | null>(null)
   const [scaleBox, setScaleBox] = useState<{ w: number; h: number } | null>(null)
+  const scaleBoxRef = useRef<{ w: number; h: number } | null>(null)
+  scaleBoxRef.current = scaleBox
   const [dirty, setDirty] = useState(false)
+  useEffect(() => {
+    window.slidesApi?.setDirty?.(dirty)
+  }, [dirty])
   const [status, setStatus] = useState('')
   // Status messages auto-dismiss after 4s: operation feedback needs only a brief showing; persistent info (page number/file name) lives on the left and in the title bar
   useEffect(() => {
@@ -536,6 +571,7 @@ export function App() {
   // ── Animations tab: current page's animation list + pane/preview ─────────────
   const [animations, setAnimations] = useState<AnimationItem[]>([])
   const [showAnimPane, setShowAnimPane] = useState(false)
+  const [animationTabActive, setAnimationTabActive] = useState(false)
   /** Animation pane selection (the timing controls bind to it first); -1 = none */
   const [selAnim, setSelAnim] = useState(-1)
   /** Canvas animation preview (plays when nonce>0; re-entering +1) */
@@ -899,10 +935,13 @@ export function App() {
   useLayoutEffect(() => {
     const el = stageScaleRef.current
     if (!el) {
+      scaleBoxRef.current = null
       setScaleBox(null)
       return
     }
-    setScaleBox({ w: el.offsetWidth, h: el.offsetHeight })
+    const nextBox = { w: el.offsetWidth, h: el.offsetHeight }
+    scaleBoxRef.current = nextBox
+    setScaleBox(nextBox)
   }, [slide?.widthPx, slide?.heightPx])
 
   // ── Stage rulers (PowerPoint-style fixed chrome outside the zoomed canvas) ──
@@ -963,35 +1002,54 @@ export function App() {
     // zoom-in above fit straight back to fit. Only a border-box change is a real
     // window/pane resize allowed to clamp a manual zoom.
     let outerBox: { w: number; h: number } | null = null
-    const ro = new ResizeObserver(() => {
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined
+    const measure = () => {
+      resizeTimer = undefined
+      if (zoomGestureRef.current.pending != null) return
       const nextSize = { w: el.clientWidth, h: el.clientHeight }
       setStageViewportSize((previous) =>
         previous.w === nextSize.w && previous.h === nextSize.h ? previous : nextSize,
       )
       const prevOuter = outerBox
       outerBox = { w: el.offsetWidth, h: el.offsetHeight }
-      const z = fitZoom(slideLiveRef.current)
+      const fit = rawFitRef.current(slideLiveRef.current)
+      const z = Math.min(1.5, Math.max(0.1, fit))
       const lf = lastFitRef.current
       const inFitMode = lf != null && Math.abs(zoomLiveRef.current - lf) <= 0.001
       if (!inFitMode) {
         // The overflow test uses the uncapped ratio: on large windows a manual
         // zoom above the 1.5 fit cap can still fit and must not be wiped
-        if (zoomLiveRef.current <= rawFit(slideLiveRef.current) + 0.001) return
+        if (zoomLiveRef.current <= fit + 0.001) return
         const outerResized =
           prevOuter != null && (outerBox.w !== prevOuter.w || outerBox.h !== prevOuter.h)
         if (!outerResized) return
       }
       lastFitRef.current = z
       setZoom(z)
+    }
+    measure()
+    const ro = new ResizeObserver(() => {
+      if (resizeTimer === undefined) resizeTimer = setTimeout(measure, 80)
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      clearTimeout(resizeTimer)
+      ro.disconnect()
+    }
     // viewMode: reading/sorter unmount the editor, so the observer must re-bind
     // to the remounted .stage-wrap or window resizes stop re-fitting the canvas
-  }, [hasDoc, fitZoom, rawFit, viewMode])
+  }, [hasDoc, viewMode])
 
   const applyOpen = useCallback(
-    (result: { path: string; slides: RenderSlide[]; defaultFont?: string } | null) => {
+    (
+      result: {
+        path: string
+        slides: RenderSlide[]
+        defaultFont?: string
+        recovered?: boolean
+        isReload?: boolean
+      } | null,
+    ) => {
       if (!result) return
       openedCustomShowPathRef.current = result.path
       customShowOpenTokenRef.current++
@@ -1000,18 +1058,32 @@ export function App() {
       customShowHistoryRef.current = null
       setSlides(result.slides)
       setDefaultFont(result.defaultFont ?? null)
+      const sameDoc = pathRef.current === result.path
+      const isReload = !!result.isReload || sameDoc
       setPath(result.path)
-      setCurrent(0)
+      pathRef.current = result.path
+      if (isReload) {
+        setCurrent((prev) => Math.min(prev, Math.max(0, result.slides.length - 1)))
+      } else {
+        setCurrent(0)
+      }
       setSelectedIds([])
       setEditing(null)
-      setDirty(false)
+      setEditingCell(null)
+      setCellSel(null)
+      setEnteredGroupId(null)
+      setDirty(!!result.recovered)
       setInkTool('select')
       setAiPanelKey((k) => k + 1)
+      setSlideEpoch((e) => e + 1)
+      setAnnotationsNonce((n) => n + 1)
       setInsertGallery(null)
       // Queue anchors belong to the deck that was open; another file invalidates them all
       setEditQueue([])
       setAskState(null)
-      needsFitRef.current = true
+      if (!isReload) {
+        needsFitRef.current = true
+      }
       setStatus(
         result.path
           ? t('appStatusOpened', {
@@ -1120,6 +1192,8 @@ export function App() {
       window.slidesApi.onDeckChanged?.(({ slides: all }) => {
         setSlides(all)
         setCurrent((c) => Math.min(c, Math.max(0, all.length - 1)))
+        setSlideEpoch((e) => e + 1)
+        setAnnotationsNonce((n) => n + 1)
         // The broadcast also fires for undo back to a clean state — ask the
         // session instead of assuming the change dirtied it
         void window.slidesApi.isDirty?.().then((d) => setDirty(!!d))
@@ -1260,8 +1334,12 @@ export function App() {
     setCurrent((c) => Math.min(c, r.length - 1))
     setSelectedIds([])
     setEditing(null)
+    setEditingCell(null)
+    setCellSel(null)
+    setEnteredGroupId(null)
     setPasteFloater(null) // The paste the floater refers to may have just been undone
     notesDraftRef.current = null // Undo overrides the unsaved draft, avoiding writing an old draft back
+    setSlideEpoch((e) => e + 1)
     setAnnotationsNonce((n) => n + 1) // Notes/comments aren't in RenderSlide; re-fetch
     void window.slidesApi.isDirty().then(setDirty)
   }, [])
@@ -1274,6 +1352,10 @@ export function App() {
       if (!undoTextEdit()) document.execCommand('undo')
       return
     }
+    await animationActions.flushAnimationEdits()
+    await flushFormatEdits()
+    await flushNudgeHistoryBatch()
+    await flushPendingTransforms()
     applyHistoryResult(await window.slidesApi.undo())
   }, [editing, applyHistoryResult])
 
@@ -1282,6 +1364,10 @@ export function App() {
       if (!redoTextEdit()) document.execCommand('redo')
       return
     }
+    await animationActions.flushAnimationEdits()
+    await flushFormatEdits()
+    await flushNudgeHistoryBatch()
+    await flushPendingTransforms()
     const result = await window.slidesApi.redo()
     applyHistoryResult(result)
     const pending = pendingLegacyCustomShowsRef.current
@@ -1307,20 +1393,30 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Zoom preview shared by trackpad pinch and the status-bar slider: a setZoom per event
-  // re-renders the whole App (thumbnails included) dozens of times per gesture and froze
-  // the pinch for seconds; instead the gesture only touches the CSS transform (rAF-batched)
-  // and the state commit is debounced to the gesture's end.
+  // Browser compositor-style pinch and preview zoom:
+  // Layout thrashing (forced synchronous reflows) and React re-renders freeze pinch gestures.
+  // During active gestures, we avoid mutating layout dimensions (box width/height) or scroller offsets.
+  // Instead, the stage adopts a GPU-accelerated 2D affine transform `translate3d(tx, ty, 0) scale(z)`
+  // anchored to the cursor position with 0 DOM reflow. The final dimensions, scroll position, and
+  // React state commit once when the gesture completes (debounced by 150ms).
   const zoomGestureRef = useRef<{
     raf: number
     timer: number
     pending: number | null
+    active: boolean
+    startZoom: number
     anchor: { x: number; y: number } | null
+    cx: number
+    cy: number
   }>({
     raf: 0,
     timer: 0,
     pending: null,
+    active: false,
+    startZoom: 1,
     anchor: null,
+    cx: 0,
+    cy: 0,
   })
   /** `next` may be a functional updater (based on the pending gesture value, so rapid
    * steps compound correctly). `anchor` (client coords) is the screen point the zoom
@@ -1328,61 +1424,84 @@ export function App() {
   const previewZoom = useCallback(
     (next: number | ((current: number) => number), anchor?: { x: number; y: number }) => {
       const g = zoomGestureRef.current
+      const scaleEl = stageScaleRef.current
+      const wrap = stageWrapRef.current
+
+      // Initialize the compositor gesture state once at the start of the pinch
+      if (!g.active && scaleEl && wrap) {
+        g.active = true
+        g.startZoom = zoomLiveRef.current || 1
+        const wr = wrap.getBoundingClientRect()
+        const sr = scaleEl.getBoundingClientRect()
+        const ax = anchorClamp(anchor?.x, wr.left, wr.right) ?? (wr.left + wr.width / 2)
+        const ay = anchorClamp(anchor?.y, wr.top, wr.bottom) ?? (wr.top + wr.height / 2)
+        g.anchor = { x: ax, y: ay }
+        g.cx = (ax - sr.left) / g.startZoom
+        g.cy = (ay - sr.top) / g.startZoom
+        scaleEl.style.willChange = 'transform'
+        scaleEl.style.transformOrigin = '0 0'
+      }
+
       const target = typeof next === 'function' ? next(g.pending ?? zoomLiveRef.current) : next
-      g.pending = Math.min(3, Math.max(0.25, target))
-      g.anchor = anchor ?? null
+      const clamped = Math.min(3, Math.max(0.25, target))
+      g.pending = clamped
+      zoomLiveRef.current = clamped
+
       if (!g.raf) {
         g.raf = requestAnimationFrame(() => {
           g.raf = 0
           const scaleEl = stageScaleRef.current
           if (g.pending == null || !scaleEl) return
-          const wrap = stageWrapRef.current
-          // Content point (unscaled coords) currently under the anchor, measured from the
-          // applied transform itself so it stays correct regardless of commit timing
-          let ax = 0
-          let ay = 0
-          let px = 0
-          let py = 0
-          if (wrap) {
-            const wr = wrap.getBoundingClientRect()
-            ax = anchorClamp(g.anchor?.x, wr.left, wr.right) ?? wr.left + wr.width / 2
-            ay = anchorClamp(g.anchor?.y, wr.top, wr.bottom) ?? wr.top + wr.height / 2
-            const r = scaleEl.getBoundingClientRect()
-            const applied = scaleEl.offsetWidth ? r.width / scaleEl.offsetWidth : 1
-            px = (ax - r.left) / applied
-            py = (ay - r.top) / applied
-          }
-          scaleEl.style.transform = `scale(${g.pending})`
-          const box = zoomBoxRef.current
-          if (box) {
-            // offsetWidth ignores the transform = unscaled layout size (same basis as scaleBox)
-            box.style.width = `${scaleEl.offsetWidth * g.pending}px`
-            box.style.height = `${scaleEl.offsetHeight * g.pending}px`
-          }
-          // Scroll so the anchored content point stays under the anchor (the browser
-          // clamps at the scroll edges; while the content still fits it stays centered)
-          if (wrap) {
-            const r = scaleEl.getBoundingClientRect()
-            wrap.scrollLeft += px * g.pending - (ax - r.left)
-            wrap.scrollTop += py * g.pending - (ay - r.top)
-            // At/below fit the anchoring must not win over centering: the bleed's
-            // scroll range would keep the offset alive after overflow turns hidden
-            resetFitScroll(g.pending)
-          }
-          // Selection chrome counter-scales per frame so it holds a constant on-screen size
-          window.dispatchEvent(new CustomEvent(ZOOM_PREVIEW_EVENT, { detail: g.pending }))
+          const z = g.pending
+          const tx = g.cx * (g.startZoom - z)
+          const ty = g.cy * (g.startZoom - z)
+          scaleEl.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${z})`
+          window.dispatchEvent(new CustomEvent(ZOOM_PREVIEW_EVENT, { detail: z }))
         })
       }
+
       window.clearTimeout(g.timer)
       g.timer = window.setTimeout(() => {
         if (g.pending == null) return
-        setZoom(g.pending)
-        // The commit may not change `zoom` (gesture ended where it started), so the
-        // layout-effect reset would not re-run; clear any residue here as well
-        resetFitScroll(g.pending)
+        const committedZoom = g.pending
+        const scaleEl = stageScaleRef.current
+        const wrap = stageWrapRef.current
+        const box = zoomBoxRef.current
+        const baseW = scaleBoxRef.current?.w ?? slideLiveRef.current?.widthPx ?? 1280
+        const baseH = scaleBoxRef.current?.h ?? slideLiveRef.current?.heightPx ?? 720
+
+        if (box) {
+          box.style.width = `${baseW * committedZoom}px`
+          box.style.height = `${baseH * committedZoom}px`
+        }
+
+        const fit = rawFitRef.current(slideLiveRef.current)
+        if (committedZoom <= fit + 0.001) {
+          if (scaleEl) {
+            scaleEl.style.willChange = ''
+            scaleEl.style.transform = `scale(${committedZoom})`
+          }
+          resetFitScroll(committedZoom)
+        } else if (wrap && g.anchor && scaleEl) {
+          scaleEl.style.willChange = ''
+          scaleEl.style.transform = `scale(${committedZoom})`
+          const wr = wrap.getBoundingClientRect()
+          const sr = scaleEl.getBoundingClientRect()
+          const slidePointX = g.cx * committedZoom
+          const slidePointY = g.cy * committedZoom
+          const scaleScrollLeft = sr.left - wr.left + wrap.scrollLeft
+          const scaleScrollTop = sr.top - wr.top + wrap.scrollTop
+          wrap.scrollLeft = Math.max(0, scaleScrollLeft + slidePointX - (g.anchor.x - wr.left))
+          wrap.scrollTop = Math.max(0, scaleScrollTop + slidePointY - (g.anchor.y - wr.top))
+        }
+
+        setZoom(committedZoom)
+        zoomLiveRef.current = committedZoom
+        lastFitRef.current = Math.abs(committedZoom - fit) <= 0.001 ? fit : null
+        g.active = false
         g.pending = null
         g.anchor = null
-      }, 150)
+      }, 250)
     },
     [resetFitScroll],
   )
@@ -1391,6 +1510,8 @@ export function App() {
     return () => {
       cancelAnimationFrame(g.raf)
       window.clearTimeout(g.timer)
+      const scaleEl = stageScaleRef.current
+      if (scaleEl) scaleEl.style.willChange = ''
     }
   }, [])
 
@@ -1405,7 +1526,12 @@ export function App() {
     const onWheel = (ev: WheelEvent) => {
       if (ev.ctrlKey || ev.metaKey) {
         ev.preventDefault()
-        const factor = Math.exp(-ev.deltaY * 0.01)
+        const delta =
+          ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaMode === 2 ? ev.deltaY * 800 : ev.deltaY
+        // Trackpad pinch zoom scales continuously with gesture amplitude (exponential formula).
+        // Clamping delta to a safe window avoids erratic jumps from rogue events while preserving continuous motion.
+        const clampedDelta = Math.max(-100, Math.min(100, delta))
+        const factor = Math.exp(-clampedDelta * 0.0075)
         previewZoom((z) => z * factor, { x: ev.clientX, y: ev.clientY })
         return
       }
@@ -1474,8 +1600,48 @@ export function App() {
   )
 
   useEffect(() => {
-    void window.slidesApi.getAiSettings().then(setAiSettings)
+    const off = window.slidesApi.onConflict((conflict) => {
+      setConflictInfo(conflict)
+    })
+    return off
   }, [])
+
+  const handleConflictOverwrite = useCallback(async () => {
+    const res = await window.slidesApi.forceSave()
+    if (res.ok) {
+      setDirty(false)
+      setConflictInfo(null)
+      showToast(t('appStatusSaved'), 'success')
+    } else {
+      showToast(t('appStatusSaveFailed', { error: res.error ?? t('appUnknownError') }), 'error')
+    }
+  }, [t])
+
+  const handleConflictSaveCopy = useCallback(async () => {
+    setConflictInfo(null)
+    void saveAs()
+  }, [saveAs])
+
+  const handleConflictReload = useCallback(async () => {
+    const res = await window.slidesApi.reload()
+    if (res) {
+      applyOpen(res)
+      setConflictInfo(null)
+      showToast(
+        t('appStatusOpened', {
+          name: res.path.split(/[\\/]/).pop() ?? '',
+          count: res.slides.length,
+        }),
+        'success',
+      )
+    }
+  }, [applyOpen, t])
+
+  const handleConflictClose = useCallback(() => {
+    setConflictInfo(null)
+  }, [])
+
+  useAiSettingsSync(setAiSettings)
 
   // Recent files for the start screen
   useEffect(() => {
@@ -1749,11 +1915,15 @@ export function App() {
     if (goTo != null) setCurrent(goTo)
     setSelectedIds([])
     setEditing(null)
+    setEditingCell(null)
+    setCellSel(null)
+    setEnteredGroupId(null)
     setDirty(true)
     // The deck is the new truth: drop an in-progress notes draft (same as undo) so a stale
     // draft can't overwrite what the AI batch wrote via setNotes on the next flush, then
     // re-fetch notes/comments, which aren't part of RenderSlide.
     notesDraftRef.current = null
+    setSlideEpoch((e) => e + 1)
     setAnnotationsNonce((n) => n + 1)
   }, [])
 
@@ -1827,6 +1997,7 @@ export function App() {
         setEnteredGroupId(null)
       }
       setSelectedId(id, additive)
+      setSelAnim(-1)
     },
     [brushMode, applyBrushToElement, setSelectedId, enteredGroupId, enteredGroupNode],
   )
@@ -1929,12 +2100,12 @@ export function App() {
   useEffect(() => {
     if (!hasDoc) return
     void window.slidesApi.getTransition(current).then(setTransition)
-  }, [hasDoc, current, path])
+  }, [hasDoc, current, path, annotationsNonce])
   // the detail follows the page and the effect (switching effect resets the direction)
   useEffect(() => {
     if (!hasDoc) return
     void window.slidesApi.getTransitionDetail(current).then(setTransitionDetail)
-  }, [hasDoc, current, path, transition])
+  }, [hasDoc, current, path, transition, annotationsNonce])
   const onTransitionDetail = useCallback(
     async (detail: SetTransitionDetailOp['detail'], allSlides = false) => {
       const ok = await window.slidesApi.setTransitionDetail({
@@ -2041,11 +2212,11 @@ export function App() {
     [],
   )
 
-  /** Index of the animation bound to the timing controls: pane selection first, else the selected shape's last one. */
+  /** Index of the animation bound to the timing controls: pane selection first, else the selected shape's first effect. */
   const timingIdx = useMemo(() => {
     if (selAnim >= 0 && selAnim < animations.length) return selAnim
     if (selectedIds.length > 0) {
-      for (let i = animations.length - 1; i >= 0; i--) {
+      for (let i = 0; i < animations.length; i++) {
         if (animations[i]!.sourceId === selectedIds[0]) return i
       }
     }
@@ -2071,11 +2242,29 @@ export function App() {
     [],
   )
 
-  /** Selected shape's current animation effect (gallery highlight: first match). */
+  /** Prefer the selected effect; otherwise highlight the selected shape's first effect. */
   const selectedAnimEffect = useMemo(() => {
+    if (selAnim >= 0 && animations[selAnim]) return animations[selAnim]!.effect
     if (selectedIds.length === 0) return null
     return animations.find((a) => a.sourceId === selectedIds[0])?.effect ?? null
-  }, [selectedIds, animations])
+  }, [selectedIds, animations, selAnim])
+
+  const selectAnimation = useCallback(
+    (index: number) => {
+      const item = animations[index]
+      setSelAnim(item ? index : -1)
+      if (!item) return
+      const target = slides[current] && animationTargetSelection(slides[current]!, item.sourceId)
+      setEnteredGroupId(target?.groupId ?? null)
+      setSelectedIds([target?.selectedId ?? item.sourceId])
+      setInsertGallery(null)
+      setShowFormat(false)
+      setShowBgFormat(false)
+      setShowComments(false)
+      setShowAnimPane(true)
+    },
+    [animations, slides, current],
+  )
 
   const toggleAnimPane = useCallback(() => {
     setInsertGallery(null)
@@ -2265,6 +2454,13 @@ export function App() {
     [],
   )
   const cancelCrop = useCallback(() => pictureEditActions.cancelCrop(ctxRef.current), [])
+  const cropToAspectRatio = useCallback(
+    (w: number, h: number) => void pictureEditActions.cropToAspectRatio(ctxRef.current, w, h),
+    [],
+  )
+  const cropFill = useCallback(() => void pictureEditActions.cropFill(ctxRef.current), [])
+  const cropFit = useCallback(() => void pictureEditActions.cropFit(ctxRef.current), [])
+  const cropReset = useCallback(() => void pictureEditActions.resetCrop(ctxRef.current), [])
   const startCutout = useCallback(() => pictureEditActions.startCutout(ctxRef.current), [])
   const replacePicture = useCallback(() => pictureEditActions.replacePicture(ctxRef.current), [])
   const applyCutout = useCallback(
@@ -2831,20 +3027,24 @@ export function App() {
   )
 
   const commitEdit = useCallback(
-    async (paragraphs: EditParagraph[]) => {
-      if (!editing) return
+    async (paragraphs: EditParagraph[], owner?: string) => {
+      const target = editingRef.current
+      const targetSourceId = target?.sourceId ?? editing?.sourceId ?? owner
+      if (!targetSourceId) return
+      const targetSlide = target?.slideIndex ?? current
+      const targetGroup = target?.groupId ?? editing?.groupId
       const updated = await window.slidesApi.editText({
-        slideIndex: current,
-        sourceId: editing.sourceId,
+        slideIndex: targetSlide,
+        sourceId: targetSourceId,
         paragraphs,
-        ...(editing.groupId ? { groupId: editing.groupId } : {}),
+        ...(targetGroup ? { groupId: targetGroup } : {}),
       })
       if (updated) {
-        setSlides((s) => s.map((sl, i) => (i === current ? updated : sl)))
+        setSlides((s) => s.map((sl, i) => (i === targetSlide ? updated : sl)))
         setDirty(true)
       }
-      setEditing(null)
-      setSelectedIds([editing.sourceId]) // Back to shape-selected state after committing
+      setEditing((cur) => (cur?.sourceId === targetSourceId ? null : cur))
+      setSelectedIds((prev) => (prev.length === 1 && prev[0] === targetSourceId ? prev : prev))
     },
     [editing, current],
   )
@@ -3080,14 +3280,28 @@ export function App() {
     if (ctxRef.current.editingNotes && isNotesDefaultColor(hex)) {
       return
     }
+    const root =
+      (document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable
+        ? document.activeElement
+        : document.querySelector<HTMLElement>('.slide-text-editor')) ??
+      document.querySelector<HTMLElement>('.notes-editor-body')
+    if (root) ensureEditorSelection(root)
     document.execCommand('styleWithCSS', false, 'true')
     document.execCommand('foreColor', false, hex)
+    saveEditSelection()
   }, [])
 
   const onNotesDefaultColor = useCallback(() => {
     // Portable document default; the notes UI remaps it to the active theme.
+    const root =
+      (document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable
+        ? document.activeElement
+        : document.querySelector<HTMLElement>('.notes-editor-body')) ??
+      document.querySelector<HTMLElement>('.slide-text-editor')
+    if (root) ensureEditorSelection(root)
     document.execCommand('styleWithCSS', false, 'true')
     document.execCommand('foreColor', false, '#000000')
+    saveEditSelection()
   }, [])
 
   const onAlign = useCallback((align: ParaAlign) => {
@@ -3506,6 +3720,7 @@ export function App() {
 
   // Refresh the action-module context every render so extracted actions never see stale state
   ctxRef.current = {
+    getLatestContext: () => ctxRef.current,
     slides,
     setSlides,
     current,
@@ -3803,6 +4018,7 @@ export function App() {
         onAnimTiming={patchAnimTiming}
         animPaneOpen={showAnimPane}
         onToggleAnimPane={toggleAnimPane}
+        onAnimationTabActive={setAnimationTabActive}
         animCount={animations.length}
         onAnimPreview={() => setAnimPreview((n) => n + 1)}
         onSlideShow={startSlideShow}
@@ -4149,6 +4365,13 @@ export function App() {
         }
         onPictureCrop={startCrop}
         cropActive={cropTarget != null}
+        onCropAspectRatio={cropToAspectRatio}
+        onCropFill={cropFill}
+        onCropFit={cropFit}
+        onCropReset={cropReset}
+        contextPictureHasCrop={
+          selectedNode?.type === 'picture' && (selectedNode as PictureRenderNode).srcRect != null
+        }
         onPictureCutout={startCutout}
         onPictureReplace={() => void replacePicture()}
         onPictureReset={() => {
@@ -4299,7 +4522,8 @@ export function App() {
                     className={`sorter-item ${i === current ? 'active' : ''} ${s.hidden ? 'thumb-hidden' : ''}${thumbDragCls(i)}`}
                     data-tip={s.hidden ? t('appSorterHiddenTitle') : t('appSorterItemTitle')}
                     {...thumbDragProps(i, true)}
-                    onClick={() => {
+                    onClick={async () => {
+                      await flushTextCommit()
                       setCurrent(i)
                       setSelectedIds([])
                       setEditing(null)
@@ -4316,10 +4540,11 @@ export function App() {
                     }}
                   >
                     <div className="sorter-frame">
-                      <SlideThumb
+                      <ViewportSlideThumb
                         slide={displaySlide(s, darkContent)}
                         images={images}
                         width={Math.round(260 * sorterZoom)}
+                        current={i === current}
                       />
                     </div>
                     <div className="sorter-meta">
@@ -4350,7 +4575,8 @@ export function App() {
                         <div
                           key={i}
                           className={`outline-item ${i === current ? 'active' : ''}`}
-                          onClick={() => {
+                          onClick={async () => {
+                            await flushTextCommit()
                             setCurrent(i)
                             setSelectedIds([])
                             setEditing(null)
@@ -4385,7 +4611,7 @@ export function App() {
                               className={`thumb ${i === current ? 'active' : ''} ${s.hidden ? 'thumb-hidden' : ''}${slideSelection.length > 1 && slideSelection.includes(i) ? ' selected' : ''}${thumbDragCls(i)}`}
                               data-tip={s.hidden ? t('appThumbHiddenTitle') : undefined}
                               {...thumbDragProps(i)}
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 if (e.shiftKey) {
                                   // range from the last plain-clicked thumbnail
                                   const a = Math.min(
@@ -4406,6 +4632,7 @@ export function App() {
                                   if (next.length === 0) return
                                   setSlideSelection(next)
                                   if (!next.includes(i)) {
+                                    await flushTextCommit()
                                     setCurrent(next[next.length - 1]!)
                                     setSelectedIds([])
                                     setEditing(null)
@@ -4415,12 +4642,14 @@ export function App() {
                                   slideAnchorRef.current = i
                                   setSlideSelection([i])
                                 }
+                                await flushTextCommit()
                                 setCurrent(i)
                                 setSelectedIds([])
                                 setEditing(null)
                               }}
-                              onContextMenu={(e) => {
+                              onContextMenu={async (e) => {
                                 e.preventDefault()
+                                await flushTextCommit()
                                 setCurrent(i)
                                 setSelectedIds([])
                                 setEditing(null)
@@ -4428,10 +4657,11 @@ export function App() {
                                 setCtxMenu({ kind: 'thumb', x: e.clientX, y: e.clientY, index: i })
                               }}
                             >
-                              <SlideThumb
+                              <ViewportSlideThumb
                                 slide={displaySlide(s, darkContent)}
                                 images={images}
                                 width={thumbW}
+                                current={i === current}
                               />
                               <span className="thumb-num">{i + 1}</span>
                               {pasteFloater?.index === i && (
@@ -4663,6 +4893,11 @@ export function App() {
                               height: slide.heightPx,
                             }}
                             onClickCapture={(event) => {
+                              if (
+                                event.target instanceof Element &&
+                                event.target.closest('.animation-order-overlay')
+                              )
+                                return
                               if (drawKindRef.current || brushMode) {
                                 lastEquationClickRef.current = null
                                 return
@@ -4731,6 +4966,7 @@ export function App() {
                             }}
                           >
                             <SlideCanvas
+                              key={`canvas_${current}_${slideEpoch}`}
                               ref={canvasRef}
                               slide={canvasSlide!}
                               selectedIds={selectedIds}
@@ -4776,6 +5012,22 @@ export function App() {
                                     : null
                               }
                             />
+                            {(showAnimPane || animationTabActive) &&
+                              !editing &&
+                              !editingCell &&
+                              !drawKind &&
+                              !brushMode &&
+                              !cropTarget &&
+                              inkTool === 'select' && (
+                                <AnimationOrderOverlay
+                                  slide={slide}
+                                  items={animations}
+                                  zoom={zoom}
+                                  selected={selAnim}
+                                  onSelect={selectAnimation}
+                                  onDelete={deleteAnimation}
+                                />
+                              )}
                             {showGrid && <div className="grid-overlay" />}
                             {showGuides &&
                               guides.map((g, gi) => (
@@ -5014,6 +5266,7 @@ export function App() {
                                 box={cropTarget.box}
                                 fullBox={cropTarget.fullBox}
                                 imgSrc={cropTarget.dataUrl}
+                                zoom={zoom}
                                 onConfirm={(rect) => void commitCrop(rect)}
                                 onCancel={cancelCrop}
                               />
@@ -5140,7 +5393,10 @@ export function App() {
                     slideIndex={current}
                     items={animations}
                     selected={selAnim}
-                    onSelect={setSelAnim}
+                    onSelect={selectAnimation}
+                    onPatch={(index, patch) =>
+                      animationActions.patchAnimation(ctxRef.current, index, patch)
+                    }
                     onMove={moveAnimation}
                     onDelete={deleteAnimation}
                     onPreview={() => setAnimPreview((n) => n + 1)}
@@ -5472,6 +5728,16 @@ export function App() {
         </div>
       )}
 
+      {conflictInfo && (
+        <ConflictDialog
+          conflict={conflictInfo}
+          onOverwrite={handleConflictOverwrite}
+          onSaveCopy={handleConflictSaveCopy}
+          onReload={handleConflictReload}
+          onClose={handleConflictClose}
+        />
+      )}
+
       {!askState &&
         !editing &&
         !editingCell &&
@@ -5550,7 +5816,9 @@ export function App() {
 
 /** Clamp a zoom-anchor coordinate into the viewport span; undefined passes through (→ center). */
 function anchorClamp(v: number | undefined, min: number, max: number): number | undefined {
-  return v == null ? undefined : Math.min(Math.max(v, min), max)
+  if (v == null) return undefined
+  if (min >= max) return v
+  return Math.min(Math.max(v, min), max)
 }
 
 /** Status-bar zoom controls. The slider keeps a local live value so the thumb and the %
@@ -5567,6 +5835,17 @@ function ZoomControls({
   const [live, setLive] = useState(() => Math.round(zoom * 100))
   // adopt outside commits (fit, pinch, menu) once they land
   useEffect(() => setLive(Math.round(zoom * 100)), [zoom])
+  // Adopt live zoom preview events so trackpad pinch continuously updates the % display
+  useEffect(() => {
+    const onZoomPreview = (e: Event) => {
+      const detail = (e as CustomEvent<number>).detail
+      if (typeof detail === 'number' && Number.isFinite(detail)) {
+        setLive(Math.round(detail * 100))
+      }
+    }
+    window.addEventListener(ZOOM_PREVIEW_EVENT, onZoomPreview)
+    return () => window.removeEventListener(ZOOM_PREVIEW_EVENT, onZoomPreview)
+  }, [])
   // Buttons go through the preview path too: the zoom pivots on the viewport center and
   // rapid clicks compound on the pending value; `live` mirrors it so the % keeps up
   const step = (dir: 1 | -1) => {
@@ -5583,7 +5862,7 @@ function ZoomControls({
         type="range"
         min={25}
         max={300}
-        step={5}
+        step={1}
         style={{ '--zoom-pct': `${((live - 25) / 275) * 100}%` } as React.CSSProperties}
         value={live}
         onChange={(e) => {

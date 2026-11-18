@@ -1946,6 +1946,27 @@ export const workbookSaveEditsAbortSchema = z
   })
   .strict()
 
+/// Breaks and source retargets of the workbook's external links, applied by
+/// the save planner on the final entry contents. Indexes are the stored `[n]`
+/// positions in `<externalReferences>`; a break also needs the affected cells
+/// journaled as literals, so the model and the file agree after the save.
+export const externalLinkOpsSchema = z
+  .object({
+    broken: z.array(z.number().int().positive()).max(64),
+    retargets: z
+      .array(
+        z
+          .object({
+            index: z.number().int().positive(),
+            target: z.string().min(1).max(2_048),
+          })
+          .strict(),
+      )
+      .max(64),
+  })
+  .strict()
+export type ExternalLinkOps = z.infer<typeof externalLinkOpsSchema>
+
 export const workbookSaveRequestSchema = z
   .object({
     sessionId: z.string().uuid(),
@@ -2157,6 +2178,7 @@ export const workbookSaveRequestSchema = z
       .strict()
       .nullable()
       .optional(),
+    externalLinkOps: externalLinkOpsSchema.nullable().default(null),
   })
   .strict()
   .refine(
@@ -2189,7 +2211,8 @@ export const workbookSaveRequestSchema = z
       request.tableAdditions.length > 0 ||
       (request.tableEdits?.length ?? 0) > 0 ||
       request.pivotAdditions.length > 0 ||
-      request.sparklineAdditions.length > 0,
+      request.sparklineAdditions.length > 0 ||
+      request.externalLinkOps !== null,
     { message: 'A save needs at least one edit.' },
   )
   .refine((request) => request.sheetOps.length === 0 || request.sheetOrder.length > 0, {
@@ -2440,6 +2463,153 @@ export type WorkbookRangeResult = z.infer<typeof workbookRangeResultSchema>
 /// The sheet's saved print settings as parsed from the file.
 export type WorkbookPagePrintSettings = NonNullable<WorkbookRangeResult['pageSetup']>
 export type WorkbookRecalcRequest = z.infer<typeof workbookRecalcRequestSchema>
+
+/// External-link reads and retargets are addressed by the open session, not a
+/// renderer-supplied path: the main process resolves the workbook this tab
+/// actually has open (the same binding the other workbook handlers use).
+export const externalLinksRequestSchema = z.object({ sessionId: z.string().uuid() }).strict()
+export type ExternalLinksRequest = z.infer<typeof externalLinksRequestSchema>
+
+/// Locate a source: the renderer names the link index of its own session, never
+/// a path, so the main process resolves the target from what the sidecar reads.
+export const externalLinkRevealRequestSchema = z
+  .object({ sessionId: z.string().uuid(), index: z.number().int().positive() })
+  .strict()
+export type ExternalLinkRevealRequest = z.infer<typeof externalLinkRevealRequestSchema>
+
+/// One link as the read-only listing carries it. Deliberately no `reachable`:
+/// listing the links must not probe the targets on disk (a dead network share
+/// can block the open), so reachability is answered only by the explicit
+/// update.
+export const externalLinkListStatusSchema = z
+  .object({
+    index: z.number().int().positive(),
+    rawTarget: z.string(),
+    source: z.string().nullable(),
+    sheetNames: z.array(z.string()),
+  })
+  .strict()
+export type ExternalLinkListStatus = z.infer<typeof externalLinkListStatusSchema>
+
+/// One row of the links panel: the listing's fields, plus the update's
+/// reachability verdict once it has run.
+export type ExternalLinkRow = ExternalLinkListStatus & { readonly reachable?: boolean }
+
+export const externalLinkStatusSchema = z
+  .object({
+    index: z.number().int().positive(),
+    rawTarget: z.string(),
+    source: z.string().nullable(),
+    reachable: z.boolean(),
+    sheetNames: z.array(z.string()),
+  })
+  .strict()
+export type ExternalLinkStatus = z.infer<typeof externalLinkStatusSchema>
+
+/// The panel's non-probing listing (the sidecar's `list_external_links`).
+export const externalLinksResultSchema = z
+  .object({ links: z.array(externalLinkListStatusSchema) })
+  .strict()
+export type ExternalLinksResult = z.infer<typeof externalLinksResultSchema>
+
+/// The kinds an external-formula cell's value can have: the save path writes a
+/// boolean as `t="b"` and an error as `t="e"` instead of spelling them as a
+/// text cache.
+export const externalLinkCellKindSchema = z.enum(['number', 'text', 'boolean', 'error'])
+export type ExternalLinkCellKind = z.infer<typeof externalLinkCellKindSchema>
+
+// One external-formula cell of an update report. `row` and `column` are
+// 0-based in the report; IronCalc, which computed the value, addresses the
+// same cells 1-based. `kind` is absent when the cell has no usable value (a
+// formula the file never cached), so the host keeps the cell's own cache;
+// older sidecars spell that as `null`.
+export const externalLinkCellSchema = z
+  .object({
+    sheet: z.string(),
+    row: z.number().int().nonnegative(),
+    column: z.number().int().nonnegative(),
+    formatted: z.string(),
+    number: z.number().nullable().optional(),
+    kind: externalLinkCellKindSchema.nullish(),
+    formula: z.string(),
+  })
+  .strict()
+export type ExternalLinkCell = z.infer<typeof externalLinkCellSchema>
+
+export const externalLinksUpdateResultSchema = z
+  .object({
+    links: z.array(externalLinkStatusSchema),
+    cells: z.array(externalLinkCellSchema),
+  })
+  .strict()
+export type ExternalLinksUpdateResult = z.infer<typeof externalLinksUpdateResultSchema>
+
+/// One formula cell that references a link, as the usage scan carries it: the
+/// value a break would freeze the cell at, typed by the cached `<v>`. `row`
+/// and `column` are 0-based.
+export const externalLinkUsageCellSchema = z
+  .object({
+    sheet: z.string(),
+    row: z.number().int().nonnegative(),
+    column: z.number().int().nonnegative(),
+    value: z.union([
+      z.object({ kind: z.literal('number'), value: z.number() }).strict(),
+      z.object({ kind: z.literal('text'), value: z.string() }).strict(),
+      z.object({ kind: z.literal('bool'), value: z.boolean() }).strict(),
+      z.object({ kind: z.literal('error'), value: z.string() }).strict(),
+      z.object({ kind: z.literal('missing') }).strict(),
+    ]),
+  })
+  .strict()
+export type ExternalLinkUsageCell = z.infer<typeof externalLinkUsageCellSchema>
+
+/// Every formula cell of the workbook that references link `[n]`.
+export const externalLinkUsageSchema = z
+  .object({
+    index: z.number().int().positive(),
+    cells: z.array(externalLinkUsageCellSchema),
+  })
+  .strict()
+export type ExternalLinkUsage = z.infer<typeof externalLinkUsageSchema>
+
+export const externalLinkUsageResultSchema = z
+  .object({ links: z.array(externalLinkUsageSchema) })
+  .strict()
+export type ExternalLinkUsageResult = z.infer<typeof externalLinkUsageResultSchema>
+
+// ── cross-workbook range picking (genoffice#2109) ──────────────────────
+
+/// Another open workbook tab, as the picker's book list shows it.
+export const workbookTabSchema = z
+  .object({
+    wcId: z.number().int().positive(),
+    name: z.string().min(1),
+    path: z.string().min(1),
+  })
+  .strict()
+export type WorkbookTab = z.infer<typeof workbookTabSchema>
+
+export const workbookTabsResultSchema = z.object({ tabs: z.array(workbookTabSchema) }).strict()
+export type WorkbookTabsResult = z.infer<typeof workbookTabsResultSchema>
+
+export const pickIdPayloadSchema = z.object({ pickId: z.string().min(1) }).strict()
+export type PickIdPayload = z.infer<typeof pickIdPayloadSchema>
+
+/// One picked range on another workbook's grid, relayed to the tab whose
+/// formula is being edited. 0-based bounds, Univer's RANGE_TYPE for 1=rows,
+/// 2=columns picks.
+export const workbookPickSelectionSchema = z
+  .object({
+    pickId: z.string().min(1),
+    sheetName: z.string().min(1),
+    startRow: z.number().int().nonnegative(),
+    endRow: z.number().int().nonnegative(),
+    startColumn: z.number().int().nonnegative(),
+    endColumn: z.number().int().nonnegative(),
+    rangeType: z.number().int().optional(),
+  })
+  .strict()
+export type WorkbookPickSelection = z.infer<typeof workbookPickSelectionSchema>
 export type WorkbookRecalcResult = z.infer<typeof workbookRecalcResultSchema>
 export type WorkbookMediaRequest = z.infer<typeof workbookMediaRequestSchema>
 export type WorkbookMediaResult = z.infer<typeof workbookMediaResultSchema>
@@ -2471,6 +2641,7 @@ const aiProviderConfigSchema = z
   .object({
     apiKey: z.string(),
     model: z.string(),
+    customModel: z.boolean().optional(),
     baseUrl: z.string().optional(),
     cliPath: z.string().optional(),
   })
@@ -2886,6 +3057,8 @@ export interface DesktopApi {
   openPathInShell?(path: string): Promise<void>
   /** File view: open a blank workbook in a new tab */
   newBlankWorkbookTab?(): Promise<void>
+  /** Initialize this tab's private unsaved workbook; no user file exists yet. */
+  openNewBlankWorkbook(): Promise<WorkbookFile | null>
   selectWorkbook(): Promise<WorkbookFile | null>
   /** multi-select xlsx picker; each file opens a secondary sidecar session for merge reads */
   selectWorkbooksForMerge(): Promise<WorkbookFile[] | null>
@@ -2894,6 +3067,24 @@ export interface DesktopApi {
   readWorkbookRange(request: WorkbookRangeRequest): Promise<WorkbookRangeResult>
   readWorkbookFormulas(request: WorkbookFormulaCellsRequest): Promise<WorkbookFormulaCellsResult>
   recalcWorkbook(request: WorkbookRecalcRequest): Promise<WorkbookRecalcResult>
+  listExternalLinks(request: ExternalLinksRequest): Promise<ExternalLinksResult>
+  updateExternalLinks(request: ExternalLinksRequest): Promise<ExternalLinksUpdateResult>
+  /// The formula cells referencing each [n] link, with the value a break
+  /// would freeze them at — the file-level scan, not the model's view.
+  readExternalLinkUsage(request: ExternalLinksRequest): Promise<ExternalLinkUsageResult>
+  /// A single-workbook file picker for "Change Source" (a link's new source).
+  selectExternalLinkSource(): Promise<string | null>
+  /// Other open workbook tabs (the cross-workbook range picker's book list).
+  listWorkbookTabs(): Promise<{ tabs: WorkbookTab[] }>
+  /// Arms a cross-workbook pick from this tab; other sheets' grids become
+  /// the pick target until a selection or a cancel.
+  armWorkbookPick(wcId: number): Promise<{ pickId: string }>
+  sendWorkbookPickSelection(selection: WorkbookPickSelection): Promise<void>
+  cancelWorkbookPick(pickId: string): Promise<void>
+  onWorkbookPickArmed(listener: (payload: { pickId: string }) => void): () => void
+  onWorkbookPickSelected(listener: (selection: WorkbookPickSelection) => void): () => void
+  onWorkbookPickCancelled(listener: (payload: { pickId: string }) => void): () => void
+  revealLinkSource(request: ExternalLinkRevealRequest): void
   readWorkbookMedia(request: WorkbookMediaRequest): Promise<WorkbookMediaResult>
   readPivotDefinition(request: WorkbookPivotRequest): Promise<WorkbookPivotDefinition>
   /// the style info of a file table's part, for Table Design

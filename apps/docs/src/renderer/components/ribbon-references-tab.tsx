@@ -18,6 +18,7 @@ import {
   type TocFormat,
   type TocLeader,
   type TocOptions,
+  type FieldDisplay,
 } from '@genoffice/docx-engine'
 import { Dropdown, RibbonFoldGroup } from '@genoffice/ui'
 import { PromptModal } from './PromptModal'
@@ -56,9 +57,15 @@ function collectTocEntriesWithPages(
   const entries = collectTocSources(editor, blocks, styles, options)
   const pages = headingPages?.(entries.map((entry) => entry.pos))
   if (pages && pages.length === entries.length) {
-    return entries.map(({ level, text }, i) => ({ level, text, pageNo: pages[i] }))
+    return entries.map(({ level, text, num, anchor }, i) => ({
+      level,
+      text,
+      num,
+      anchor,
+      pageNo: pages[i],
+    }))
   }
-  return entries.map(({ level, text }) => ({ level, text }))
+  return entries.map(({ level, text, num, anchor }) => ({ level, text, num, anchor }))
 }
 
 /** PM nodes for a freshly generated TOC field (one docProtected per line) */
@@ -66,8 +73,10 @@ function tocFieldNodes(
   entries: TocEntry[],
   options?: TocOptions,
   instruction?: string,
+  baseEntryFieldDisplay?: FieldDisplay,
 ): Array<Record<string, unknown>> {
-  return generateTocFieldXml(entries, options, instruction).map((xml, i) => ({
+  return generateTocFieldXml(entries, options, instruction, baseEntryFieldDisplay).map(
+    (xml, i) => ({
     type: 'docProtected',
     attrs: {
       docxIndex: null,
@@ -76,6 +85,7 @@ function tocFieldNodes(
       genXml: xml,
       fieldDisplay: {
         kind: 'tocLine',
+        num: entries[i].num,
         left: entries[i].text,
         right:
           options?.showPageNumbers === false
@@ -84,7 +94,11 @@ function tocFieldNodes(
               ? String(entries[i].pageNo)
               : '',
         level: entries[i].level,
+        anchor: entries[i].anchor,
         leader: options?.leader ?? 'dot',
+        fontFamily: baseEntryFieldDisplay?.fontFamily,
+        fontAscii: baseEntryFieldDisplay?.fontAscii,
+        eastAsiaFont: baseEntryFieldDisplay?.eastAsiaFont,
       },
     },
   }))
@@ -318,7 +332,8 @@ function updateTocField(
   headingPages: ((positions?: number[]) => string[] | null) | undefined,
   mode: 'pages' | 'full',
 ): void {
-  const region = findTocField(editor, blocks)
+  const targetPos = editor.state.selection.from
+  const region = findTocField(editor, blocks, targetPos)
   if (!region) {
     window.alert(t('ribbonTocNotFound'))
     return
@@ -345,7 +360,10 @@ function updateTocField(
     }
     return
   }
-  const nodes = tocFieldNodes(entries, options, region.instruction)
+  const baseEntryFieldDisplay = region.nodes.find(
+    ({ node }) => node.attrs.fieldDisplay?.kind === 'tocLine',
+  )?.node.attrs.fieldDisplay as FieldDisplay | undefined
+  const nodes = tocFieldNodes(entries, options, region.instruction, baseEntryFieldDisplay)
   if (!anchorTocReplacement(nodes, region, blocks)) {
     window.alert(t('ribbonTocUnsupported'))
     return
@@ -659,8 +677,12 @@ export function ReferencesTab({
       window.alert(t('ribbonTocNoHeadings'))
       return
     }
-    const region = findTocField(editor, blocks)
-    const nodes = tocFieldNodes(entries, options, tocInstruction(options))
+    const targetPos = editor.state.selection.from
+    const region = findTocField(editor, blocks, targetPos)
+    const baseEntryFieldDisplay = region?.nodes.find(
+      ({ node }) => node.attrs.fieldDisplay?.kind === 'tocLine',
+    )?.node.attrs.fieldDisplay as FieldDisplay | undefined
+    const nodes = tocFieldNodes(entries, options, tocInstruction(options), baseEntryFieldDisplay)
     if (region) {
       if (!tocOptionsFromField(region.instruction, region.nodes[0]?.xml ?? '')) {
         window.alert(t('ribbonTocUnsupported'))

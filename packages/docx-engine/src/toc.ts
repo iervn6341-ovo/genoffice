@@ -59,9 +59,13 @@ export function parseTocInstruction(instruction: string): TocOptions | null {
     } else if (key === 'f') {
       if (value) return null // a TC identifier needs its own UI and entry filtering
       options.useTcFields = true
-    } else if (key === 'h') options.useHyperlinks = true
-    else if (key === 'u') options.useOutlineLevels = true
-    else if (key === 'n') {
+    } else if (key === 'h') {
+      options.useHyperlinks = true
+    } else if (key === 'u') {
+      options.useOutlineLevels = true
+    } else if (key === 'c') {
+      options.captionLabel = value ?? ''
+    } else if (key === 'n') {
       if (value) return null // an omitted-level range differs from the whole-table toggle
       options.showPageNumbers = false
     } else if (key === 'z') {
@@ -73,6 +77,7 @@ export function parseTocInstruction(instruction: string): TocOptions | null {
     useHeadingStyles ||
     (!options.useTcFields &&
       !options.useOutlineLevels &&
+      !options.captionLabel &&
       Object.keys(options.styleLevels).length === 0)
   return options
 }

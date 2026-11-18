@@ -20,12 +20,28 @@ export function escapeMarkdownText(text: string): string {
   return escapeBrackets(text.replace(/([\\`*_~])/g, '\\$1'))
 }
 
-type Escaper = { escapeMarkdownSyntax: (text: string) => string }
+type JsonNode = { type?: string; marks?: Array<string | { type: string }> }
+type Escaper = {
+  escapeMarkdownSyntax: (text: string) => string
+  encodeTextForMarkdown?: (text: string, node: JsonNode, parent?: JsonNode) => string
+}
+
+const hasMark = (node: JsonNode, name: string): boolean =>
+  (node.marks ?? []).some((m) => (typeof m === 'string' ? m : m.type) === name)
 
 export const SelectiveEscapeMarkdown = Markdown.extend({
   onBeforeCreate(props) {
     this.parent?.(props)
     const manager = this.editor.markdown as unknown as Escaper | undefined
-    if (manager) manager.escapeMarkdownSyntax = escapeMarkdownText
+    if (!manager) return
+    manager.escapeMarkdownSyntax = escapeMarkdownText
+    if (typeof manager.encodeTextForMarkdown === 'function') {
+      const encode = manager.encodeTextForMarkdown.bind(manager)
+      manager.encodeTextForMarkdown = (text, node, parent) => {
+        // the text under a wiki mark is the `[[...]]` literal; escaping it would change the target
+        if (hasMark(node, 'wikiLink')) return text
+        return encode(text, node, parent)
+      }
+    }
   },
 })

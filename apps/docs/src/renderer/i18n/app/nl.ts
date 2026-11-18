@@ -108,6 +108,15 @@ export const nl = {
     'Stijl "{name}" bijgewerkt met de opmaak van de selectie; wordt bij het opslaan naar het document geschreven',
   appStyleCreated: 'Stijl "{name}" gemaakt en toegepast op de selectie',
   appPgNumFormatSet: 'Paginanummerindeling ingesteld',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'Paginanummerindeling',
   appNumberFormat: 'Getalnotatie',
   appIncludeChapterNumber: 'Hoofdstuknummer opnemen',

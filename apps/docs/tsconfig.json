@@ -16,7 +16,9 @@
       "@genoffice/electron-utils": ["../../packages/electron-utils/src/index.ts"],
       "@genoffice/ai-provider": ["../../packages/ai-provider/src/index.ts"],
       "@genoffice/i18n": ["../../packages/i18n/src/index.ts"],
-      "@genoffice/ui": ["../../packages/ui/src/index.ts"]
+      "@genoffice/ui": ["../../packages/ui/src/index.ts"],
+      "@genoffice/compound-file": ["../../packages/compound-file/src/index.ts"],
+      "@genoffice/doc2docx": ["../../packages/doc2docx/src/index.ts"]
     }
   },
   "include": ["src", "tests", "electron.vite.config.ts", "vitest.config.ts"]

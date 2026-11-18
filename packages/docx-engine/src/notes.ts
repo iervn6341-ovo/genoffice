@@ -243,8 +243,11 @@ function noteEntriesOf(
     const paras: string[] = []
     const pRe = /<w:p[\s>][\s\S]*?<\/w:p>|<w:p\/>/g
     let p: RegExpExecArray | null
-    while ((p = pRe.exec(m[2])) !== null)
-      paras.push(notePlainText(markRun ? p[0].replace(markRun, '') : p[0]))
+    while ((p = pRe.exec(m[2])) !== null) {
+      const stripped = markRun ? p[0].replace(markRun, '') : p[0]
+      const text = notePlainText(stripped)
+      paras.push(text || (!text && notePlainText(p[0]) ? notePlainText(p[0]) : ''))
+    }
     // the first paragraph starts with the self-reference mark + a spacer
     if (paras.length > 0) paras[0] = paras[0].replace(/^\s+/, '')
     out.push({ id, text: paras.join('\n'), xml: m[0], markRun, mark })

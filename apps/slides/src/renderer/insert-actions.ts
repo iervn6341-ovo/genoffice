@@ -456,6 +456,7 @@ export async function applyHf(
           dateFormat: opts.dateFormat,
           dontShowOnTitleSlide: opts.dontShowOnTitleSlide,
           firstSlideNum: opts.firstSlideNum,
+          numbering: opts.numbering,
           ...(opts.scope === 'current' ? { slideIndexes: [ctx.current] } : {}),
           fitWidthPx: FIT_WIDTH,
         })

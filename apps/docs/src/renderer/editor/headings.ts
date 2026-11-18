@@ -11,8 +11,25 @@ export interface HeadingRef {
 export function collectHeadings(doc: PmNode): HeadingRef[] {
   const out: HeadingRef[] = []
   doc.forEach((node, offset) => {
-    if (node.type.name === 'docHeading' && node.textContent.trim()) {
-      out.push({ text: node.textContent, level: Number(node.attrs.level) || 1, pos: offset })
+    const isHeading = node.type.name === 'docHeading'
+    const isListItem = node.type.name === 'docListItem'
+    const isParagraph = node.type.name === 'docParagraph'
+    if (!isHeading && !isListItem && !isParagraph) return
+    const text = node.textContent.trim()
+    if (!text) return
+    const levelAttr = Number(node.attrs?.level)
+    const styleId = String(node.attrs?.styleId || '')
+    const headingStyleMatch = /heading\s*([1-9])|^([1-9])$/i.exec(styleId)
+    const level =
+      levelAttr > 0
+        ? levelAttr
+        : headingStyleMatch
+          ? Number(headingStyleMatch[1] ?? headingStyleMatch[2])
+          : isHeading
+            ? 1
+            : 0
+    if (level >= 1 && level <= 9) {
+      out.push({ text: node.textContent, level, pos: offset })
     }
   })
   return out

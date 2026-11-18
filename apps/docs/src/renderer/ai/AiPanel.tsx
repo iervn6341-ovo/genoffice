@@ -1,3 +1,4 @@
+import { AiModelProfilePicker } from '@genoffice/ui'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
@@ -1246,6 +1247,7 @@ export function AiPanel({
           <AssistantMark size={22} />
           {t('aiPanelTitle')}
         </span>
+        <AiModelProfilePicker lang={lang} disabled={busy} />
         <div className="ai-panel-header-actions">
           <AiPanelSideButton
             lang={lang}

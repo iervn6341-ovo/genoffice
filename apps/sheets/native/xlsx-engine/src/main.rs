@@ -86,6 +86,14 @@ enum Command {
         edits: Vec<RecalcEdit>,
         reads: Vec<RecalcRead>,
     },
+    #[serde(rename_all = "camelCase")]
+    UpdateExternalLinks { path: PathBuf },
+    #[serde(rename_all = "camelCase")]
+    ReadExternalLinks { path: PathBuf },
+    #[serde(rename_all = "camelCase")]
+    ListExternalLinks { path: PathBuf },
+    #[serde(rename_all = "camelCase")]
+    ReadExternalLinkUsage { path: PathBuf },
 }
 
 #[derive(Debug, Deserialize)]
@@ -533,6 +541,19 @@ fn handle_request(
         }
         Command::RecalcCells { path, edits, reads } => {
             return recalc.dispatch(request_id, path, edits, reads, output);
+        }
+        Command::UpdateExternalLinks { path } => {
+            xlsx_sidecar::external_links::update_external_link_values(&path).and_then(to_json_value)
+        }
+        Command::ReadExternalLinks { path } => {
+            xlsx_sidecar::external_links::read_external_link_statuses(&path).and_then(to_json_value)
+        }
+        Command::ListExternalLinks { path } => {
+            xlsx_sidecar::external_links::list_external_link_statuses(&path).and_then(to_json_value)
+        }
+        Command::ReadExternalLinkUsage { path } => {
+            xlsx_sidecar::external_links::read_external_link_usage(&path)
+                .and_then(|links| to_json_value(serde_json::json!({ "links": links })))
         }
     };
     Some(match result {

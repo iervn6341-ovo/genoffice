@@ -237,6 +237,7 @@ export function EditorContextMenu({
     (Array.isArray(protAttrs?.textboxes) && (protAttrs.textboxes as unknown[]).length > 0)
   const currentWrap = (protAttrs?.imageWrap as string | null) ?? null
   const setWrap = (wrap: string | null) => {
+    window.dispatchEvent(new Event('ai-docs-commit-tables'))
     const clearedPosition =
       wrap === null
         ? { imagePosH: null, imagePosV: null, imageOffsetXEmu: null, imageOffsetYEmu: null }
@@ -253,6 +254,7 @@ export function EditorContextMenu({
   const currentZOrder = Number((protAttrs?.imageZOrder as number | null) ?? 0)
   const isFloatingWrap = currentWrap === 'front' || currentWrap === 'behind'
   const setZOrder = (z: number) => {
+    window.dispatchEvent(new Event('ai-docs-commit-tables'))
     const attrs: Record<string, unknown> = { imageZOrder: z }
     // an inline image has no paint order; floating it (in front) makes the
     // reorder meaningful, matching Word's "Bring to Front" on an inline picture

@@ -211,6 +211,7 @@ export const nl = {
   appCtxEditText: 'Tekst bewerken',
   appCtxHyperlink: 'Hyperlink…',
   appCtxCropPicture: 'Afbeelding bijsnijden',
+  appCtxResetCrop: 'Reset Crop',
   appCtxRemoveBackground: 'Achtergrond verwijderen',
   appCtxChangeBgImage: 'Achtergrondafbeelding wijzigen…',
   appCtxFormatBackground: 'Achtergrond opmaken…',
@@ -280,4 +281,20 @@ export const nl = {
   appSettingsCancel: 'Annuleren',
   appSettingsSave: 'Opslaan',
   appCropHint: 'Enter om te bevestigen · Esc om te annuleren · Klik erbuiten om te bevestigen',
+  conflictTitle: 'File Conflict Detected',
+  conflictSubtitle:
+    'This file was modified outside GenOffice, and you also have unsaved changes. Choose which version you want to keep:',
+  conflictLocalTitle: 'Current Edits (GenOffice)',
+  conflictLocalBadge: 'Unsaved Draft',
+  conflictLocalDesc:
+    'Keeps all your slide edits, styles, and content modifications from this session.',
+  conflictLocalOverwrite: 'Keep Current Edits (Overwrite Disk)',
+  conflictLocalSaveCopy: 'Save as a Copy…',
+  conflictDiskTitle: 'External File (Disk)',
+  conflictDiskBadge: 'Updated Externally',
+  conflictDiskDesc: 'Discards current unsaved edits and reloads the latest version from disk.',
+  conflictDiskMissing: 'The file was deleted or moved outside GenOffice.',
+  conflictDiskReload: 'Use External Version (Reload)',
+  conflictDecideLater: 'Decide Later (Keep Editing)',
+  appStatusFormatApplyFailed: 'Could not apply this format',
 } satisfies Record<keyof typeof zh, string>

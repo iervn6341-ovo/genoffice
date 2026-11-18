@@ -1,3 +1,4 @@
+import { refreshSlideNumbers } from './headerfooter'
 /**
  * pptx-engine top-level API.
  *
@@ -747,7 +748,9 @@ export function reparseDeck(opened: OpenedPptx): OpenedPptx {
     const slide = parseSlideFromArchive(archive, slidePath)
     if (slide) slides.push(slide)
   }
-  return { deck: { slides, size, originalHash: archive.originalHash }, archive }
+  const result = { deck: { slides, size, originalHash: archive.originalHash }, archive }
+  refreshSlideNumbers(result)
+  return result
 }
 
 /**
@@ -865,6 +868,7 @@ function slideIsDirty(s: Slide): boolean {
 }
 
 function buildZip(opened: OpenedPptx): JSZip {
+  refreshSlideNumbers(opened)
   const { deck, archive } = opened
   stripStaleEmbeddedFonts(deck, archive)
   const dirtyByPath = new Map<string, Slide>()
@@ -2030,7 +2034,8 @@ function registerNewSlide(opened: OpenedPptx, sourceIndex: number, newPath: stri
   const slide = parseSlideFromArchive(archive, newPath)
   if (!slide) return null
   deck.slides.splice(sourceIndex + 1, 0, slide)
-  return slide
+  refreshSlideNumbers(opened)
+  return deck.slides[sourceIndex + 1] ?? null
 }
 
 /**
@@ -2128,11 +2133,9 @@ export function pasteSlide(
   const relsXml = materializeSlideBundle(archive, bundle, newPath, layoutPath)
   let slideXml = bundle.slideXml
   if (bundle.tableStyles?.length) {
-    const renames = landTableStyles(
-      opened,
-      neighbour?.path ?? deck.slides[0]!.path,
-      [{ xml: '', rels: [], tableStyles: bundle.tableStyles }],
-    )
+    const renames = landTableStyles(opened, neighbour?.path ?? deck.slides[0]!.path, [
+      { xml: '', rels: [], tableStyles: bundle.tableStyles },
+    ])
     for (const [from, to] of renames) {
       slideXml = slideXml.replaceAll(
         `<a:tableStyleId>${from}</a:tableStyleId>`,
@@ -2151,6 +2154,7 @@ export function pasteSlide(
   } else {
     landed = registerNewSlide(opened, anchorIndex, newPath)
   }
+  if (landed) landed = deck.slides.find((s) => s.path === newPath) ?? landed
   if (landed && bundle.notes?.length) {
     try {
       setSlideNotesParagraphs(opened, deck.slides.indexOf(landed), bundle.notes as Paragraph[])
@@ -2439,6 +2443,7 @@ export function deleteSlide(opened: OpenedPptx, index: number): boolean {
 
   removePartWithOwnedResources(archive, slide.path)
   deck.slides.splice(index, 1)
+  refreshSlideNumbers(opened)
   return true
 }
 
@@ -2479,6 +2484,8 @@ export function materializeSlide(opened: OpenedPptx, slideIndex: number): Slide 
   archive.entries.set(slide.path, Buffer.from(patchSlideXml(slide), 'utf8'))
   const fresh = parseSlideFromArchive(archive, slide.path)
   if (!fresh) return null
+  // a reparse is not a save: the edits it baked into the XML are still unsaved
+  if (slideIsDirty(slide)) fresh.structureDirty = true
   deck.slides[slideIndex] = fresh
   return fresh
 }
@@ -5761,7 +5768,8 @@ export function pasteElements(
           : {}),
       })
     }
-    if (remapped.length) writeSlideAnimations(fresh, [...readSlideAnimations(fresh, true), ...remapped])
+    if (remapped.length)
+      writeSlideAnimations(fresh, [...readSlideAnimations(fresh, true), ...remapped])
   }
   return result
 }
@@ -6467,12 +6475,13 @@ export * from './clipboard-native'
 export * from './clipboard-text'
 export * from './clipboard-html-text'
 
-
 // ── PowerPoint's slide clipboard package ────────────────────────────────
 
-const PRES_MAIN_CT = 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'
+const PRES_MAIN_CT =
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'
 const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml'
-const TABLE_STYLES_CT = 'application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml'
+const TABLE_STYLES_CT =
+  'application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml'
 const REL_BASE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
 /**
@@ -6509,7 +6518,9 @@ export async function buildSlidesClipboardPackage(
         continue
       }
       collectPart(archive, resolveTarget(slide.path, rel.target), parts, cts)
-      lines.push(`<Relationship Id="${rel.id}" Type="${rel.type}" Target="${escapeXmlAttr(rel.target)}"/>`)
+      lines.push(
+        `<Relationship Id="${rel.id}" Type="${rel.type}" Target="${escapeXmlAttr(rel.target)}"/>`,
+      )
     }
     const slidePath = `clipboard/slides/slide${k + 1}.xml`
     files.set(slidePath, patchSlideXml(slide))
@@ -6523,7 +6534,8 @@ export async function buildSlidesClipboardPackage(
     files.set(renamed(path), new Uint8Array(Buffer.from(b64, 'base64')))
   }
   const presSrc = archive.readText('ppt/presentation.xml') ?? ''
-  const defaultTextStyle = /<p:defaultTextStyle>[\s\S]*?<\/p:defaultTextStyle>/.exec(presSrc)?.[0] ?? ''
+  const defaultTextStyle =
+    /<p:defaultTextStyle>[\s\S]*?<\/p:defaultTextStyle>/.exec(presSrc)?.[0] ?? ''
   const size = deck.size
   const masterIds = masters
     .map((_, i) => `<p:sldMasterId id="${2147483648 + i * 20000}" r:id="rId${i + 1}"/>`)
@@ -6554,7 +6566,9 @@ export async function buildSlidesClipboardPackage(
   const tableStyles = archive.readText('ppt/tableStyles.xml')
   if (tableStyles) {
     files.set('clipboard/tableStyles.xml', tableStyles)
-    presRels.push(`<Relationship Id="rId${nextRid++}" Type="${REL_BASE}/tableStyles" Target="tableStyles.xml"/>`)
+    presRels.push(
+      `<Relationship Id="rId${nextRid++}" Type="${REL_BASE}/tableStyles" Target="tableStyles.xml"/>`,
+    )
   }
   files.set(
     'clipboard/_rels/presentation.xml.rels',
@@ -6613,3 +6627,9 @@ export async function openSlidesClipboardPackage(bytes: Uint8Array): Promise<Ope
     return null
   }
 }
+
+export {
+  getSlideNumberingRule,
+  validateSlideNumberingRule,
+  type SlideNumberingRule,
+} from './numbering'

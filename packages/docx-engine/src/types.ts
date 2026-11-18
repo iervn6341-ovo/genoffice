@@ -103,6 +103,8 @@ export interface Run {
    *  run value wins; w:specVanish style separators stay visible). Display only;
    *  saving is kept faithful by rawRPr */
   vanish?: boolean
+  /** the run's own w:vanish (tri-state); this is what saves, `vanish` may be inherited */
+  vanishOwn?: boolean
   /** Horizontal character scale percent (w:w). */
   charScalePct?: number
   /** OOXML named highlight color (w:highlight), e.g. "yellow" */
@@ -132,7 +134,7 @@ export interface Run {
   /** East Asian emphasis mark (w:em). Display only; saving is kept faithful by rawRPr */
   em?: 'dot' | 'comma' | 'circle' | 'underDot'
   /** hyperlink info; rId references an existing relationship in the original docx */
-  link?: { href: string; rId?: string; tooltip?: string }
+  link?: { href: string; rId?: string; tooltip?: string; plain?: boolean }
   /**
    * ids of comments whose range covers this run. Only set when the whole
    * commentRangeStart..End pair lives inside the same paragraph, so an edited
@@ -875,6 +877,8 @@ export interface NumberingDef {
 
 /** Content for the default page header / footer. */
 export interface HeaderFooter {
+  /** Remove PAGE fields in preserved layout tables and protected XML, retaining surrounding objects. */
+  suppressPageNumber?: boolean
   text: string
   /** append an automatic page number (PAGE field), footer only */
   pageNumber?: boolean
@@ -891,6 +895,8 @@ export interface HeaderFooter {
 export const TOTAL_PAGES_MARK = '\uE000'
 /** Placeholder for PAGE fields in headers/footers; a private-use character so literal '#' text in the part can never be mistaken for the field position */
 export const PAGE_MARK = '\uE001'
+/** Placeholder for SECTIONPAGES fields in headers/footers */
+export const SECTION_PAGES_MARK = '\uE002'
 
 /** display-only image in a header/footer part (logos etc.; saving preserves the part's bytes) */
 export interface HfImage {
@@ -1043,6 +1049,10 @@ export interface FieldDisplay {
   szHalfPoints?: number
   /** face of the visible result runs (text fields: dominant; tocLine: leading run): drives the line factor */
   fontFamily?: string
+  /** Latin-slot font family (w:ascii/w:hAnsi) of the result run */
+  fontAscii?: string
+  /** East-Asian font slot (w:eastAsia/w:eastAsiaTheme) of the result run or style */
+  eastAsiaFont?: string
   /** tocLine whose leading result run is bold */
   bold?: boolean
   /** character style (w:rStyle) of the tocLine's leading result run */
@@ -2185,6 +2195,10 @@ export interface FontTableEntry {
   panose?: string
   /** w:family — roman / swiss / modern / script / decorative / auto */
   family?: string
+  /** w:charset hex (81 = Hangul) */
+  charset?: string
+  /** w:sig csb0 hex: code pages the face covers (bit 6 = Arabic 1256) */
+  csb0?: string
   /** w:pitch — fixed / variable / default */
   pitch?: string
   /** w:embedRegular / embedBold / embedItalic / embedBoldItalic parts */

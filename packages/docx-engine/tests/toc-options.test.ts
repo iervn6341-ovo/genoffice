@@ -71,4 +71,30 @@ describe('native TOC field options', () => {
     expect(patchTocCachedPageNumber(xml, '9', '12')).toBeNull()
     expect(patchTocCachedPageNumber(xml.replace('<w:tab/>', ''), '7', '12')).toBeNull()
   })
+
+  it('supports caption switch \\c and hyperlinked entries with PAGEREF', () => {
+    const parsed = parseTocInstruction(' TOC \\h \\z \\c "圖表" ')
+    expect(parsed).toMatchObject({
+      captionLabel: '圖表',
+      useHyperlinks: true,
+      useHeadingStyles: false,
+    })
+    expect(tocInstruction(parsed!)).toBe(' TOC \\c "圖表" \\h \\z ')
+
+    const options = {
+      ...DEFAULT_TOC_OPTIONS,
+      useHyperlinks: true,
+    }
+    const xml = generateTocFieldXml(
+      [{ level: 1, text: '緒論', num: '第1章', pageNo: 1, anchor: '_Toc245137332' }],
+      options,
+    )[0]!
+
+    expect(xml).toContain('<w:hyperlink w:anchor="_Toc245137332" w:history="1">')
+    expect(xml).toContain('PAGEREF _Toc245137332 \\h')
+    expect(xml).toContain('第1章')
+    expect(xml).toContain('緒論')
+    expect(xml).toContain('<w:t>1</w:t>')
+    expect(xml).toContain('</w:hyperlink>')
+  })
 })

@@ -1,3 +1,6 @@
+import { externalFiles, ExternalFileChangedError } from '@genoffice/electron-utils/external-files'
+import { registerAiSettingsHandlers } from '@genoffice/ai-provider'
+import { webContents as aiSettingsWebContents } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   appendFileSync,
@@ -75,6 +78,7 @@ import type {
   WebContents,
 } from 'electron'
 import { parseFileToText } from '@genoffice/file-parse'
+import { convertLegacyDocToDocx } from '../../../../packages/doc2docx/src'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
 import { ElectronBrowserDriver } from '../../../../packages/html2docx/src/drivers/electron'
 import {
@@ -83,24 +87,19 @@ import {
   isAiNetworkError,
   isAiOverloadedError,
   chatForProvider,
-  defaultAiSettings,
-  activeProvider,
   providerRequiresApiKey,
   testMediaProvider,
   type AiMediaProviderConfig,
   type AiMediaProviderId,
   type AiSearchProviderId,
-  resolveAiSettings,
   maxOutputTokensOf,
   listOpenAiCompatibleModels,
   setAiUserAgent,
   setRescueFetch,
   streamForProvider,
   type AiChatRequest,
-  type AiSettings,
   type AiStreamChunk,
   type AiStreamRequest,
-  type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { listCodexModels, shutdownCodexAppServers } from '@genoffice/ai-provider/codex-app-server'
 import {
@@ -123,7 +122,12 @@ import type {
   OpenDocxResult,
 } from '../shared/ipc'
 import { ATTACHMENT_IMAGE_EXTS, type PrinterJobSettings } from '../shared/ipc'
-import { findDocxPath } from '../shared/open-file'
+import {
+  OPENABLE_DOC_EXTENSIONS,
+  docImportKindForPath,
+  findOpenableDocPath,
+  isOpenableDocPath,
+} from '../shared/open-file'
 import { atomicWriteFile, looksLikeZip } from './atomic-write'
 import {
   adoptLazyMediaHashes,
@@ -152,7 +156,7 @@ import {
   setDocPassword,
   snapshotDocPassword,
 } from './docx-encryption'
-import { isExternallyModified, type DiskFileState } from './external-change'
+import type { DiskFileState } from './external-change'
 import { initDocsAutoUpdater } from './updater'
 import { registerZoteroIpc, teardownZoteroIpc } from './zotero-ipc'
 
@@ -169,6 +173,10 @@ const tMain = createI18n({
   zh: {
     dlgOpenDoc: '打开文档',
     filterWord: 'Word 文档',
+    docImportMsg: "转换 .{ext} 文档？",
+    docImportDetail:
+      "GenOffice 只编辑 .docx，不编辑 Word 97-2003 旧版 .doc。正文、标题、列表、表格和图片会转换过来；脚注、批注和文本框不会完整保留。源文件不会被修改，转换后的 .docx 是独立副本，之后的保存都写入它。",
+    docImportConvertBtn: "转换并打开",
     dlgSaveAs: '另存为',
     closeUnsavedMsg: '此文档有未保存的更改。',
     closeUnsavedDetail: '关闭前是否保存？',
@@ -265,6 +273,10 @@ const tMain = createI18n({
   en: {
     dlgOpenDoc: 'Open Document',
     filterWord: 'Word Documents',
+    docImportMsg: "Convert this .{ext} document?",
+    docImportDetail:
+      "GenOffice edits .docx files, not Word 97-2003 (.doc) documents. Body text, headings, lists, tables and pictures are converted; footnotes, comments and text boxes are not fully kept. The source file is never modified; the converted .docx is an independent copy that later saves write to.",
+    docImportConvertBtn: "Convert and Open",
     dlgSaveAs: 'Save As',
     closeUnsavedMsg: 'This document has unsaved changes.',
     closeUnsavedDetail: 'Do you want to save them before closing?',
@@ -362,6 +374,10 @@ const tMain = createI18n({
   ja: {
     dlgOpenDoc: '文書を開く',
     filterWord: 'Word 文書',
+    docImportMsg: "この .{ext} 文書を変換しますか？",
+    docImportDetail:
+      "GenOffice は Word 97-2003（.doc）文書ではなく .docx ファイルを編集します。本文、見出し、箇条書き、表、画像は変換されますが、脚注、コメント、テキストボックスは完全には保持されません。元のファイルが変更されることはなく、変換後の .docx はその後の保存先となる独立したコピーです。",
+    docImportConvertBtn: "変換して開く",
     dlgSaveAs: '名前を付けて保存',
     closeUnsavedMsg: 'このドキュメントに未保存の変更があります。',
     closeUnsavedDetail: '閉じる前に保存しますか？',
@@ -459,6 +475,10 @@ const tMain = createI18n({
   ko: {
     dlgOpenDoc: '문서 열기',
     filterWord: 'Word 문서',
+    docImportMsg: "이 .{ext} 문서를 변환할까요?",
+    docImportDetail:
+      "GenOffice는 Word 97-2003(.doc) 문서가 아닌 .docx 파일을 편집합니다. 본문 텍스트, 제목, 목록, 표, 그림은 변환되지만 각주, 메모, 텍스트 상자는 온전히 유지되지 않습니다. 원본 파일은 수정되지 않으며, 변환된 .docx는 이후 저장이 기록되는 독립된 사본입니다.",
+    docImportConvertBtn: "변환 후 열기",
     dlgSaveAs: '다른 이름으로 저장',
     closeUnsavedMsg: '이 문서에 저장하지 않은 변경 사항이 있습니다.',
     closeUnsavedDetail: '닫기 전에 저장하시겠습니까?',
@@ -557,6 +577,10 @@ const tMain = createI18n({
   fr: {
     dlgOpenDoc: 'Ouvrir un document',
     filterWord: 'Documents Word',
+    docImportMsg: "Convertir ce document .{ext} ?",
+    docImportDetail:
+      "GenOffice modifie les fichiers .docx, pas les documents Word 97-2003 (.doc). Le texte principal, les titres, les listes, les tableaux et les images sont convertis ; les notes de bas de page, les commentaires et les zones de texte ne sont pas intégralement conservés. Le fichier source n'est jamais modifié ; le .docx converti est une copie indépendante.",
+    docImportConvertBtn: "Convertir et ouvrir",
     dlgSaveAs: 'Enregistrer sous',
     closeUnsavedMsg: 'Ce document contient des modifications non enregistrées.',
     closeUnsavedDetail: 'Voulez-vous les enregistrer avant de fermer ?',
@@ -656,6 +680,10 @@ const tMain = createI18n({
   de: {
     dlgOpenDoc: 'Dokument öffnen',
     filterWord: 'Word-Dokumente',
+    docImportMsg: "Dieses .{ext}-Dokument konvertieren?",
+    docImportDetail:
+      "GenOffice bearbeitet .docx-Dateien, keine Word 97-2003-Dokumente (.doc). Fließtext, Überschriften, Listen, Tabellen und Bilder werden konvertiert; Fußnoten, Kommentare und Textfelder bleiben nicht vollständig erhalten. Die Quelldatei wird niemals geändert; die konvertierte .docx ist eine eigenständige Kopie.",
+    docImportConvertBtn: "Konvertieren und öffnen",
     dlgSaveAs: 'Speichern unter',
     closeUnsavedMsg: 'Dieses Dokument enthält ungespeicherte Änderungen.',
     closeUnsavedDetail: 'Vor dem Schließen speichern?',
@@ -755,6 +783,10 @@ const tMain = createI18n({
   es: {
     dlgOpenDoc: 'Abrir documento',
     filterWord: 'Documentos de Word',
+    docImportMsg: "¿Convertir este documento .{ext}?",
+    docImportDetail:
+      "GenOffice edita archivos .docx, no documentos de Word 97-2003 (.doc). Se convierten el texto principal, los encabezados, las listas, las tablas y las imágenes; las notas al pie, los comentarios y los cuadros de texto no se conservan por completo. El archivo de origen nunca se modifica; el .docx convertido es una copia independiente.",
+    docImportConvertBtn: "Convertir y abrir",
     dlgSaveAs: 'Guardar como',
     closeUnsavedMsg: 'Este documento tiene cambios sin guardar.',
     closeUnsavedDetail: '¿Desea guardarlos antes de cerrar?',
@@ -854,6 +886,10 @@ const tMain = createI18n({
   th: {
     dlgOpenDoc: 'เปิดเอกสาร',
     filterWord: 'เอกสาร Word',
+    docImportMsg: "แปลงเอกสาร .{ext} นี้ไหม?",
+    docImportDetail:
+      "GenOffice แก้ไขไฟล์ .docx ไม่ใช่เอกสาร Word 97-2003 (.doc) ข้อความเนื้อหา หัวเรื่อง รายการ ตาราง และรูปภาพจะถูกแปลง เชิงอรรถ ข้อคิดเห็น และกล่องข้อความจะไม่ได้รับการเก็บรักษาไว้อย่างสมบูรณ์ ไฟล์ต้นฉบับจะไม่ถูกแก้ไข ไฟล์ .docx ที่แปลงแล้วเป็นสำเนาแยกต่างหาก",
+    docImportConvertBtn: "แปลงและเปิด",
     dlgSaveAs: 'บันทึกเป็น',
     closeUnsavedMsg: 'เอกสารนี้มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก',
     closeUnsavedDetail: 'ต้องการบันทึกก่อนปิดหรือไม่?',
@@ -951,6 +987,10 @@ const tMain = createI18n({
   id: {
     dlgOpenDoc: 'Buka Dokumen',
     filterWord: 'Dokumen Word',
+    docImportMsg: "Konversi dokumen .{ext} ini?",
+    docImportDetail:
+      "GenOffice mengedit file .docx, bukan dokumen Word 97-2003 (.doc). Teks isi, judul, daftar, tabel, dan gambar dikonversi; catatan kaki, komentar, dan kotak teks tidak disimpan sepenuhnya. File sumber tidak pernah diubah; .docx hasil konversi adalah salinan independen.",
+    docImportConvertBtn: "Konversi dan buka",
     dlgSaveAs: 'Simpan Sebagai',
     closeUnsavedMsg: 'Dokumen ini memiliki perubahan yang belum disimpan.',
     closeUnsavedDetail: 'Simpan sebelum menutup?',
@@ -1049,6 +1089,10 @@ const tMain = createI18n({
   ru: {
     dlgOpenDoc: 'Открыть документ',
     filterWord: 'Документы Word',
+    docImportMsg: "Преобразовать этот документ .{ext}?",
+    docImportDetail:
+      "GenOffice редактирует файлы .docx, а не документы Word 97-2003 (.doc). Основной текст, заголовки, списки, таблицы и рисунки преобразуются; сноски, примечания и надписи сохраняются не полностью. Исходный файл не изменяется; созданный .docx является отдельной копией.",
+    docImportConvertBtn: "Преобразовать и открыть",
     dlgSaveAs: 'Сохранить как',
     closeUnsavedMsg: 'В этом документе есть несохранённые изменения.',
     closeUnsavedDetail: 'Сохранить их перед закрытием?',
@@ -1147,6 +1191,10 @@ const tMain = createI18n({
   ar: {
     dlgOpenDoc: 'فتح مستند',
     filterWord: 'مستندات Word',
+    docImportMsg: "تحويل مستند .{ext} هذا؟",
+    docImportDetail:
+      "يقوم GenOffice بتحرير ملفات .docx وليس مستندات Word 97-2003 (.doc). يتم تحويل النص الأساسي والعناوين والقوائم والجداول والصور؛ ولا يتم الاحتفاظ بالحواشي السفلية والتعليقات ومربعات النص بالكامل. لا يتم تعديل الملف الأصلي أبدًا؛ وملف .docx المحول هو نسخة مستقلة.",
+    docImportConvertBtn: "تحويل وفتح",
     dlgSaveAs: 'حفظ باسم',
     closeUnsavedMsg: 'يحتوي هذا المستند على تغييرات غير محفوظة.',
     closeUnsavedDetail: 'هل تريد حفظها قبل الإغلاق؟',
@@ -1245,6 +1293,10 @@ const tMain = createI18n({
   pt: {
     dlgOpenDoc: 'Abrir Documento',
     filterWord: 'Documentos do Word',
+    docImportMsg: "Converter este documento .{ext}?",
+    docImportDetail:
+      "O GenOffice edita arquivos .docx, não documentos do Word 97-2003 (.doc). O texto do corpo, os títulos, as listas, as tabelas e as imagens são convertidos; notas de rodapé, comentários e caixas de texto não são totalmente preservados. O arquivo de origem nunca é modificado; o .docx convertido é uma cópia independente.",
+    docImportConvertBtn: "Converter e abrir",
     dlgSaveAs: 'Salvar Como',
     closeUnsavedMsg: 'Este documento tem alterações não salvas.',
     closeUnsavedDetail: 'Deseja salvá-las antes de fechar?',
@@ -1343,6 +1395,10 @@ const tMain = createI18n({
   it: {
     dlgOpenDoc: 'Apri documento',
     filterWord: 'Documenti Word',
+    docImportMsg: "Convertire questo documento .{ext}?",
+    docImportDetail:
+      "GenOffice modifica i file .docx, non i documenti di Word 97-2003 (.doc). Il corpo del testo, le intestazioni, gli elenchi, le tabelle e le immagini vengono convertiti; le note a piè di pagina, i commenti e le caselle di testo non vengono mantenuti completamente. Il file sorgente non viene mai modificato; il .docx convertito è una copia indipendente.",
+    docImportConvertBtn: "Converti e apri",
     dlgSaveAs: 'Salva con nome',
     closeUnsavedMsg: 'Questo documento contiene modifiche non salvate.',
     closeUnsavedDetail: 'Salvarle prima di chiudere?',
@@ -1441,6 +1497,10 @@ const tMain = createI18n({
   pl: {
     dlgOpenDoc: 'Otwórz dokument',
     filterWord: 'Dokumenty programu Word',
+    docImportMsg: "Skonwertować ten dokument .{ext}?",
+    docImportDetail:
+      "GenOffice edytuje pliki .docx, a nie dokumenty Word 97-2003 (.doc). Tekst podstawowy, nagłówki, listy, tabele i obrazy są konwertowane; przypisy dolne, komentarze i pola tekstowe nie są w pełni zachowane. Plik źródłowy nie jest modyfikowany; przekonwertowany .docx to niezależna kopia.",
+    docImportConvertBtn: "Konwertuj i otwórz",
     dlgSaveAs: 'Zapisz jako',
     closeUnsavedMsg: 'Ten dokument zawiera niezapisane zmiany.',
     closeUnsavedDetail: 'Czy zapisać je przed zamknięciem?',
@@ -1539,6 +1599,10 @@ const tMain = createI18n({
   cs: {
     dlgOpenDoc: 'Otevřít dokument',
     filterWord: 'Dokumenty Wordu',
+    docImportMsg: "Převést tento dokument .{ext}?",
+    docImportDetail:
+      "GenOffice upravuje .docx, nikoli dokumenty Word 97-2003 (.doc). Text, nadpisy, seznamy, tabulky a obrázky se převedou; poznámky pod čarou, komentáře a textová pole se nepřevezmou úplně. Původní soubor se nikdy nemění; převedený .docx je samostatná kopie, do níž se dalším ukládáním zapisuje.",
+    docImportConvertBtn: "Převést a otevřít",
     dlgSaveAs: 'Uložit jako',
     closeUnsavedMsg: 'Tento dokument obsahuje neuložené změny.',
     closeUnsavedDetail: 'Chcete je před zavřením uložit?',
@@ -1637,6 +1701,10 @@ const tMain = createI18n({
   nl: {
     dlgOpenDoc: 'Document openen',
     filterWord: 'Word-documenten',
+    docImportMsg: "Dit .{ext}-document converteren?",
+    docImportDetail:
+      "GenOffice bewerkt .docx, geen Word 97-2003-documenten (.doc). Tekst, koppen, lijsten, tabellen en afbeeldingen worden omgezet; voetnoten, opmerkingen en tekstvakken niet volledig. Het oorspronkelijke bestand wordt nooit gewijzigd; de omgezette .docx is een zelfstandige kopie waarin volgende opslaan-acties terechtkomen.",
+    docImportConvertBtn: "Converteren en openen",
     dlgSaveAs: 'Opslaan als',
     closeUnsavedMsg: 'Dit document bevat niet-opgeslagen wijzigingen.',
     closeUnsavedDetail: 'Wilt u ze opslaan voordat u sluit?',
@@ -1735,6 +1803,10 @@ const tMain = createI18n({
   ms: {
     dlgOpenDoc: 'Buka Dokumen',
     filterWord: 'Dokumen Word',
+    docImportMsg: "Tukar dokumen .{ext} ini?",
+    docImportDetail:
+      "GenOffice menyunting .docx, bukan dokumen Word 97-2003 (.doc). Teks kandungan, tajuk, senarai, jadual dan imej ditukar; nota kaki, komen dan kotak teks tidak dikekalkan sepenuhnya. Fail asal tidak pernah diubah; salinan .docx yang ditukar ialah salinan berasingan tempat simpanan seterusnya ditulis.",
+    docImportConvertBtn: "Tukar dan buka",
     dlgSaveAs: 'Simpan Sebagai',
     closeUnsavedMsg: 'Dokumen ini mempunyai perubahan yang belum disimpan.',
     closeUnsavedDetail: 'Adakah anda mahu menyimpannya sebelum menutup?',
@@ -1833,6 +1905,10 @@ const tMain = createI18n({
   he: {
     dlgOpenDoc: 'פתיחת מסמך',
     filterWord: 'מסמכי Word',
+    docImportMsg: "להמיר את מסמך ה‑.{ext} הזה?",
+    docImportDetail:
+      "GenOffice עורך קבצי ‎.docx ולא מסמכי Word 97-2003 (‎.doc). טקסט, כותרות, רשימות, טבלאות ותמונות מומרים; הערות שוליים, תגובות ותיבות טקסט לא נשמרים במלואם. קובץ המקור לעולם אינו משתנה; קובץ ה‑.docx שהומר הוא עותק נפרד שאליו נכתבות השמירות הבאות.",
+    docImportConvertBtn: "המר ופתח",
     dlgSaveAs: 'שמירה בשם',
     closeUnsavedMsg: 'במסמך זה יש שינויים שלא נשמרו.',
     closeUnsavedDetail: 'האם לשמור אותם לפני הסגירה?',
@@ -1930,6 +2006,10 @@ const tMain = createI18n({
   hi: {
     dlgOpenDoc: 'दस्तावेज़ खोलें',
     filterWord: 'Word दस्तावेज़',
+    docImportMsg: "इस .{ext} दस्तावेज़ को बदलें?",
+    docImportDetail:
+      "GenOffice Word 97-2003 (.doc) दस्तावेज़ नहीं, .docx संपादित करता है। मुख्य पाठ, शीर्षक, सूचियाँ, तालिकाएँ और चित्र बदल दिए जाते हैं; फुटनोट, टिप्पणियाँ और टेक्स्ट बॉक्स पूरी तरह नहीं रखे जाते। मूल फ़ाइल कभी नहीं बदलती; बदली हुई .docx एक स्वतंत्र प्रति है जिसमें आगे के सेव लिखे जाते हैं।",
+    docImportConvertBtn: "बदलकर खोलें",
     dlgSaveAs: 'इस रूप में सहेजें',
     closeUnsavedMsg: 'इस दस्तावेज़ में सहेजे नहीं गए परिवर्तन हैं।',
     closeUnsavedDetail: 'क्या आप बंद करने से पहले उन्हें सहेजना चाहते हैं?',
@@ -2028,6 +2108,10 @@ const tMain = createI18n({
   'zh-TW': {
     dlgOpenDoc: '開啟文件',
     filterWord: 'Word 文件',
+    docImportMsg: "轉換這個 .{ext} 文件？",
+    docImportDetail:
+      "GenOffice 只編輯 .docx，不編輯 Word 97-2003 舊版 .doc。內文、標題、清單、表格與圖片會轉換過來；註腳、註解與文字方塊不會完整保留。原始檔案不會被修改，轉換後的 .docx 是獨立副本，之後的儲存都寫入它。",
+    docImportConvertBtn: "轉換並開啟",
     dlgSaveAs: '另存新檔',
     closeUnsavedMsg: '此文件有未儲存的變更。',
     closeUnsavedDetail: '關閉前是否要儲存？',
@@ -2152,7 +2236,7 @@ export function configureDocsRuntime(config: DocsRuntimeConfig): void {
 
 let mainWindow: BrowserWindow | null = null
 let rendererReady = false
-let pendingOpenPath = findDocxPath(process.argv)
+let pendingOpenPath = findOpenableDocPath(process.argv)
 /** documents queued for windows/tabs spawned via New Tab, keyed by webContents id */
 const pendingWindowOpens = new Map<number, string>()
 /** webContents ids that should open as a new blank doc instead of the start screen */
@@ -2220,19 +2304,22 @@ export function uniquePathIn(dir: string, fileName: string): string {
 }
 
 export function openExternalDocx(filePath: string | null): void {
-  if (!filePath || !/\.docx$/i.test(filePath)) return
+  if (!filePath || !isOpenableDocPath(filePath)) return
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow
   if (!rendererReady || !win) {
     pendingOpenPath = filePath
     return
   }
-  void loadDocx(filePath, win.webContents.id)
-    .then((result) => {
-      if (!result || win.isDestroyed()) return
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
-      win.webContents.send('docs:opened', result)
+  void prepareDocumentForOpen(filePath, win)
+    .then((prepared) => {
+      if (!prepared || win.isDestroyed()) return
+      return loadDocx(prepared, win.webContents.id).then((result) => {
+        if (!result || win.isDestroyed()) return
+        if (win.isMinimized()) win.restore()
+        win.show()
+        win.focus()
+        win.webContents.send('docs:opened', result)
+      })
     })
     .catch((err) => dialog.showErrorBox(tm('dlgOpenDoc'), String(err)))
 }
@@ -2297,6 +2384,7 @@ export function removeRecentFiles(filePaths: string[]): void {
  *  the Home list) — push to the matching renderer so it syncs its save path and
  *  title bar (docs keeps path state on the renderer side). */
 export function docsFileRenamed(wc: WebContents, oldPath: string, newPath: string): void {
+  void externalFiles.renamed(wc.id, oldPath, newPath)
   // keep the save allowlist in sync so docs:save accepts the renamed path
   docWritablePaths.get(wc.id)?.delete(oldPath)
   allowDocWrite(wc.id, newPath)
@@ -2360,12 +2448,27 @@ export function removeStarredFiles(filePaths: string[]): void {
 
 // ---- original archive (pass-through base: original file archived by content hash) ----
 
-async function archiveOriginal(filePath: string, hash: string, size: number): Promise<void> {
+const pinnedOriginals = new Map<number, Set<string>>()
+function unpinOriginals(wcId: number): void {
+  if (pinnedOriginals.delete(wcId)) void pruneOriginals(userDataPath('originals'))
+}
+
+async function archiveOriginal(
+  filePath: string,
+  hash: string,
+  size: number,
+  lazyOwner?: number,
+): Promise<void> {
   // a copy larger than the whole cap would only evict every other original
-  if (size > ORIGINALS_MAX_BYTES) return
+  if (size > ORIGINALS_MAX_BYTES && lazyOwner === undefined) return
   const dir = userDataPath('originals')
   await mkdir(dir, { recursive: true })
   const target = join(dir, `${hash}.docx`)
+  if (lazyOwner !== undefined) {
+    const pins = pinnedOriginals.get(lazyOwner) ?? new Set<string>()
+    pins.add(target)
+    pinnedOriginals.set(lazyOwner, pins)
+  }
   if (!existsSync(target)) await copyFile(filePath, target)
   void pruneOriginals(dir)
 }
@@ -2391,6 +2494,8 @@ async function pruneOriginals(dir: string): Promise<void> {
     files.sort((a, b) => a.mtimeMs - b.mtimeMs)
     for (const f of files) {
       if (total <= ORIGINALS_MAX_BYTES) break
+      // Open lazy documents still need this exact version for display and Save a Copy.
+      if ([...pinnedOriginals.values()].some((paths) => paths.has(f.path))) continue
       try {
         await unlink(f.path)
         total -= f.size
@@ -2453,6 +2558,7 @@ function isImageExportTemp(wcId: number, filePath: string): boolean {
 }
 
 function dropDocWriter(wcId: number): void {
+  unpinOriginals(wcId)
   docWritablePaths.delete(wcId)
   pdfWritablePaths.delete(wcId)
   for (const p of imageExportTemps.get(wcId) ?? []) void rm(p, { force: true })
@@ -2479,25 +2585,27 @@ async function rememberDiskState(wcId: number, filePath: string, hash: string): 
     const states = docDiskStates.get(wcId) ?? new Map<string, DiskFileState>()
     states.set(filePath, { mtimeMs: s.mtimeMs, size: s.size, hash })
     docDiskStates.set(wcId, states)
+    const wc = webContents.fromId(wcId)
+    if (wc) {
+      externalFiles.attach(wc, {
+        language: getUiLang,
+        isDirty: () => docsQueryDirty(wc),
+        reload: async (path) => {
+          // A deliberate reload must not restore the recovery copy being discarded.
+          await rm(recoveryPathFor(path), { force: true })
+          const result = await loadDocx(path, wc.id)
+          if (!result) throw new Error('The document could not be reopened.')
+          wc.send('docs:opened', result)
+        },
+        saveCopy: () => {
+          wc.send('menu:command', 'save-as')
+        },
+      })
+      await externalFiles.remember(wcId, filePath, hash)
+    }
   } catch {
     /* unstatable target: skip tracking; the next save simply won't flag a conflict */
   }
-}
-
-async function diskChangedExternally(wcId: number, filePath: string): Promise<boolean> {
-  let current: { mtimeMs: number; size: number } | null
-  try {
-    current = await stat(filePath)
-  } catch {
-    current = null
-  }
-  return isExternallyModified(docDiskStates.get(wcId)?.get(filePath), current, async () => {
-    try {
-      return sha256Hex(await readFile(filePath))
-    } catch {
-      return null
-    }
-  })
 }
 
 /** A closed docs tab detaches without destroying its webContents (shell freeze
@@ -2506,11 +2614,14 @@ async function diskChangedExternally(wcId: number, filePath: string): Promise<bo
 export function teardownDocsRenderer(contents: WebContents): void {
   teardownZoteroIpc(contents)
   tornDownWcIds.add(contents.id)
+  externalFiles.forget(contents.id)
+  unpinOriginals(contents.id)
   forgetLazyMediaOwner(contents.id)
   // Sweep recovery copies for this renderer's documents: every non-crash close
   // either saved (docs:save already cleared it) or explicitly discarded, so a
   // copy still on disk here is a leftover from an in-flight recovery write.
   for (const p of docWritablePaths.get(contents.id) ?? []) clearRecoveryCopy(p)
+  clearUntitledRecovery(contents.id)
   // reclaim every per-wcId grant, not just doc saves — the orphaned renderer
   // must also lose its dialog-authorized PDF targets and disk-state cache
   docWritablePaths.delete(contents.id)
@@ -2525,6 +2636,17 @@ export function teardownDocsRenderer(contents: WebContents): void {
 const recoveryDir = () => userDataPath('docs-autosave')
 const recoveryPathFor = (filePath: string) =>
   join(recoveryDir(), `${createHash('sha1').update(filePath).digest('hex').slice(0, 16)}.docx`)
+
+/** Untitled recovery stays private to userData and never becomes a recent document. */
+const untitledRecoveryByWc = new Map<number, string>()
+const untitledRecoveryEpochs = new Map<number, number>()
+
+function clearUntitledRecovery(wcId: number): void {
+  untitledRecoveryEpochs.set(wcId, (untitledRecoveryEpochs.get(wcId) ?? 0) + 1)
+  const path = untitledRecoveryByWc.get(wcId)
+  untitledRecoveryByWc.delete(wcId)
+  if (path) void rm(path, { force: true }).catch(() => {})
+}
 
 /** Bumped by every clear: an in-flight docs:write-recovery that started before
  * the bump must not recreate the file it is about to land (stale-recovery race). */
@@ -2599,6 +2721,64 @@ async function showOpenError(wcId: number, detail: string): Promise<void> {
   else await dialog.showMessageBox(options)
 }
 
+/**
+ * A legacy Word .doc/.dot opens only as a converted .docx copy: confirm the
+ * import, pick the destination (the sibling .docx by default), convert,
+ * write the file and open it. Native .docx passes through unchanged;
+ * null cancels the open.
+ */
+async function prepareDocumentForOpen(
+  filePath: string,
+  parent?: BrowserWindow | undefined,
+): Promise<string | null> {
+  const importKind = docImportKindForPath(filePath)
+  if (!importKind) return filePath
+  const extension = filePath.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? ''
+  const options = {
+    type: 'warning' as const,
+    message: tm('docImportMsg', { ext: extension }),
+    detail: tm('docImportDetail'),
+    buttons: [tm('docImportConvertBtn'), tm('btnCancel')],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  }
+  const choice =
+    parent && !parent.isDestroyed()
+      ? await dialog.showMessageBox(parent, options)
+      : await dialog.showMessageBox(options)
+  if (choice.response !== 0) return null
+  const picked = await showSaveDialogWithMemory(
+    dialog,
+    parent,
+    {
+      title: tm('dlgSaveAs'),
+      defaultPath: join(
+        dirname(filePath),
+        basename(filePath).replace(/\.(doc|dot)$/i, '.docx'),
+      ),
+      filters: [{ name: tm('filterWord'), extensions: ['docx'] }],
+    },
+    defaultSaveDir(),
+  )
+  if (picked.canceled || !picked.filePath) return null
+  try {
+    const source = new Uint8Array(await readFile(filePath))
+    const result = await convertLegacyDocToDocx(source)
+    await atomicWriteFile(picked.filePath, Buffer.from(result.docx))
+  } catch (err) {
+    if (parent && !parent.isDestroyed()) {
+      await dialog.showMessageBox(parent, {
+        type: 'error',
+        message: tm('dlgOpenDoc'),
+        detail: String(err),
+      })
+    }
+    return null
+  }
+  return picked.filePath
+}
+
 async function loadDocx(
   filePath: string,
   wcId: number,
@@ -2630,7 +2810,10 @@ async function loadDocx(
   // the archive keeps the on-disk original as-is (encrypted ones included: they
   // reopen with the user's password), so a bad save never loses the source file
   const hash = lazy?.hash ?? sha256Hex(original)
-  await archiveOriginal(filePath, hash, size)
+  await archiveOriginal(filePath, hash, size, lazy ? wcId : undefined)
+  // Lazy media must keep serving the opened version after an external replacement.
+  const archivedSource = join(userDataPath('originals'), `${hash}.docx`)
+  if (lazy && existsSync(archivedSource)) pointLazyMediaAt(new Set([hash]), archivedSource, wcId)
   const recovery = await maybeRecoverDocBytes(filePath, plainBytes)
   let bytes = recovery.bytes
   let recovered = recovery.recovered
@@ -2645,6 +2828,7 @@ async function loadDocx(
     }
   }
   if (recovered) await adoptLazyMediaHashes(bytes, filePath, wcId)
+  clearUntitledRecovery(wcId)
   pushRecent(filePath)
   allowDocWrite(wcId, filePath)
   if (fileOpenedHook) fileOpenedHook(wcId, filePath)
@@ -2842,16 +3026,15 @@ const activeAiStreams = new Map<string, AbortController>()
  */
 export function registerAiIpc(): void {
   app.once('before-quit', shutdownCodexAppServers)
-  ipcMain.handle('ai:get-settings', (): AiSettings => {
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
-    const settings = resolveAiSettings(stored, defaultAiSettings())
-
-    settings.provider = activeProvider(settings)
-    return settings
-  })
-
-  ipcMain.handle('ai:set-settings', (_event, settings: AiSettings) => {
-    writeJson(SETTINGS_PATH(), settings)
+  registerAiSettingsHandlers({
+    ipc: ipcMain,
+    read: () => readJson(SETTINGS_PATH(), {}),
+    write: (settings) => writeJson(SETTINGS_PATH(), settings),
+    broadcast: (settings) => {
+      for (const contents of aiSettingsWebContents.getAllWebContents()) {
+        if (!contents.isDestroyed()) contents.send('ai:settings-changed', settings)
+      }
+    },
   })
 
   ipcMain.handle('ai:list-models', async (_event, baseUrl: unknown, apiKey: unknown) => {
@@ -3061,6 +3244,7 @@ export function setDocsFileSavedHook(hook: (wc: WebContents, filePath: string) =
 }
 
 function notifyFileSaved(wc: WebContents, filePath: string): void {
+  clearUntitledRecovery(wc.id)
   if (fileSavedHook) fileSavedHook(wc, filePath)
 }
 
@@ -3244,14 +3428,20 @@ export function registerDocsIpc(): void {
   ipcMain.handle('docs:open', async (event) => {
     const result = await openDialog(event, {
       title: tm('dlgOpenDoc'),
-      filters: [{ name: tm('filterWord'), extensions: ['docx'] }],
+      filters: [{ name: tm('filterWord'), extensions: [...OPENABLE_DOC_EXTENSIONS] }],
       properties: ['openFile'],
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    return loadDocx(result.filePaths[0], event.sender.id)
+    const prepared = await prepareDocumentForOpen(result.filePaths[0], dialogParent(event))
+    if (!prepared) return null
+    return loadDocx(prepared, event.sender.id)
   })
 
-  ipcMain.handle('docs:open-path', (event, filePath: string) => loadDocx(filePath, event.sender.id))
+  ipcMain.handle('docs:open-path', async (event, filePath: string) => {
+    const prepared = await prepareDocumentForOpen(filePath, dialogParent(event))
+    if (!prepared) return null
+    return loadDocx(prepared, event.sender.id)
+  })
 
   // w:altChunk HTML: the same html2docx chain as the HTML app's export, in a
   // hidden window; the renderer parses the result and shows its blocks
@@ -3339,17 +3529,22 @@ export function registerDocsIpc(): void {
     },
   )
 
-  ipcMain.handle('docs:consume-pending-open', (event) => {
+  ipcMain.handle('docs:consume-pending-open', async (event) => {
     rendererReady = true
     // a tab spawned via New Tab loads the document queued for it specifically
     const queued = pendingWindowOpens.get(event.sender.id)
     if (queued) {
       pendingWindowOpens.delete(event.sender.id)
-      return loadDocx(queued, event.sender.id)
+      const prepared = await prepareDocumentForOpen(queued, dialogParent(event))
+      if (!prepared) return null
+      return loadDocx(prepared, event.sender.id)
     }
     const filePath = pendingOpenPath
     pendingOpenPath = null
-    return filePath ? loadDocx(filePath, event.sender.id) : null
+    if (!filePath) return null
+    const prepared = await prepareDocumentForOpen(filePath, dialogParent(event))
+    if (!prepared) return null
+    return loadDocx(prepared, event.sender.id)
   })
 
   /** returns true when this tab was opened via "New Document" and should start blank */
@@ -3390,31 +3585,11 @@ export function registerDocsIpc(): void {
 
   ipcMain.handle(
     'docs:save',
-    async (event, filePath: string, data: ArrayBuffer, auto?: boolean) => {
+    async (event, filePath: string, data: ArrayBuffer, _auto?: boolean) => {
       try {
         // only paths this renderer opened or chose via save-as may be overwritten
         if (typeof filePath !== 'string' || !canDocWrite(event.sender.id, filePath)) {
           return { ok: false, error: 'save target is not an opened document' }
-        }
-        if (await diskChangedExternally(event.sender.id, filePath)) {
-          // autosave must never clobber another program's edits silently; the
-          // renderer stays dirty and the next manual save raises the dialog
-          if (auto === true) return { ok: false, reason: 'external-modified' }
-          const options = {
-            type: 'warning' as const,
-            message: tm('extModifiedMsg'),
-            detail: tm('extModifiedDetail'),
-            buttons: [tm('btnOverwrite'), tm('btnCancel')],
-            defaultId: 0,
-            cancelId: 1,
-            noLink: true,
-          }
-          const parent = dialogParent(event)
-          const { response } =
-            parent && !parent.isDestroyed()
-              ? await dialog.showMessageBox(parent, options)
-              : await dialog.showMessageBox(options)
-          if (response !== 0) return { ok: false, reason: 'external-modified' }
         }
         // The tab may have been closed while the external-change check or the
         // overwrite prompt was pending: a Don't Save close revoked this tab's
@@ -3427,7 +3602,7 @@ export function registerDocsIpc(): void {
         const passwordState = snapshotDocPassword(event.sender.id, filePath)
         const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-        await atomicWriteFile(filePath, bytes)
+        await externalFiles.write(event.sender.id, filePath, () => atomicWriteFile(filePath, bytes))
         // Teardown may have cleared all in-memory secrets while the atomic
         // write was pending. Never resurrect state for an orphaned renderer.
         if (tornDownWcIds.has(event.sender.id)) {
@@ -3437,12 +3612,7 @@ export function registerDocsIpc(): void {
         if (tornDownWcIds.has(event.sender.id)) {
           return { ok: false, error: 'save target is not an opened document' }
         }
-        pointLazyMediaAt(
-          hashes,
-          filePath,
-          event.sender.id,
-          passwordState.password ? plain : undefined,
-        )
+        pointLazyMediaAt(hashes, filePath, event.sender.id, plain)
         // Commit immediately after the final await: intents received during
         // post-write bookkeeping are included, with no later async race.
         const passwordIntentPending = commitDocPasswordSave(
@@ -3458,6 +3628,8 @@ export function registerDocsIpc(): void {
           ...reissuedDoc(!!passwordState.password, hashes, plain),
         }
       } catch (err) {
+        if (err instanceof ExternalFileChangedError)
+          return { ok: false, reason: 'external-modified' }
         return { ok: false, error: String(err) }
       }
     },
@@ -3494,6 +3666,85 @@ export function registerDocsIpc(): void {
       return { ok: true }
     } catch {
       return { ok: false }
+    }
+  })
+
+  ipcMain.handle('docs:write-untitled-recovery', async (event, data: ArrayBuffer) => {
+    const wcId = event.sender.id
+    if (tornDownWcIds.has(wcId) || !(data instanceof ArrayBuffer)) return { ok: false }
+    const path =
+      untitledRecoveryByWc.get(wcId) ?? join(recoveryDir(), `untitled-${randomUUID()}.docx`)
+    untitledRecoveryByWc.set(wcId, path)
+    const epoch = untitledRecoveryEpochs.get(wcId) ?? 0
+    try {
+      await mkdir(recoveryDir(), { recursive: true })
+      await atomicWriteFile(path, Buffer.from(data))
+      if (
+        tornDownWcIds.has(wcId) ||
+        untitledRecoveryByWc.get(wcId) !== path ||
+        untitledRecoveryEpochs.get(wcId) !== epoch
+      ) {
+        await rm(path, { force: true })
+        return { ok: false }
+      }
+      return { ok: true }
+    } catch {
+      return { ok: false }
+    }
+  })
+
+  ipcMain.handle('docs:consume-untitled-recovery', async (event): Promise<OpenDocxResult> => {
+    if (tornDownWcIds.has(event.sender.id)) return null
+    try {
+      const candidates = await Promise.all(
+        (await readdir(recoveryDir()))
+          .filter((name) => /^untitled-[0-9a-f-]{36}\.docx$/.test(name))
+          .map(async (name) => {
+            const path = join(recoveryDir(), name)
+            return { path, mtime: (await stat(path)).mtimeMs }
+          }),
+      )
+      const active = new Set(untitledRecoveryByWc.values())
+      const latest = candidates
+        .filter((item) => !active.has(item.path))
+        .sort((a, b) => b.mtime - a.mtime)[0]
+      if (!latest) return null
+      untitledRecoveryByWc.set(event.sender.id, latest.path)
+      const parent = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+      const options = {
+        type: 'question' as const,
+        buttons: [tm('autosaveRestore'), tm('autosaveDiscard')],
+        defaultId: 0,
+        cancelId: 1,
+        message: tm('autosaveFoundTitle'),
+        detail: tm('autosaveFoundBody'),
+      }
+      const response =
+        parent && !parent.isDestroyed()
+          ? await dialog.showMessageBox(parent, options)
+          : await dialog.showMessageBox(options)
+      if (response.response !== 0) {
+        clearUntitledRecovery(event.sender.id)
+        return null
+      }
+      const bytes = await readFile(latest.path)
+      if (!looksLikeZip(bytes)) {
+        clearUntitledRecovery(event.sender.id)
+        return null
+      }
+      return {
+        path: '',
+        name: 'Untitled.docx',
+        data: bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer,
+        hash: '',
+        recovered: true,
+      }
+    } catch {
+      clearUntitledRecovery(event.sender.id)
+      return null
     }
   })
 
@@ -3557,16 +3808,13 @@ export function registerDocsIpc(): void {
         )
         const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-        await atomicWriteFile(result.filePath, bytes)
+        await externalFiles.write(event.sender.id, result.filePath, () =>
+          atomicWriteFile(result.filePath, bytes),
+        )
         if (tornDownWcIds.has(event.sender.id)) return { ok: false }
         allowDocWrite(event.sender.id, result.filePath)
         await rememberDiskState(event.sender.id, result.filePath, sha256Hex(bytes))
-        pointLazyMediaAt(
-          hashes,
-          result.filePath,
-          event.sender.id,
-          passwordState.password ? plain : undefined,
-        )
+        pointLazyMediaAt(hashes, result.filePath, event.sender.id, plain)
         if (tornDownWcIds.has(event.sender.id)) return { ok: false }
         const passwordIntentPending = commitDocPasswordSave(
           event.sender.id,
@@ -3596,7 +3844,7 @@ export function registerDocsIpc(): void {
       const passwordState = snapshotDocPassword(event.sender.id, null)
       const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
       const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-      await atomicWriteFile(filePath, bytes)
+      await externalFiles.write(event.sender.id, filePath, () => atomicWriteFile(filePath, bytes))
       // teardown may have happened while the write was in flight — the path is
       // freshly created, so rolling it back is safe (mirrors docs:write-recovery)
       if (tornDownWcIds.has(event.sender.id)) {
@@ -3605,12 +3853,7 @@ export function registerDocsIpc(): void {
       }
       allowDocWrite(event.sender.id, filePath)
       await rememberDiskState(event.sender.id, filePath, sha256Hex(bytes))
-      pointLazyMediaAt(
-        hashes,
-        filePath,
-        event.sender.id,
-        passwordState.password ? plain : undefined,
-      )
+      pointLazyMediaAt(hashes, filePath, event.sender.id, plain)
       if (tornDownWcIds.has(event.sender.id)) {
         await unlink(filePath).catch(() => {})
         return { ok: false }
@@ -3665,7 +3908,7 @@ export function registerDocsIpc(): void {
         const passwordState = snapshotDocPassword(event.sender.id, null)
         const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
-        await atomicWriteFile(filePath, bytes)
+        await externalFiles.write(event.sender.id, filePath, () => atomicWriteFile(filePath, bytes))
         // teardown may have happened while the write was in flight — only a file
         // this handler created is safe to roll back; an overwritten one stays
         const rollback = async (): Promise<{ ok: false }> => {
@@ -3674,12 +3917,7 @@ export function registerDocsIpc(): void {
         }
         if (tornDownWcIds.has(event.sender.id)) return rollback()
         await rememberDiskState(event.sender.id, filePath, sha256Hex(bytes))
-        pointLazyMediaAt(
-          hashes,
-          filePath,
-          event.sender.id,
-          passwordState.password ? plain : undefined,
-        )
+        pointLazyMediaAt(hashes, filePath, event.sender.id, plain)
         if (tornDownWcIds.has(event.sender.id)) return rollback()
         const passwordIntentPending = commitDocPasswordSave(
           event.sender.id,
@@ -4679,6 +4917,16 @@ interface DocsCloseState {
 const closeCheckWaiters = new Map<number, (state: DocsCloseState) => void>()
 const closeSaveWaiters = new Map<number, (ok: boolean) => void>()
 
+let docsDirtyHook: ((wc: WebContents, dirty: boolean) => void) | null = null
+
+export function setDocsFileDirtyHook(hook: (wc: WebContents, dirty: boolean) => void): void {
+  docsDirtyHook = hook
+}
+
+ipcMain.on('docs:dirty-changed', (event, dirty: unknown) => {
+  docsDirtyHook?.(event.sender, dirty === true)
+})
+
 ipcMain.on('docs:view-menu-state', (event, state: unknown) => {
   const s = state as { aiSidebar?: unknown; darkCanvas?: unknown } | null
   const next = { aiSidebar: s?.aiSidebar === true, darkCanvas: s?.darkCanvas === true }
@@ -4829,6 +5077,7 @@ async function performDocsClose(
   if (response === 1) {
     // Explicitly discarded: also drop the recovery copy so the next open doesn't offer it
     if (state.filePath) clearRecoveryCopy(state.filePath)
+    else clearUntitledRecovery(contents.id)
     return true
   }
   return requestRendererSave(contents)
@@ -4900,7 +5149,7 @@ export function startDocsStandalone(): void {
   })
 
   app.on('second-instance', (_event, argv) => {
-    openExternalDocx(findDocxPath(argv))
+    openExternalDocx(findOpenableDocPath(argv))
     mainWindow?.show()
     mainWindow?.focus()
   })

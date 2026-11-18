@@ -14,6 +14,15 @@ import type { UpdateChannel } from './update-api'
 import type { AiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
 import type { FontSubstitutionRule } from '@genoffice/ui'
 export type { FontSubstitutionRule }
+ 
+export interface AcquireOfficeFontResult {
+  success: boolean
+  fontName: string
+  copiedCount?: number
+  reason?: 'installed' | 'no-office' | 'not-found' | 'error'
+  destPath?: string
+  message: string
+}
 
 /** UI language; kept self-contained here (mirrors Lang in @genoffice/i18n) */
 export type UiLanguage =
@@ -215,6 +224,10 @@ export interface HomeApi {
   getFontSubstitutions(): Promise<FontSubstitutionRule[]>
   /** save font substitutions; broadcasts 'app:font-substitutions-changed' */
   setFontSubstitutions(rules: FontSubstitutionRule[]): Promise<void>
+  /** acquire and install an Office font from local Office installation */
+  acquireOfficeFont(fontFamily: string): Promise<AcquireOfficeFontResult>
+  /** open the user or system fonts directory in file manager */
+  openFontsFolder(): Promise<void>
 
   getAiSettings(): Promise<AiSettings>
   /** persist AI settings; open editors pick the change up on their next settings read */
@@ -388,6 +401,8 @@ export const HOME_CHANNELS = {
   pickDefaultSaveDir: 'home:pick-default-save-dir',
   getFontSubstitutions: 'home:get-font-substitutions',
   setFontSubstitutions: 'home:set-font-substitutions',
+  acquireOfficeFont: 'home:acquire-office-font',
+  openFontsFolder: 'home:open-fonts-folder',
   openGitHubRepo: 'home:open-github-repo',
   githubStars: 'home:github-stars',
   starPromptShouldShow: 'home:star-prompt-should-show',

@@ -6,6 +6,8 @@ import {
   generateTocFieldXml,
   parseDocx,
   saveDocx,
+  tocInstructionFromXml,
+  tocOptionsFromField,
 } from '@genoffice/docx-engine'
 import { buildDocx } from '../../../packages/docx-engine/tests/helpers/build-docx'
 import { blocksToPmDoc, pmDocToSavePlan, type PmNode } from '../src/renderer/editor/convert'
@@ -16,6 +18,7 @@ import {
   collectTocSources,
   findTocField,
   preserveTocHistorySource,
+  tocNodeXml,
   updateTocPageCaches,
 } from '../src/renderer/editor/toc-actions'
 
@@ -268,5 +271,117 @@ describe('custom TOC update', () => {
     const crossSaveRedo = await documentXml(await save(editor, undoneParsed))
     expect(crossSaveRedo).toContain('New third')
     expect(crossSaveRedo).toContain('<w:fldSimple w:instr=" DATE ">')
+  })
+
+  it('updates TOC in 碩士論文計畫書 範例.docx', async () => {
+    const fs = await import('fs')
+    const path = await import('path')
+    const filePath = path.resolve(__dirname, '../../../碩士論文計畫書 範例.docx')
+    if (!fs.existsSync(filePath)) return
+    const buf = fs.readFileSync(filePath)
+    const parsed = await parseDocx(buf)
+    const editor = new Editor({
+      element: document.createElement('div'),
+      extensions: editorExtensions,
+      content: blocksToPmDoc(parsed.blocks) as never,
+    })
+    editors.push(editor)
+    const { computeListMarkerInfos } = await import('@genoffice/docx-engine')
+    const refs: any[] = []
+    const liNodes: any[] = []
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'docListItem') {
+        refs.push({ numId: node.attrs.numId, ilvl: Number(node.attrs.ilvl) || 0 })
+        liNodes.push({ pos, node })
+      }
+    })
+    const markers = computeListMarkerInfos(refs, parsed.numbering as any)
+    liNodes.forEach((item, i) => {
+      const styleId = item.node.attrs.styleId
+      const info = parsed.styles.get(styleId)
+      if (info?.headingLevel) {
+        console.log(`Heading docListItem pos=${item.pos} marker="${markers[i]?.text}" style=${styleId} text="${item.node.textContent}"`)
+      }
+    })
+
+    const region = findTocField(editor, parsed.blocks)
+    expect(Boolean(region)).toBe(true)
+    const options = tocOptionsFromField(region!.instruction, region!.nodes[0]?.xml ?? '')
+    expect(Boolean(options)).toBe(true)
+    ;(editor.storage as any).listNumbering = { defs: parsed.numbering }
+    const actualEntries = collectTocSources(editor, parsed.blocks, parsed.styles, options!)
+    expect(actualEntries.length).toBe(42)
+    const ch1 = actualEntries.find((e) => e.text === '緒論')
+    expect(ch1?.num).toBe('第1章')
+    const s11 = actualEntries.find((e) => e.text === '研究動機')
+    expect(s11?.num).toBe('1.1')
+    const ch2 = actualEntries.find((e) => e.text === '相關研究探討')
+    expect(ch2?.num).toBe('第2章')
+    const ch3 = actualEntries.find((e) => e.text === '研究方法、步驟及執行速度')
+    expect(ch3?.num).toBe('第3章')
+
+    const baseEntryFieldDisplay = region!.nodes.find(
+      ({ node }) => node.attrs.fieldDisplay?.kind === 'tocLine',
+    )?.node.attrs.fieldDisplay
+    expect(baseEntryFieldDisplay?.fontFamily).toBe('標楷體')
+
+    const nodes = generateTocFieldXml(
+      actualEntries,
+      options!,
+      region!.instruction,
+      baseEntryFieldDisplay,
+    ).map((xml, i) => ({
+      type: 'docProtected',
+      attrs: {
+        docxIndex: null,
+        blockType: 'passthrough',
+        label: 'TOC Field',
+        genXml: xml,
+        fieldDisplay: {
+          kind: 'tocLine',
+          num: actualEntries[i]?.num,
+          left: actualEntries[i]?.text ?? '',
+          right: '',
+          level: actualEntries[i]?.level ?? 1,
+          leader: options?.leader ?? 'dot',
+          fontFamily: baseEntryFieldDisplay?.fontFamily,
+          fontAscii: baseEntryFieldDisplay?.fontAscii,
+          eastAsiaFont: baseEntryFieldDisplay?.eastAsiaFont,
+        },
+      },
+    }))
+    expect(nodes.length).toBe(42)
+    const anchored = anchorTocReplacement(nodes, region!, parsed.blocks)
+    expect(anchored).toBe(true)
+
+    preserveTocHistorySource(editor, region!, parsed.blocks)
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from: region!.from, to: region!.to })
+      .insertContentAt(region!.from, nodes as never)
+      .run()
+
+    let tocLineCount = 0
+    editor.state.doc.descendants((node) => {
+      if (node.attrs.fieldDisplay?.kind === 'tocLine') {
+        tocLineCount++
+      }
+    })
+    expect(tocLineCount).toBe(62)
+
+    const updatedRegion = findTocField(editor, parsed.blocks, region!.from)
+    const updatedLines = updatedRegion!.nodes.filter(
+      ({ node }) => node.attrs.fieldDisplay?.kind === 'tocLine',
+    )
+    expect(updatedLines.length).toBe(42)
+
+    const savedBytes = await save(editor, parsed)
+    const reopened = await parseDocx(savedBytes)
+    const reopenedTocLines = reopened.blocks.filter((b) => b.fieldDisplay?.kind === 'tocLine')
+    expect(reopenedTocLines.length).toBe(62)
+    const reopenedCh1 = reopenedTocLines.find((b) => b.fieldDisplay?.left === '緒論')
+    expect(reopenedCh1?.fieldDisplay?.num).toBe('第1章')
+    expect(reopenedCh1?.fieldDisplay?.fontFamily).toBe('標楷體')
   })
 })

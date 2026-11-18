@@ -48,6 +48,9 @@ describe('isDocDirty', () => {
   it('is true when only the body changed', () => {
     expect(isDocDirty({ ...cleanState(), dirtyRef: { current: true } })).toBe(true)
   })
+  it('keeps document settings protected when the PM body itself is clean', () => {
+    expect(isDocDirty({ ...cleanState(), docFlagsDirty: true })).toBe(true)
+  })
 
   it('treats restored recovery content as unsaved body content', () => {
     const state = cleanState()

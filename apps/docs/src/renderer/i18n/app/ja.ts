@@ -111,6 +111,15 @@ export const ja = {
   appStyleCreated: 'スタイル「{name}」を作成し、選択範囲に適用しました',
   // Page number format
   appPgNumFormatSet: 'ページ番号の書式を設定しました',
+  appPageNumberPhysical: 'Number from a specific page',
+  appPageNumberFromPage: 'Start on physical page',
+  appPageNumberHideBefore: 'Hide page numbers before this page',
+  appPageNumberSectionHint:
+    'Creates a Word-compatible section at the selected page. Following sections continue numbering.',
+  appPageNumberBoundaryUnavailable:
+    'Pagination is updating. Please try again after layout finishes.',
+  appPageNumberInsideTable:
+    'This page starts inside a table or unsupported block. Insert a section break before it first.',
   appPageNumFormatTitle: 'ページ番号の書式',
   appNumberFormat: '番号書式',
   appIncludeChapterNumber: '章番号を含める',

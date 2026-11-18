@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { workbookFileSchema } from '../src/shared/desktop-api'
+import {
+  createEditJournal,
+  journalSize,
+  recordPageSetup,
+  toSavePageSetupStates,
+} from '../src/renderer/edit-journal'
 
 // The open path parses the sidecar output with a strict schema, and the
 // preload rebuilds sheet metadata from a hand-written whitelist — a wire
@@ -27,6 +33,17 @@ const baseSheet = {
 }
 
 describe('sheet zoomScale wire field', () => {
+  it('retains reading zoom for explicit save without marking content dirty', () => {
+    const journal = createEditJournal()
+    recordPageSetup(journal, 'sheet-1', { zoomScale: 85 })
+    expect(journalSize(journal)).toBe(0)
+    expect(toSavePageSetupStates(journal)).toEqual([{ sheetId: 'sheet-1', zoomScale: 85 }])
+    recordPageSetup(journal, 'sheet-1', { frozenRows: 2 })
+    expect(journalSize(journal)).toBe(1)
+    expect(toSavePageSetupStates(journal)).toEqual([
+      { sheetId: 'sheet-1', zoomScale: 85, frozenRows: 2 },
+    ])
+  })
   it('accepts the sidecar zoom percent and keeps it optional', () => {
     expect(sheetSchema.parse({ ...baseSheet, zoomScale: 70 }).zoomScale).toBe(70)
     expect(sheetSchema.parse(baseSheet).zoomScale).toBeUndefined()

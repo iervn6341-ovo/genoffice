@@ -29,6 +29,7 @@ import type {
   SheetTableAddition,
   SheetVisualAddition,
   SheetFormulaValues,
+  ExternalLinkOps,
 } from './xlsx-gateway'
 import { planCellEditsToXlsx, syncFileBestEffort } from './xlsx-gateway'
 import { normalizeOoxmlPartPrefix } from './xlsx-namespace'
@@ -112,6 +113,8 @@ export interface StreamingSaveRequest {
   readonly tableStyleAdditions?: readonly TableStyleAddition[] | undefined
   /// Table Design on tables the file already has
   readonly tableEdits?: readonly TableEdit[] | undefined
+  /// External-link breaks and source retargets, resolved on the final contents
+  readonly externalLinkOps?: ExternalLinkOps | null | undefined
 }
 
 export interface StreamingSaveResult {
@@ -190,6 +193,7 @@ export async function saveWorkbookViaSidecar(
       request.bulkConstantFills ?? [],
       request.tableStyleAdditions ?? [],
       request.tableEdits ?? [],
+      request.externalLinkOps ?? null,
     )
 
     const replacements = await writePlanContents(workDir, 'replace', plan.replaced)

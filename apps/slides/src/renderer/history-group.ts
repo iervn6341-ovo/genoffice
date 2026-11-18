@@ -38,6 +38,10 @@ export interface TransformReq {
 }
 
 type FlushFn = (slideIndex: number, reqs: TransformReq[]) => Promise<void>
+const pendingGeometry = new Set<Promise<void>>()
+export async function flushPendingTransforms(): Promise<void> {
+  while (pendingGeometry.size) await Promise.all([...pendingGeometry])
+}
 
 /**
  * Collects the geometry commits requested within one tick on one slide — a multi-selection
@@ -52,15 +56,30 @@ export function createTransformBatcher(
   let slideIndex = -1
   let pending: TransformReq[] = []
   let waiters: Array<() => void> = []
+  let inFlight = false
+  let needsRerun = false
+
   const run = () => {
+    if (inFlight) {
+      needsRerun = true
+      return
+    }
     if (!pending.length) return
+    inFlight = true
     const reqs = pending
     const done = waiters
     const slide = slideIndex
     pending = []
     waiters = []
     slideIndex = -1
-    void flush(slide, reqs).finally(() => done.forEach((d) => d()))
+    void flush(slide, reqs).finally(() => {
+      inFlight = false
+      done.forEach((d) => d())
+      if (needsRerun || pending.length) {
+        needsRerun = false
+        schedule(run)
+      }
+    })
   }
   return {
     push(slide: number, req: TransformReq): Promise<void> {
@@ -70,10 +89,13 @@ export function createTransformBatcher(
       const at = pending.findIndex((p) => p.sourceId === req.sourceId && p.groupId === req.groupId)
       if (at >= 0) pending[at] = req
       else pending.push(req)
-      return new Promise<void>((resolve) => {
+      const done = new Promise<void>((resolve) => {
         waiters.push(resolve)
-        if (waiters.length === 1) schedule(run)
+        if (!inFlight && waiters.length === 1) schedule(run)
       })
+      pendingGeometry.add(done)
+      void done.finally(() => pendingGeometry.delete(done))
+      return done
     },
   }
 }

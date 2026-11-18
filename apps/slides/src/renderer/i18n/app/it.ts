@@ -209,6 +209,7 @@ export const it = {
   appCtxEditText: 'Modifica testo',
   appCtxHyperlink: 'Collegamento ipertestuale…',
   appCtxCropPicture: 'Ritaglia immagine',
+  appCtxResetCrop: 'Reset Crop',
   appCtxRemoveBackground: 'Rimuovi sfondo',
   appCtxChangeBgImage: 'Cambia immagine di sfondo…',
   appCtxFormatBackground: 'Formato sfondo…',
@@ -278,4 +279,20 @@ export const it = {
   appSettingsCancel: 'Annulla',
   appSettingsSave: 'Salva',
   appCropHint: "Invio per confermare · Esc per annullare · Fai clic all'esterno per confermare",
+  conflictTitle: 'Rilevato conflitto di file',
+  conflictSubtitle:
+    'Questo file è stato modificato all’esterno di GenOffice e sono presenti modifiche non salvate. Scegli quale versione mantenere:',
+  conflictLocalTitle: 'Modifiche correnti (GenOffice)',
+  conflictLocalBadge: 'Bozza non salvata',
+  conflictLocalDesc:
+    'Conserva tutte le modifiche alle diapositive, gli stili e i contenuti di questa sessione.',
+  conflictLocalOverwrite: 'Mantieni modifiche correnti (sovrascrivi su disco)',
+  conflictLocalSaveCopy: 'Salva una copia…',
+  conflictDiskTitle: 'File esterno (Disco)',
+  conflictDiskBadge: 'Aggiornato esternamente',
+  conflictDiskDesc: 'Rinuncia alle modifiche non salvate e ricarica l’ultima versione dal disco.',
+  conflictDiskMissing: 'Il file è stato eliminato o spostato all’esterno di GenOffice.',
+  conflictDiskReload: 'Usa versione esterna (ricarica)',
+  conflictDecideLater: 'Decidi più tardi (continua a modificare)',
+  appStatusFormatApplyFailed: 'Impossibile applicare questo formato',
 } satisfies Record<keyof typeof zh, string>
